@@ -13,6 +13,7 @@ DATA_FILE = os.path.join(DATA_DIR, "data.json")
 LOG_FILE = os.path.join(DATA_DIR, "log.jsonl")
 
 # ---------- Config ----------
+# Render では環境変数があればそちらを優先
 GS_WEBHOOK_URL = os.getenv(
     "GS_WEBHOOK_URL",
     "https://script.google.com/macros/s/AKfycbxHW688WVJIbu12LukpplzrR4QvsiygE-e8gSFpY6pETZOhHJJXth-wkm1FdmHFpC5d/exec",
@@ -20,6 +21,7 @@ GS_WEBHOOK_URL = os.getenv(
 
 # ========== Utils ==========
 def ensure_data_dir():
+    """データフォルダ作成（存在しなければ）。"""
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -51,44 +53,32 @@ def save_to_google_sheets(record):
     except Exception as e:
         print("Error posting to Google Sheets:", e)
 
-def parse_ymd(s: str):
+def parse_ymd(s: str) -> date | None:
+    """'YYYY-MM-DD' を date に。失敗時は None。"""
     try:
         return datetime.strptime(s, "%Y-%m-%d").date()
     except Exception:
         return None
 
-# --------- core (requestに依存しない) ----------
-def scrape_counts():
+# ========== Core collect (request非依存) ==========
+def do_collect(men: int | None = None, women: int | None = None) -> dict:
     """
-    ここに実際のスクレイプを実装。
-    取得できない場合は (None, None) を返す。
+    収集の中核処理。Flaskのrequestに依存しない。
+    スケジューラからも、HTTPルートからも共通で使う。
     """
-    return (None, None)
+    if men is None:
+        men = 12
+    if women is None:
+        women = 8
 
-def collect_core(men=None, women=None):
-    """
-    men/women が None の場合は scrape する。
-    それでも取れなければ最後の値 or 既定値で処理。
-    """
-    if men is None or women is None:
-        s_m, s_w = scrape_counts()
-        if s_m is not None and s_w is not None:
-            men, women = s_m, s_w
-
-    if men is None or women is None:
-        # 最後の値か既定値
-        last = load_data()
-        men = men if men is not None else last.get("men", 0)
-        women = women if women is not None else last.get("women", 0)
-
-    total = int(men) + int(women)
+    total = men + women
     ts = now_jst()
     record = {
         "date": ts.strftime("%Y-%m-%d"),
         "time": ts.strftime("%H:%M"),
         "store": "長崎",
-        "men": int(men),
-        "women": int(women),
+        "men": men,
+        "women": women,
         "total": total,
         "weather": None,
         "temp": None,
@@ -99,7 +89,8 @@ def collect_core(men=None, women=None):
     save_data(record)
     append_log(record)
     save_to_google_sheets(record)
-    print(f"[{record['ts']}] Collected: {record['store']} M={record['men']} W={record['women']} T={record['total']}")
+
+    print(f"[{record['ts']}] Collected: {record['store']} M={men} W={women} T={total}")
     return record
 
 # ========== Routes ==========
@@ -111,28 +102,20 @@ def index():
 def healthz():
     return "ok", 200
 
-@app.route("/favicon.ico")
-def favicon():
-    return "", 204
-
 @app.route("/api/current")
 def api_current():
     return jsonify(load_data())
 
-# 手動入力：例 /tasks/collect?men=10&women=5
+# 例) /tasks/collect?men=0&women=0
 @app.route("/tasks/collect")
 def collect_task():
     men = request.args.get("men", type=int)
     women = request.args.get("women", type=int)
-    rec = collect_core(men, women)
-    return jsonify({"ok": True, "record": rec})
+    record = do_collect(men=men, women=women)
+    return jsonify({"ok": True, "record": record})
 
-# 自動スクレイプ（即時実行したいとき用）
-@app.route("/tasks/scrape")
-def scrape_task():
-    rec = collect_core(None, None)
-    return jsonify({"ok": True, "record": rec})
-
+# 本日分（または from/to 範囲）のログ
+# 例) /api/range?from=2025-09-26&to=2025-09-26&limit=1000
 @app.route("/api/range")
 def api_range():
     start_s = request.args.get("from")
@@ -161,6 +144,7 @@ def api_range():
     rows = rows[-limit:]
     return jsonify({"ok": True, "rows": rows})
 
+# 直近n日・曜日平均（ダッシュボード下段用）
 @app.route("/api/summary")
 def api_summary():
     days = int(request.args.get("days", 28))
@@ -175,57 +159,66 @@ def api_summary():
                 except Exception:
                     continue
                 ts = rec.get("ts")
-                if ts and datetime.fromisoformat(ts).date() >= cutoff:
+                if not ts:
+                    continue
+                if datetime.fromisoformat(ts).date() >= cutoff:
                     rows.append(rec)
 
     agg = {}
     for r in rows:
-        w = datetime.fromisoformat(r["ts"]).weekday()
+        w = datetime.fromisoformat(r["ts"]).weekday()  # 0=Mon
         d = agg.setdefault(w, {"men": 0, "women": 0, "total": 0, "count": 0})
         d["men"] += r.get("men", 0)
         d["women"] += r.get("women", 0)
         d["total"] += r.get("total", 0)
         d["count"] += 1
-    for d in agg.values():
+    for w, d in agg.items():
         if d["count"]:
             d["men"] /= d["count"]
             d["women"] /= d["count"]
             d["total"] /= d["count"]
     return jsonify(agg)
 
+@app.route("/api/forecast")
+def api_forecast():
+    data = load_data()
+    if not data:
+        return jsonify({"ok": False, "msg": "no data"})
+    forecast_total = int(data.get("total", 0) * 1.2)
+    return jsonify({"ok": True, "today": data.get("date"), "forecast_total": forecast_total})
+
 # ========== Scheduler ==========
 _scheduler_started = False
 _scheduler_lock = threading.Lock()
 
-def scheduler_job():
-    with app.app_context():
+def scheduler_loop():
+    """10分おきに収集。Flaskのrequestには一切触れない。"""
+    while True:
         try:
-            collect_core(None, None)  # ← requestに依存しない関数だけを呼ぶ
+            # ここで実際のスクレイピングを行うなら men, women を取得して do_collect(men, women)
+            do_collect()  # デフォルト値でサンプル収集
         except Exception as e:
             print("Scheduler error:", e)
+        # 600秒（10分）待機
+        threading.Event().wait(600)
 
-def start_scheduler_thread():
-    def loop():
-        while True:
-            scheduler_job()
-            threading.Event().wait(600)  # 10分
-    t = threading.Thread(target=loop, daemon=True)
-    t.start()
-    return t
-
-@app.before_request
-def _bootstrap_once():
-    """最初のアクセスで一度だけスケジューラを起動（WSGI対応）。"""
+def start_scheduler_once():
     global _scheduler_started
-    ensure_data_dir()
     with _scheduler_lock:
         if not _scheduler_started:
-            start_scheduler_thread()
+            t = threading.Thread(target=scheduler_loop, daemon=True)
+            t.start()
             _scheduler_started = True
             print("[bootstrap] scheduler started")
 
-# ---- ローカル実行用 ----
+# Flask 3.1 には before_first_request が無いので before_request で一度だけ起動
+@app.before_request
+def _bootstrap_on_first_request():
+    ensure_data_dir()
+    start_scheduler_once()
+
+# ---- ローカル実行用（python app.py） ----
 if __name__ == "__main__":
     ensure_data_dir()
-    start_scheduler_thread()
+    start_scheduler_once()
     app.run(debug=True, use_reloader=False)
