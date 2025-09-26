@@ -2,10 +2,10 @@
 import os
 import re
 import json
+import time
 import requests
 from datetime import datetime, date, timedelta
 from flask import Flask, jsonify, request, render_template
-
 from bs4 import BeautifulSoup
 
 app = Flask(__name__)
@@ -16,8 +16,11 @@ DATA_FILE = os.path.join(DATA_DIR, "data.json")
 LOG_FILE = os.path.join(DATA_DIR, "log.jsonl")
 
 # ---------- Config ----------
-TARGET_URL = os.getenv("TARGET_URL", "https://oriental-lounge.com/stores/38")  # 長崎店
-GS_WEBHOOK_URL = os.getenv("GS_WEBHOOK_URL", "")  # 任意でGoogle Sheets連携
+TARGET_URL   = os.getenv("TARGET_URL", "https://oriental-lounge.com/stores/38")  # 長崎店ページ
+STORE_NAME   = os.getenv("STORE_NAME", "長崎")
+GS_WEBHOOK_URL = os.getenv("GS_WEBHOOK_URL", "")  # Google Apps Script の /exec URL
+WINDOW_START = int(os.getenv("WINDOW_START", "19"))  # 収集開始時刻(時) JST
+WINDOW_END   = int(os.getenv("WINDOW_END", "3"))   # 収集終了時刻(翌日, 時) JST
 
 # ========== Utils ==========
 def ensure_data_dir():
@@ -50,19 +53,26 @@ def parse_ymd(s: str) -> date | None:
         return None
 
 def save_to_google_sheets(record: dict):
+    """Apps Script Webhook に JSON を POST。3回まで再試行。"""
     if not GS_WEBHOOK_URL:
         return
-    try:
-        res = requests.post(GS_WEBHOOK_URL, json=record, timeout=10)
-        print("Posted to Google Sheets:", res.status_code)
-    except Exception as e:
-        print("Error posting to Google Sheets:", e)
+    payload = record
+    last_err = None
+    for i in range(3):
+        try:
+            res = requests.post(GS_WEBHOOK_URL, json=payload, timeout=10)
+            print("Posted to Google Sheets:", res.status_code)
+            return
+        except Exception as e:
+            last_err = e
+            time.sleep(1.5)  # 少し待ってリトライ
+    print("Error posting to Google Sheets:", last_err)
 
 # ========== Scraper ==========
 def scrape_oriental_counts() -> tuple[int | None, int | None]:
     """
     対象サイトから (men, women) を抽出。
-    「28 GENTLEMEN / 26 LADIES」の形式を想定。
+    「28 GENTLEMEN / 26 LADIES」の表示を主にテキスト走査で検出。
     """
     try:
         resp = requests.get(TARGET_URL, timeout=12, headers={
@@ -95,7 +105,7 @@ def scrape_oriental_counts() -> tuple[int | None, int | None]:
         elif w_label_before:
             women = int(w_label_before.group(1))
 
-        # fallback: セレクタ指定（将来用）
+        # 予備: セレクタ候補
         if men is None or women is None:
             candidates_m = [
                 ".men-count", ".male .count", "#menCount", "#men", ".count-men",
@@ -109,19 +119,16 @@ def scrape_oriental_counts() -> tuple[int | None, int | None]:
                 if not node: return None
                 m = re.search(r"\d+", node.get_text(strip=True).replace(",", ""))
                 return int(m.group()) if m else None
-
             if men is None:
                 for sel in candidates_m:
                     node = soup.select_one(sel)
                     men = to_int(node)
-                    if men is not None:
-                        break
+                    if men is not None: break
             if women is None:
                 for sel in candidates_w:
                     node = soup.select_one(sel)
                     women = to_int(node)
-                    if women is not None:
-                        break
+                    if women is not None: break
 
         return men, women
     except Exception as e:
@@ -129,15 +136,26 @@ def scrape_oriental_counts() -> tuple[int | None, int | None]:
         return (None, None)
 
 # ========== Core collect ==========
-def do_collect() -> dict:
-    men, women = scrape_oriental_counts()
+def do_collect(men: int | None = None, women: int | None = None, source: str | None = None) -> dict:
+    """
+    収集の中核。men/women が与えられなければスクレイピング。
+    /tasks/collect?men=..&women=.. で手動テスト値を保存可能（/tasks/tick は常にスクレイプ）。
+    """
+    if men is None or women is None:
+        men_s, women_s = scrape_oriental_counts()
+        men = men if men is not None else men_s
+        women = women if women is not None else women_s
+        source = source or TARGET_URL
+    else:
+        source = source or "manual"
+
     total = (men + women) if (men is not None and women is not None) else None
 
     ts = now_jst()
     record = {
         "date": ts.strftime("%Y-%m-%d"),
         "time": ts.strftime("%H:%M"),
-        "store": "長崎",
+        "store": STORE_NAME,
         "men": men,
         "women": women,
         "total": total,
@@ -145,7 +163,7 @@ def do_collect() -> dict:
         "temp": None,
         "precip_mm": None,
         "ts": ts.isoformat(timespec="seconds"),
-        "source": TARGET_URL,
+        "source": source,
     }
 
     save_data(record)
@@ -159,8 +177,8 @@ def do_collect() -> dict:
 def is_within_window(ts: datetime | None = None) -> bool:
     ts = ts or now_jst()
     hhmm = ts.hour * 60 + ts.minute
-    start = 19 * 60
-    end = 3 * 60
+    start = WINDOW_START * 60
+    end = WINDOW_END * 60
     return (hhmm >= start) or (hhmm < end)
 
 # ========== Routes ==========
@@ -208,17 +226,41 @@ def api_range():
     rows = rows[-limit:]
     return jsonify({"ok": True, "rows": rows})
 
+# 手動: men/women 指定でテスト上書きもOK（指定なしはスクレイプ）
 @app.route("/tasks/collect")
 def collect_task():
-    rec = do_collect()
+    men = request.args.get("men", type=int)
+    women = request.args.get("women", type=int)
+    rec = do_collect(men=men, women=women, source="manual" if men is not None and women is not None else None)
     return jsonify({"ok": True, "record": rec})
 
+# 外部cron向け: 10分置きに叩く。時間帯外はスキップ。
 @app.route("/tasks/tick")
 def tasks_tick():
     if not is_within_window():
         return jsonify({"ok": True, "skipped": True, "reason": "outside-window"})
-    rec = do_collect()
+    rec = do_collect()  # 常にスクレイプ
     return jsonify({"ok": True, "record": rec})
+
+# （任意）その日の初回だけ1行入れる種まき
+@app.route("/tasks/seed")
+def tasks_seed():
+    today = now_jst().strftime("%Y-%m-%d")
+    exists = False
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if rec.get("date") == today:
+                    exists = True
+                    break
+    if not exists:
+        rec = do_collect()
+        return jsonify({"ok": True, "seeded": True, "record": rec})
+    return jsonify({"ok": True, "seeded": False})
 
 # ---- Local run ----
 if __name__ == "__main__":
