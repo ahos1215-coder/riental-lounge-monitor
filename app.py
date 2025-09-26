@@ -13,7 +13,7 @@ DATA_FILE = os.path.join(DATA_DIR, "data.json")
 LOG_FILE = os.path.join(DATA_DIR, "log.jsonl")
 
 # ---------- Config ----------
-# 環境変数があれば優先（Render に置くとき用）
+# Render 等に置くときは環境変数 GS_WEBHOOK_URL を設定して上書き
 GS_WEBHOOK_URL = os.getenv(
     "GS_WEBHOOK_URL",
     "https://script.google.com/macros/s/AKfycbxHW688WVJIbu12LukpplzrR4QvsiygE-e8gSFpY6pETZOhHJJXth-wkm1FdmHFpC5d/exec",
@@ -21,10 +21,12 @@ GS_WEBHOOK_URL = os.getenv(
 
 # ========== Utils ==========
 def ensure_data_dir():
-    """データフォルダの作成（存在しなければ）。WSGIでも必ず呼ばれるように、モジュール読み込み時および
-    before_first_request から呼び出す。"""
+    """データフォルダ作成（存在しなければ）。"""
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR, exist_ok=True)
+
+# モジュール読み込み時に一度だけ確実に作っておく
+ensure_data_dir()
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -54,7 +56,7 @@ def save_to_google_sheets(record):
     except Exception as e:
         print("Error posting to Google Sheets:", e)
 
-def parse_ymd(s: str) -> date:
+def parse_ymd(s: str) -> date | None:
     """'YYYY-MM-DD' → date。失敗したら None。"""
     try:
         return datetime.strptime(s, "%Y-%m-%d").date()
@@ -139,7 +141,7 @@ def api_range():
                     continue
                 rows.append(rec)
 
-    rows = rows[-limit:]  # 後ろlimit件（新しい順でほしい場合は並べ替えも可）
+    rows = rows[-limit:]  # 後方 limit 件
     return jsonify({"ok": True, "rows": rows})
 
 # 直近n日・曜日平均（ダッシュボード下段用）
@@ -206,19 +208,24 @@ def start_scheduler_thread():
     t.start()
     return t
 
-@app.before_first_request
-def _bootstrap_on_wsgi():
-    """gunicornなどWSGIでも、最初のリクエスト時に一度だけ初期化。"""
+# Flask 3.x では before_first_request が廃止されたため、
+# 最初のリクエストのタイミングで一度だけスケジューラを起動する。
+@app.before_request
+def _ensure_scheduler_started_once():
     global _scheduler_started
-    ensure_data_dir()
-    with _scheduler_lock:
-        if not _scheduler_started:
-            start_scheduler_thread()
-            _scheduler_started = True
-            print("[bootstrap] scheduler started")
+    if not _scheduler_started:
+        with _scheduler_lock:
+            if not _scheduler_started:
+                try:
+                    start_scheduler_thread()
+                    _scheduler_started = True
+                    print("[bootstrap] scheduler started")
+                except Exception as e:
+                    print("[bootstrap] scheduler start failed:", e)
 
 # ---- ローカル実行用（python app.py） ----
 if __name__ == "__main__":
     ensure_data_dir()
+    # ローカルでは起動直後から回しておく
     start_scheduler_thread()
     app.run(debug=True, use_reloader=False)
