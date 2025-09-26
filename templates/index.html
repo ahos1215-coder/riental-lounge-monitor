@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ORIENTAL LOUNGE ダッシュボード</title>
+  <meta name="theme-color" content="#0b0b0b">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {color-scheme: dark;}
+    html,body{background:#0b0b0b; font-family:'Inter','Noto Sans JP',system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+    .card{background:#121212;border:1px solid #252525;box-shadow:0 12px 30px rgba(0,0,0,.5)}
+    .chip{border:1px solid rgba(255,255,255,.12)}
+  </style>
+</head>
+<body class="min-h-screen text-zinc-100">
+
+<header class="sticky top-0 z-50 border-b border-zinc-800 bg-black/70 backdrop-blur">
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 py-3 flex items-center gap-3">
+    <div class="text-lg sm:text-xl font-extrabold tracking-wide">ORIENTAL LOUNGE</div>
+    <div class="ml-auto text-sm chip rounded px-2 py-1" id="clock">--:-- 更新</div>
+  </div>
+</header>
+
+<section class="border-b border-zinc-800/80 bg-gradient-to-b from-black to-zinc-950/60">
+  <div class="mx-auto max-w-6xl px-4 sm:px-6 py-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div class="card rounded-2xl p-4"><div class="text-xs text-zinc-400">現在 男</div><div class="mt-1 text-2xl font-extrabold" id="kpi-men">--</div></div>
+    <div class="card rounded-2xl p-4"><div class="text-xs text-zinc-400">現在 女</div><div class="mt-1 text-2xl font-extrabold" id="kpi-women">--</div></div>
+    <div class="card rounded-2xl p-4"><div class="text-xs text-zinc-400">現在 合計</div><div class="mt-1 text-2xl font-extrabold" id="kpi-total">--</div></div>
+    <div class="card rounded-2xl p-4"><div class="text-xs text-zinc-400">本日 取得件数</div><div class="mt-1 text-2xl font-extrabold" id="kpi-count">--</div></div>
+  </div>
+</section>
+
+<section class="mx-auto max-w-6xl px-4 sm:px-6 py-8">
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="card rounded-2xl p-4">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm text-zinc-300">本日の推移（10分刻み：合計 / 男性 / 女性）</h3>
+        <div class="flex items-center gap-2">
+          <button id="btn-reload" class="text-xs chip rounded px-2 py-1">再読込</button>
+          <a id="btn-export" class="text-xs chip rounded px-2 py-1" href="#">CSV</a>
+        </div>
+      </div>
+      <canvas id="todayChart" height="210"></canvas>
+      <div class="text-xs text-zinc-400 mt-2">※ /api/range → 本日データを 10分バケットで描画</div>
+    </div>
+
+    <div class="card rounded-2xl p-4">
+      <h3 class="text-sm text-zinc-300 mb-2">最新のJSON</h3>
+      <pre id="jsonDump" class="text-xs bg-black/40 rounded p-3 overflow-x-auto"></pre>
+      <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
+        <div class="rounded-lg bg-black/30 border border-zinc-800 p-3">
+          <div class="text-xs text-zinc-400">遅延</div>
+          <div id="q-latency" class="text-lg font-bold">--</div>
+        </div>
+        <div class="rounded-lg bg-black/30 border border-zinc-800 p-3">
+          <div class="text-xs text-zinc-400">欠損枠</div>
+          <div id="q-missing" class="text-lg font-bold">--</div>
+        </div>
+      </div>
+      <div class="text-xs text-zinc-400 mt-2">テスト収集: <code>/tasks/collect?men=0&women=0</code></div>
+    </div>
+  </div>
+</section>
+
+<script>
+(async function () {
+  const $ = (s)=>document.querySelector(s);
+  const pad = (n)=>String(n).padStart(2,'0');
+  const jstToday = ()=>{
+    const d=new Date();
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  };
+  const tickClock = ()=>{
+    const d=new Date();
+    $("#clock").textContent = `${pad(d.getHours())}:${pad(d.getMinutes())} 更新`;
+  };
+  setInterval(tickClock, 1000); tickClock();
+
+  // 10分バケットキー "HH:MM"(MMは00/10/20/30/40/50)
+  function bucketKey(tsStr){
+    const d = new Date(tsStr);
+    const hh = pad(d.getHours());
+    const m = Math.floor(d.getMinutes()/10)*10;
+    return `${hh}:${pad(m)}`;
+  }
+
+  async function fetchTodayRows(){
+    const day=jstToday();
+    const res = await fetch(`/api/range?from=${day}&to=${day}&limit=1000`, {cache:"no-store"});
+    const js = await res.json();
+    if(!js.ok) throw new Error("range failed");
+    return js.rows;
+  }
+
+  // 10分バケット化（同じバケットは最後のレコードを採用）
+  function toBuckets(rows){
+    const map = new Map();
+    for(const r of rows){
+      const k = bucketKey(r.ts || `${r.date}T${r.time}:00+09:00`);
+      map.set(k, r); // 後勝ち（最新）
+    }
+    const labels = [...map.keys()].sort();
+    const men   = labels.map(k => Number(map.get(k).men||0));
+    const women = labels.map(k => Number(map.get(k).women||0));
+    const total = labels.map((_,i)=> men[i]+women[i]);
+    const last  = labels.length ? map.get(labels[labels.length-1]) : null;
+    return {labels, men, women, total, last};
+  }
+
+  // KPI & JSON
+  function updateKPI(b){
+    if(!b.last) return;
+    $("#kpi-men").textContent   = b.last.men ?? 0;
+    $("#kpi-women").textContent = b.last.women ?? 0;
+    $("#kpi-total").textContent = (b.last.men||0)+(b.last.women||0);
+    $("#kpi-count").textContent = b.labels.length;
+    $("#jsonDump").textContent  = JSON.stringify(b.last, null, 2);
+
+    // 遅延・欠損(10分刻みで前後差が11分超なら欠損とみなす簡易版)
+    let miss=0, maxLag=0;
+    for(let i=1;i<b.labels.length;i++){
+      const [h1,m1]=b.labels[i-1].split(':').map(Number);
+      const [h2,m2]=b.labels[i].split(':').map(Number);
+      const t1=h1*60+m1, t2=h2*60+m2, diff=t2-t1;
+      if(diff>10){ miss += (diff/10)-1; }
+      if(diff>maxLag) maxLag=diff;
+    }
+    $("#q-latency").textContent = `${Math.max(0, maxLag-10)}分`;
+    $("#q-missing").textContent = `${miss|0}枠`;
+  }
+
+  // Chart.js
+  let chart;
+  function renderChart(b){
+    const ctx = $("#todayChart");
+    if(!ctx) return;
+    if(chart) chart.destroy();
+    chart = new Chart(ctx, {
+      type:"line",
+      data:{
+        labels:b.labels,
+        datasets:[
+          {label:"合計", data:b.total, tension:.35, borderWidth:2},
+          {label:"男性", data:b.men,   tension:.35, borderWidth:2},
+          {label:"女性", data:b.women, tension:.35, borderWidth:2},
+        ]
+      },
+      options:{
+        responsive:true,
+        interaction:{mode:"index",intersect:false},
+        plugins:{legend:{labels:{color:"#ccc"}}},
+        scales:{
+          x:{ticks:{color:"#cfcfcf"},grid:{color:"rgba(200,200,200,.08)"}},
+          y:{ticks:{color:"#cfcfcf"},grid:{color:"rgba(200,200,200,.08)"}}
+        }
+      }
+    });
+  }
+
+  async function reload(){
+    try{
+      const rows = await fetchTodayRows();
+      const b = toBuckets(rows);
+      updateKPI(b);
+      renderChart(b);
+    }catch(e){
+      console.error(e);
+      alert("データ取得に失敗しました");
+    }
+  }
+  await reload();
+  $("#btn-reload")?.addEventListener("click", reload);
+  setInterval(reload, 10*60*1000); // 10分ごと自動更新
+})();
+</script>
+</body>
+</html>
