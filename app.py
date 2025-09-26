@@ -5,8 +5,6 @@ import requests
 from datetime import datetime, date, timedelta
 from flask import Flask, jsonify, request, render_template
 
-from bs4 import BeautifulSoup  # ← 追加
-
 app = Flask(__name__)
 
 # ---------- Paths ----------
@@ -19,7 +17,6 @@ GS_WEBHOOK_URL = os.getenv(
     "GS_WEBHOOK_URL",
     "https://script.google.com/macros/s/AKfycbxHW688WVJIbu12LukpplzrR4QvsiygE-e8gSFpY6pETZOhHJJXth-wkm1FdmHFpC5d/exec",
 )
-ORIENTAL_URL = os.getenv("ORIENTAL_URL", "")  # ← 公式WebページのURL（Renderの環境変数で設定）
 
 # ========== Utils ==========
 def ensure_data_dir():
@@ -54,96 +51,44 @@ def save_to_google_sheets(record):
     except Exception as e:
         print("Error posting to Google Sheets:", e)
 
-def parse_ymd(s: str) -> date:
+def parse_ymd(s: str):
     try:
         return datetime.strptime(s, "%Y-%m-%d").date()
     except Exception:
         return None
 
-# ========== Scraper ==========
-def fetch_official_data():
+# --------- core (requestに依存しない) ----------
+def scrape_counts():
     """
-    公式Webページ(ORIENTAL_URL)から現在人数をスクレイピングして返す。
-    返り値: {"men": int, "women": int}
+    ここに実際のスクレイプを実装。
+    取得できない場合は (None, None) を返す。
     """
-    if not ORIENTAL_URL:
-        raise RuntimeError("ORIENTAL_URL is not set")
+    return (None, None)
 
-    headers = {
-        # 軽いブロック回避のためUAを偽装
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/114.0 Safari/537.36"
-    }
-    r = requests.get(ORIENTAL_URL, headers=headers, timeout=15)
-    r.raise_for_status()
-
-    soup = BeautifulSoup(r.text, "lxml")
-
-    # ===== ここが唯一の“要調整ポイント” =====
-    # ブラウザで公式ページを開き、男/女の数字要素を右クリック→「検証」で
-    # セレクタを確認して、下の selector_men / selector_women を書き換えてください。
-    selector_men = "div:contains('GENTLEMEN') .some-number"   # ← 仮
-    selector_women = "div:contains('LADIES') .some-number"    # ← 仮
-
-    # 例）もし「<span class='count men'>12</span>」なら
-    #   selector_men = "span.count.men"
-    #   selector_women = "span.count.women"
-
-    # 見つからなければ例外にしてログに出す
-    men_el = soup.select_one(selector_men)
-    women_el = soup.select_one(selector_women)
-    if not men_el or not women_el:
-        raise RuntimeError("Failed to locate counters with the given CSS selectors")
-
-    def to_int(text):
-        return int("".join(ch for ch in text if ch.isdigit()))
-
-    men = to_int(men_el.get_text(strip=True))
-    women = to_int(women_el.get_text(strip=True))
-
-    return {"men": men, "women": women}
-
-# ========== Routes ==========
-@app.route("/")
-def index():
-    return render_template("index.html")
-
-@app.route("/healthz")
-def healthz():
-    return "ok", 200
-
-@app.route("/api/current")
-def api_current():
-    return jsonify(load_data())
-
-# 手動/自動収集
-@app.route("/tasks/collect")
-def collect_task():
-    men = request.args.get("men", type=int)
-    women = request.args.get("women", type=int)
-
-    # (A) パラメータが来ていればそれを優先
+def collect_core(men=None, women=None):
+    """
+    men/women が None の場合は scrape する。
+    それでも取れなければ最後の値 or 既定値で処理。
+    """
     if men is None or women is None:
-        # (B) それ以外はスクレイピングで取得
-        try:
-            data = fetch_official_data()
-            men, women = data["men"], data["women"]
-        except Exception as e:
-            # もし取得に失敗したら、以前の値 or デフォルトで埋める
-            print("fetch_official_data() error:", e)
-            last = load_data()
-            men = men if men is not None else last.get("men", 12)
-            women = women if women is not None else last.get("women", 8)
+        s_m, s_w = scrape_counts()
+        if s_m is not None and s_w is not None:
+            men, women = s_m, s_w
 
-    total = men + women
+    if men is None or women is None:
+        # 最後の値か既定値
+        last = load_data()
+        men = men if men is not None else last.get("men", 0)
+        women = women if women is not None else last.get("women", 0)
+
+    total = int(men) + int(women)
     ts = now_jst()
     record = {
         "date": ts.strftime("%Y-%m-%d"),
         "time": ts.strftime("%H:%M"),
         "store": "長崎",
-        "men": men,
-        "women": women,
+        "men": int(men),
+        "women": int(women),
         "total": total,
         "weather": None,
         "temp": None,
@@ -154,11 +99,40 @@ def collect_task():
     save_data(record)
     append_log(record)
     save_to_google_sheets(record)
+    print(f"[{record['ts']}] Collected: {record['store']} M={record['men']} W={record['women']} T={record['total']}")
+    return record
 
-    print(f"[{record['ts']}] Collected: {record['store']} M={men} W={women} T={total}")
-    return jsonify({"ok": True, "record": record})
+# ========== Routes ==========
+@app.route("/")
+def index():
+    return render_template("index.html")
 
-# 範囲取得
+@app.route("/healthz")
+def healthz():
+    return "ok", 200
+
+@app.route("/favicon.ico")
+def favicon():
+    return "", 204
+
+@app.route("/api/current")
+def api_current():
+    return jsonify(load_data())
+
+# 手動入力：例 /tasks/collect?men=10&women=5
+@app.route("/tasks/collect")
+def collect_task():
+    men = request.args.get("men", type=int)
+    women = request.args.get("women", type=int)
+    rec = collect_core(men, women)
+    return jsonify({"ok": True, "record": rec})
+
+# 自動スクレイプ（即時実行したいとき用）
+@app.route("/tasks/scrape")
+def scrape_task():
+    rec = collect_core(None, None)
+    return jsonify({"ok": True, "record": rec})
+
 @app.route("/api/range")
 def api_range():
     start_s = request.args.get("from")
@@ -180,14 +154,13 @@ def api_range():
                 ts = rec.get("ts")
                 if not ts:
                     continue
-                rec_d = datetime.fromisoformat(ts).date()
-                if start_d <= rec_d <= end_d:
+                d = datetime.fromisoformat(ts).date()
+                if start_d <= d <= end_d:
                     rows.append(rec)
 
     rows = rows[-limit:]
     return jsonify({"ok": True, "rows": rows})
 
-# 曜日平均
 @app.route("/api/summary")
 def api_summary():
     days = int(request.args.get("days", 28))
@@ -202,9 +175,7 @@ def api_summary():
                 except Exception:
                     continue
                 ts = rec.get("ts")
-                if not ts:
-                    continue
-                if datetime.fromisoformat(ts).date() >= cutoff:
+                if ts and datetime.fromisoformat(ts).date() >= cutoff:
                     rows.append(rec)
 
     agg = {}
@@ -215,7 +186,7 @@ def api_summary():
         d["women"] += r.get("women", 0)
         d["total"] += r.get("total", 0)
         d["count"] += 1
-    for w, d in agg.items():
+    for d in agg.values():
         if d["count"]:
             d["men"] /= d["count"]
             d["women"] /= d["count"]
@@ -229,7 +200,7 @@ _scheduler_lock = threading.Lock()
 def scheduler_job():
     with app.app_context():
         try:
-            collect_task()
+            collect_core(None, None)  # ← requestに依存しない関数だけを呼ぶ
         except Exception as e:
             print("Scheduler error:", e)
 
@@ -244,7 +215,7 @@ def start_scheduler_thread():
 
 @app.before_request
 def _bootstrap_once():
-    """最初のアクセス時だけスケジューラ起動"""
+    """最初のアクセスで一度だけスケジューラを起動（WSGI対応）。"""
     global _scheduler_started
     ensure_data_dir()
     with _scheduler_lock:
