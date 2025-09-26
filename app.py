@@ -5,6 +5,8 @@ import requests
 from datetime import datetime, date, timedelta
 from flask import Flask, jsonify, request, render_template
 
+from bs4 import BeautifulSoup  # ← 追加
+
 app = Flask(__name__)
 
 # ---------- Paths ----------
@@ -13,20 +15,16 @@ DATA_FILE = os.path.join(DATA_DIR, "data.json")
 LOG_FILE = os.path.join(DATA_DIR, "log.jsonl")
 
 # ---------- Config ----------
-# Render 等に置くときは環境変数 GS_WEBHOOK_URL を設定して上書き
 GS_WEBHOOK_URL = os.getenv(
     "GS_WEBHOOK_URL",
     "https://script.google.com/macros/s/AKfycbxHW688WVJIbu12LukpplzrR4QvsiygE-e8gSFpY6pETZOhHJJXth-wkm1FdmHFpC5d/exec",
 )
+ORIENTAL_URL = os.getenv("ORIENTAL_URL", "")  # ← 公式WebページのURL（Renderの環境変数で設定）
 
 # ========== Utils ==========
 def ensure_data_dir():
-    """データフォルダ作成（存在しなければ）。"""
     if not os.path.exists(DATA_DIR):
         os.makedirs(DATA_DIR, exist_ok=True)
-
-# モジュール読み込み時に一度だけ確実に作っておく
-ensure_data_dir()
 
 def load_data():
     if os.path.exists(DATA_FILE):
@@ -56,12 +54,55 @@ def save_to_google_sheets(record):
     except Exception as e:
         print("Error posting to Google Sheets:", e)
 
-def parse_ymd(s: str) -> date | None:
-    """'YYYY-MM-DD' → date。失敗したら None。"""
+def parse_ymd(s: str) -> date:
     try:
         return datetime.strptime(s, "%Y-%m-%d").date()
     except Exception:
         return None
+
+# ========== Scraper ==========
+def fetch_official_data():
+    """
+    公式Webページ(ORIENTAL_URL)から現在人数をスクレイピングして返す。
+    返り値: {"men": int, "women": int}
+    """
+    if not ORIENTAL_URL:
+        raise RuntimeError("ORIENTAL_URL is not set")
+
+    headers = {
+        # 軽いブロック回避のためUAを偽装
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/114.0 Safari/537.36"
+    }
+    r = requests.get(ORIENTAL_URL, headers=headers, timeout=15)
+    r.raise_for_status()
+
+    soup = BeautifulSoup(r.text, "lxml")
+
+    # ===== ここが唯一の“要調整ポイント” =====
+    # ブラウザで公式ページを開き、男/女の数字要素を右クリック→「検証」で
+    # セレクタを確認して、下の selector_men / selector_women を書き換えてください。
+    selector_men = "div:contains('GENTLEMEN') .some-number"   # ← 仮
+    selector_women = "div:contains('LADIES') .some-number"    # ← 仮
+
+    # 例）もし「<span class='count men'>12</span>」なら
+    #   selector_men = "span.count.men"
+    #   selector_women = "span.count.women"
+
+    # 見つからなければ例外にしてログに出す
+    men_el = soup.select_one(selector_men)
+    women_el = soup.select_one(selector_women)
+    if not men_el or not women_el:
+        raise RuntimeError("Failed to locate counters with the given CSS selectors")
+
+    def to_int(text):
+        return int("".join(ch for ch in text if ch.isdigit()))
+
+    men = to_int(men_el.get_text(strip=True))
+    women = to_int(women_el.get_text(strip=True))
+
+    return {"men": men, "women": women}
 
 # ========== Routes ==========
 @app.route("/")
@@ -76,18 +117,24 @@ def healthz():
 def api_current():
     return jsonify(load_data())
 
-# 収集：URLクエリで人数上書き可
-# 例) /tasks/collect?men=0&women=0
+# 手動/自動収集
 @app.route("/tasks/collect")
 def collect_task():
     men = request.args.get("men", type=int)
     women = request.args.get("women", type=int)
 
-    # 既定値（未指定なら 12/8）
-    if men is None:
-        men = 12
-    if women is None:
-        women = 8
+    # (A) パラメータが来ていればそれを優先
+    if men is None or women is None:
+        # (B) それ以外はスクレイピングで取得
+        try:
+            data = fetch_official_data()
+            men, women = data["men"], data["women"]
+        except Exception as e:
+            # もし取得に失敗したら、以前の値 or デフォルトで埋める
+            print("fetch_official_data() error:", e)
+            last = load_data()
+            men = men if men is not None else last.get("men", 12)
+            women = women if women is not None else last.get("women", 8)
 
     total = men + women
     ts = now_jst()
@@ -108,18 +155,16 @@ def collect_task():
     append_log(record)
     save_to_google_sheets(record)
 
-    print(f"[{record['ts']}] Collected: {record['store']} total={record['total']}")
+    print(f"[{record['ts']}] Collected: {record['store']} M={men} W={women} T={total}")
     return jsonify({"ok": True, "record": record})
 
-# 本日分のログ（もしくは from/to 範囲）を返す
-# 例) /api/range?from=2025-09-26&to=2025-09-26&limit=1000
+# 範囲取得
 @app.route("/api/range")
 def api_range():
     start_s = request.args.get("from")
     end_s = request.args.get("to")
     limit = int(request.args.get("limit", 500))
 
-    # 既定は「今日」
     today = now_jst().date()
     start_d = parse_ymd(start_s) or today
     end_d = parse_ymd(end_s) or today
@@ -132,19 +177,17 @@ def api_range():
                     rec = json.loads(line)
                 except Exception:
                     continue
-                ts = rec.get("ts")  # "YYYY-MM-DDTHH:MM:SS"
+                ts = rec.get("ts")
                 if not ts:
                     continue
-                # 日付部分だけで比較
                 rec_d = datetime.fromisoformat(ts).date()
-                if rec_d < start_d or rec_d > end_d:
-                    continue
-                rows.append(rec)
+                if start_d <= rec_d <= end_d:
+                    rows.append(rec)
 
-    rows = rows[-limit:]  # 後方 limit 件
+    rows = rows[-limit:]
     return jsonify({"ok": True, "rows": rows})
 
-# 直近n日・曜日平均（ダッシュボード下段用）
+# 曜日平均
 @app.route("/api/summary")
 def api_summary():
     days = int(request.args.get("days", 28))
@@ -166,7 +209,7 @@ def api_summary():
 
     agg = {}
     for r in rows:
-        w = datetime.fromisoformat(r["ts"]).weekday()  # 0=Mon
+        w = datetime.fromisoformat(r["ts"]).weekday()
         d = agg.setdefault(w, {"men": 0, "women": 0, "total": 0, "count": 0})
         d["men"] += r.get("men", 0)
         d["women"] += r.get("women", 0)
@@ -178,14 +221,6 @@ def api_summary():
             d["women"] /= d["count"]
             d["total"] /= d["count"]
     return jsonify(agg)
-
-@app.route("/api/forecast")
-def api_forecast():
-    data = load_data()
-    if not data:
-        return jsonify({"ok": False, "msg": "no data"})
-    forecast_total = int(data.get("total", 0) * 1.2)
-    return jsonify({"ok": True, "today": data.get("date"), "forecast_total": forecast_total})
 
 # ========== Scheduler ==========
 _scheduler_started = False
@@ -199,7 +234,6 @@ def scheduler_job():
             print("Scheduler error:", e)
 
 def start_scheduler_thread():
-    """10分ごとに collect を回すループを1つだけ起動。"""
     def loop():
         while True:
             scheduler_job()
@@ -208,24 +242,19 @@ def start_scheduler_thread():
     t.start()
     return t
 
-# Flask 3.x では before_first_request が廃止されたため、
-# 最初のリクエストのタイミングで一度だけスケジューラを起動する。
 @app.before_request
-def _ensure_scheduler_started_once():
+def _bootstrap_once():
+    """最初のアクセス時だけスケジューラ起動"""
     global _scheduler_started
-    if not _scheduler_started:
-        with _scheduler_lock:
-            if not _scheduler_started:
-                try:
-                    start_scheduler_thread()
-                    _scheduler_started = True
-                    print("[bootstrap] scheduler started")
-                except Exception as e:
-                    print("[bootstrap] scheduler start failed:", e)
+    ensure_data_dir()
+    with _scheduler_lock:
+        if not _scheduler_started:
+            start_scheduler_thread()
+            _scheduler_started = True
+            print("[bootstrap] scheduler started")
 
-# ---- ローカル実行用（python app.py） ----
+# ---- ローカル実行用 ----
 if __name__ == "__main__":
     ensure_data_dir()
-    # ローカルでは起動直後から回しておく
     start_scheduler_thread()
     app.run(debug=True, use_reloader=False)
