@@ -104,7 +104,7 @@
     </div>
   </section>
 
-  <!-- 今日の推移（ワイド版） -->
+  <!-- 今日の推移 -->
   <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-6">
     <div class="card rounded-2xl p-4 lift">
       <div class="flex items-center justify-between mb-2">
@@ -141,7 +141,7 @@
     </div>
   </section>
 
-  <!-- 分析グラフ：時間帯別 / 曜日別 -->
+  <!-- 分析グラフ -->
   <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-6">
     <div class="flex items-center justify-between mb-3">
       <h2 class="text-lg font-bold">分析グラフ</h2>
@@ -221,6 +221,31 @@
     const GRID    = css.getPropertyValue('--grid').trim();
     const AXIS    = css.getPropertyValue('--axis').trim();
 
+    // ===== 見やすいY目盛ユーティリティ
+    function niceStep(max){
+      if (!isFinite(max) || max<=10) return 2;
+      if (max<=20) return 2;
+      if (max<=50) return 5;
+      if (max<=100) return 10;
+      if (max<=200) return 20;
+      return 50;
+    }
+    function applyNiceYAxis(chart, maxVal){
+      const step = niceStep(maxVal);
+      const top  = Math.ceil((maxVal||0)/step)*step || step*5;
+      chart.options.scales.y = {
+        beginAtZero:true,
+        suggestedMax: top,
+        grid:{color:GRID},
+        ticks:{
+          color:AXIS,
+          stepSize: step,
+          font:{size:12}
+        },
+        title:{display:true, text:'人数', color:AXIS, font:{size:13}}
+      };
+    }
+
     // ===== 実績チャート
     const ctx = document.getElementById('chart').getContext('2d');
     const chart = new Chart(ctx, {
@@ -233,7 +258,23 @@
         ]
       },
       options:{
-        scales:{ x:{ grid:{color:GRID}, ticks:{color:AXIS} }, y:{ grid:{color:GRID}, ticks:{color:AXIS} } },
+        scales:{
+          x:{
+            grid:{color:GRID},
+            ticks:{
+              color:AXIS,
+              maxRotation:0, minRotation:0, autoSkip:false,
+              callback:(val, idx, ticks)=>{
+                // "HH:MM" の MM が 00 または 30 のときだけ表示
+                const lab = chart.data.labels[idx] || '';
+                return (lab && (lab.endsWith(':00') || lab.endsWith(':30'))) ? lab : '';
+              },
+              font:{size:12}
+            },
+            title:{display:true, text:'時間帯', color:AXIS, font:{size:13}}
+          },
+          y:{ grid:{color:GRID}, ticks:{color:AXIS} } // 具体値は更新時にapplyNiceYAxisで上書き
+        },
         plugins:{ legend:{labels:{color:'#ddd'}}, tooltip:{mode:'index', intersect:false} },
         interaction:{mode:'index', intersect:false},
         maintainAspectRatio:false
@@ -254,13 +295,16 @@
         ]
       },
       options:{
-        scales:{ x:{grid:{color:GRID}, ticks:{color:AXIS}}, y:{grid:{color:GRID}, ticks:{color:AXIS}} },
+        scales:{
+          x:{grid:{color:GRID}, ticks:{color:AXIS, maxRotation:0, minRotation:0, font:{size:12}}, title:{display:true,text:'時間帯',color:AXIS,font:{size:13}}},
+          y:{grid:{color:GRID}, ticks:{color:AXIS}, beginAtZero:true}
+        },
         plugins:{legend:{labels:{color:'#ddd'}}},
         maintainAspectRatio:false
       }
     });
 
-    // ===== 分析チャート
+    // ===== 分析チャート（時間帯別 / 曜日別）
     const hctx = document.getElementById('hourChart').getContext('2d');
     const hourChart = new Chart(hctx, {
       type:'bar',
@@ -269,8 +313,13 @@
         {label:'男性', data:[], backgroundColor:'rgba(59,130,246,.35)',  borderColor:C_MEN,   borderWidth:1},
         {label:'女性', data:[], backgroundColor:'rgba(236,72,153,.35)',  borderColor:C_WOMEN, borderWidth:1},
       ]},
-      options:{ scales:{ x:{grid:{color:GRID}, ticks:{color:AXIS}}, y:{grid:{color:GRID}, ticks:{color:AXIS}} },
-        plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false }
+      options:{
+        scales:{
+          x:{grid:{color:GRID}, ticks:{color:AXIS, maxRotation:0, minRotation:0, font:{size:12}}, title:{display:true,text:'時間帯',color:AXIS,font:{size:13}}},
+          y:{grid:{color:GRID}, ticks:{color:AXIS}, beginAtZero:true}
+        },
+        plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false
+      }
     });
 
     const wctx = document.getElementById('wdayChart').getContext('2d');
@@ -281,8 +330,13 @@
         {label:'男性', data:Array(7).fill(0), backgroundColor:'rgba(59,130,246,.35)',  borderColor:C_MEN,   borderWidth:1},
         {label:'女性', data:Array(7).fill(0), backgroundColor:'rgba(236,72,153,.35)',  borderColor:C_WOMEN, borderWidth:1},
       ]},
-      options:{ scales:{ x:{grid:{color:GRID}, ticks:{color:AXIS}}, y:{grid:{color:GRID}, ticks:{color:AXIS}} },
-        plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false }
+      options:{
+        scales:{
+          x:{grid:{color:GRID}, ticks:{color:AXIS, maxRotation:0, minRotation:0, font:{size:12}}},
+          y:{grid:{color:GRID}, ticks:{color:AXIS}, beginAtZero:true}
+        },
+        plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false
+      }
     });
 
     // ===== API utilities
@@ -359,6 +413,9 @@
         return v;
       });
       forecastChart.data.datasets[3].data = act;
+      // 目盛最適化
+      const fMax = Math.max(...[...act, ...forecastChart.data.datasets[0].data, ...forecastChart.data.datasets[1].data].filter(v=>v!=null));
+      applyNiceYAxis(forecastChart, fMax);
       forecastChart.update('none');
     }
 
@@ -436,6 +493,9 @@
         chart.data.datasets[0].data = b.total;
         chart.data.datasets[1].data = b.men;
         chart.data.datasets[2].data = b.women;
+        // 縦軸をデータに合わせて自動調整
+        const cMax = Math.max(...[...b.total, ...b.men, ...b.women].filter(v=>v!=null));
+        applyNiceYAxis(chart, cMax);
         chart.update('none');
         kHits.textContent = b.hits;
         feedForecastWithActual(b);
@@ -446,6 +506,8 @@
         hourChart.data.datasets[0].data = h.total;
         hourChart.data.datasets[1].data = h.men;
         hourChart.data.datasets[2].data = h.women;
+        const hMax = Math.max(...h.total, ...h.men, ...h.women, 0);
+        applyNiceYAxis(hourChart, hMax);
         hourChart.update('none');
 
         // 曜日別 平均（直近35日）
@@ -456,6 +518,8 @@
         wdayChart.data.datasets[0].data = w.total;
         wdayChart.data.datasets[1].data = w.men;
         wdayChart.data.datasets[2].data = w.women;
+        const wMax = Math.max(...w.total, ...w.men, ...w.women, 0);
+        applyNiceYAxis(wdayChart, wMax);
         wdayChart.update('none');
 
         updateClock();
@@ -470,15 +534,15 @@
 
     // ====== 全国店舗一覧（モック） ======
     const STORES = [
-      {name:"長崎",  area:"Kyushu", img:"https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=1400&auto=format&fit=crop", men:12, women:8,  official:null},
-      {name:"渋谷",  area:"Tokyo",  img:"https://images.unsplash.com/photo-1511765224389-37f0e77cf0eb?q=80&w=1400&auto=format&fit=crop", men:20, women:25, official:"https://oriental-lounge.com/stores/01"},
+      {name:"長崎",  area:"Kyushu",   img:"https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=1400&auto=format&fit=crop", men:12, women:8,  official:null},
+      {name:"渋谷",  area:"Tokyo",    img:"https://images.unsplash.com/photo-1511765224389-37f0e77cf0eb?q=80&w=1400&auto=format&fit=crop", men:20, women:25, official:"https://oriental-lounge.com/stores/01"},
       {name:"札幌",  area:"Hokkaido", img:"https://images.unsplash.com/photo-1501785888041-af3ef285b470?q=80&w=1400&auto=format&fit=crop", men:5,  women:9,  official:null},
-      {name:"仙台",  area:"Tohoku", img:"https://images.unsplash.com/photo-1552083375-1447ce886485?q=80&w=1400&auto=format&fit=crop", men:18, women:14, official:null},
+      {name:"仙台",  area:"Tohoku",   img:"https://images.unsplash.com/photo-1552083375-1447ce886485?q=80&w=1400&auto=format&fit=crop", men:18, women:14, official:null},
       {name:"横浜",  area:"Kanagawa", img:"https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?q=80&w=1400&auto=format&fit=crop", men:10, women:6,  official:null},
-      {name:"新宿",  area:"Tokyo", img:"https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=1400&auto=format&fit=crop", men:14, women:20, official:"https://oriental-lounge.com/stores/02"},
-      {name:"上野",  area:"Tokyo", img:"https://images.unsplash.com/photo-1501785888041-af3ef285b472?q=80&w=1400&auto=format&fit=crop", men:9,  women:7,  official:null},
-      {name:"大宮",  area:"Saitama", img:"https://images.unsplash.com/photo-1498050108023-c5249f4df085?q=80&w=1400&auto=format&fit=crop", men:8,  women:11, official:null},
-      {name:"宇都宮",area:"Tochigi", img:"https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?q=80&w=1400&auto=format&fit=crop", men:7,  women:6,  official:null},
+      {name:"新宿",  area:"Tokyo",    img:"https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=1400&auto=format&fit=crop", men:14, women:20, official:"https://oriental-lounge.com/stores/02"},
+      {name:"上野",  area:"Tokyo",    img:"https://images.unsplash.com/photo-1501785888041-af3ef285b472?q=80&w=1400&auto=format&fit=crop", men:9,  women:7,  official:null},
+      {name:"大宮",  area:"Saitama",  img:"https://images.unsplash.com/photo-1498050108023-c5249f4df085?q=80&w=1400&auto=format&fit=crop", men:8,  women:11, official:null},
+      {name:"宇都宮",area:"Tochigi",  img:"https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?q=80&w=1400&auto=format&fit=crop", men:7,  women:6,  official:null},
     ];
 
     const gridEl   = document.getElementById('store-grid');
