@@ -1,533 +1,276 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ORIENTAL LOUNGE</title>
-  <meta name="theme-color" content="#0b0b0b">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    :root{
-      color-scheme: dark;
-      --men:      #3b82f6;
-      --men-bg:   rgba(59,130,246,.18);
-      --women:    #ec4899;
-      --women-bg: rgba(236,72,153,.18);
-      --total:    #93c5fd;
-      --grid:     rgba(200,200,200,.08);
-      --axis:     #cfcfcf;
-      --purple:   #a855f7;
-      --purple-f: rgba(168,85,247,.10);
-      --card-bg:  #111318;
-      --card-br:  #1f2430;
-    }
-    html,body{
-      background:#0b0b0b;
-      font-family:'Inter','Noto Sans JP',system-ui,-apple-system,Segoe UI,Roboto,'ヒラギノ角ゴ ProN','メイリオ',Arial,sans-serif
-    }
-    .card{background:var(--card-bg);border:1px solid var(--card-br);box-shadow:0 12px 30px rgba(0,0,0,.45)}
-    .chip{border:1px solid rgba(255,255,255,.12)}
-    .lift{transition:transform .18s ease, box-shadow .18s ease}
-    .lift:hover{transform:translateY(-2px); box-shadow:0 14px 34px rgba(0,0,0,.55)}
-    .pill{backdrop-filter: blur(6px); border:1px solid rgba(255,255,255,.14)}
-  </style>
-</head>
-<body class="text-zinc-100">
-  <!-- Header -->
-  <header class="sticky top-0 z-50 border-b border-zinc-800 bg-black/70 backdrop-blur">
-    <div class="mx-auto max-w-6xl px-4 sm:px-6 py-3 flex items-center gap-3">
-      <div class="h-8 w-8 rounded bg-zinc-900 grid place-items-center ring-1 ring-zinc-800">
-        <div class="flex gap-0.5"><span class="block w-0.5 h-5 bg-zinc-300"></span><span class="block w-0.5 h-6 bg-zinc-300"></span><span class="block w-0.5 h-4 bg-zinc-300"></span></div>
-      </div>
-      <div class="text-lg sm:text-xl font-extrabold tracking-wide">ORIENTAL LOUNGE</div>
-      <div class="ml-2 text-zinc-400 text-sm">(長崎)</div>
-      <div class="ml-auto flex items-center gap-2 text-sm">
-        <div id="clock" class="rounded chip px-2 py-1 text-zinc-300">--:-- 更新</div>
-        <button id="btn-reload" class="rounded chip px-2 py-1 hover:bg-zinc-800">再読込</button>
-      </div>
-    </div>
-  </header>
+# app.py
+import os
+import re
+import json
+import time
+import requests
+from datetime import datetime, date, timedelta
+from flask import Flask, jsonify, request, render_template
+from bs4 import BeautifulSoup
 
-  <!-- KPI Row -->
-  <section class="border-b border-zinc-800/80 bg-gradient-to-b from-black to-zinc-950/60">
-    <div class="mx-auto max-w-6xl px-4 sm:px-6 py-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-      <div class="card rounded-2xl p-4 lift">
-        <div class="text-xs text-zinc-400">現在 男</div>
-        <div class="mt-1 text-2xl font-extrabold" style="color:var(--men)" id="k-men">0</div>
-      </div>
-      <div class="card rounded-2xl p-4 lift">
-        <div class="text-xs text-zinc-400">現在 女</div>
-        <div class="mt-1 text-2xl font-extrabold" style="color:var(--women)" id="k-women">0</div>
-      </div>
-      <div class="card rounded-2xl p-4 lift">
-        <div class="text-xs text-zinc-400">現在 合計</div>
-        <div class="mt-1 text-2xl font-extrabold" style="color:var(--total)" id="k-total">0</div>
-      </div>
-      <div class="card rounded-2xl p-4 lift">
-        <div class="text-xs text-zinc-400">本日 取得件数</div>
-        <div id="k-hits" class="mt-1 text-2xl font-extrabold">0</div>
-      </div>
-    </div>
-  </section>
+app = Flask(__name__)
 
-  <!-- Hero + Highlight -->
-  <section class="mx-auto max-w-6xl px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <div class="card rounded-2xl overflow-hidden lg:col-span-2 relative">
-      <img class="w-full h-[240px] object-cover opacity-[.92]" src="https://images.unsplash.com/photo-1557264337-e8a93017fe92?q=80&w=1600&auto=format&fit=crop" alt="">
-      <div class="absolute left-4 bottom-5">
-        <div class="text-lg font-bold drop-shadow">長崎</div>
-        <div class="text-xs text-zinc-300/90">現在の来客者数</div>
-      </div>
-      <div class="absolute right-4 bottom-4 flex gap-2">
-        <div class="pill rounded-full px-3 py-1.5 bg-[color:var(--men-bg)]" style="color:var(--men)"><span class="mr-1">♂</span><span id="pill-men">0</span></div>
-        <div class="pill rounded-full px-3 py-1.5 bg-[color:var(--women-bg)]" style="color:var(--women)"><span class="mr-1">♀</span><span id="pill-women">0</span></div>
-      </div>
-    </div>
-    <div class="card rounded-2xl p-4">
-      <div class="text-sm text-zinc-300 mb-2">ハイライト</div>
-      <div class="rounded bg-black/30 border border-zinc-800 p-3 mb-2">
-        <div class="text-xs text-zinc-400">女性/男性比</div>
-        <div class="mt-1 text-sm"><span id="ratio">—</span></div>
-      </div>
-      <div class="rounded bg-black/30 border border-zinc-800 p-3">
-        <div class="text-xs text-zinc-400">今日のピーク（予想）</div>
-        <div class="mt-1 text-xl font-bold">21:00</div>
-      </div>
-    </div>
-  </section>
+# ---------- Paths ----------
+DATA_DIR = "data"
+DATA_FILE = os.path.join(DATA_DIR, "data.json")
+LOG_FILE = os.path.join(DATA_DIR, "log.jsonl")
 
-  <!-- 推移（19:00〜翌03:00 固定） -->
-  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-6">
-    <div class="card rounded-2xl p-4 lift">
-      <div class="flex items-center justify-between mb-2">
-        <h3 id="range-title" class="text-sm text-zinc-300">19:00〜翌03:00の推移（10分刻み：合計 / 男性 / 女性）</h3>
-        <div class="text-xs text-zinc-400">データは10分刻みで自動更新</div>
-      </div>
-      <div class="h-[340px]"><canvas id="chart"></canvas></div>
-      <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
-        <div class="rounded bg-black/30 border border-zinc-800 p-3">
-          <div class="text-xs text-zinc-400">遅延</div>
-          <div id="latency">—</div>
-        </div>
-        <div class="rounded bg-black/30 border border-zinc-800 p-3">
-          <div class="text-xs text-zinc-400">欠損枠（10分刻み）</div>
-          <div id="missing">—</div>
-        </div>
-      </div>
-    </div>
-  </section>
+# ---------- Config ----------
+TARGET_URL = os.getenv("TARGET_URL", "https://oriental-lounge.com/stores/38")  # 長崎店ページ
+STORE_NAME = os.getenv("STORE_NAME", "長崎")
+GS_WEBHOOK_URL = os.getenv("GS_WEBHOOK_URL", "")  # Google Apps Script の /exec URL
+WINDOW_START = int(os.getenv("WINDOW_START", "19"))  # 収集開始時刻(時) JST
+WINDOW_END = int(os.getenv("WINDOW_END", "3"))       # 収集終了時刻(翌日, 時) JST
 
-  <!-- Forecast (予測＋実測) -->
-  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-6">
-    <div class="card rounded-2xl p-4 lift">
-      <div class="flex items-center justify-between mb-2">
-        <h3 class="text-sm text-zinc-300">本日の予想（帯域＋実測）</h3>
-        <div class="text-xs text-zinc-400">モック計算</div>
-      </div>
-      <div class="h-[260px]"><canvas id="forecastChart"></canvas></div>
-      <div class="mt-3 grid grid-cols-3 gap-2 text-sm">
-        <div><div class="text-xs text-zinc-400">次ピーク予測</div><div class="font-bold">21:00</div></div>
-        <div><div class="text-xs text-zinc-400">RMSE（暫定）</div><div>—</div></div>
-        <div><div class="text-xs text-zinc-400">ソース</div><div id="source-mini">—</div></div>
-      </div>
-    </div>
-  </section>
+# ========== Utils ==========
+def ensure_data_dir():
+    if not os.path.exists(DATA_DIR):
+        os.makedirs(DATA_DIR, exist_ok=True)
 
-  <!-- 分析：時間帯別 / 曜日別 -->
-  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-6">
-    <div class="flex items-center justify-between mb-3">
-      <h2 class="text-lg font-bold">分析グラフ</h2>
-      <div class="hidden lg:flex items-center gap-2 text-sm">
-        <button class="chip rounded px-2 py-1 opacity-60 cursor-not-allowed">週末補正</button>
-        <button class="chip rounded px-2 py-1 opacity-60 cursor-not-allowed">祝日補正</button>
-        <button class="chip rounded px-2 py-1 opacity-60 cursor-not-allowed">天候補正</button>
-        <select class="chip rounded px-2 py-1 bg-transparent opacity-60 cursor-not-allowed">
-          <option>—</option><option>雨</option><option>晴れ</option>
-        </select>
-        <button class="chip rounded px-2 py-1 opacity-60 cursor-not-allowed">実測優先</button>
-      </div>
-    </div>
+def load_data():
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
 
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div class="card rounded-2xl p-4 lift">
-        <div class="text-sm text-zinc-300 mb-2"><span class="rounded bg-blue-900/60 px-1.5 py-0.5">時間帯別</span> 入店人数（男女＋合計）</div>
-        <div class="h-[260px]"><canvas id="hourChart"></canvas></div>
-      </div>
-      <div class="card rounded-2xl p-4 lift">
-        <div class="text-sm text-zinc-300 mb-2">曜日別 平均人数（男女＋合計）</div>
-        <div class="h-[260px]"><canvas id="wdayChart"></canvas></div>
-      </div>
-    </div>
-  </section>
+def save_data(data):
+    ensure_data_dir()
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-  <!-- 全国店舗一覧（モック） -->
-  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-24">
-    <div class="flex items-center justify-between mb-3">
-      <h2 class="text-lg font-bold">全国店舗一覧</h2>
-      <div class="flex items-center gap-2">
-        <input id="store-q" class="chip rounded bg-transparent px-3 py-1.5 text-sm" type="search" placeholder="店舗を検索">
-        <button id="sort-crowd" class="chip rounded px-2 py-1.5 text-sm">混雑順</button>
-        <button id="sort-women" class="chip rounded px-2 py-1.5 text-sm">女性比順</button>
-      </div>
-    </div>
-    <div id="store-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
-  </section>
+def append_log(record):
+    ensure_data_dir()
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-  <!-- Source -->
-  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-16">
-    <div class="card rounded-2xl p-4">
-      <div class="text-sm text-zinc-300">ソース情報</div>
-      <div id="source" class="text-xs text-zinc-400 mt-1">—</div>
-    </div>
-  </section>
+def now_jst():
+    return datetime.utcnow() + timedelta(hours=9)
 
-  <script>
-    // ===== 固定ウィンドウ設定（app.py のデフォルトに合わせて 19→3） =====
-    const START_HOUR = 19; // 19:00
-    const END_HOUR   = 3;  // 翌03:00
+def parse_ymd(s: str) -> date | None:
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except Exception:
+        return None
 
-    // ===== 時計 =====
-    const clockEl = document.getElementById('clock');
-    const p2 = n => String(n).padStart(2,'0');
-    function updateClock(){ const d = new Date(); clockEl.textContent = `${p2(d.getHours())}:${p2(d.getMinutes())} 更新`; }
-    updateClock(); setInterval(updateClock, 15000);
+def save_to_google_sheets(record: dict):
+    """Apps Script Webhook に JSON を POST。3回まで再試行。"""
+    if not GS_WEBHOOK_URL:
+        return
+    payload = record
+    last_err = None
+    for _ in range(3):
+        try:
+            res = requests.post(GS_WEBHOOK_URL, json=payload, timeout=10)
+            print("Posted to Google Sheets:", res.status_code)
+            return
+        except Exception as e:
+            last_err = e
+            time.sleep(1.5)
+    print("Error posting to Google Sheets:", last_err)
 
-    // ===== 参照 =====
-    const kMen = document.getElementById('k-men');
-    const kWomen = document.getElementById('k-women');
-    const kTotal = document.getElementById('k-total');
-    const kHits = document.getElementById('k-hits');
-    const pillMen = document.getElementById('pill-men');
-    const pillWomen = document.getElementById('pill-women');
-    const ratioEl = document.getElementById('ratio');
-    const srcEl = document.getElementById('source');
-    const srcMiniEl = document.getElementById('source-mini');
-    const latencyEl = document.getElementById('latency');
-    const missingEl = document.getElementById('missing');
+# ========== Scraper ==========
+def scrape_oriental_counts() -> tuple[int | None, int | None]:
+    """
+    対象サイトから (men, women) を抽出。
+    「28 GENTLEMEN / 26 LADIES」の表示を主にテキスト走査で検出。
+    """
+    try:
+        resp = requests.get(TARGET_URL, timeout=12, headers={
+            "User-Agent": "Mozilla/5.0 (compatible; MonitorBot/1.0)"
+        })
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "lxml")
 
-    // ===== 色 =====
-    const css = getComputedStyle(document.documentElement);
-    const C_MEN   = css.getPropertyValue('--men').trim();
-    const C_WOMEN = css.getPropertyValue('--women').trim();
-    const C_TOTAL = css.getPropertyValue('--total').trim();
-    const GRID    = css.getPropertyValue('--grid').trim();
-    const AXIS    = css.getPropertyValue('--axis').trim();
+        men = None
+        women = None
 
-    // ===== 軸ユーティリティ =====
-    function dynamicY(){ // 最大値×1.5（最低1）
-      return {
-        beginAtZero:true,
-        grid:{color:GRID},
-        ticks:{color:AXIS},
-        afterDataLimits(scale){
-          const mx = Number.isFinite(scale.max) ? scale.max : 0;
-          scale.max = mx > 0 ? Math.ceil(mx * 1.5) : 1;
-        }
-      };
-    }
-    function tidyX(){ // 横軸を見やすく
-      return {
-        grid:{color:GRID},
-        ticks:{color:AXIS, autoSkip:true, maxTicksLimit:8, autoSkipPadding:8, maxRotation:0, minRotation:0}
-      };
+        # ページ全文テキストから拾う
+        full_text = soup.get_text(" ", strip=True)
+
+        # 数字の後にラベル
+        m_num_before = re.search(r"(\d+)\s*(?:GENTLEMEN|Men|MEN|男性)", full_text, re.IGNORECASE)
+        w_num_before = re.search(r"(\d+)\s*(?:LADIES|Women|WOMEN|女性)", full_text, re.IGNORECASE)
+
+        # ラベルの後に数字
+        m_label_before = re.search(r"(?:GENTLEMEN|Men|MEN|男性)[^\d]{0,10}(\d+)", full_text, re.IGNORECASE)
+        w_label_before = re.search(r"(?:LADIES|Women|WOMEN|女性)[^\d]{0,10}(\d+)", full_text, re.IGNORECASE)
+
+        if m_num_before:
+            men = int(m_num_before.group(1))
+        elif m_label_before:
+            men = int(m_label_before.group(1))
+
+        if w_num_before:
+            women = int(w_num_before.group(1))
+        elif w_label_before:
+            women = int(w_label_before.group(1))
+
+        # 予備: セレクタ候補
+        if men is None or women is None:
+            candidates_m = [
+                ".men-count", ".male .count", "#menCount", "#men", ".count-men",
+                '[data-role="men"]', '[data-gender="male"]'
+            ]
+            candidates_w = [
+                ".women-count", ".female .count", "#womenCount", "#women", ".count-women",
+                '[data-role="women"]', '[data-gender="female"]'
+            ]
+            def to_int(node):
+                if not node:
+                    return None
+                m = re.search(r"\d+", node.get_text(strip=True).replace(",", ""))
+                return int(m.group()) if m else None
+            if men is None:
+                for sel in candidates_m:
+                    node = soup.select_one(sel)
+                    men = to_int(node)
+                    if men is not None:
+                        break
+            if women is None:
+                for sel in candidates_w:
+                    node = soup.select_one(sel)
+                    women = to_int(node)
+                    if women is not None:
+                        break
+
+        return men, women
+    except Exception as e:
+        print("scrape error:", e)
+        return (None, None)
+
+# ========== Core collect ==========
+def do_collect(men: int | None = None, women: int | None = None, source: str | None = None) -> dict:
+    """
+    収集の中核。men/women が与えられなければスクレイピング。
+    /tasks/collect?men=..&women=.. で手動テスト値を保存可能。
+    """
+    if men is None or women is None:
+        men_s, women_s = scrape_oriental_counts()
+        men = men if men is not None else men_s
+        women = women if women is not None else women_s
+        source = source or TARGET_URL
+    else:
+        source = source or "manual"
+
+    total = (men + women) if (men is not None and women is not None) else None
+
+    ts = now_jst()
+    record = {
+        "date": ts.strftime("%Y-%m-%d"),
+        "time": ts.strftime("%H:%M"),
+        "store": STORE_NAME,
+        "men": men,
+        "women": women,
+        "total": total,
+        "weather": None,
+        "temp": None,
+        "precip_mm": None,
+        "ts": ts.isoformat(timespec="seconds"),
+        "source": source,
     }
 
-    // ===== チャート生成 =====
-    const chart = new Chart(document.getElementById('chart').getContext('2d'), {
-      data:{
-        labels:[],
-        datasets:[
-          {type:'line', label:'合計',  data:[], borderColor:C_TOTAL, backgroundColor:'rgba(147,197,253,.22)', tension:.35, fill:true},
-          {type:'line', label:'男性',  data:[], borderColor:C_MEN,   backgroundColor:css.getPropertyValue('--men-bg').trim(),   tension:.35, fill:false},
-          {type:'line', label:'女性',  data:[], borderColor:C_WOMEN, backgroundColor:css.getPropertyValue('--women-bg').trim(), tension:.35, fill:false},
-        ]
-      },
-      options:{
-        scales:{ x:tidyX(), y:dynamicY() },
-        plugins:{ legend:{labels:{color:'#ddd'}}, tooltip:{mode:'index', intersect:false} },
-        interaction:{mode:'index', intersect:false},
-        maintainAspectRatio:false
-      }
-    });
+    save_data(record)
+    append_log(record)
+    save_to_google_sheets(record)
 
-    // 予測チャート（モック）
-    const forecastChart = new Chart(document.getElementById('forecastChart').getContext('2d'), {
-      type:'line',
-      data:{
-        labels:["18:00","19:00","20:00","21:00","22:00","23:00"],
-        datasets:[
-          {label:"上限", data:[8,20,30,38,32,18], borderColor:"rgba(168,85,247,.30)", backgroundColor:css.getPropertyValue('--purple-f').trim(), fill:"+1", tension:.3},
-          {label:"下限", data:[2,10,20,25,20,8],  borderColor:"rgba(168,85,247,.30)", backgroundColor:css.getPropertyValue('--purple-f').trim(), fill:"-1", tension:.3},
-          {label:"予想人数", data:[5,15,25,32,26,12], borderColor:css.getPropertyValue('--purple').trim(), borderDash:[6,4], fill:false, tension:.3},
-          {label:"実測（合計）", data:[], borderColor:C_TOTAL, backgroundColor:'rgba(147,197,253,.25)', fill:false, tension:.3}
-        ]
-      },
-      options:{ scales:{ x:tidyX(), y:dynamicY() }, plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false }
-    });
+    print(f"[{record['ts']}] Scraped: M={men} W={women} T={total}")
+    return record
 
-    // 分析チャート
-    const hourChart = new Chart(document.getElementById('hourChart').getContext('2d'), {
-      type:'bar',
-      data:{ labels:[], datasets:[
-        {label:'合計', data:[], backgroundColor:'rgba(147,197,253,.35)', borderColor:C_TOTAL, borderWidth:1},
-        {label:'男性', data:[], backgroundColor:'rgba(59,130,246,.35)',  borderColor:C_MEN,   borderWidth:1},
-        {label:'女性', data:[], backgroundColor:'rgba(236,72,153,.35)',  borderColor:C_WOMEN, borderWidth:1},
-      ]},
-      options:{ scales:{ x:tidyX(), y:dynamicY() }, plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false }
-    });
+# ========== Time window ==========
+def is_within_window(ts: datetime | None = None) -> bool:
+    """
+    収集ウィンドウ: WINDOW_START:00 〜 翌 WINDOW_END:00 （終端を含む）
+    例) 19→3 の場合は 19:00〜翌03:00 を対象（03:00 ちょうど含む）
+    """
+    ts = ts or now_jst()
+    hhmm = ts.hour * 60 + ts.minute
+    start = WINDOW_START * 60
+    end = WINDOW_END * 60
+    return (hhmm >= start) or (hhmm <= end)
 
-    const wdayChart = new Chart(document.getElementById('wdayChart').getContext('2d'), {
-      type:'bar',
-      data:{ labels:['月','火','水','木','金','土','日'], datasets:[
-        {label:'合計', data:Array(7).fill(0), backgroundColor:'rgba(147,197,253,.35)', borderColor:C_TOTAL, borderWidth:1},
-        {label:'男性', data:Array(7).fill(0), backgroundColor:'rgba(59,130,246,.35)',  borderColor:C_MEN,   borderWidth:1},
-        {label:'女性', data:Array(7).fill(0), backgroundColor:'rgba(236,72,153,.35)',  borderColor:C_WOMEN, borderWidth:1},
-      ]},
-      options:{ scales:{ x:tidyX(), y:dynamicY() }, plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false }
-    });
+# ========== Routes ==========
+@app.route("/")
+def index():
+    try:
+        return render_template("index.html")
+    except Exception:
+        cur = load_data()
+        return jsonify({"msg": "index.html が無いので JSON を返します", "current": cur})
 
-    // ===== API util =====
-    function ymd(d){ return d.toISOString().slice(0,10); }
-    function addDays(d,days){ const x=new Date(d); x.setDate(x.getDate()+days); return x; }
-    function floor10m(d){ const x=new Date(d); x.setSeconds(0,0); x.setMinutes(Math.floor(x.getMinutes()/10)*10); return x; }
-    function fmtKey(d){ const x=floor10m(d); return x.toISOString().slice(0,16).replace('T',' '); }
-    function fmtLabel(d){ const x=floor10m(d); return `${x.getMonth()+1}/${x.getDate()} ${p2(x.getHours())}:${p2(x.getMinutes())}`; }
+@app.route("/healthz")
+def healthz():
+    return "ok", 200
 
-    // 19:00〜翌03:00 の時間窓（今日 or 昨日始まりを自動判定）
-    function getWindow19to3(now=new Date()){
-      const start=new Date(now); start.setHours(START_HOUR,0,0,0);
-      const end = new Date(start); end.setDate(end.getDate()+1); end.setHours(END_HOUR,0,0,0);
-      if(now < start){ start.setDate(start.getDate()-1); end.setDate(end.getDate()-1); }
-      return {start, end};
-    }
+@app.route("/api/current")
+def api_current():
+    return jsonify(load_data())
 
-    async function fetchCurrent(){
-      const res = await fetch('/api/current');
-      const cur = await res.json();
-      const men   = cur.men   ?? 0;
-      const women = cur.women ?? 0;
-      const total = cur.total ?? (men + women);
-      kMen.textContent = men; kWomen.textContent = women; kTotal.textContent = total;
-      pillMen.textContent = men; pillWomen.textContent = women;
-      ratioEl.textContent = (men>0) ? (women/men).toFixed(2)+'×' : '—';
-      const src = cur.source || '—';
-      srcEl.textContent = src; srcMiniEl && (srcMiniEl.textContent = src);
-      return cur;
-    }
+@app.route("/api/range")
+def api_range():
+    start_s = request.args.get("from")
+    end_s = request.args.get("to")
+    limit = int(request.args.get("limit", 500))
 
-    async function fetchRange(from, to, limit=10000){
-      const url = `/api/range?from=${from}&to=${to}&limit=${limit}`;
-      const res = await fetch(url);
-      const out = await res.json();
-      return out.rows || [];
-    }
+    today = now_jst().date()
+    start_d = parse_ymd(start_s) or today
+    end_d = parse_ymd(end_s) or today
 
-    // 10分バケット（19→3 固定）
-    function bucket10min(rows, startDate, endDate){
-      if(!rows || rows.length===0){ return {labels:[], men:[], women:[], total:[], hits:0}; }
-      const map = new Map();
-      rows.forEach(r=>{ if(r.ts){ map.set(fmtKey(new Date(r.ts)), r); }});
+    rows = []
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                ts = rec.get("ts")
+                if not ts:
+                    continue
+                d = datetime.fromisoformat(ts).date()
+                if start_d <= d <= end_d:
+                    rows.append(rec)
 
-      const labels=[], men=[], women=[], total=[];
-      for(let t=new Date(floor10m(startDate)); t<=endDate; t.setMinutes(t.getMinutes()+10)){
-        const key = fmtKey(t);
-        labels.push(fmtLabel(t));
-        const r = map.get(key);
-        men.push(r?.men ?? null);
-        women.push(r?.women ?? null);
-        total.push(r?.total ?? ((r?.men||0)+(r?.women||0) || null));
-      }
+    rows = rows[-limit:]
+    return jsonify({"ok": True, "rows": rows})
 
-      missingEl.textContent = `${total.filter(v=>v==null).length}枠`;
-      const latest = rows.length? new Date(rows[rows.length-1].ts) : null;
-      latencyEl.textContent = latest? `${Math.max(0, Math.round((Date.now() - latest.getTime())/60000))}分` : '—';
+@app.route("/tasks/collect")
+def collect_task():
+    men = request.args.get("men", type=int)
+    women = request.args.get("women", type=int)
+    rec = do_collect(
+        men=men,
+        women=women,
+        source="manual" if men is not None and women is not None else None
+    )
+    return jsonify({"ok": True, "record": rec})
 
-      return {labels, men, women, total, hits: rows.length};
-    }
+@app.route("/tasks/tick")
+def tasks_tick():
+    if not is_within_window():
+        return jsonify({"ok": True, "skipped": True, "reason": "outside-window"})
+    rec = do_collect()
+    return jsonify({"ok": True, "record": rec})
 
-    // 実測を予測チャートに反映（その時刻の最新値）
-    function feedForecastWithActual(b){
-      const today = new Date();
-      const dayStr = `${today.getMonth()+1}/${today.getDate()}`;
-      const latestByHour = new Map();
-      b.labels.forEach((lab,i)=>{
-        if(!lab.startsWith(dayStr)) return;
-        const hh = lab.slice(dayStr.length+1, dayStr.length+3);
-        const v = b.total[i];
-        if(v==null) return;
-        latestByHour.set(hh, v);
-      });
-      const want = ["18","19","20","21","22","23"];
-      forecastChart.data.datasets[3].data = want.map(h => latestByHour.get(h) ?? null);
-      forecastChart.update('none');
-    }
+@app.route("/tasks/seed")
+def tasks_seed():
+    today = now_jst().strftime("%Y-%m-%d")
+    exists = False
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    rec = json.loads(line)
+                except Exception:
+                    continue
+                if rec.get("date") == today:
+                    exists = True
+                    break
+    if not exists:
+        rec = do_collect()
+        return jsonify({"ok": True, "seeded": True, "record": rec})
+    return jsonify({"ok": True, "seeded": False})
 
-    // —— 入店人数推定：前時点からの増加分
-    function diffIncrements(prev, cur){ return Math.max(0, (cur ?? 0) - (prev ?? 0)); }
-
-    // 時間帯別 入店人数（今日）
-    function buildHourlyEntries(rows){
-      const todayStr = ymd(new Date());
-      const todays = rows.filter(r => (r.ts||'').startsWith(todayStr));
-      const sorted = todays.sort((a,b)=> new Date(a.ts)-new Date(b.ts));
-      const hours=[]; for(let h=19;h<24;h++) hours.push(h); for(let h=0;h<=3;h++) hours.push(h+24);
-      const idx={}; hours.forEach((h,i)=> idx[h]=i);
-      const men=Array(hours.length).fill(0), women=Array(hours.length).fill(0), total=Array(hours.length).fill(0);
-      let p=null;
-      for(const r of sorted){
-        const d=new Date(r.ts);
-        let h=d.getHours(); if(h<=3) h+=24;
-        if(!(h in idx)){ p=r; continue; }
-        if(p){
-          men[idx[h]]   += diffIncrements(p.men, r.men);
-          women[idx[h]] += diffIncrements(p.women, r.women);
-          const pt = p.total ?? ((p.men||0)+(p.women||0));
-          const ct = r.total ?? ((r.men||0)+(r.women||0));
-          total[idx[h]] += diffIncrements(pt, ct);
-        }
-        p=r;
-      }
-      const labels = hours.map(h => (h>=24? h-24 : h)).map(h=>`${p2(h)}:00`);
-      return {labels, men, women, total};
-    }
-
-    // 曜日別 平均入店人数（直近35日）
-    function buildWdayAverageEntries(rows){
-      const byDate = new Map();
-      for(const r of rows){
-        if(!r.ts) continue;
-        const d = r.ts.slice(0,10);
-        if(!byDate.has(d)) byDate.set(d, []);
-        byDate.get(d).push(r);
-      }
-      const sumMen=Array(7).fill(0), sumWomen=Array(7).fill(0), sumTotal=Array(7).fill(0), cnt=Array(7).fill(0);
-      for(const [d, arr] of byDate.entries()){
-        const sorted = arr.sort((a,b)=> new Date(a.ts)-new Date(b.ts));
-        let pm=null, pw=null, pt=null, em=0, ew=0, et=0;
-        for(const r of sorted){
-          em += diffIncrements(pm, r.men);
-          ew += diffIncrements(pw, r.women);
-          const tprev = pt ?? ((pm||0)+(pw||0));
-          const tcur  = r.total ?? ((r.men||0)+(r.women||0));
-          et += diffIncrements(tprev, tcur);
-          pm=r.men; pw=r.women; pt=r.total;
-        }
-        const wd = new Date(d).getDay(); // 0:日
-        const i = (wd+6)%7; // 月0〜日6
-        sumMen[i]+=em; sumWomen[i]+=ew; sumTotal[i]+=et; cnt[i]+=1;
-      }
-      const avg=(s,i)=> cnt[i] ? Math.round(s[i]/cnt[i]) : 0;
-      return { men:sumMen.map(avg), women:sumWomen.map(avg), total:sumTotal.map(avg) };
-    }
-
-    async function refresh(){
-      try{
-        await fetchCurrent();
-
-        // 19:00〜翌03:00 の2日間データを取得
-        const {start, end} = getWindow19to3(new Date());
-        document.getElementById('range-title').textContent =
-          `${p2(START_HOUR)}:00〜翌${p2(END_HOUR)}:00の推移（10分刻み：合計 / 男性 / 女性）`;
-
-        const histRows = await fetchRange(ymd(start), ymd(end), 50000);
-
-        // メインチャート更新（固定窓）
-        const b = bucket10min(histRows, start, end);
-        chart.data.labels = b.labels;
-        chart.data.datasets[0].data = b.total;
-        chart.data.datasets[1].data = b.men;
-        chart.data.datasets[2].data = b.women;
-        chart.update('none');
-        kHits.textContent = b.hits;
-
-        // 予測に実測重ね
-        feedForecastWithActual(b);
-
-        // 時間帯別（今日）
-        const h = buildHourlyEntries(histRows);
-        hourChart.data.labels = h.labels;
-        hourChart.data.datasets[0].data = h.total;
-        hourChart.data.datasets[1].data = h.men;
-        hourChart.data.datasets[2].data = h.women;
-        hourChart.update('none');
-
-        // 曜日別 平均（直近35日）
-        const to   = ymd(end);
-        const from = ymd(addDays(end, -35));
-        const rows35 = await fetchRange(from, to, 50000);
-        const w = buildWdayAverageEntries(rows35);
-        wdayChart.data.datasets[0].data = w.total;
-        wdayChart.data.datasets[1].data = w.men;
-        wdayChart.data.datasets[2].data = w.women;
-        wdayChart.update('none');
-
-        updateClock();
-      }catch(e){
-        console.error(e);
-      }
-    }
-
-    refresh();
-    setInterval(refresh, 60_000);
-    document.getElementById('btn-reload').addEventListener('click', refresh);
-
-    // ====== 全国店舗一覧（モック） ======
-    const STORES = [
-      {name:"長崎",  area:"Kyushu", img:"https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=1400&auto=format&fit=crop", men:12, women:8,  official:null},
-      {name:"渋谷",  area:"Tokyo",  img:"https://images.unsplash.com/photo-1511765224389-37f0e77cf0eb?q=80&w=1400&auto=format&fit=crop", men:20, women:25, official:"https://oriental-lounge.com/stores/01"},
-      {name:"札幌",  area:"Hokkaido", img:"https://images.unsplash.com/photo-1501785888041-af3ef285b470?q=80&w=1400&auto=format&fit=crop", men:5,  women:9,  official:null},
-      {name:"仙台",  area:"Tohoku", img:"https://images.unsplash.com/photo-1552083375-1447ce886485?q=80&w=1400&auto=format&fit=crop", men:18, women:14, official:null},
-      {name:"横浜",  area:"Kanagawa", img:"https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?q=80&w=1400&auto=format&fit=crop", men:10, women:6,  official:null},
-      {name:"新宿",  area:"Tokyo", img:"https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=1400&auto=format&fit=crop", men:14, women:20, official:"https://oriental-lounge.com/stores/02"},
-      {name:"上野",  area:"Tokyo", img:"https://images.unsplash.com/photo-1501785888041-af3ef285b472?q=80&w=1400&auto=format&fit=crop", men:9,  women:7,  official:null},
-      {name:"大宮",  area:"Saitama", img:"https://images.unsplash.com/photo-1498050108023-c5249f4df085?q=80&w=1400&auto=format&fit=crop", men:8,  women:11, official:null},
-      {name:"宇都宮",area:"Tochigi", img:"https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?q=80&w=1400&auto=format&fit=crop", men:7,  women:6,  official:null},
-    ];
-    const gridEl=document.getElementById('store-grid');
-    const qEl=document.getElementById('store-q');
-    const sortCrowdBtn=document.getElementById('sort-crowd');
-    const sortWomenBtn=document.getElementById('sort-women');
-    let filtered=[...STORES];
-    const ratio=(m,w)=> m>0 ? (w/m) : 0;
-    const storeCardHTML=s=>{
-      const total=(s.men||0)+(s.women||0);
-      const r=ratio(s.men||0,s.women||0);
-      const rText=r>0?(r.toFixed(2)+'×'):'—';
-      const badge=`<div class="absolute right-3 top-3 text-[11px] px-2 py-0.5 rounded-full bg-black/50 border border-white/10">比 ${rText}</div>`;
-      const detail=s.official?`<a href="${s.official}" target="_blank" class="chip rounded px-2 py-1 text-xs hover:bg-zinc-800">公式▶</a>`:`<button class="chip rounded px-2 py-1 text-xs opacity-50 cursor-not-allowed">公式</button>`;
-      return `
-      <div class="card rounded-2xl overflow-hidden lift">
-        <div class="relative h-40 bg-zinc-900">
-          <img class="w-full h-full object-cover opacity-90" src="${s.img}" alt="">
-          ${badge}
-        </div>
-        <div class="px-4 pt-3 pb-4">
-          <div class="flex items-baseline justify-between">
-            <div>
-              <div class="text-base font-semibold">${s.name}</div>
-              <div class="text-[11px] text-zinc-400">${s.area}</div>
-            </div>
-          </div>
-          <div class="mt-3 flex items-center gap-2">
-            <div class="pill rounded-full px-2.5 py-1 bg-[color:var(--men-bg)]" style="color:var(--men)"><span class="mr-1">♂</span>${s.men ?? 0}</div>
-            <div class="pill rounded-full px-2.5 py-1 bg-[color:var(--women-bg)]" style="color:var(--women)"><span class="mr-1">♀</span>${s.women ?? 0}</div>
-          </div>
-          <div class="mt-3 flex items-center justify-between text-sm">
-            <div class="text-zinc-300">合計 <span class="font-bold">${total}</span></div>
-            ${detail}
-          </div>
-        </div>
-      </div>`;
-    };
-    const renderStores=list=>{gridEl.innerHTML=list.map(storeCardHTML).join('');};
-    qEl.addEventListener('input', ()=>{const q=qEl.value.trim().toLowerCase(); filtered=STORES.filter(s=>(s.name+s.area).toLowerCase().includes(q)); renderStores(filtered);});
-    sortCrowdBtn.addEventListener('click', ()=>{filtered.sort((a,b)=>((b.men+b.women)-(a.men+a.women))); renderStores(filtered);});
-    sortWomenBtn.addEventListener('click', ()=>{filtered.sort((a,b)=> ratio(b.men,b.women)-ratio(a.men,a.women)); renderStores(filtered);});
-    renderStores(filtered);
-  </script>
-</body>
-</html>
+# ---- Local run ----
+if __name__ == "__main__":
+    ensure_data_dir()
+    app.run(debug=True, use_reloader=False)
