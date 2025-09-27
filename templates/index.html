@@ -13,16 +13,15 @@
   <style>
     :root{
       color-scheme: dark;
-      /* ▼ 統一カラー */
-      --men:      #3b82f6;                 /* 男性：青 */
+      --men:      #3b82f6;
       --men-bg:   rgba(59,130,246,.18);
-      --women:    #ec4899;                 /* 女性：ピンク */
+      --women:    #ec4899;
       --women-bg: rgba(236,72,153,.18);
-      --total:    #93c5fd;                 /* 合計：淡い青 */
+      --total:    #93c5fd;
       --grid:     rgba(200,200,200,.08);
       --axis:     #cfcfcf;
-      --purple:   #a855f7;                 /* 予測ライン：紫 */
-      --purple-f: rgba(168,85,247,.10);    /* 予測帯：半透明 */
+      --purple:   #a855f7;
+      --purple-f: rgba(168,85,247,.10);
       --card-bg:  #111318;
       --card-br:  #1f2430;
     }
@@ -105,18 +104,14 @@
     </div>
   </section>
 
-  <!-- Charts + JSON -->
-  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <!-- 今日の推移（ワイド版） -->
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-6">
     <div class="card rounded-2xl p-4 lift">
       <div class="flex items-center justify-between mb-2">
         <h3 class="text-sm text-zinc-300">本日の推移（10分刻み：合計 / 男性 / 女性）</h3>
         <div class="text-xs text-zinc-400">データは10分刻みで自動更新</div>
       </div>
-      <div class="h-[260px]"><canvas id="chart"></canvas></div>
-    </div>
-    <div class="card rounded-2xl p-4 lift">
-      <h3 class="text-sm text-zinc-300 mb-2">最新のJSON</h3>
-      <pre id="json" class="text-xs bg-black/30 border border-zinc-800 rounded p-3 overflow-auto h-[260px] whitespace-pre-wrap">—</pre>
+      <div class="h-[340px]"><canvas id="chart"></canvas></div>
       <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
         <div class="rounded bg-black/30 border border-zinc-800 p-3">
           <div class="text-xs text-zinc-400">遅延</div>
@@ -127,7 +122,6 @@
           <div id="missing">—</div>
         </div>
       </div>
-      <div class="mt-3 text-xs text-zinc-400">テスト収集: <code>/tasks/collect?men=0&women=0</code></div>
     </div>
   </section>
 
@@ -140,18 +134,9 @@
       </div>
       <div class="h-[260px]"><canvas id="forecastChart"></canvas></div>
       <div class="mt-3 grid grid-cols-3 gap-2 text-sm">
-        <div>
-          <div class="text-xs text-zinc-400">次ピーク予測</div>
-          <div class="font-bold">21:00</div>
-        </div>
-        <div>
-          <div class="text-xs text-zinc-400">RMSE（暫定）</div>
-          <div>—</div>
-        </div>
-        <div>
-          <div class="text-xs text-zinc-400">ソース</div>
-          <div>—</div>
-        </div>
+        <div><div class="text-xs text-zinc-400">次ピーク予測</div><div class="font-bold">21:00</div></div>
+        <div><div class="text-xs text-zinc-400">RMSE（暫定）</div><div>—</div></div>
+        <div><div class="text-xs text-zinc-400">ソース</div><div id="source-mini">—</div></div>
       </div>
     </div>
   </section>
@@ -210,7 +195,7 @@
     const pillWomen = document.getElementById('pill-women');
     const ratioEl = document.getElementById('ratio');
     const srcEl = document.getElementById('source');
-    const jsonEl = document.getElementById('json');
+    const srcMiniEl = document.getElementById('source-mini');
     const latencyEl = document.getElementById('latency');
     const missingEl = document.getElementById('missing');
 
@@ -222,7 +207,7 @@
     const GRID    = css.getPropertyValue('--grid').trim();
     const AXIS    = css.getPropertyValue('--axis').trim();
 
-    // ===== 実績チャート
+    // ===== 実績チャート（ワイド）
     const ctx = document.getElementById('chart').getContext('2d');
     const chart = new Chart(ctx, {
       data: {
@@ -261,7 +246,7 @@
       }
     });
 
-    // ===== 分析チャート（時間帯別・曜日別）
+    // ===== 分析チャート
     const hctx = document.getElementById('hourChart').getContext('2d');
     const hourChart = new Chart(hctx, {
       type:'bar',
@@ -299,8 +284,8 @@
       kMen.textContent = men; kWomen.textContent = women; kTotal.textContent = total;
       pillMen.textContent = men; pillWomen.textContent = women;
       ratioEl.textContent = (men>0) ? (women/men).toFixed(2)+'×' : '—';
-      srcEl.textContent = cur.source || '—';
-      jsonEl.textContent = JSON.stringify(cur, null, 2);
+      const src = cur.source || '—';
+      srcEl.textContent = src; srcMiniEl.textContent = src;
       return cur;
     }
 
@@ -312,7 +297,7 @@
     }
     async function fetchTodayRange(){ const t=ymd(new Date()); return await fetchRange(t,t,1000); }
 
-    // 10分バケット（実績ライン用）
+    // 10分バケット
     function bucket10min(rows){
       const map = new Map();
       rows.forEach(r=>{
@@ -344,7 +329,7 @@
       return {labels, men, women, total, hits: rows.length};
     }
 
-    // 実測を予測チャートへ重ねる（18〜23時の00分近傍）
+    // 実測を予測チャートへ重ねる
     function feedForecastWithActual(b){
       const wantHours = ["18:00","19:00","20:00","21:00","22:00","23:00"];
       const toMap = new Map();
@@ -363,40 +348,29 @@
       forecastChart.update('none');
     }
 
-    // —— 入店人数推定：前時点からの「増加分」のみを足す
+    // —— 入店人数推定：前時点からの増加分
     function diffIncrements(prev, cur){
-      const dx = Math.max(0, (cur ?? 0) - (prev ?? 0));
-      return dx;
+      return Math.max(0, (cur ?? 0) - (prev ?? 0));
     }
 
     // 時間帯別 入店人数（今日）
     function buildHourlyEntries(rows){
-      // rows は ts 昇順で処理
       const sorted = [...rows].sort((a,b)=> new Date(a.ts)-new Date(b.ts));
-      const hours = [];
-      for(let h=19;h<24;h++) hours.push(h);
-      for(let h=0;h<=3;h++) hours.push(h+24); // 翌日 0-3 は 24–27 として扱う
-
+      const hours = []; for(let h=19;h<24;h++) hours.push(h); for(let h=0;h<=3;h++) hours.push(h+24);
       const idx = {}; hours.forEach((h,i)=> idx[h]=i);
-      const men = Array(hours.length).fill(0);
-      const women = Array(hours.length).fill(0);
-      const total = Array(hours.length).fill(0);
-
+      const men = Array(hours.length).fill(0), women = Array(hours.length).fill(0), total = Array(hours.length).fill(0);
       let p=null;
       for(const r of sorted){
         if(!r.ts) continue;
         const d = new Date(r.ts);
-        let h = d.getHours();
-        if(h<=3) h+=24;
-        if(!(h in idx)) continue; // ウィンドウ外は無視
-
+        let h = d.getHours(); if(h<=3) h+=24;
+        if(!(h in idx)) { p=r; continue; }
         if(p){
-          const dm = diffIncrements(p.men, r.men);
-          const dw = diffIncrements(p.women, r.women);
-          const dt = diffIncrements(p.total ?? (p.men||0)+(p.women||0), r.total ?? (r.men||0)+(r.women||0));
-          men[idx[h]]   += dm;
-          women[idx[h]] += dw;
-          total[idx[h]] += dt;
+          men[idx[h]]   += diffIncrements(p.men, r.men);
+          women[idx[h]] += diffIncrements(p.women, r.women);
+          const pt = p.total ?? ((p.men||0)+(p.women||0));
+          const ct = r.total ?? ((r.men||0)+(r.women||0));
+          total[idx[h]] += diffIncrements(pt, ct);
         }
         p = r;
       }
@@ -404,25 +378,19 @@
       return {labels, men, women, total};
     }
 
-    // 曜日別 平均入店人数（直近 N 日）
+    // 曜日別 平均入店人数（直近35日）
     function buildWdayAverageEntries(rows){
-      // 日毎に増加分を合計し、曜日で平均
-      const byDate = new Map(); // date -> rows[]
+      const byDate = new Map();
       for(const r of rows){
         if(!r.ts) continue;
         const d = r.ts.slice(0,10);
         if(!byDate.has(d)) byDate.set(d, []);
         byDate.get(d).push(r);
       }
-      const sumMen   = Array(7).fill(0);
-      const sumWomen = Array(7).fill(0);
-      const sumTotal = Array(7).fill(0);
-      const cnt      = Array(7).fill(0);
-
+      const sumMen=Array(7).fill(0), sumWomen=Array(7).fill(0), sumTotal=Array(7).fill(0), cnt=Array(7).fill(0);
       for(const [d, arr] of byDate.entries()){
         const sorted = arr.sort((a,b)=> new Date(a.ts)-new Date(b.ts));
-        let pm=null, pw=null, pt=null;
-        let em=0, ew=0, et=0;
+        let pm=null, pw=null, pt=null, em=0, ew=0, et=0;
         for(const r of sorted){
           em += diffIncrements(pm, r.men);
           ew += diffIncrements(pw, r.women);
@@ -431,22 +399,23 @@
           et += diffIncrements(tprev, tcur);
           pm = r.men; pw = r.women; pt = r.total;
         }
-        const wd = new Date(d).getDay(); // 0:日〜6:土
-        const idx = (wd+6)%7; // 月(0)〜日(6) 並びに変換
-        sumMen[idx]+=em; sumWomen[idx]+=ew; sumTotal[idx]+=et; cnt[idx]+=1;
+        const wd = new Date(d).getDay(); // 0:日
+        const i = (wd+6)%7; // 月0〜日6
+        sumMen[i]+=em; sumWomen[i]+=ew; sumTotal[i]+=et; cnt[i]+=1;
       }
-      const avg = (s, i)=> cnt[i] ? Math.round(s[i]/cnt[i]) : 0;
-      const men   = sumMen.map(avg);
-      const women = sumWomen.map(avg);
-      const total = sumTotal.map(avg);
-      return {men, women, total};
+      const avg = (s,i)=> cnt[i] ? Math.round(s[i]/cnt[i]) : 0;
+      return {
+        men:   sumMen.map(avg),
+        women: sumWomen.map(avg),
+        total: sumTotal.map(avg),
+      };
     }
 
     async function refresh(){
       try{
         await fetchCurrent();
 
-        // きょう
+        // 今日の実績
         const todayRows = await fetchTodayRange();
         const b = bucket10min(todayRows);
         chart.data.labels = b.labels;
