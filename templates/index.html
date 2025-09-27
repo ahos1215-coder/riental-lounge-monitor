@@ -168,7 +168,7 @@
     </div>
   </section>
 
-  <!-- 全国店舗一覧 -->
+  <!-- 全国店舗一覧（モック） -->
   <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-24">
     <div class="flex items-center justify-between mb-3">
       <h2 class="text-lg font-bold">全国店舗一覧</h2>
@@ -221,6 +221,20 @@
     const GRID    = css.getPropertyValue('--grid').trim();
     const AXIS    = css.getPropertyValue('--axis').trim();
 
+    // 縦軸を「最大値×1.5」にする共通関数（綺麗な数に丸め）
+    function yMax15(ctx){
+      const vals = [];
+      ctx.chart.data.datasets.forEach(ds=>{
+        (ds.data||[]).forEach(v=>{ if(v!=null && !isNaN(v)) vals.push(+v); });
+      });
+      if(!vals.length) return 10;
+      const maxv = Math.max(...vals);
+      const raw = maxv * 1.5;
+      // 5刻みで切り上げ
+      const step = 5;
+      return Math.ceil(raw / step) * step;
+    }
+
     // ===== 実績チャート
     const ctx = document.getElementById('chart').getContext('2d');
     const chart = new Chart(ctx, {
@@ -233,7 +247,24 @@
         ]
       },
       options:{
-        scales:{ x:{ grid:{color:GRID}, ticks:{color:AXIS} }, y:{ grid:{color:GRID}, ticks:{color:AXIS} } },
+        scales:{
+          x:{
+            grid:{color:GRID},
+            ticks:{
+              color:AXIS,
+              callback: function(value, index){
+                // 10分刻み -> 1時間ごとにラベル表示
+                return index % 6 === 0 ? this.getLabelForValue(value) : '';
+              }
+            }
+          },
+          y:{
+            grid:{color:GRID},
+            ticks:{color:AXIS},
+            suggestedMin: 0,
+            suggestedMax: (ctx)=> yMax15(ctx)
+          }
+        },
         plugins:{ legend:{labels:{color:'#ddd'}}, tooltip:{mode:'index', intersect:false} },
         interaction:{mode:'index', intersect:false},
         maintainAspectRatio:false
@@ -254,13 +285,16 @@
         ]
       },
       options:{
-        scales:{ x:{grid:{color:GRID}, ticks:{color:AXIS}}, y:{grid:{color:GRID}, ticks:{color:AXIS}} },
+        scales:{
+          x:{grid:{color:GRID}, ticks:{color:AXIS}},
+          y:{grid:{color:GRID}, ticks:{color:AXIS}, suggestedMin:0, suggestedMax:(ctx)=>yMax15(ctx)}
+        },
         plugins:{legend:{labels:{color:'#ddd'}}},
         maintainAspectRatio:false
       }
     });
 
-    // ===== 分析チャート
+    // ===== 分析チャート（時間帯別）
     const hctx = document.getElementById('hourChart').getContext('2d');
     const hourChart = new Chart(hctx, {
       type:'bar',
@@ -269,10 +303,16 @@
         {label:'男性', data:[], backgroundColor:'rgba(59,130,246,.35)',  borderColor:C_MEN,   borderWidth:1},
         {label:'女性', data:[], backgroundColor:'rgba(236,72,153,.35)',  borderColor:C_WOMEN, borderWidth:1},
       ]},
-      options:{ scales:{ x:{grid:{color:GRID}, ticks:{color:AXIS}}, y:{grid:{color:GRID}, ticks:{color:AXIS}} },
-        plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false }
+      options:{
+        scales:{
+          x:{grid:{color:GRID}, ticks:{color:AXIS}},
+          y:{grid:{color:GRID}, ticks:{color:AXIS}, suggestedMin:0, suggestedMax:(ctx)=>yMax15(ctx)}
+        },
+        plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false
+      }
     });
 
+    // ===== 分析チャート（曜日別）
     const wctx = document.getElementById('wdayChart').getContext('2d');
     const wdayChart = new Chart(wctx, {
       type:'bar',
@@ -281,8 +321,13 @@
         {label:'男性', data:Array(7).fill(0), backgroundColor:'rgba(59,130,246,.35)',  borderColor:C_MEN,   borderWidth:1},
         {label:'女性', data:Array(7).fill(0), backgroundColor:'rgba(236,72,153,.35)',  borderColor:C_WOMEN, borderWidth:1},
       ]},
-      options:{ scales:{ x:{grid:{color:GRID}, ticks:{color:AXIS}}, y:{grid:{color:GRID}, ticks:{color:AXIS}} },
-        plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false }
+      options:{
+        scales:{
+          x:{grid:{color:GRID}, ticks:{color:AXIS}},
+          y:{grid:{color:GRID}, ticks:{color:AXIS}, suggestedMin:0, suggestedMax:(ctx)=>yMax15(ctx)}
+        },
+        plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false
+      }
     });
 
     // ===== API utilities
