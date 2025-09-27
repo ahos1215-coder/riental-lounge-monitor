@@ -13,7 +13,7 @@
   <style>
     :root{
       color-scheme: dark;
-      /* ▼ 統一カラー（ここを変えるだけで全体に反映） */
+      /* ▼ 統一カラー */
       --men:      #3b82f6;                 /* 男性：青 */
       --men-bg:   rgba(59,130,246,.18);
       --women:    #ec4899;                 /* 女性：ピンク */
@@ -78,13 +78,11 @@
   <!-- Hero + Highlight -->
   <section class="mx-auto max-w-6xl px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
     <div class="card rounded-2xl overflow-hidden lg:col-span-2 relative">
-      <!-- ▼ ヒーロー画像（必要に応じてURL差し替え） -->
       <img class="w-full h-[240px] object-cover opacity-[.92]" src="https://images.unsplash.com/photo-1557264337-e8a93017fe92?q=80&w=1600&auto=format&fit=crop" alt="">
       <div class="absolute left-4 bottom-5">
         <div class="text-lg font-bold drop-shadow">長崎</div>
         <div class="text-xs text-zinc-300/90">現在の来客者数</div>
       </div>
-      <!-- 男/女ピル -->
       <div class="absolute right-4 bottom-4 flex gap-2">
         <div class="pill rounded-full px-3 py-1.5 bg-[color:var(--men-bg)]" style="color:var(--men)">
           <span class="mr-1">♂</span><span id="pill-men">0</span>
@@ -158,6 +156,33 @@
     </div>
   </section>
 
+  <!-- 分析グラフ：時間帯別 / 曜日別 -->
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-6">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-bold">分析グラフ</h2>
+      <div class="hidden lg:flex items-center gap-2 text-sm">
+        <button class="chip rounded px-2 py-1 opacity-60 cursor-not-allowed">週末補正</button>
+        <button class="chip rounded px-2 py-1 opacity-60 cursor-not-allowed">祝日補正</button>
+        <button class="chip rounded px-2 py-1 opacity-60 cursor-not-allowed">天候補正</button>
+        <select class="chip rounded px-2 py-1 bg-transparent opacity-60 cursor-not-allowed">
+          <option>—</option><option>雨</option><option>晴れ</option>
+        </select>
+        <button class="chip rounded px-2 py-1 opacity-60 cursor-not-allowed">実測優先</button>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="card rounded-2xl p-4 lift">
+        <div class="text-sm text-zinc-300 mb-2"><span class="rounded bg-blue-900/60 px-1.5 py-0.5">時間帯別</span> 入店人数（男女＋合計）</div>
+        <div class="h-[260px]"><canvas id="hourChart"></canvas></div>
+      </div>
+      <div class="card rounded-2xl p-4 lift">
+        <div class="text-sm text-zinc-300 mb-2">曜日別 平均人数（男女＋合計）</div>
+        <div class="h-[260px]"><canvas id="wdayChart"></canvas></div>
+      </div>
+    </div>
+  </section>
+
   <!-- Source -->
   <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-16">
     <div class="card rounded-2xl p-4">
@@ -189,23 +214,27 @@
     const latencyEl = document.getElementById('latency');
     const missingEl = document.getElementById('missing');
 
-    // ===== 実績チャート
+    // ===== 色
     const css = getComputedStyle(document.documentElement);
+    const C_MEN   = css.getPropertyValue('--men').trim();
+    const C_WOMEN = css.getPropertyValue('--women').trim();
+    const C_TOTAL = css.getPropertyValue('--total').trim();
+    const GRID    = css.getPropertyValue('--grid').trim();
+    const AXIS    = css.getPropertyValue('--axis').trim();
+
+    // ===== 実績チャート
     const ctx = document.getElementById('chart').getContext('2d');
     const chart = new Chart(ctx, {
       data: {
         labels: [],
         datasets: [
-          {type:'line', label:'合計',  data:[], borderColor:css.getPropertyValue('--total').trim(),  backgroundColor:'rgba(147,197,253,.22)', tension:.35, fill:true},
-          {type:'line', label:'男性',  data:[], borderColor:css.getPropertyValue('--men').trim(),    backgroundColor:css.getPropertyValue('--men-bg').trim(),   tension:.35, fill:false},
-          {type:'line', label:'女性',  data:[], borderColor:css.getPropertyValue('--women').trim(),  backgroundColor:css.getPropertyValue('--women-bg').trim(), tension:.35, fill:false},
+          {type:'line', label:'合計',  data:[], borderColor:C_TOTAL, backgroundColor:'rgba(147,197,253,.22)', tension:.35, fill:true},
+          {type:'line', label:'男性',  data:[], borderColor:C_MEN,   backgroundColor:css.getPropertyValue('--men-bg').trim(),   tension:.35, fill:false},
+          {type:'line', label:'女性',  data:[], borderColor:C_WOMEN, backgroundColor:css.getPropertyValue('--women-bg').trim(), tension:.35, fill:false},
         ]
       },
       options:{
-        scales:{
-          x:{ grid:{color:css.getPropertyValue('--grid').trim()}, ticks:{color:css.getPropertyValue('--axis').trim()} },
-          y:{ grid:{color:css.getPropertyValue('--grid').trim()}, ticks:{color:css.getPropertyValue('--axis').trim()} }
-        },
+        scales:{ x:{ grid:{color:GRID}, ticks:{color:AXIS} }, y:{ grid:{color:GRID}, ticks:{color:AXIS} } },
         plugins:{ legend:{labels:{color:'#ddd'}}, tooltip:{mode:'index', intersect:false} },
         interaction:{mode:'index', intersect:false},
         maintainAspectRatio:false
@@ -219,48 +248,47 @@
       data:{
         labels:["18:00","19:00","20:00","21:00","22:00","23:00"],
         datasets:[
-          {
-            label:"上限",
-            data:[8,20,30,38,32,18],
-            borderColor:"rgba(168,85,247,.30)",
-            backgroundColor:css.getPropertyValue('--purple-f').trim(),
-            fill:"+1", tension:.3
-          },
-          {
-            label:"下限",
-            data:[2,10,20,25,20,8],
-            borderColor:"rgba(168,85,247,.30)",
-            backgroundColor:css.getPropertyValue('--purple-f').trim(),
-            fill:"-1", tension:.3
-          },
-          {
-            label:"予想人数",
-            data:[5,15,25,32,26,12],
-            borderColor:css.getPropertyValue('--purple').trim(),
-            borderDash:[6,4],
-            fill:false, tension:.3
-          },
-          {
-            label:"実測（合計）",
-            data:[],  // 実測値を流し込む
-            borderColor:css.getPropertyValue('--total').trim(),
-            backgroundColor:'rgba(147,197,253,.25)',
-            fill:false, tension:.3
-          }
+          {label:"上限", data:[8,20,30,38,32,18], borderColor:"rgba(168,85,247,.30)", backgroundColor:css.getPropertyValue('--purple-f').trim(), fill:"+1", tension:.3},
+          {label:"下限", data:[2,10,20,25,20,8],  borderColor:"rgba(168,85,247,.30)", backgroundColor:css.getPropertyValue('--purple-f').trim(), fill:"-1", tension:.3},
+          {label:"予想人数", data:[5,15,25,32,26,12], borderColor:css.getPropertyValue('--purple').trim(), borderDash:[6,4], fill:false, tension:.3},
+          {label:"実測（合計）", data:[], borderColor:C_TOTAL, backgroundColor:'rgba(147,197,253,.25)', fill:false, tension:.3}
         ]
       },
       options:{
-        scales:{
-          x:{grid:{color:css.getPropertyValue('--grid').trim()}, ticks:{color:css.getPropertyValue('--axis').trim()}},
-          y:{grid:{color:css.getPropertyValue('--grid').trim()}, ticks:{color:css.getPropertyValue('--axis').trim()}}
-        },
+        scales:{ x:{grid:{color:GRID}, ticks:{color:AXIS}}, y:{grid:{color:GRID}, ticks:{color:AXIS}} },
         plugins:{legend:{labels:{color:'#ddd'}}},
         maintainAspectRatio:false
       }
     });
 
+    // ===== 分析チャート（時間帯別・曜日別）
+    const hctx = document.getElementById('hourChart').getContext('2d');
+    const hourChart = new Chart(hctx, {
+      type:'bar',
+      data:{ labels:[], datasets:[
+        {label:'合計', data:[], backgroundColor:'rgba(147,197,253,.35)', borderColor:C_TOTAL, borderWidth:1},
+        {label:'男性', data:[], backgroundColor:'rgba(59,130,246,.35)',  borderColor:C_MEN,   borderWidth:1},
+        {label:'女性', data:[], backgroundColor:'rgba(236,72,153,.35)',  borderColor:C_WOMEN, borderWidth:1},
+      ]},
+      options:{ scales:{ x:{grid:{color:GRID}, ticks:{color:AXIS}}, y:{grid:{color:GRID}, ticks:{color:AXIS}} },
+        plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false }
+    });
+
+    const wctx = document.getElementById('wdayChart').getContext('2d');
+    const wdayChart = new Chart(wctx, {
+      type:'bar',
+      data:{ labels:['月','火','水','木','金','土','日'], datasets:[
+        {label:'合計', data:Array(7).fill(0), backgroundColor:'rgba(147,197,253,.35)', borderColor:C_TOTAL, borderWidth:1},
+        {label:'男性', data:Array(7).fill(0), backgroundColor:'rgba(59,130,246,.35)',  borderColor:C_MEN,   borderWidth:1},
+        {label:'女性', data:Array(7).fill(0), backgroundColor:'rgba(236,72,153,.35)',  borderColor:C_WOMEN, borderWidth:1},
+      ]},
+      options:{ scales:{ x:{grid:{color:GRID}, ticks:{color:AXIS}}, y:{grid:{color:GRID}, ticks:{color:AXIS}} },
+        plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false }
+    });
+
     // ===== API
     function ymd(d){ return d.toISOString().slice(0,10); }
+    function addDays(d,days){ const x=new Date(d); x.setDate(x.getDate()+days); return x; }
 
     async function fetchCurrent(){
       const res = await fetch('/api/current');
@@ -268,31 +296,28 @@
       const men   = cur.men   ?? 0;
       const women = cur.women ?? 0;
       const total = cur.total ?? (men + women);
-
-      kMen.textContent = men;
-      kWomen.textContent = women;
-      kTotal.textContent = total;
-      pillMen.textContent = men;
-      pillWomen.textContent = women;
+      kMen.textContent = men; kWomen.textContent = women; kTotal.textContent = total;
+      pillMen.textContent = men; pillWomen.textContent = women;
       ratioEl.textContent = (men>0) ? (women/men).toFixed(2)+'×' : '—';
       srcEl.textContent = cur.source || '—';
       jsonEl.textContent = JSON.stringify(cur, null, 2);
       return cur;
     }
 
-    async function fetchTodayRange(){
-      const today = ymd(new Date());
-      const res = await fetch(`/api/range?from=${today}&to=${today}&limit=1000`);
+    async function fetchRange(from, to, limit=10000){
+      const url = `/api/range?from=${from}&to=${to}&limit=${limit}`;
+      const res = await fetch(url);
       const out = await res.json();
       return out.rows || [];
     }
+    async function fetchTodayRange(){ const t=ymd(new Date()); return await fetchRange(t,t,1000); }
 
-    // 10分バケット化（実績）
+    // 10分バケット（実績ライン用）
     function bucket10min(rows){
       const map = new Map();
       rows.forEach(r=>{
         if(!r.ts) return;
-        const t = r.ts.slice(11,16); // "HH:MM"
+        const t = r.ts.slice(11,16);
         const [H,M] = t.split(':').map(Number);
         const m10 = String(Math.floor(M/10)*10).padStart(2,'0');
         const key = `${String(H).padStart(2,'0')}:${m10}`;
@@ -319,10 +344,9 @@
       return {labels, men, women, total, hits: rows.length};
     }
 
-    // 予測チャートへ実測を反映（簡易：直近 18〜23 時の :00 を拾って入れる。無ければ近い値）
+    // 実測を予測チャートへ重ねる（18〜23時の00分近傍）
     function feedForecastWithActual(b){
       const wantHours = ["18:00","19:00","20:00","21:00","22:00","23:00"];
-      // b.labels は 19:00〜03:00 の10分刻み。:00 を優先、無ければその時間帯の最新を拾う
       const toMap = new Map();
       b.labels.forEach((lab, i)=>{
         const h = lab.slice(0,2) + ":00";
@@ -335,26 +359,121 @@
         for(let i=arr.length-1;i>=0;i--){ if(arr[i]!=null){ v = arr[i]; break; } }
         return v;
       });
-      forecastChart.data.datasets[3].data = act;  // 実測（合計）を重ねる
+      forecastChart.data.datasets[3].data = act;
       forecastChart.update('none');
+    }
+
+    // —— 入店人数推定：前時点からの「増加分」のみを足す
+    function diffIncrements(prev, cur){
+      const dx = Math.max(0, (cur ?? 0) - (prev ?? 0));
+      return dx;
+    }
+
+    // 時間帯別 入店人数（今日）
+    function buildHourlyEntries(rows){
+      // rows は ts 昇順で処理
+      const sorted = [...rows].sort((a,b)=> new Date(a.ts)-new Date(b.ts));
+      const hours = [];
+      for(let h=19;h<24;h++) hours.push(h);
+      for(let h=0;h<=3;h++) hours.push(h+24); // 翌日 0-3 は 24–27 として扱う
+
+      const idx = {}; hours.forEach((h,i)=> idx[h]=i);
+      const men = Array(hours.length).fill(0);
+      const women = Array(hours.length).fill(0);
+      const total = Array(hours.length).fill(0);
+
+      let p=null;
+      for(const r of sorted){
+        if(!r.ts) continue;
+        const d = new Date(r.ts);
+        let h = d.getHours();
+        if(h<=3) h+=24;
+        if(!(h in idx)) continue; // ウィンドウ外は無視
+
+        if(p){
+          const dm = diffIncrements(p.men, r.men);
+          const dw = diffIncrements(p.women, r.women);
+          const dt = diffIncrements(p.total ?? (p.men||0)+(p.women||0), r.total ?? (r.men||0)+(r.women||0));
+          men[idx[h]]   += dm;
+          women[idx[h]] += dw;
+          total[idx[h]] += dt;
+        }
+        p = r;
+      }
+      const labels = hours.map(h => (h>=24? h-24 : h)).map(h=>`${p2(h)}:00`);
+      return {labels, men, women, total};
+    }
+
+    // 曜日別 平均入店人数（直近 N 日）
+    function buildWdayAverageEntries(rows){
+      // 日毎に増加分を合計し、曜日で平均
+      const byDate = new Map(); // date -> rows[]
+      for(const r of rows){
+        if(!r.ts) continue;
+        const d = r.ts.slice(0,10);
+        if(!byDate.has(d)) byDate.set(d, []);
+        byDate.get(d).push(r);
+      }
+      const sumMen   = Array(7).fill(0);
+      const sumWomen = Array(7).fill(0);
+      const sumTotal = Array(7).fill(0);
+      const cnt      = Array(7).fill(0);
+
+      for(const [d, arr] of byDate.entries()){
+        const sorted = arr.sort((a,b)=> new Date(a.ts)-new Date(b.ts));
+        let pm=null, pw=null, pt=null;
+        let em=0, ew=0, et=0;
+        for(const r of sorted){
+          em += diffIncrements(pm, r.men);
+          ew += diffIncrements(pw, r.women);
+          const tprev = pt ?? ((pm||0)+(pw||0));
+          const tcur  = r.total ?? ((r.men||0)+(r.women||0));
+          et += diffIncrements(tprev, tcur);
+          pm = r.men; pw = r.women; pt = r.total;
+        }
+        const wd = new Date(d).getDay(); // 0:日〜6:土
+        const idx = (wd+6)%7; // 月(0)〜日(6) 並びに変換
+        sumMen[idx]+=em; sumWomen[idx]+=ew; sumTotal[idx]+=et; cnt[idx]+=1;
+      }
+      const avg = (s, i)=> cnt[i] ? Math.round(s[i]/cnt[i]) : 0;
+      const men   = sumMen.map(avg);
+      const women = sumWomen.map(avg);
+      const total = sumTotal.map(avg);
+      return {men, women, total};
     }
 
     async function refresh(){
       try{
         await fetchCurrent();
-        const rows = await fetchTodayRange();
-        const b = bucket10min(rows);
 
-        // 実績チャート
+        // きょう
+        const todayRows = await fetchTodayRange();
+        const b = bucket10min(todayRows);
         chart.data.labels = b.labels;
         chart.data.datasets[0].data = b.total;
         chart.data.datasets[1].data = b.men;
         chart.data.datasets[2].data = b.women;
         chart.update('none');
         kHits.textContent = b.hits;
-
-        // 予測チャートに実測合計を重ねる
         feedForecastWithActual(b);
+
+        // 時間帯別 入店人数（今日）
+        const h = buildHourlyEntries(todayRows);
+        hourChart.data.labels = h.labels;
+        hourChart.data.datasets[0].data = h.total;
+        hourChart.data.datasets[1].data = h.men;
+        hourChart.data.datasets[2].data = h.women;
+        hourChart.update('none');
+
+        // 曜日別 平均（直近35日）
+        const to   = ymd(new Date());
+        const from = ymd(addDays(new Date(), -35));
+        const hist = await fetchRange(from, to, 50000);
+        const w    = buildWdayAverageEntries(hist);
+        wdayChart.data.datasets[0].data = w.total;
+        wdayChart.data.datasets[1].data = w.men;
+        wdayChart.data.datasets[2].data = w.women;
+        wdayChart.update('none');
 
         updateClock();
       }catch(e){
@@ -362,7 +481,6 @@
       }
     }
 
-    // 初回 & 自動更新
     refresh();
     setInterval(refresh, 60_000);
     document.getElementById('btn-reload').addEventListener('click', refresh);
