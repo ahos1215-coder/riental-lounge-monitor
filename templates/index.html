@@ -1,246 +1,208 @@
-<!doctype html>
-<html lang="ja" class="dark">
+<!DOCTYPE html>
+<html lang="ja">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ORIENTAL LOUNGE ダッシュボード</title>
-
-  <!-- Tailwind CSS -->
+  <title>ORIENTAL LOUNGE</title>
+  <meta name="theme-color" content="#0b0b0b">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            bg:    '#0b0f17',
-            panel: '#111827',
-            card:  '#0f1623',
-            text:  '#e5e7eb',
-            sub:   '#9ca3af',
-            brand: '#4f46e5',
-            men:   '#60a5fa',
-            women: '#f59e0b',
-            total: '#22d3ee',
-          },
-          boxShadow: {
-            soft: '0 8px 24px rgba(0,0,0,0.35)',
-          }
-        }
-      }
-    }
-  </script>
-  <!-- Chart.js -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {color-scheme: dark}
+    html,body{background:#0b0b0b; font-family:'Inter','Noto Sans JP',system-ui,-apple-system,Segoe UI,Roboto,'ヒラギノ角ゴ ProN','メイリオ',Arial,sans-serif}
+    .card{background:#111318;border:1px solid #1f2430;box-shadow:0 12px 30px rgba(0,0,0,.45)}
+    .chip{border:1px solid rgba(255,255,255,.12)}
+    .lift{transition:transform .18s ease, box-shadow .18s ease}
+    .lift:hover{transform:translateY(-2px); box-shadow:0 14px 34px rgba(0,0,0,.55)}
+  </style>
 </head>
-<body class="bg-bg text-text min-h-screen">
-
+<body class="text-zinc-100">
   <!-- Header -->
-  <header class="sticky top-0 z-10 backdrop-blur bg-bg/70 border-b border-white/5">
-    <div class="max-w-7xl mx-auto px-4 py-3 flex items-center gap-4">
-      <div class="flex items-center gap-3">
-        <div class="w-9 h-9 rounded-xl bg-brand/20 grid place-items-center ring-1 ring-brand/30">
-          <span class="text-brand font-bold">OL</span>
-        </div>
-        <h1 class="text-lg md:text-xl font-semibold tracking-wide">ORIENTAL LOUNGE</h1>
+  <header class="sticky top-0 z-50 border-b border-zinc-800 bg-black/70 backdrop-blur">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 py-3 flex items-center gap-3">
+      <div class="h-8 w-8 rounded bg-zinc-900 grid place-items-center ring-1 ring-zinc-800">
+        <div class="flex gap-0.5"><span class="block w-0.5 h-5 bg-zinc-300"></span><span class="block w-0.5 h-6 bg-zinc-300"></span><span class="block w-0.5 h-4 bg-zinc-300"></span></div>
       </div>
-      <div class="ml-auto text-sub text-sm flex items-center gap-3">
-        <span id="updatedAt">--:-- 更新</span>
-        <button id="refreshBtn" class="px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition border border-white/10">
-          再読込
-        </button>
+      <div class="text-lg sm:text-xl font-extrabold tracking-wide">ORIENTAL LOUNGE</div>
+      <div class="ml-auto flex items-center gap-2 text-sm">
+        <div id="clock" class="rounded chip px-2 py-1 text-zinc-300">--:-- 更新</div>
+        <button id="btn-reload" class="rounded chip px-2 py-1 hover:bg-zinc-800">再読込</button>
       </div>
     </div>
   </header>
 
-  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+  <!-- KPI Row -->
+  <section class="border-b border-zinc-800/80 bg-gradient-to-b from-black to-zinc-950/60">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 py-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="card rounded-2xl p-4 lift">
+        <div class="text-xs text-zinc-400">現在 男</div>
+        <div id="k-men" class="mt-1 text-2xl font-extrabold">0</div>
+      </div>
+      <div class="card rounded-2xl p-4 lift">
+        <div class="text-xs text-zinc-400">現在 女</div>
+        <div id="k-women" class="mt-1 text-2xl font-extrabold">0</div>
+      </div>
+      <div class="card rounded-2xl p-4 lift">
+        <div class="text-xs text-zinc-400">現在 合計</div>
+        <div id="k-total" class="mt-1 text-2xl font-extrabold">0</div>
+      </div>
+      <div class="card rounded-2xl p-4 lift">
+        <div class="text-xs text-zinc-400">本日 取得件数</div>
+        <div id="k-hits" class="mt-1 text-2xl font-extrabold">0</div>
+      </div>
+    </div>
+  </section>
 
-    <!-- KPI cards -->
-    <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <!-- men -->
-      <div class="rounded-2xl bg-card shadow-soft border border-white/5 p-5">
-        <div class="text-sub text-xs">現在 男</div>
-        <div id="kpiMen" class="mt-2 text-3xl font-bold text-men">--</div>
+  <!-- Charts + JSON -->
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="card rounded-2xl p-4 lift">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm text-zinc-300">本日の推移（10分刻み：合計 / 男性 / 女性）</h3>
+        <div class="text-xs text-zinc-400">データは10分刻みで自動更新</div>
       </div>
-      <!-- women -->
-      <div class="rounded-2xl bg-card shadow-soft border border-white/5 p-5">
-        <div class="text-sub text-xs">現在 女</div>
-        <div id="kpiWomen" class="mt-2 text-3xl font-bold text-women">--</div>
-      </div>
-      <!-- total -->
-      <div class="rounded-2xl bg-card shadow-soft border border-white/5 p-5">
-        <div class="text-sub text-xs">現在 合計</div>
-        <div id="kpiTotal" class="mt-2 text-3xl font-bold text-total">--</div>
-      </div>
-      <!-- 今日の取得件数 -->
-      <div class="rounded-2xl bg-card shadow-soft border border-white/5 p-5">
-        <div class="text-sub text-xs">本日 取得件数</div>
-        <div id="kpiCount" class="mt-2 text-3xl font-bold">--</div>
-      </div>
-    </section>
-
-    <!-- Chart + JSON -->
-    <section class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <!-- Chart card -->
-      <div class="lg:col-span-2 rounded-2xl bg-panel shadow-soft border border-white/5 p-5">
-        <div class="flex items-center justify-between">
-          <h2 class="text-base font-semibold">本日の推移（10分刻み / 合計・男性・女性）</h2>
-          <div class="text-sub text-xs" id="windowInfo"></div>
+      <canvas id="chart" height="220"></canvas>
+    </div>
+    <div class="card rounded-2xl p-4 lift">
+      <h3 class="text-sm text-zinc-300 mb-2">最新のJSON</h3>
+      <pre id="json" class="text-xs bg-black/30 border border-zinc-800 rounded p-3 overflow-auto h-[260px] whitespace-pre-wrap">—</pre>
+      <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
+        <div class="rounded bg-black/30 border border-zinc-800 p-3">
+          <div class="text-xs text-zinc-400">遅延</div>
+          <div id="latency">—</div>
         </div>
-        <div class="mt-4">
-          <canvas id="trendChart" height="120"></canvas>
+        <div class="rounded bg-black/30 border border-zinc-800 p-3">
+          <div class="text-xs text-zinc-400">欠損枠（10分刻み）</div>
+          <div id="missing">—</div>
         </div>
-        <div class="mt-3 text-sub text-xs">※ `/api/range` を集計して可視化</div>
       </div>
+      <div class="mt-3 text-xs text-zinc-400">テスト収集: <code>/tasks/collect?men=0&women=0</code></div>
+    </div>
+  </section>
 
-      <!-- JSON + meta -->
-      <div class="rounded-2xl bg-panel shadow-soft border border-white/5 p-5 space-y-4">
-        <h2 class="text-base font-semibold">最新のJSON</h2>
-        <pre id="jsonBox" class="text-xs bg-black/30 p-3 rounded-lg border border-white/5 overflow-x-auto max-h-80"></pre>
-
-        <div class="grid grid-cols-2 gap-3">
-          <div class="rounded-xl bg-black/30 p-3 border border-white/5">
-            <div class="text-sub text-xs">遅延</div>
-            <div id="delayMin" class="mt-1 text-xl font-bold">--分</div>
-          </div>
-          <div class="rounded-xl bg-black/30 p-3 border border-white/5">
-            <div class="text-sub text-xs">欠損枠（10分落ち）</div>
-            <div id="missingSlots" class="mt-1 text-xl font-bold">--枠</div>
-          </div>
-        </div>
-
-        <div class="text-sub text-xs">テスト収集: <code class="text-white/70">/tasks/collect?men=0&amp;women=0</code></div>
-      </div>
-    </section>
-
-    <!-- Stores (将来拡張用のカード例) -->
-    <section class="rounded-2xl bg-panel shadow-soft border border-white/5 p-5">
-      <h2 class="text-base font-semibold mb-3">ソース情報</h2>
-      <div id="sourceLink" class="text-brand text-sm underline underline-offset-4 break-all"></div>
-    </section>
-  </main>
-
-  <footer class="max-w-7xl mx-auto px-4 py-8 text-center text-sub text-xs">
-    © 2025 ORIENTAL LOUNGE Monitor
-  </footer>
+  <!-- Source -->
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-16">
+    <div class="card rounded-2xl p-4">
+      <div class="text-sm text-zinc-300">ソース情報</div>
+      <div id="source" class="text-xs text-zinc-400 mt-1">—</div>
+    </div>
+  </section>
 
   <script>
-    // ========== helpers ==========
-    const fmt = (n) => (n ?? '--');
-    const toDate = (s) => new Date(s);
-
-    // 10分刻みのラベル作成（実際に存在する行から生成）
-    function buildBuckets(rows) {
-      // rows: [{time:"HH:MM", ...}]
-      const set = new Set();
-      for (const r of rows) set.add(r.time);
-      const labels = Array.from(set).sort();
-      return labels;
+    // ===== 時計
+    const clockEl = document.getElementById('clock');
+    function updateClock(){
+      const d = new Date();
+      const p = n => String(n).padStart(2,'0');
+      clockEl.textContent = `${p(d.getHours())}:${p(d.getMinutes())} 更新`;
     }
+    updateClock(); setInterval(updateClock, 15000);
 
-    function aggregateSeries(labels, rows, key) {
-      const map = new Map(rows.map(r => [r.time, r[key] ?? null]));
-      return labels.map(t => map.has(t) ? map.get(t) : null);
-    }
+    // ===== API 呼び出し
+    const kMen = document.getElementById('k-men');
+    const kWomen = document.getElementById('k-women');
+    const kTotal = document.getElementById('k-total');
+    const kHits = document.getElementById('k-hits');
+    const srcEl = document.getElementById('source');
+    const jsonEl = document.getElementById('json');
+    const latencyEl = document.getElementById('latency');
+    const missingEl = document.getElementById('missing');
 
-    function minutesDiffFromNow(tsIso) {
-      if (!tsIso) return null;
-      const d = new Date(tsIso);
-      const now = new Date();
-      const diffMs = now - d;
-      return Math.max(0, Math.round(diffMs / 60000));
-    }
-
-    function countMissing10m(labels, rows) {
-      const set = new Set(rows.map(r => r.time));
-      let miss = 0;
-      for (const t of labels) if (!set.has(t)) miss++;
-      return miss;
-    }
-
-    // ========== Chart ==========
-    let chart;
-    function renderChart(labels, men, women, total) {
-      const ctx = document.getElementById('trendChart');
-      const data = {
-        labels,
+    const gridColor = 'rgba(200,200,200,0.08)';
+    const axisColor = '#cfcfcf';
+    const ctx = document.getElementById('chart').getContext('2d');
+    const chart = new Chart(ctx, {
+      data: {
+        labels: [],
         datasets: [
-          { label: '合計', data: total, borderWidth: 2, pointRadius: 0, tension: .35, borderColor: '#22d3ee' },
-          { label: '男性', data: men,   borderWidth: 2, pointRadius: 0, tension: .35, borderColor: '#60a5fa' },
-          { label: '女性', data: women, borderWidth: 2, pointRadius: 0, tension: .35, borderColor: '#f59e0b' },
+          {type:'line', label:'合計',  data:[], borderColor:'#60a5fa', backgroundColor:'rgba(96,165,250,.25)', tension:.35, fill:true},
+          {type:'line', label:'男性',  data:[], borderColor:'#38bdf8', backgroundColor:'rgba(56,189,248,.2)',  tension:.35, fill:false},
+          {type:'line', label:'女性',  data:[], borderColor:'#f59e0b', backgroundColor:'rgba(245,158,11,.2)', tension:.35, fill:false},
         ]
-      };
-      const options = {
-        responsive: true,
-        scales: {
-          x: { grid: { color: 'rgba(255,255,255,.06)' } },
-          y: { grid: { color: 'rgba(255,255,255,.06)' }, ticks: { precision: 0, stepSize: 5 } }
-        },
-        plugins: {
-          legend: { labels: { color: '#e5e7eb' } },
-          tooltip: { intersect: false, mode: 'index' }
-        }
-      };
-      if (chart) chart.destroy();
-      chart = new Chart(ctx, { type: 'line', data, options });
+      },
+      options:{
+        scales:{ x:{ grid:{color:gridColor}, ticks:{color:axisColor} }, y:{ grid:{color:gridColor}, ticks:{color:axisColor} } },
+        plugins:{ legend:{labels:{color:'#ddd'}}, tooltip:{mode:'index', intersect:false} },
+        interaction:{mode:'index', intersect:false},
+        maintainAspectRatio:false
+      }
+    });
+
+    function ymd(d){ return d.toISOString().slice(0,10); }
+
+    async function fetchCurrent(){
+      const res = await fetch('/api/current');   // {date,time,men,women,total,ts,source,...}
+      const cur = await res.json();
+      kMen.textContent   = cur.men   ?? 0;
+      kWomen.textContent = cur.women ?? 0;
+      kTotal.textContent = cur.total ?? ((cur.men||0)+(cur.women||0));
+      srcEl.textContent  = cur.source || '—';
+      jsonEl.textContent = JSON.stringify(cur, null, 2);
+      return cur;
     }
 
-    // ========== fetch & render ==========
-    async function load() {
-      // current
-      const curRes = await fetch('/api/current');
-      const cur = await curRes.json();
+    async function fetchTodayRange(){
+      const today = ymd(new Date());
+      const res = await fetch(`/api/range?from=${today}&to=${today}&limit=1000`);
+      const out = await res.json(); // {ok:true, rows:[...]}
+      return out.rows || [];
+    }
 
-      // today range
-      const today = new Date();
-      const y = today.getFullYear();
-      const m = String(today.getMonth()+1).padStart(2,'0');
-      const d = String(today.getDate()).padStart(2,'0');
-      const ymd = `${y}-${m}-${d}`;
-      const rangeRes = await fetch(`/api/range?from=${ymd}&to=${ymd}&limit=1000`);
-      const rangeJson = await rangeRes.json();
-      const rows = (rangeJson.rows || []).map(r => ({
-        time: r.time, men: r.men ?? null, women: r.women ?? null, total: r.total ?? null, ts: r.ts
-      }));
+    function bucket10min(rows){
+      // rows: [{ts, men, women, total}, ...] -> 10分刻みへ
+      const map = new Map();
+      rows.forEach(r=>{
+        if(!r.ts) return;
+        // "HH:MM" を10分単位に丸め
+        const t = r.ts.slice(11,16);
+        const [H,M] = t.split(':').map(Number);
+        const m10 = String(Math.floor(M/10)*10).padStart(2,'0');
+        const key = `${String(H).padStart(2,'0')}:${m10}`;
+        map.set(key, r);
+      });
+      // 19:00〜翌03:00まで並べる
+      const labels = [];
+      const men=[], women=[], total=[];
+      function push(h,m){ const label=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; labels.push(label);
+        const r = map.get(label);
+        men.push(r?.men ?? null); women.push(r?.women ?? null); total.push(r?.total ?? ((r?.men||0)+(r?.women||0) || null)); }
+      for(let h=19;h<24;h++){ for(let m=0;m<60;m+=10) push(h,m); }
+      for(let h=0;h<=3;h++){ for(let m=0;m<60;m+=10) push(h,m); }
 
-      // KPI
-      document.getElementById('kpiMen').textContent    = fmt(cur.men);
-      document.getElementById('kpiWomen').textContent  = fmt(cur.women);
-      document.getElementById('kpiTotal').textContent  = fmt(cur.total);
-      document.getElementById('kpiCount').textContent  = rows.length;
+      // 欠損数・遅延表示
+      const missing = total.filter(v=>v==null).length;
+      missingEl.textContent = `${missing}枠`;
+      // 最新10分枠の遅延（分）
+      const latest = rows.length? new Date(rows[rows.length-1].ts) : null;
+      const lagMin = latest? Math.max(0, Math.round((Date.now() - latest.getTime())/60000)) : '—';
+      latencyEl.textContent = (latest? `${lagMin}分` : '—');
 
-      // 最新JSON表示
-      const pretty = JSON.stringify(cur, null, 2);
-      document.getElementById('jsonBox').textContent = pretty;
+      return {labels, men, women, total, hits: rows.length};
+    }
 
-      // 遅延
-      const delay = minutesDiffFromNow(cur.ts);
-      document.getElementById('delayMin').textContent = (delay == null) ? '--分' : `${delay}分`;
-
-      // 欠損（表示ラベルに対して欠けている時間の数）
-      const labels = buildBuckets(rows);
-      const missing = countMissing10m(labels, rows);
-      document.getElementById('missingSlots').textContent = `${missing}枠`;
-
-      // グラフ
-      renderChart(
-        labels,
-        aggregateSeries(labels, rows, 'men'),
-        aggregateSeries(labels, rows, 'women'),
-        aggregateSeries(labels, rows, 'total')
-      );
-
-      // 補足表示
-      document.getElementById('updatedAt').textContent = (cur.time ? `${cur.time} 更新` : '— 更新');
-      document.getElementById('windowInfo').textContent = 'データは10分刻みで自動更新';
-      document.getElementById('sourceLink').innerHTML = `<a href="${cur.source || '#'}" target="_blank" class="hover:opacity-80">${cur.source || ''}</a>`;
+    async function refresh(){
+      try{
+        await fetchCurrent();
+        const rows = await fetchTodayRange();
+        const b = bucket10min(rows);
+        chart.data.labels = b.labels;
+        chart.data.datasets[0].data = b.total;
+        chart.data.datasets[1].data = b.men;
+        chart.data.datasets[2].data = b.women;
+        chart.update('none');
+        kHits.textContent = b.hits;
+        updateClock();
+      }catch(e){
+        console.error(e);
+      }
     }
 
     // 初回 & 自動更新
-    load();
-    document.getElementById('refreshBtn').addEventListener('click', load);
-    // 60秒ごとに自動更新（好みで変更可）
-    setInterval(load, 60 * 1000);
+    refresh();
+    setInterval(refresh, 60_000);
+    document.getElementById('btn-reload').addEventListener('click', refresh);
   </script>
 </body>
 </html>
