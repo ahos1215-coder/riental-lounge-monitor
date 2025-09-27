@@ -168,6 +168,20 @@
     </div>
   </section>
 
+  <!-- 全国店舗一覧 -->
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-24">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-lg font-bold">全国店舗一覧</h2>
+      <div class="flex items-center gap-2">
+        <input id="store-q" class="chip rounded bg-transparent px-3 py-1.5 text-sm" type="search" placeholder="店舗を検索">
+        <button id="sort-crowd" class="chip rounded px-2 py-1.5 text-sm">混雑順</button>
+        <button id="sort-women" class="chip rounded px-2 py-1.5 text-sm">女性比順</button>
+      </div>
+    </div>
+
+    <div id="store-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+  </section>
+
   <!-- Source -->
   <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-16">
     <div class="card rounded-2xl p-4">
@@ -207,7 +221,7 @@
     const GRID    = css.getPropertyValue('--grid').trim();
     const AXIS    = css.getPropertyValue('--axis').trim();
 
-    // ===== 実績チャート（ワイド）
+    // ===== 実績チャート
     const ctx = document.getElementById('chart').getContext('2d');
     const chart = new Chart(ctx, {
       data: {
@@ -271,7 +285,7 @@
         plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false }
     });
 
-    // ===== API
+    // ===== API utilities
     function ymd(d){ return d.toISOString().slice(0,10); }
     function addDays(d,days){ const x=new Date(d); x.setDate(x.getDate()+days); return x; }
 
@@ -453,6 +467,85 @@
     refresh();
     setInterval(refresh, 60_000);
     document.getElementById('btn-reload').addEventListener('click', refresh);
+
+    // ====== 全国店舗一覧（モック） ======
+    const STORES = [
+      {name:"長崎",  area:"Kyushu", img:"https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=1400&auto=format&fit=crop", men:12, women:8,  official:null},
+      {name:"渋谷",  area:"Tokyo",  img:"https://images.unsplash.com/photo-1511765224389-37f0e77cf0eb?q=80&w=1400&auto=format&fit=crop", men:20, women:25, official:"https://oriental-lounge.com/stores/01"},
+      {name:"札幌",  area:"Hokkaido", img:"https://images.unsplash.com/photo-1501785888041-af3ef285b470?q=80&w=1400&auto=format&fit=crop", men:5,  women:9,  official:null},
+      {name:"仙台",  area:"Tohoku", img:"https://images.unsplash.com/photo-1552083375-1447ce886485?q=80&w=1400&auto=format&fit=crop", men:18, women:14, official:null},
+      {name:"横浜",  area:"Kanagawa", img:"https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?q=80&w=1400&auto=format&fit=crop", men:10, women:6,  official:null},
+      {name:"新宿",  area:"Tokyo", img:"https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=1400&auto=format&fit=crop", men:14, women:20, official:"https://oriental-lounge.com/stores/02"},
+      {name:"上野",  area:"Tokyo", img:"https://images.unsplash.com/photo-1501785888041-af3ef285b472?q=80&w=1400&auto=format&fit=crop", men:9,  women:7,  official:null},
+      {name:"大宮",  area:"Saitama", img:"https://images.unsplash.com/photo-1498050108023-c5249f4df085?q=80&w=1400&auto=format&fit=crop", men:8,  women:11, official:null},
+      {name:"宇都宮",area:"Tochigi", img:"https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?q=80&w=1400&auto=format&fit=crop", men:7,  women:6,  official:null},
+    ];
+
+    const gridEl   = document.getElementById('store-grid');
+    const qEl      = document.getElementById('store-q');
+    const sortCrowdBtn  = document.getElementById('sort-crowd');
+    const sortWomenBtn  = document.getElementById('sort-women');
+
+    let filtered = [...STORES];
+
+    function ratio(m,w){ return m>0 ? (w/m) : 0; }
+
+    function storeCardHTML(s){
+      const total = (s.men||0)+(s.women||0);
+      const r = ratio(s.men||0, s.women||0);
+      const rText = r>0 ? (r.toFixed(2)+'×') : '—';
+      const badge = `<div class="absolute right-3 top-3 text-[11px] px-2 py-0.5 rounded-full bg-black/50 border border-white/10">比 ${rText}</div>`;
+      const detail = s.official
+        ? `<a href="${s.official}" target="_blank" class="chip rounded px-2 py-1 text-xs hover:bg-zinc-800">公式▶</a>`
+        : `<button class="chip rounded px-2 py-1 text-xs opacity-50 cursor-not-allowed">公式</button>`;
+      return `
+      <div class="card rounded-2xl overflow-hidden lift">
+        <div class="relative h-40 bg-zinc-900">
+          <img class="w-full h-full object-cover opacity-90" src="${s.img}" alt="">
+          ${badge}
+        </div>
+        <div class="px-4 pt-3 pb-4">
+          <div class="flex items-baseline justify-between">
+            <div>
+              <div class="text-base font-semibold">${s.name}</div>
+              <div class="text-[11px] text-zinc-400">${s.area}</div>
+            </div>
+          </div>
+          <div class="mt-3 flex items-center gap-2">
+            <div class="pill rounded-full px-2.5 py-1 bg-[color:var(--men-bg)]" style="color:var(--men)">
+              <span class="mr-1">♂</span>${s.men ?? 0}
+            </div>
+            <div class="pill rounded-full px-2.5 py-1 bg-[color:var(--women-bg)]" style="color:var(--women)">
+              <span class="mr-1">♀</span>${s.women ?? 0}
+            </div>
+          </div>
+          <div class="mt-3 flex items-center justify-between text-sm">
+            <div class="text-zinc-300">合計 <span class="font-bold">${total}</span></div>
+            ${detail}
+          </div>
+        </div>
+      </div>`;
+    }
+
+    function renderStores(list){
+      gridEl.innerHTML = list.map(storeCardHTML).join('');
+    }
+
+    qEl.addEventListener('input', ()=>{
+      const q = qEl.value.trim().toLowerCase();
+      filtered = STORES.filter(s => (s.name+s.area).toLowerCase().includes(q));
+      renderStores(filtered);
+    });
+    sortCrowdBtn.addEventListener('click', ()=>{
+      filtered.sort((a,b)=> ((b.men+b.women) - (a.men+a.women)));
+      renderStores(filtered);
+    });
+    sortWomenBtn.addEventListener('click', ()=>{
+      filtered.sort((a,b)=> ratio(b.men,b.women) - ratio(a.men,a.women));
+      renderStores(filtered);
+    });
+
+    renderStores(filtered);
   </script>
 </body>
 </html>
