@@ -16,11 +16,11 @@ DATA_FILE = os.path.join(DATA_DIR, "data.json")
 LOG_FILE = os.path.join(DATA_DIR, "log.jsonl")
 
 # ---------- Config ----------
-TARGET_URL   = os.getenv("TARGET_URL", "https://oriental-lounge.com/stores/38")  # 長崎店ページ
-STORE_NAME   = os.getenv("STORE_NAME", "長崎")
+TARGET_URL = os.getenv("TARGET_URL", "https://oriental-lounge.com/stores/38")  # 長崎店ページ
+STORE_NAME = os.getenv("STORE_NAME", "長崎")
 GS_WEBHOOK_URL = os.getenv("GS_WEBHOOK_URL", "")  # Google Apps Script の /exec URL
 WINDOW_START = int(os.getenv("WINDOW_START", "19"))  # 収集開始時刻(時) JST
-WINDOW_END   = int(os.getenv("WINDOW_END", "3"))   # 収集終了時刻(翌日, 時) JST
+WINDOW_END = int(os.getenv("WINDOW_END", "3"))       # 収集終了時刻(翌日, 時) JST
 
 # ========== Utils ==========
 def ensure_data_dir():
@@ -58,7 +58,7 @@ def save_to_google_sheets(record: dict):
         return
     payload = record
     last_err = None
-    for i in range(3):
+    for _ in range(3):
         try:
             res = requests.post(GS_WEBHOOK_URL, json=payload, timeout=10)
             print("Posted to Google Sheets:", res.status_code)
@@ -116,19 +116,22 @@ def scrape_oriental_counts() -> tuple[int | None, int | None]:
                 '[data-role="women"]', '[data-gender="female"]'
             ]
             def to_int(node):
-                if not node: return None
+                if not node:
+                    return None
                 m = re.search(r"\d+", node.get_text(strip=True).replace(",", ""))
                 return int(m.group()) if m else None
             if men is None:
                 for sel in candidates_m:
                     node = soup.select_one(sel)
                     men = to_int(node)
-                    if men is not None: break
+                    if men is not None:
+                        break
             if women is None:
                 for sel in candidates_w:
                     node = soup.select_one(sel)
                     women = to_int(node)
-                    if women is not None: break
+                    if women is not None:
+                        break
 
         return men, women
     except Exception as e:
@@ -176,7 +179,8 @@ def do_collect(men: int | None = None, women: int | None = None, source: str | N
 # ========== Time window ==========
 def is_within_window(ts: datetime | None = None) -> bool:
     """
-    収集ウィンドウ: 19:00〜翌03:00 （03:00を含む）
+    収集ウィンドウ: WINDOW_START:00 〜 翌 WINDOW_END:00 （終端を含む）
+    例) 19→3 の場合は 19:00〜翌03:00 を対象（03:00 ちょうど含む）
     """
     ts = ts or now_jst()
     hhmm = ts.hour * 60 + ts.minute
@@ -233,7 +237,11 @@ def api_range():
 def collect_task():
     men = request.args.get("men", type=int)
     women = request.args.get("women", type=int)
-    rec = do_collect(men=men, women=women, source="manual" if men is not None and women is not None else None)
+    rec = do_collect(
+        men=men,
+        women=women,
+        source="manual" if men is not None and women is not None else None
+    )
     return jsonify({"ok": True, "record": rec})
 
 @app.route("/tasks/tick")
