@@ -11,23 +11,37 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    :root {color-scheme: dark}
-    html,body{background:#0b0b0b; font-family:'Inter','Noto Sans JP',system-ui,-apple-system,Segoe UI,Roboto,'ヒラギノ角ゴ ProN','メイリオ',Arial,sans-serif}
+    :root{
+      color-scheme: dark;
+      /* ▼ 統一カラー（ここを変えるだけで全体に反映） */
+      --men:   #3b82f6;                 /* 男性：青 */
+      --men-bg:rgba(59,130,246,.18);
+      --women: #ec4899;                 /* 女性：ピンク */
+      --women-bg:rgba(236,72,153,.18);
+      --total: #93c5fd;                 /* 合計は淡い青系で */
+      --grid : rgba(200,200,200,.08);
+      --axis : #cfcfcf;
+    }
+    html,body{
+      background:#0b0b0b;
+      font-family:'Inter','Noto Sans JP',system-ui,-apple-system,Segoe UI,Roboto,'ヒラギノ角ゴ ProN','メイリオ',Arial,sans-serif
+    }
     .card{background:#111318;border:1px solid #1f2430;box-shadow:0 12px 30px rgba(0,0,0,.45)}
     .chip{border:1px solid rgba(255,255,255,.12)}
     .lift{transition:transform .18s ease, box-shadow .18s ease}
     .lift:hover{transform:translateY(-2px); box-shadow:0 14px 34px rgba(0,0,0,.55)}
+    .pill{backdrop-filter: blur(6px); border:1px solid rgba(255,255,255,.14)}
   </style>
 </head>
 <body class="text-zinc-100">
-
   <!-- Header -->
   <header class="sticky top-0 z-50 border-b border-zinc-800 bg-black/70 backdrop-blur">
-    <div class="mx-auto max-w-7xl px-4 py-3 flex items-center gap-3">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 py-3 flex items-center gap-3">
       <div class="h-8 w-8 rounded bg-zinc-900 grid place-items-center ring-1 ring-zinc-800">
         <div class="flex gap-0.5"><span class="block w-0.5 h-5 bg-zinc-300"></span><span class="block w-0.5 h-6 bg-zinc-300"></span><span class="block w-0.5 h-4 bg-zinc-300"></span></div>
       </div>
-      <div class="text-lg sm:text-xl font-extrabold tracking-wide">ORIENTAL LOUNGE（長崎）</div>
+      <div class="text-lg sm:text-xl font-extrabold tracking-wide">ORIENTAL LOUNGE</div>
+      <div class="ml-2 text-zinc-400 text-sm">(長崎)</div>
       <div class="ml-auto flex items-center gap-2 text-sm">
         <div id="clock" class="rounded chip px-2 py-1 text-zinc-300">--:-- 更新</div>
         <button id="btn-reload" class="rounded chip px-2 py-1 hover:bg-zinc-800">再読込</button>
@@ -35,103 +49,218 @@
     </div>
   </header>
 
-  <!-- Hero Section -->
-  <section class="mx-auto max-w-7xl px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <div class="col-span-2 card rounded-2xl overflow-hidden relative">
-      <img src="https://picsum.photos/id/1015/1200/400" class="w-full h-56 object-cover opacity-90" />
-      <div class="absolute bottom-3 left-4 text-white">
-        <div class="text-lg font-bold">長崎</div>
-        <div class="text-xs text-zinc-300">現在の来客者数</div>
+  <!-- KPI Row -->
+  <section class="border-b border-zinc-800/80 bg-gradient-to-b from-black to-zinc-950/60">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 py-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="card rounded-2xl p-4 lift">
+        <div class="text-xs text-zinc-400">現在 男</div>
+        <div class="mt-1 text-2xl font-extrabold" style="color:var(--men)" id="k-men">0</div>
       </div>
-      <div class="absolute bottom-3 right-4 flex gap-3">
-        <div class="flex items-center gap-1 text-sm bg-black/50 px-3 py-1 rounded-full"><span>♂</span><span id="hero-men">0</span></div>
-        <div class="flex items-center gap-1 text-sm bg-black/50 px-3 py-1 rounded-full"><span>♀</span><span id="hero-women">0</span></div>
+      <div class="card rounded-2xl p-4 lift">
+        <div class="text-xs text-zinc-400">現在 女</div>
+        <div class="mt-1 text-2xl font-extrabold" style="color:var(--women)" id="k-women">0</div>
+      </div>
+      <div class="card rounded-2xl p-4 lift">
+        <div class="text-xs text-zinc-400">現在 合計</div>
+        <div class="mt-1 text-2xl font-extrabold" style="color:var(--total)" id="k-total">0</div>
+      </div>
+      <div class="card rounded-2xl p-4 lift">
+        <div class="text-xs text-zinc-400">本日 取得件数</div>
+        <div id="k-hits" class="mt-1 text-2xl font-extrabold">0</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Hero + Highlight -->
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="card rounded-2xl overflow-hidden lg:col-span-2 relative">
+      <!-- ▼ ヒーロー画像（必要に応じてURL差し替え） -->
+      <img class="w-full h-[240px] object-cover opacity-[.92]" src="https://images.unsplash.com/photo-1557264337-e8a93017fe92?q=80&w=1600&auto=format&fit=crop" alt="">
+      <div class="absolute left-4 bottom-5">
+        <div class="text-lg font-bold drop-shadow">長崎</div>
+        <div class="text-xs text-zinc-300/90">現在の来客者数</div>
+      </div>
+      <!-- 男/女ピル -->
+      <div class="absolute right-4 bottom-4 flex gap-2">
+        <div class="pill rounded-full px-3 py-1.5 bg-[color:var(--men-bg)]" style="color:var(--men)">
+          <span class="mr-1">♂</span><span id="pill-men">0</span>
+        </div>
+        <div class="pill rounded-full px-3 py-1.5 bg-[color:var(--women-bg)]" style="color:var(--women)">
+          <span class="mr-1">♀</span><span id="pill-women">0</span>
+        </div>
       </div>
     </div>
     <div class="card rounded-2xl p-4">
-      <h3 class="text-sm text-zinc-300">ハイライト</h3>
-      <div class="mt-2 text-xs text-zinc-400">女性/男性比</div>
-      <div class="w-full bg-zinc-800 h-2 rounded-full mt-1">
-        <div id="ratio-bar" class="h-2 bg-cyan-400 rounded-full" style="width:50%"></div>
+      <div class="text-sm text-zinc-300 mb-2">ハイライト</div>
+      <div class="rounded bg-black/30 border border-zinc-800 p-3 mb-2">
+        <div class="text-xs text-zinc-400">女性/男性比</div>
+        <div class="mt-1 text-sm"><span id="ratio">—</span></div>
       </div>
-      <div id="ratio-text" class="mt-1 text-sm">-</div>
-      <div class="mt-4 text-xs text-zinc-400">今日のピーク（予想）</div>
-      <div class="mt-1 text-xl font-bold">21:00</div>
+      <div class="rounded bg-black/30 border border-zinc-800 p-3">
+        <div class="text-xs text-zinc-400">今日のピーク（予想）</div>
+        <div class="mt-1 text-xl font-bold">21:00</div>
+      </div>
     </div>
   </section>
 
-  <!-- KPI Row -->
-  <section class="mx-auto max-w-7xl px-4 grid grid-cols-2 md:grid-cols-4 gap-3">
-    <div class="card rounded-2xl p-4 lift"><div class="text-xs text-zinc-400">現在 男</div><div id="k-men" class="mt-1 text-2xl font-extrabold">0</div></div>
-    <div class="card rounded-2xl p-4 lift"><div class="text-xs text-zinc-400">現在 女</div><div id="k-women" class="mt-1 text-2xl font-extrabold">0</div></div>
-    <div class="card rounded-2xl p-4 lift"><div class="text-xs text-zinc-400">現在 合計</div><div id="k-total" class="mt-1 text-2xl font-extrabold">0</div></div>
-    <div class="card rounded-2xl p-4 lift"><div class="text-xs text-zinc-400">本日 取得件数</div><div id="k-hits" class="mt-1 text-2xl font-extrabold">0</div></div>
-  </section>
-
-  <!-- Graphs -->
-  <section class="mx-auto max-w-7xl px-4 py-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <!-- Charts + JSON -->
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
     <div class="card rounded-2xl p-4 lift">
-      <h3 class="text-sm text-zinc-300 mb-2">本日の推移（10分刻み：合計 / 男性 / 女性）</h3>
-      <canvas id="chart" height="220"></canvas>
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm text-zinc-300">本日の推移（10分刻み：合計 / 男性 / 女性）</h3>
+        <div class="text-xs text-zinc-400">データは10分刻みで自動更新</div>
+      </div>
+      <div class="h-[260px]"><canvas id="chart"></canvas></div>
     </div>
     <div class="card rounded-2xl p-4 lift">
-      <h3 class="text-sm text-zinc-300 mb-2">本日の予想（モック）</h3>
-      <canvas id="forecast" height="220"></canvas>
+      <h3 class="text-sm text-zinc-300 mb-2">最新のJSON</h3>
+      <pre id="json" class="text-xs bg-black/30 border border-zinc-800 rounded p-3 overflow-auto h-[260px] whitespace-pre-wrap">—</pre>
+      <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
+        <div class="rounded bg-black/30 border border-zinc-800 p-3">
+          <div class="text-xs text-zinc-400">遅延</div>
+          <div id="latency">—</div>
+        </div>
+        <div class="rounded bg-black/30 border border-zinc-800 p-3">
+          <div class="text-xs text-zinc-400">欠損枠（10分刻み）</div>
+          <div id="missing">—</div>
+        </div>
+      </div>
+      <div class="mt-3 text-xs text-zinc-400">テスト収集: <code>/tasks/collect?men=0&women=0</code></div>
     </div>
   </section>
 
-  <!-- 全国店舗一覧（モック） -->
-  <section class="mx-auto max-w-7xl px-4 pb-16">
-    <h3 class="text-sm text-zinc-300 mb-3">全国店舗一覧（モック）</h3>
-    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-      <div class="card rounded-xl overflow-hidden relative bg-gradient-to-r from-indigo-500 to-purple-500 p-4">
-        <div class="text-sm font-bold">梅田</div>
-        <div class="text-xs text-zinc-300">Osaka</div>
-        <div class="mt-3 flex gap-3">
-          <span>♂ 18</span><span>♀ 20</span><span>合計 38</span>
-        </div>
-      </div>
-      <div class="card rounded-xl overflow-hidden relative bg-gradient-to-r from-cyan-500 to-blue-500 p-4">
-        <div class="text-sm font-bold">渋谷</div>
-        <div class="text-xs text-zinc-300">Tokyo</div>
-        <div class="mt-3 flex gap-3">
-          <span>♂ 21</span><span>♀ 24</span><span>合計 45</span>
-        </div>
-      </div>
-      <div class="card rounded-xl overflow-hidden relative bg-gradient-to-r from-pink-500 to-orange-500 p-4">
-        <div class="text-sm font-bold">名古屋</div>
-        <div class="text-xs text-zinc-300">Aichi</div>
-        <div class="mt-3 flex gap-3">
-          <span>♂ 12</span><span>♀ 14</span><span>合計 26</span>
-        </div>
-      </div>
+  <!-- Source -->
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-16">
+    <div class="card rounded-2xl p-4">
+      <div class="text-sm text-zinc-300">ソース情報</div>
+      <div id="source" class="text-xs text-zinc-400 mt-1">—</div>
     </div>
   </section>
 
   <script>
-    // 時計
+    // ===== 時計
     const clockEl = document.getElementById('clock');
+    const p2 = n => String(n).padStart(2,'0');
     function updateClock(){
       const d = new Date();
-      const p = n => String(n).padStart(2,'0');
-      clockEl.textContent = `${p(d.getHours())}:${p(d.getMinutes())} 更新`;
+      clockEl.textContent = `${p2(d.getHours())}:${p2(d.getMinutes())} 更新`;
     }
     updateClock(); setInterval(updateClock, 15000);
 
-    // チャート
-    const ctx = document.getElementById('chart').getContext('2d');
-    const chart = new Chart(ctx,{type:'line',data:{labels:[],datasets:[
-      {label:'合計',data:[],borderColor:'#60a5fa',fill:true,backgroundColor:'rgba(96,165,250,.25)'},
-      {label:'男性',data:[],borderColor:'#38bdf8',fill:false},
-      {label:'女性',data:[],borderColor:'#f59e0b',fill:false}
-    ]},options:{scales:{x:{ticks:{color:'#aaa'}},y:{ticks:{color:'#aaa'}}}}});
+    // ===== 参照
+    const kMen = document.getElementById('k-men');
+    const kWomen = document.getElementById('k-women');
+    const kTotal = document.getElementById('k-total');
+    const kHits = document.getElementById('k-hits');
+    const pillMen = document.getElementById('pill-men');
+    const pillWomen = document.getElementById('pill-women');
+    const ratioEl = document.getElementById('ratio');
+    const srcEl = document.getElementById('source');
+    const jsonEl = document.getElementById('json');
+    const latencyEl = document.getElementById('latency');
+    const missingEl = document.getElementById('missing');
 
-    // 予測グラフ（モック）
-    const ftx = document.getElementById('forecast').getContext('2d');
-    const forecast = new Chart(ftx,{type:'line',data:{labels:['18:00','19:00','20:00','21:00','22:00','23:00'],datasets:[
-      {label:'予測人数',data:[5,15,25,30,27,15],borderColor:'#a78bfa',borderDash:[5,5],fill:false},
-      {label:'実測',data:[4,12,20,28,25,14],borderColor:'#34d399',fill:false}
-    ]},options:{scales:{x:{ticks:{color:'#aaa'}},y:{ticks:{color:'#aaa'}}}}});
+    // ===== Chart
+    const ctx = document.getElementById('chart').getContext('2d');
+    const chart = new Chart(ctx, {
+      data: {
+        labels: [],
+        datasets: [
+          {type:'line', label:'合計',  data:[], borderColor:getComputedStyle(document.documentElement).getPropertyValue('--total').trim(), backgroundColor:'rgba(147,197,253,.22)', tension:.35, fill:true},
+          {type:'line', label:'男性',  data:[], borderColor:getComputedStyle(document.documentElement).getPropertyValue('--men').trim(),   backgroundColor:getComputedStyle(document.documentElement).getPropertyValue('--men-bg').trim(),   tension:.35, fill:false},
+          {type:'line', label:'女性',  data:[], borderColor:getComputedStyle(document.documentElement).getPropertyValue('--women').trim(), backgroundColor:getComputedStyle(document.documentElement).getPropertyValue('--women-bg').trim(), tension:.35, fill:false},
+        ]
+      },
+      options:{
+        scales:{
+          x:{ grid:{color:getComputedStyle(document.documentElement).getPropertyValue('--grid').trim()}, ticks:{color:getComputedStyle(document.documentElement).getPropertyValue('--axis').trim()} },
+          y:{ grid:{color:getComputedStyle(document.documentElement).getPropertyValue('--grid').trim()}, ticks:{color:getComputedStyle(document.documentElement).getPropertyValue('--axis').trim()} }
+        },
+        plugins:{ legend:{labels:{color:'#ddd'}}, tooltip:{mode:'index', intersect:false} },
+        interaction:{mode:'index', intersect:false},
+        maintainAspectRatio:false
+      }
+    });
+
+    // ===== API
+    function ymd(d){ return d.toISOString().slice(0,10); }
+
+    async function fetchCurrent(){
+      const res = await fetch('/api/current');
+      const cur = await res.json();
+      const men   = cur.men   ?? 0;
+      const women = cur.women ?? 0;
+      const total = cur.total ?? (men + women);
+
+      kMen.textContent = men;
+      kWomen.textContent = women;
+      kTotal.textContent = total;
+      pillMen.textContent = men;
+      pillWomen.textContent = women;
+      ratioEl.textContent = (men>0) ? (women/men).toFixed(2)+'×' : '—';
+      srcEl.textContent = cur.source || '—';
+      jsonEl.textContent = JSON.stringify(cur, null, 2);
+      return cur;
+    }
+
+    async function fetchTodayRange(){
+      const today = ymd(new Date());
+      const res = await fetch(`/api/range?from=${today}&to=${today}&limit=1000`);
+      const out = await res.json();
+      return out.rows || [];
+    }
+
+    function bucket10min(rows){
+      const map = new Map();
+      rows.forEach(r=>{
+        if(!r.ts) return;
+        const t = r.ts.slice(11,16);                // "HH:MM"
+        const [H,M] = t.split(':').map(Number);
+        const m10 = String(Math.floor(M/10)*10).padStart(2,'0');
+        const key = `${String(H).padStart(2,'0')}:${m10}`;
+        map.set(key, r);
+      });
+      const labels = [], men=[], women=[], total=[];
+      function push(h,m){
+        const label=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+        labels.push(label);
+        const r = map.get(label);
+        men.push(r?.men ?? null);
+        women.push(r?.women ?? null);
+        total.push(r?.total ?? ((r?.men||0)+(r?.women||0) || null));
+      }
+      for(let h=19;h<24;h++){ for(let m=0;m<60;m+=10) push(h,m); }
+      for(let h=0;h<=3;h++){  for(let m=0;m<60;m+=10) push(h,m); }
+
+      const missing = total.filter(v=>v==null).length;
+      missingEl.textContent = `${missing}枠`;
+      const latest = rows.length? new Date(rows[rows.length-1].ts) : null;
+      const lagMin = latest? Math.max(0, Math.round((Date.now() - latest.getTime())/60000)) : '—';
+      latencyEl.textContent = (latest? `${lagMin}分` : '—');
+
+      return {labels, men, women, total, hits: rows.length};
+    }
+
+    async function refresh(){
+      try{
+        await fetchCurrent();
+        const rows = await fetchTodayRange();
+        const b = bucket10min(rows);
+        chart.data.labels = b.labels;
+        chart.data.datasets[0].data = b.total;
+        chart.data.datasets[1].data = b.men;
+        chart.data.datasets[2].data = b.women;
+        chart.update('none');
+        kHits.textContent = b.hits;
+        updateClock();
+      }catch(e){
+        console.error(e);
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 60_000);
+    document.getElementById('btn-reload').addEventListener('click', refresh);
   </script>
 </body>
 </html>
