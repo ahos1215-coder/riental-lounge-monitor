@@ -65,7 +65,7 @@ def save_to_google_sheets(record: dict):
             return
         except Exception as e:
             last_err = e
-            time.sleep(1.5)  # 少し待ってリトライ
+            time.sleep(1.5)
     print("Error posting to Google Sheets:", last_err)
 
 # ========== Scraper ==========
@@ -87,11 +87,11 @@ def scrape_oriental_counts() -> tuple[int | None, int | None]:
         # ページ全文テキストから拾う
         full_text = soup.get_text(" ", strip=True)
 
-        # 数字の後にラベル (例: "28 GENTLEMEN")
+        # 数字の後にラベル
         m_num_before = re.search(r"(\d+)\s*(?:GENTLEMEN|Men|MEN|男性)", full_text, re.IGNORECASE)
         w_num_before = re.search(r"(\d+)\s*(?:LADIES|Women|WOMEN|女性)", full_text, re.IGNORECASE)
 
-        # ラベルの後に数字 (例: "GENTLEMEN 28")
+        # ラベルの後に数字
         m_label_before = re.search(r"(?:GENTLEMEN|Men|MEN|男性)[^\d]{0,10}(\d+)", full_text, re.IGNORECASE)
         w_label_before = re.search(r"(?:LADIES|Women|WOMEN|女性)[^\d]{0,10}(\d+)", full_text, re.IGNORECASE)
 
@@ -139,7 +139,7 @@ def scrape_oriental_counts() -> tuple[int | None, int | None]:
 def do_collect(men: int | None = None, women: int | None = None, source: str | None = None) -> dict:
     """
     収集の中核。men/women が与えられなければスクレイピング。
-    /tasks/collect?men=..&women=.. で手動テスト値を保存可能（/tasks/tick は常にスクレイプ）。
+    /tasks/collect?men=..&women=.. で手動テスト値を保存可能。
     """
     if men is None or women is None:
         men_s, women_s = scrape_oriental_counts()
@@ -173,13 +173,16 @@ def do_collect(men: int | None = None, women: int | None = None, source: str | N
     print(f"[{record['ts']}] Scraped: M={men} W={women} T={total}")
     return record
 
-# ========== Time window (19:00〜翌03:00) ==========
+# ========== Time window ==========
 def is_within_window(ts: datetime | None = None) -> bool:
+    """
+    収集ウィンドウ: 19:00〜翌03:00 （03:00を含む）
+    """
     ts = ts or now_jst()
     hhmm = ts.hour * 60 + ts.minute
     start = WINDOW_START * 60
     end = WINDOW_END * 60
-    return (hhmm >= start) or (hhmm < end)
+    return (hhmm >= start) or (hhmm <= end)
 
 # ========== Routes ==========
 @app.route("/")
@@ -226,7 +229,6 @@ def api_range():
     rows = rows[-limit:]
     return jsonify({"ok": True, "rows": rows})
 
-# 手動: men/women 指定でテスト上書きもOK（指定なしはスクレイプ）
 @app.route("/tasks/collect")
 def collect_task():
     men = request.args.get("men", type=int)
@@ -234,15 +236,13 @@ def collect_task():
     rec = do_collect(men=men, women=women, source="manual" if men is not None and women is not None else None)
     return jsonify({"ok": True, "record": rec})
 
-# 外部cron向け: 10分置きに叩く。時間帯外はスキップ。
 @app.route("/tasks/tick")
 def tasks_tick():
     if not is_within_window():
         return jsonify({"ok": True, "skipped": True, "reason": "outside-window"})
-    rec = do_collect()  # 常にスクレイプ
+    rec = do_collect()
     return jsonify({"ok": True, "record": rec})
 
-# （任意）その日の初回だけ1行入れる種まき
 @app.route("/tasks/seed")
 def tasks_seed():
     today = now_jst().strftime("%Y-%m-%d")
