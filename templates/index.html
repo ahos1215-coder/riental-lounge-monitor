@@ -14,19 +14,23 @@
     :root{
       color-scheme: dark;
       /* ▼ 統一カラー（ここを変えるだけで全体に反映） */
-      --men:   #3b82f6;                 /* 男性：青 */
-      --men-bg:rgba(59,130,246,.18);
-      --women: #ec4899;                 /* 女性：ピンク */
-      --women-bg:rgba(236,72,153,.18);
-      --total: #93c5fd;                 /* 合計は淡い青系で */
-      --grid : rgba(200,200,200,.08);
-      --axis : #cfcfcf;
+      --men:      #3b82f6;                 /* 男性：青 */
+      --men-bg:   rgba(59,130,246,.18);
+      --women:    #ec4899;                 /* 女性：ピンク */
+      --women-bg: rgba(236,72,153,.18);
+      --total:    #93c5fd;                 /* 合計：淡い青 */
+      --grid:     rgba(200,200,200,.08);
+      --axis:     #cfcfcf;
+      --purple:   #a855f7;                 /* 予測ライン：紫 */
+      --purple-f: rgba(168,85,247,.10);    /* 予測帯：半透明 */
+      --card-bg:  #111318;
+      --card-br:  #1f2430;
     }
     html,body{
       background:#0b0b0b;
       font-family:'Inter','Noto Sans JP',system-ui,-apple-system,Segoe UI,Roboto,'ヒラギノ角ゴ ProN','メイリオ',Arial,sans-serif
     }
-    .card{background:#111318;border:1px solid #1f2430;box-shadow:0 12px 30px rgba(0,0,0,.45)}
+    .card{background:var(--card-bg);border:1px solid var(--card-br);box-shadow:0 12px 30px rgba(0,0,0,.45)}
     .chip{border:1px solid rgba(255,255,255,.12)}
     .lift{transition:transform .18s ease, box-shadow .18s ease}
     .lift:hover{transform:translateY(-2px); box-shadow:0 14px 34px rgba(0,0,0,.55)}
@@ -129,6 +133,31 @@
     </div>
   </section>
 
+  <!-- Forecast (予測＋実測) -->
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-6">
+    <div class="card rounded-2xl p-4 lift">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm text-zinc-300">本日の予想（帯域＋実測）</h3>
+        <div class="text-xs text-zinc-400">モック計算</div>
+      </div>
+      <div class="h-[260px]"><canvas id="forecastChart"></canvas></div>
+      <div class="mt-3 grid grid-cols-3 gap-2 text-sm">
+        <div>
+          <div class="text-xs text-zinc-400">次ピーク予測</div>
+          <div class="font-bold">21:00</div>
+        </div>
+        <div>
+          <div class="text-xs text-zinc-400">RMSE（暫定）</div>
+          <div>—</div>
+        </div>
+        <div>
+          <div class="text-xs text-zinc-400">ソース</div>
+          <div>—</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- Source -->
   <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-16">
     <div class="card rounded-2xl p-4">
@@ -160,24 +189,72 @@
     const latencyEl = document.getElementById('latency');
     const missingEl = document.getElementById('missing');
 
-    // ===== Chart
+    // ===== 実績チャート
+    const css = getComputedStyle(document.documentElement);
     const ctx = document.getElementById('chart').getContext('2d');
     const chart = new Chart(ctx, {
       data: {
         labels: [],
         datasets: [
-          {type:'line', label:'合計',  data:[], borderColor:getComputedStyle(document.documentElement).getPropertyValue('--total').trim(), backgroundColor:'rgba(147,197,253,.22)', tension:.35, fill:true},
-          {type:'line', label:'男性',  data:[], borderColor:getComputedStyle(document.documentElement).getPropertyValue('--men').trim(),   backgroundColor:getComputedStyle(document.documentElement).getPropertyValue('--men-bg').trim(),   tension:.35, fill:false},
-          {type:'line', label:'女性',  data:[], borderColor:getComputedStyle(document.documentElement).getPropertyValue('--women').trim(), backgroundColor:getComputedStyle(document.documentElement).getPropertyValue('--women-bg').trim(), tension:.35, fill:false},
+          {type:'line', label:'合計',  data:[], borderColor:css.getPropertyValue('--total').trim(),  backgroundColor:'rgba(147,197,253,.22)', tension:.35, fill:true},
+          {type:'line', label:'男性',  data:[], borderColor:css.getPropertyValue('--men').trim(),    backgroundColor:css.getPropertyValue('--men-bg').trim(),   tension:.35, fill:false},
+          {type:'line', label:'女性',  data:[], borderColor:css.getPropertyValue('--women').trim(),  backgroundColor:css.getPropertyValue('--women-bg').trim(), tension:.35, fill:false},
         ]
       },
       options:{
         scales:{
-          x:{ grid:{color:getComputedStyle(document.documentElement).getPropertyValue('--grid').trim()}, ticks:{color:getComputedStyle(document.documentElement).getPropertyValue('--axis').trim()} },
-          y:{ grid:{color:getComputedStyle(document.documentElement).getPropertyValue('--grid').trim()}, ticks:{color:getComputedStyle(document.documentElement).getPropertyValue('--axis').trim()} }
+          x:{ grid:{color:css.getPropertyValue('--grid').trim()}, ticks:{color:css.getPropertyValue('--axis').trim()} },
+          y:{ grid:{color:css.getPropertyValue('--grid').trim()}, ticks:{color:css.getPropertyValue('--axis').trim()} }
         },
         plugins:{ legend:{labels:{color:'#ddd'}}, tooltip:{mode:'index', intersect:false} },
         interaction:{mode:'index', intersect:false},
+        maintainAspectRatio:false
+      }
+    });
+
+    // ===== 予測チャート
+    const fctx = document.getElementById('forecastChart').getContext('2d');
+    const forecastChart = new Chart(fctx, {
+      type:'line',
+      data:{
+        labels:["18:00","19:00","20:00","21:00","22:00","23:00"],
+        datasets:[
+          {
+            label:"上限",
+            data:[8,20,30,38,32,18],
+            borderColor:"rgba(168,85,247,.30)",
+            backgroundColor:css.getPropertyValue('--purple-f').trim(),
+            fill:"+1", tension:.3
+          },
+          {
+            label:"下限",
+            data:[2,10,20,25,20,8],
+            borderColor:"rgba(168,85,247,.30)",
+            backgroundColor:css.getPropertyValue('--purple-f').trim(),
+            fill:"-1", tension:.3
+          },
+          {
+            label:"予想人数",
+            data:[5,15,25,32,26,12],
+            borderColor:css.getPropertyValue('--purple').trim(),
+            borderDash:[6,4],
+            fill:false, tension:.3
+          },
+          {
+            label:"実測（合計）",
+            data:[],  // 実測値を流し込む
+            borderColor:css.getPropertyValue('--total').trim(),
+            backgroundColor:'rgba(147,197,253,.25)',
+            fill:false, tension:.3
+          }
+        ]
+      },
+      options:{
+        scales:{
+          x:{grid:{color:css.getPropertyValue('--grid').trim()}, ticks:{color:css.getPropertyValue('--axis').trim()}},
+          y:{grid:{color:css.getPropertyValue('--grid').trim()}, ticks:{color:css.getPropertyValue('--axis').trim()}}
+        },
+        plugins:{legend:{labels:{color:'#ddd'}}},
         maintainAspectRatio:false
       }
     });
@@ -210,11 +287,12 @@
       return out.rows || [];
     }
 
+    // 10分バケット化（実績）
     function bucket10min(rows){
       const map = new Map();
       rows.forEach(r=>{
         if(!r.ts) return;
-        const t = r.ts.slice(11,16);                // "HH:MM"
+        const t = r.ts.slice(11,16); // "HH:MM"
         const [H,M] = t.split(':').map(Number);
         const m10 = String(Math.floor(M/10)*10).padStart(2,'0');
         const key = `${String(H).padStart(2,'0')}:${m10}`;
@@ -241,23 +319,50 @@
       return {labels, men, women, total, hits: rows.length};
     }
 
+    // 予測チャートへ実測を反映（簡易：直近 18〜23 時の :00 を拾って入れる。無ければ近い値）
+    function feedForecastWithActual(b){
+      const wantHours = ["18:00","19:00","20:00","21:00","22:00","23:00"];
+      // b.labels は 19:00〜03:00 の10分刻み。:00 を優先、無ければその時間帯の最新を拾う
+      const toMap = new Map();
+      b.labels.forEach((lab, i)=>{
+        const h = lab.slice(0,2) + ":00";
+        if(!toMap.has(h)) toMap.set(h, []);
+        toMap.get(h).push(b.total[i]);
+      });
+      const act = wantHours.map(h=>{
+        const arr = toMap.get(h) || [];
+        let v = null;
+        for(let i=arr.length-1;i>=0;i--){ if(arr[i]!=null){ v = arr[i]; break; } }
+        return v;
+      });
+      forecastChart.data.datasets[3].data = act;  // 実測（合計）を重ねる
+      forecastChart.update('none');
+    }
+
     async function refresh(){
       try{
         await fetchCurrent();
         const rows = await fetchTodayRange();
         const b = bucket10min(rows);
+
+        // 実績チャート
         chart.data.labels = b.labels;
         chart.data.datasets[0].data = b.total;
         chart.data.datasets[1].data = b.men;
         chart.data.datasets[2].data = b.women;
         chart.update('none');
         kHits.textContent = b.hits;
+
+        // 予測チャートに実測合計を重ねる
+        feedForecastWithActual(b);
+
         updateClock();
       }catch(e){
         console.error(e);
       }
     }
 
+    // 初回 & 自動更新
     refresh();
     setInterval(refresh, 60_000);
     document.getElementById('btn-reload').addEventListener('click', refresh);
