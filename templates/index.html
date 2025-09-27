@@ -74,7 +74,7 @@
     </div>
   </section>
 
-  <!-- Hero + Highlight -->
+  <!-- Hero -->
   <section class="mx-auto max-w-6xl px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
     <div class="card rounded-2xl overflow-hidden lg:col-span-2 relative">
       <img class="w-full h-[240px] object-cover opacity-[.92]" src="https://images.unsplash.com/photo-1557264337-e8a93017fe92?q=80&w=1600&auto=format&fit=crop" alt="">
@@ -104,11 +104,11 @@
     </div>
   </section>
 
-  <!-- 推移（ワイド版：最近24時間） -->
+  <!-- Chart -->
   <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-6">
     <div class="card rounded-2xl p-4 lift">
       <div class="flex items-center justify-between mb-2">
-        <h3 class="text-sm text-zinc-300">最近24時間の推移（10分刻み：合計 / 男性 / 女性）</h3>
+        <h3 class="text-sm text-zinc-300">19:00〜翌05:00の推移（10分刻み：合計 / 男性 / 女性）</h3>
         <div class="text-xs text-zinc-400">データは10分刻みで自動更新</div>
       </div>
       <div class="h-[340px]"><canvas id="chart"></canvas></div>
@@ -118,475 +118,65 @@
           <div id="latency">—</div>
         </div>
         <div class="rounded bg-black/30 border border-zinc-800 p-3">
-          <div class="text-xs text-zinc-400">欠損枠（10分刻み）</div>
+          <div class="text-xs text-zinc-400">欠損枠</div>
           <div id="missing">—</div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Forecast (予測＋実測) -->
-  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-6">
-    <div class="card rounded-2xl p-4 lift">
-      <div class="flex items-center justify-between mb-2">
-        <h3 class="text-sm text-zinc-300">本日の予想（帯域＋実測）</h3>
-        <div class="text-xs text-zinc-400">モック計算</div>
-      </div>
-      <div class="h-[260px]"><canvas id="forecastChart"></canvas></div>
-      <div class="mt-3 grid grid-cols-3 gap-2 text-sm">
-        <div><div class="text-xs text-zinc-400">次ピーク予測</div><div class="font-bold">21:00</div></div>
-        <div><div class="text-xs text-zinc-400">RMSE（暫定）</div><div>—</div></div>
-        <div><div class="text-xs text-zinc-400">ソース</div><div id="source-mini">—</div></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 分析グラフ：時間帯別 / 曜日別 -->
-  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-6">
-    <div class="flex items-center justify-between mb-3">
-      <h2 class="text-lg font-bold">分析グラフ</h2>
-      <div class="hidden lg:flex items-center gap-2 text-sm">
-        <button class="chip rounded px-2 py-1 opacity-60 cursor-not-allowed">週末補正</button>
-        <button class="chip rounded px-2 py-1 opacity-60 cursor-not-allowed">祝日補正</button>
-        <button class="chip rounded px-2 py-1 opacity-60 cursor-not-allowed">天候補正</button>
-        <select class="chip rounded px-2 py-1 bg-transparent opacity-60 cursor-not-allowed">
-          <option>—</option><option>雨</option><option>晴れ</option>
-        </select>
-        <button class="chip rounded px-2 py-1 opacity-60 cursor-not-allowed">実測優先</button>
-      </div>
-    </div>
-
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div class="card rounded-2xl p-4 lift">
-        <div class="text-sm text-zinc-300 mb-2"><span class="rounded bg-blue-900/60 px-1.5 py-0.5">時間帯別</span> 入店人数（男女＋合計）</div>
-        <div class="h-[260px]"><canvas id="hourChart"></canvas></div>
-      </div>
-      <div class="card rounded-2xl p-4 lift">
-        <div class="text-sm text-zinc-300 mb-2">曜日別 平均人数（男女＋合計）</div>
-        <div class="h-[260px]"><canvas id="wdayChart"></canvas></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- 全国店舗一覧（モック） -->
-  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-24">
-    <div class="flex items-center justify-between mb-3">
-      <h2 class="text-lg font-bold">全国店舗一覧</h2>
-      <div class="flex items-center gap-2">
-        <input id="store-q" class="chip rounded bg-transparent px-3 py-1.5 text-sm" type="search" placeholder="店舗を検索">
-        <button id="sort-crowd" class="chip rounded px-2 py-1.5 text-sm">混雑順</button>
-        <button id="sort-women" class="chip rounded px-2 py-1.5 text-sm">女性比順</button>
-      </div>
-    </div>
-
-    <div id="store-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
-  </section>
-
-  <!-- Source -->
-  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-16">
-    <div class="card rounded-2xl p-4">
-      <div class="text-sm text-zinc-300">ソース情報</div>
-      <div id="source" class="text-xs text-zinc-400 mt-1">—</div>
-    </div>
-  </section>
-
   <script>
-    // ===== パラメータ =====
-    const LOOKBACK_HOURS = 24; // ← 直近何時間を見るか（必要なら変更）
+    // パラメータ
+    const START_HOUR = 19;
+    const END_HOUR   = 5;
 
-    // ===== 時計
-    const clockEl = document.getElementById('clock');
-    const p2 = n => String(n).padStart(2,'0');
-    function updateClock(){ const d = new Date(); clockEl.textContent = `${p2(d.getHours())}:${p2(d.getMinutes())} 更新`; }
-    updateClock(); setInterval(updateClock, 15000);
+    // 時計
+    const clockEl=document.getElementById('clock');
+    const p2=n=>String(n).padStart(2,'0');
+    function updateClock(){const d=new Date();clockEl.textContent=`${p2(d.getHours())}:${p2(d.getMinutes())} 更新`;}
+    updateClock();setInterval(updateClock,15000);
 
-    // ===== 参照
-    const kMen = document.getElementById('k-men');
-    const kWomen = document.getElementById('k-women');
-    const kTotal = document.getElementById('k-total');
-    const kHits = document.getElementById('k-hits');
-    const pillMen = document.getElementById('pill-men');
-    const pillWomen = document.getElementById('pill-women');
-    const ratioEl = document.getElementById('ratio');
-    const srcEl = document.getElementById('source');
-    const srcMiniEl = document.getElementById('source-mini');
-    const latencyEl = document.getElementById('latency');
-    const missingEl = document.getElementById('missing');
+    // 参照
+    const kMen=document.getElementById('k-men');
+    const kWomen=document.getElementById('k-women');
+    const kTotal=document.getElementById('k-total');
+    const kHits=document.getElementById('k-hits');
+    const pillMen=document.getElementById('pill-men');
+    const pillWomen=document.getElementById('pill-women');
+    const ratioEl=document.getElementById('ratio');
+    const latencyEl=document.getElementById('latency');
+    const missingEl=document.getElementById('missing');
 
-    // ===== 色
-    const css = getComputedStyle(document.documentElement);
-    const C_MEN   = css.getPropertyValue('--men').trim();
-    const C_WOMEN = css.getPropertyValue('--women').trim();
-    const C_TOTAL = css.getPropertyValue('--total').trim();
-    const GRID    = css.getPropertyValue('--grid').trim();
-    const AXIS    = css.getPropertyValue('--axis').trim();
+    // 色
+    const css=getComputedStyle(document.documentElement);
+    const C_MEN=css.getPropertyValue('--men').trim();
+    const C_WOMEN=css.getPropertyValue('--women').trim();
+    const C_TOTAL=css.getPropertyValue('--total').trim();
+    const GRID=css.getPropertyValue('--grid').trim();
+    const AXIS=css.getPropertyValue('--axis').trim();
 
-    // ===== 軸ユーティリティ
-    function dynamicY(){ // 最大値×1.5（最低1）
-      return {
-        beginAtZero:true,
-        grid:{color:GRID},
-        ticks:{color:AXIS},
-        afterDataLimits(scale){
-          const mx = Number.isFinite(scale.max) ? scale.max : 0;
-          scale.max = mx > 0 ? Math.ceil(mx * 1.5) : 1;
-        }
-      };
-    }
-    function tidyX(){ // 横軸を見やすく間引き
-      return {
-        grid:{color:GRID},
-        ticks:{
-          color:AXIS,
-          autoSkip:true,
-          maxTicksLimit: 8,
-          autoSkipPadding: 8,
-          maxRotation:0,
-          minRotation:0,
-        }
-      };
-    }
+    function dynamicY(){return{beginAtZero:true,grid:{color:GRID},ticks:{color:AXIS},afterDataLimits(scale){const mx=Number.isFinite(scale.max)?scale.max:0;scale.max=mx>0?Math.ceil(mx*1.5):1;}};}
+    function tidyX(){return{grid:{color:GRID},ticks:{color:AXIS,autoSkip:true,maxTicksLimit:8,autoSkipPadding:8,maxRotation:0,minRotation:0}};}
 
-    // ===== 実績チャート
-    const ctx = document.getElementById('chart').getContext('2d');
-    const chart = new Chart(ctx, {
-      data: {
-        labels: [],
-        datasets: [
-          {type:'line', label:'合計',  data:[], borderColor:C_TOTAL, backgroundColor:'rgba(147,197,253,.22)', tension:.35, fill:true},
-          {type:'line', label:'男性',  data:[], borderColor:C_MEN,   backgroundColor:css.getPropertyValue('--men-bg').trim(),   tension:.35, fill:false},
-          {type:'line', label:'女性',  data:[], borderColor:C_WOMEN, backgroundColor:css.getPropertyValue('--women-bg').trim(), tension:.35, fill:false},
-        ]
-      },
-      options:{
-        scales:{ x:tidyX(), y:dynamicY() },
-        plugins:{ legend:{labels:{color:'#ddd'}}, tooltip:{mode:'index', intersect:false} },
-        interaction:{mode:'index', intersect:false},
-        maintainAspectRatio:false
-      }
-    });
+    const ctx=document.getElementById('chart').getContext('2d');
+    const chart=new Chart(ctx,{data:{labels:[],datasets:[{type:'line',label:'合計',data:[],borderColor:C_TOTAL,backgroundColor:'rgba(147,197,253,.22)',tension:.35,fill:true},{type:'line',label:'男性',data:[],borderColor:C_MEN,backgroundColor:css.getPropertyValue('--men-bg').trim(),tension:.35,fill:false},{type:'line',label:'女性',data:[],borderColor:C_WOMEN,backgroundColor:css.getPropertyValue('--women-bg').trim(),tension:.35,fill:false}]},options:{scales:{x:tidyX(),y:dynamicY()},plugins:{legend:{labels:{color:'#ddd'}},tooltip:{mode:'index',intersect:false}},interaction:{mode:'index',intersect:false},maintainAspectRatio:false}});
 
-    // ===== 予測チャート
-    const fctx = document.getElementById('forecastChart').getContext('2d');
-    const forecastChart = new Chart(fctx, {
-      type:'line',
-      data:{
-        labels:["18:00","19:00","20:00","21:00","22:00","23:00"],
-        datasets:[
-          {label:"上限", data:[8,20,30,38,32,18], borderColor:"rgba(168,85,247,.30)", backgroundColor:css.getPropertyValue('--purple-f').trim(), fill:"+1", tension:.3},
-          {label:"下限", data:[2,10,20,25,20,8],  borderColor:"rgba(168,85,247,.30)", backgroundColor:css.getPropertyValue('--purple-f').trim(), fill:"-1", tension:.3},
-          {label:"予想人数", data:[5,15,25,32,26,12], borderColor:css.getPropertyValue('--purple').trim(), borderDash:[6,4], fill:false, tension:.3},
-          {label:"実測（合計）", data:[], borderColor:C_TOTAL, backgroundColor:'rgba(147,197,253,.25)', fill:false, tension:.3}
-        ]
-      },
-      options:{
-        scales:{ x:tidyX(), y:dynamicY() },
-        plugins:{legend:{labels:{color:'#ddd'}}},
-        maintainAspectRatio:false
-      }
-    });
+    function ymd(d){return d.toISOString().slice(0,10);}
+    function floor10m(d){const x=new Date(d);x.setSeconds(0,0);x.setMinutes(Math.floor(x.getMinutes()/10)*10);return x;}
+    function fmtKey(d){const x=floor10m(d);return x.toISOString().slice(0,16).replace('T',' ');}
+    function fmtLabel(d){const x=floor10m(d);return `${x.getMonth()+1}/${x.getDate()} ${p2(x.getHours())}:${p2(x.getMinutes())}`;}
 
-    // ===== 分析チャート
-    const hctx = document.getElementById('hourChart').getContext('2d');
-    const hourChart = new Chart(hctx, {
-      type:'bar',
-      data:{ labels:[], datasets:[
-        {label:'合計', data:[], backgroundColor:'rgba(147,197,253,.35)', borderColor:C_TOTAL, borderWidth:1},
-        {label:'男性', data:[], backgroundColor:'rgba(59,130,246,.35)',  borderColor:C_MEN,   borderWidth:1},
-        {label:'女性', data:[], backgroundColor:'rgba(236,72,153,.35)',  borderColor:C_WOMEN, borderWidth:1},
-      ]},
-      options:{ scales:{ x:tidyX(), y:dynamicY() },
-        plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false }
-    });
+    async function fetchCurrent(){const res=await fetch('/api/current');const cur=await res.json();const men=cur.men??0;const women=cur.women??0;const total=cur.total??(men+women);kMen.textContent=men;kWomen.textContent=women;kTotal.textContent=total;pillMen.textContent=men;pillWomen.textContent=women;ratioEl.textContent=(men>0)?(women/men).toFixed(2)+'×':'—';return cur;}
 
-    const wctx = document.getElementById('wdayChart').getContext('2d');
-    const wdayChart = new Chart(wctx, {
-      type:'bar',
-      data:{ labels:['月','火','水','木','金','土','日'], datasets:[
-        {label:'合計', data:Array(7).fill(0), backgroundColor:'rgba(147,197,253,.35)', borderColor:C_TOTAL, borderWidth:1},
-        {label:'男性', data:Array(7).fill(0), backgroundColor:'rgba(59,130,246,.35)',  borderColor:C_MEN,   borderWidth:1},
-        {label:'女性', data:Array(7).fill(0), backgroundColor:'rgba(236,72,153,.35)',  borderColor:C_WOMEN, borderWidth:1},
-      ]},
-      options:{ scales:{ x:tidyX(), y:dynamicY() },
-        plugins:{legend:{labels:{color:'#ddd'}}}, maintainAspectRatio:false }
-    });
+    async function fetchRange(from,to,limit=10000){const url=`/api/range?from=${from}&to=${to}&limit=${limit}`;const res=await fetch(url);const out=await res.json();return out.rows||[];}
 
-    // ===== API util
-    function ymd(d){ return d.toISOString().slice(0,10); }
-    function addDays(d,days){ const x=new Date(d); x.setDate(x.getDate()+days); return x; }
-    function floor10m(d){ const x=new Date(d); x.setSeconds(0,0); x.setMinutes(Math.floor(x.getMinutes()/10)*10); return x; }
-    function fmtKey(d){ // 内部キー（重複防止）
-      const x = floor10m(d);
-      return x.toISOString().slice(0,16).replace('T',' ');
-    }
-    function fmtLabel(d){ // 表示ラベル
-      const x = floor10m(d);
-      return `${x.getMonth()+1}/${x.getDate()} ${p2(x.getHours())}:${p2(x.getMinutes())}`;
-    }
+    function getWindow19to5(now=new Date()){const start=new Date(now);start.setHours(START_HOUR,0,0,0);const end=new Date(start);end.setDate(end.getDate()+1);end.setHours(END_HOUR,0,0,0);if(now<start){start.setDate(start.getDate()-1);end.setDate(end.getDate()-1);}return{start,end};}
 
-    async function fetchCurrent(){
-      const res = await fetch('/api/current');
-      const cur = await res.json();
-      const men   = cur.men   ?? 0;
-      const women = cur.women ?? 0;
-      const total = cur.total ?? (men + women);
-      kMen.textContent = men; kWomen.textContent = women; kTotal.textContent = total;
-      pillMen.textContent = men; pillWomen.textContent = women;
-      ratioEl.textContent = (men>0) ? (women/men).toFixed(2)+'×' : '—';
-      const src = cur.source || '—';
-      srcEl.textContent = src; srcMiniEl.textContent = src;
-      return cur;
-    }
+    function bucket10min(rows,startDate,endDate){if(!rows||rows.length===0){return{labels:[],men:[],women:[],total:[],hits:0};}const map=new Map();rows.forEach(r=>{if(!r.ts)return;map.set(fmtKey(new Date(r.ts)),r);});const labels=[],men=[],women=[],total=[];for(let t=new Date(startDate);t<=endDate;t.setMinutes(t.getMinutes()+10)){const key=fmtKey(t);const lab=fmtLabel(t);labels.push(lab);const r=map.get(key);men.push(r?.men??null);women.push(r?.women??null);total.push(r?.total??((r?.men||0)+(r?.women||0)||null));}missingEl.textContent=`${total.filter(v=>v==null).length}枠`;return{labels,men,women,total,hits:rows.length};}
 
-    async function fetchRange(from, to, limit=10000){
-      // /api/range は日付（YYYY-MM-DD）で範囲指定
-      const url = `/api/range?from=${from}&to=${to}&limit=${limit}`;
-      const res = await fetch(url);
-      const out = await res.json();
-      return out.rows || [];
-    }
+    async function refresh(){try{await fetchCurrent();const now=new Date();const {start,end}=getWindow19to5(now);const histRows=await fetchRange(ymd(start),ymd(end),50000);const b=bucket10min(histRows,start,end);chart.data.labels=b.labels;chart.data.datasets[0].data=b.total;chart.data.datasets[1].data=b.men;chart.data.datasets[2].data=b.women;chart.update('none');kHits.textContent=b.hits;updateClock();}catch(e){console.error(e);}}
 
-    // 10分バケット（任意の開始・終了）
-    function bucket10min(rows, startDate, endDate){
-      if(!rows || rows.length===0){
-        return {labels:[], men:[], women:[], total:[], hits:0};
-      }
-      // rows は複数日を含むので、内部キーは「日付+時刻(10分)」
-      const map = new Map();
-      rows.forEach(r=>{
-        if(!r.ts) return;
-        const k = fmtKey(new Date(r.ts));
-        map.set(k, r);
-      });
-
-      const start = floor10m(startDate);
-      const end   = floor10m(endDate);
-      const labels=[], men=[], women=[], total=[];
-      for(let t=new Date(start); t<=end; t.setMinutes(t.getMinutes()+10)){
-        const key = fmtKey(t);
-        const lab = fmtLabel(t);
-        labels.push(lab);
-        const r = map.get(key);
-        men.push(r?.men ?? null);
-        women.push(r?.women ?? null);
-        total.push(r?.total ?? ((r?.men||0)+(r?.women||0) || null));
-      }
-
-      const missing = total.filter(v=>v==null).length;
-      missingEl.textContent = `${missing}枠`;
-      const latest = rows.length? new Date(rows[rows.length-1].ts) : null;
-      const lagMin = latest? Math.max(0, Math.round((Date.now() - latest.getTime())/60000)) : '—';
-      latencyEl.textContent = (latest? `${lagMin}分` : '—');
-
-      return {labels, men, women, total, hits: rows.length};
-    }
-
-    // 実測を予測チャートへ重ねる（今日の毎時の最新値だけ反映）
-    function feedForecastWithActual(b){
-      // b.labels は M/D HH:mm 表記なので、今日の各「HH:00」を抽出
-      const today = new Date();
-      const todayStr = `${today.getMonth()+1}/${today.getDate()}`;
-      const latestByHour = new Map(); // "HH" -> value
-      b.labels.forEach((lab, i)=>{
-        if(!lab.startsWith(todayStr)) return;
-        const hh = lab.slice(todayStr.length+1, todayStr.length+3); // HH
-        const v  = b.total[i];
-        if(v==null) return;
-        latestByHour.set(hh, v); // 10分ずつ上書き→結果的に各時の最新値
-      });
-      const wantHours = ["18","19","20","21","22","23"];
-      const act = wantHours.map(h=> latestByHour.get(h) ?? null);
-      forecastChart.data.datasets[3].data = act;
-      forecastChart.update('none');
-    }
-
-    // —— 入店人数推定：前時点からの増加分
-    function diffIncrements(prev, cur){
-      return Math.max(0, (cur ?? 0) - (prev ?? 0));
-    }
-
-    // 時間帯別 入店人数（今日）
-    function buildHourlyEntries(rows){
-      const todayStr = ymd(new Date());
-      const todays = rows.filter(r => (r.ts||'').startsWith(todayStr));
-      const sorted = todays.sort((a,b)=> new Date(a.ts)-new Date(b.ts));
-
-      // 19:00〜翌03:00 固定（店の帯域を想定）
-      const hours = []; for(let h=19;h<24;h++) hours.push(h); for(let h=0;h<=3;h++) hours.push(h+24);
-      const idx = {}; hours.forEach((h,i)=> idx[h]=i);
-      const men = Array(hours.length).fill(0), women = Array(hours.length).fill(0), total = Array(hours.length).fill(0);
-
-      let p=null;
-      for(const r of sorted){
-        const d = new Date(r.ts);
-        let h = d.getHours(); if(h<=3) h+=24;
-        if(!(h in idx)) { p=r; continue; }
-        if(p){
-          men[idx[h]]   += diffIncrements(p.men, r.men);
-          women[idx[h]] += diffIncrements(p.women, r.women);
-          const pt = p.total ?? ((p.men||0)+(p.women||0));
-          const ct = r.total ?? ((r.men||0)+(r.women||0));
-          total[idx[h]] += diffIncrements(pt, ct);
-        }
-        p = r;
-      }
-      const labels = hours.map(h => (h>=24? h-24 : h)).map(h=>`${p2(h)}:00`);
-      return {labels, men, women, total};
-    }
-
-    // 曜日別 平均入店人数（直近35日）
-    function buildWdayAverageEntries(rows){
-      const byDate = new Map();
-      for(const r of rows){
-        if(!r.ts) continue;
-        const d = r.ts.slice(0,10);
-        if(!byDate.has(d)) byDate.set(d, []);
-        byDate.get(d).push(r);
-      }
-      const sumMen=Array(7).fill(0), sumWomen=Array(7).fill(0), sumTotal=Array(7).fill(0), cnt=Array(7).fill(0);
-      for(const [d, arr] of byDate.entries()){
-        const sorted = arr.sort((a,b)=> new Date(a.ts)-new Date(b.ts));
-        let pm=null, pw=null, pt=null, em=0, ew=0, et=0;
-        for(const r of sorted){
-          em += diffIncrements(pm, r.men);
-          ew += diffIncrements(pw, r.women);
-          const tprev = pt ?? ((pm||0)+(pw||0));
-          const tcur  = r.total ?? ((r.men||0)+(r.women||0));
-          et += diffIncrements(tprev, tcur);
-          pm = r.men; pw = r.women; pt = r.total;
-        }
-        const wd = new Date(d).getDay(); // 0:日
-        const i = (wd+6)%7; // 月0〜日6
-        sumMen[i]+=em; sumWomen[i]+=ew; sumTotal[i]+=et; cnt[i]+=1;
-      }
-      const avg = (s,i)=> cnt[i] ? Math.round(s[i]/cnt[i]) : 0;
-      return { men:sumMen.map(avg), women:sumWomen.map(avg), total:sumTotal.map(avg) };
-    }
-
-    async function refresh(){
-      try{
-        await fetchCurrent();
-
-        // 直近 LOOKBACK_HOURS を取得
-        const now = new Date();
-        const fromDT = new Date(now.getTime() - LOOKBACK_HOURS*3600*1000);
-        // /api/range は日単位なので、from/to は日付文字列
-        const histRows = await fetchRange(ymd(fromDT), ymd(now), 50000);
-
-        // 10分バケット（直近LOOKBACK_HOURS）
-        const b = bucket10min(histRows, fromDT, now);
-        chart.data.labels = b.labels;
-        chart.data.datasets[0].data = b.total;
-        chart.data.datasets[1].data = b.men;
-        chart.data.datasets[2].data = b.women;
-        chart.update('none');
-        kHits.textContent = b.hits;
-        feedForecastWithActual(b);
-
-        // 時間帯別（今日）
-        const h = buildHourlyEntries(histRows);
-        hourChart.data.labels = h.labels;
-        hourChart.data.datasets[0].data = h.total;
-        hourChart.data.datasets[1].data = h.men;
-        hourChart.data.datasets[2].data = h.women;
-        hourChart.update('none');
-
-        // 曜日別 平均（直近35日）
-        const to   = ymd(now);
-        const from = ymd(addDays(now, -35));
-        const rows35 = await fetchRange(from, to, 50000);
-        const w = buildWdayAverageEntries(rows35);
-        wdayChart.data.datasets[0].data = w.total;
-        wdayChart.data.datasets[1].data = w.men;
-        wdayChart.data.datasets[2].data = w.women;
-        wdayChart.update('none');
-
-        updateClock();
-      }catch(e){
-        console.error(e);
-      }
-    }
-
-    refresh();
-    setInterval(refresh, 60_000);
-    document.getElementById('btn-reload').addEventListener('click', refresh);
-
-    // ====== 全国店舗一覧（モック） ======
-    const STORES = [
-      {name:"長崎",  area:"Kyushu", img:"https://images.unsplash.com/photo-1542751371-adc38448a05e?q=80&w=1400&auto=format&fit=crop", men:12, women:8,  official:null},
-      {name:"渋谷",  area:"Tokyo",  img:"https://images.unsplash.com/photo-1511765224389-37f0e77cf0eb?q=80&w=1400&auto=format&fit=crop", men:20, women:25, official:"https://oriental-lounge.com/stores/01"},
-      {name:"札幌",  area:"Hokkaido", img:"https://images.unsplash.com/photo-1501785888041-af3ef285b470?q=80&w=1400&auto=format&fit=crop", men:5,  women:9,  official:null},
-      {name:"仙台",  area:"Tohoku", img:"https://images.unsplash.com/photo-1552083375-1447ce886485?q=80&w=1400&auto=format&fit=crop", men:18, women:14, official:null},
-      {name:"横浜",  area:"Kanagawa", img:"https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?q=80&w=1400&auto=format&fit=crop", men:10, women:6,  official:null},
-      {name:"新宿",  area:"Tokyo", img:"https://images.unsplash.com/photo-1492684223066-81342ee5ff30?q=80&w=1400&auto=format&fit=crop", men:14, women:20, official:"https://oriental-lounge.com/stores/02"},
-      {name:"上野",  area:"Tokyo", img:"https://images.unsplash.com/photo-1501785888041-af3ef285b472?q=80&w=1400&auto=format&fit=crop", men:9,  women:7,  official:null},
-      {name:"大宮",  area:"Saitama", img:"https://images.unsplash.com/photo-1498050108023-c5249f4df085?q=80&w=1400&auto=format&fit=crop", men:8,  women:11, official:null},
-      {name:"宇都宮",area:"Tochigi", img:"https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?q=80&w=1400&auto=format&fit=crop", men:7,  women:6,  official:null},
-    ];
-
-    const gridEl   = document.getElementById('store-grid');
-    const qEl      = document.getElementById('store-q');
-    const sortCrowdBtn  = document.getElementById('sort-crowd');
-    const sortWomenBtn  = document.getElementById('sort-women');
-
-    let filtered = [...STORES];
-
-    function ratio(m,w){ return m>0 ? (w/m) : 0; }
-
-    function storeCardHTML(s){
-      const total = (s.men||0)+(s.women||0);
-      const r = ratio(s.men||0, s.women||0);
-      const rText = r>0 ? (r.toFixed(2)+'×') : '—';
-      const badge = `<div class="absolute right-3 top-3 text-[11px] px-2 py-0.5 rounded-full bg-black/50 border border-white/10">比 ${rText}</div>`;
-      const detail = s.official
-        ? `<a href="${s.official}" target="_blank" class="chip rounded px-2 py-1 text-xs hover:bg-zinc-800">公式▶</a>`
-        : `<button class="chip rounded px-2 py-1 text-xs opacity-50 cursor-not-allowed">公式</button>`;
-      return `
-      <div class="card rounded-2xl overflow-hidden lift">
-        <div class="relative h-40 bg-zinc-900">
-          <img class="w-full h-full object-cover opacity-90" src="${s.img}" alt="">
-          ${badge}
-        </div>
-        <div class="px-4 pt-3 pb-4">
-          <div class="flex items-baseline justify-between">
-            <div>
-              <div class="text-base font-semibold">${s.name}</div>
-              <div class="text-[11px] text-zinc-400">${s.area}</div>
-            </div>
-          </div>
-          <div class="mt-3 flex items-center gap-2">
-            <div class="pill rounded-full px-2.5 py-1 bg-[color:var(--men-bg)]" style="color:var(--men)">
-              <span class="mr-1">♂</span>${s.men ?? 0}
-            </div>
-            <div class="pill rounded-full px-2.5 py-1 bg-[color:var(--women-bg)]" style="color:var(--women)">
-              <span class="mr-1">♀</span>${s.women ?? 0}
-            </div>
-          </div>
-          <div class="mt-3 flex items-center justify-between text-sm">
-            <div class="text-zinc-300">合計 <span class="font-bold">${total}</span></div>
-            ${detail}
-          </div>
-        </div>
-      </div>`;
-    }
-
-    function renderStores(list){ gridEl.innerHTML = list.map(storeCardHTML).join(''); }
-
-    qEl.addEventListener('input', ()=>{
-      const q = qEl.value.trim().toLowerCase();
-      filtered = STORES.filter(s => (s.name+s.area).toLowerCase().includes(q));
-      renderStores(filtered);
-    });
-    sortCrowdBtn.addEventListener('click', ()=>{
-      filtered.sort((a,b)=> ((b.men+b.women) - (a.men+a.women)));
-      renderStores(filtered);
-    });
-    sortWomenBtn.addEventListener('click', ()=>{
-      filtered.sort((a,b)=> ratio(b.men,b.women) - ratio(a.men,a.women));
-      renderStores(filtered);
-    });
-
-    renderStores(filtered);
+    refresh();setInterval(refresh,60000);document.getElementById('btn-reload').addEventListener('click',refresh);
   </script>
 </body>
 </html>
