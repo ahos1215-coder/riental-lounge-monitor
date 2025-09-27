@@ -11,12 +11,19 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    :root {color-scheme: dark}
-    html,body{background:#0b0b0b; font-family:'Inter','Noto Sans JP',system-ui,-apple-system,Segoe UI,Roboto,'ヒラギノ角ゴ ProN','メイリオ',Arial,sans-serif}
-    .card{background:#111318;border:1px solid #1f2430;box-shadow:0 12px 30px rgba(0,0,0,.45)}
+    :root { color-scheme: dark }
+    html,body{
+      background:#0b0b0b;
+      font-family:'Inter','Noto Sans JP',system-ui,-apple-system,Segoe UI,Roboto,'ヒラギノ角ゴ ProN','メイリオ',Arial,sans-serif
+    }
+    .card{background:#0e1016;border:1px solid #1f2430;box-shadow:0 12px 30px rgba(0,0,0,.45);overflow:hidden}
     .chip{border:1px solid rgba(255,255,255,.12)}
     .lift{transition:transform .18s ease, box-shadow .18s ease}
     .lift:hover{transform:translateY(-2px); box-shadow:0 14px 34px rgba(0,0,0,.55)}
+    .glass{background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.02));border:1px solid rgba(255,255,255,.08)}
+    /* グラフ用ラッパ（無限に縦伸びしないよう固定高） */
+    .chart-wrap{position:relative;height:300px}
+    .chart-canvas{width:100% !important;height:100% !important;display:block}
   </style>
 </head>
 <body class="text-zinc-100">
@@ -27,6 +34,7 @@
         <div class="flex gap-0.5"><span class="block w-0.5 h-5 bg-zinc-300"></span><span class="block w-0.5 h-6 bg-zinc-300"></span><span class="block w-0.5 h-4 bg-zinc-300"></span></div>
       </div>
       <div class="text-lg sm:text-xl font-extrabold tracking-wide">ORIENTAL LOUNGE</div>
+      <div id="subStore" class="ml-2 text-sm text-zinc-400"></div>
       <div class="ml-auto flex items-center gap-2 text-sm">
         <div id="clock" class="rounded chip px-2 py-1 text-zinc-300">--:-- 更新</div>
         <button id="btn-reload" class="rounded chip px-2 py-1 hover:bg-zinc-800">再読込</button>
@@ -34,24 +42,71 @@
     </div>
   </header>
 
-  <!-- KPI Row -->
+  <!-- KPI Row : 本物っぽいカード -->
   <section class="border-b border-zinc-800/80 bg-gradient-to-b from-black to-zinc-950/60">
     <div class="mx-auto max-w-6xl px-4 sm:px-6 py-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-      <div class="card rounded-2xl p-4 lift">
-        <div class="text-xs text-zinc-400">現在 男</div>
-        <div id="k-men" class="mt-1 text-2xl font-extrabold">0</div>
+      <!-- 男 -->
+      <div class="card rounded-2xl p-0 lift">
+        <div class="p-4 flex items-center gap-3">
+          <div class="h-9 w-9 rounded-xl glass grid place-items-center">
+            <!-- heroicon user -->
+            <svg class="w-5 h-5 text-sky-300" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0Z" stroke-width="1.5"/>
+              <path d="M4.5 20.25a8.25 8.25 0 0 1 15 0" stroke-width="1.5"/>
+            </svg>
+          </div>
+          <div class="flex-1">
+            <div class="text-xs text-zinc-400">現在 男</div>
+            <div id="k-men" class="mt-0.5 text-2xl font-extrabold tracking-tight">0</div>
+          </div>
+          <div class="h-full w-1 bg-gradient-to-b from-sky-500/30 to-transparent"></div>
+        </div>
       </div>
-      <div class="card rounded-2xl p-4 lift">
-        <div class="text-xs text-zinc-400">現在 女</div>
-        <div id="k-women" class="mt-1 text-2xl font-extrabold">0</div>
+      <!-- 女 -->
+      <div class="card rounded-2xl p-0 lift">
+        <div class="p-4 flex items-center gap-3">
+          <div class="h-9 w-9 rounded-xl glass grid place-items-center">
+            <svg class="w-5 h-5 text-amber-300" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M15 7a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" stroke-width="1.5"/>
+              <path d="M12 14v7M9 18h6" stroke-width="1.5"/>
+            </svg>
+          </div>
+          <div class="flex-1">
+            <div class="text-xs text-zinc-400">現在 女</div>
+            <div id="k-women" class="mt-0.5 text-2xl font-extrabold tracking-tight">0</div>
+          </div>
+          <div class="h-full w-1 bg-gradient-to-b from-amber-500/30 to-transparent"></div>
+        </div>
       </div>
-      <div class="card rounded-2xl p-4 lift">
-        <div class="text-xs text-zinc-400">現在 合計</div>
-        <div id="k-total" class="mt-1 text-2xl font-extrabold">0</div>
+      <!-- 合計 -->
+      <div class="card rounded-2xl p-0 lift">
+        <div class="p-4 flex items-center gap-3">
+          <div class="h-9 w-9 rounded-xl glass grid place-items-center">
+            <svg class="w-5 h-5 text-indigo-300" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M4 12h16M12 4v16" stroke-width="1.5"/>
+            </svg>
+          </div>
+          <div class="flex-1">
+            <div class="text-xs text-zinc-400">現在 合計</div>
+            <div id="k-total" class="mt-0.5 text-2xl font-extrabold tracking-tight">0</div>
+          </div>
+          <div class="h-full w-1 bg-gradient-to-b from-indigo-500/30 to-transparent"></div>
+        </div>
       </div>
-      <div class="card rounded-2xl p-4 lift">
-        <div class="text-xs text-zinc-400">本日 取得件数</div>
-        <div id="k-hits" class="mt-1 text-2xl font-extrabold">0</div>
+      <!-- 取得件数 -->
+      <div class="card rounded-2xl p-0 lift">
+        <div class="p-4 flex items-center gap-3">
+          <div class="h-9 w-9 rounded-xl glass grid place-items-center">
+            <svg class="w-5 h-5 text-emerald-300" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+              <path d="M3 12h7l2 3 4-8 5 10" stroke-width="1.5"/>
+            </svg>
+          </div>
+          <div class="flex-1">
+            <div class="text-xs text-zinc-400">本日 取得件数</div>
+            <div id="k-hits" class="mt-0.5 text-2xl font-extrabold tracking-tight">0</div>
+          </div>
+          <div class="h-full w-1 bg-gradient-to-b from-emerald-500/30 to-transparent"></div>
+        </div>
       </div>
     </div>
   </section>
@@ -63,8 +118,9 @@
         <h3 class="text-sm text-zinc-300">本日の推移（10分刻み：合計 / 男性 / 女性）</h3>
         <div class="text-xs text-zinc-400">データは10分刻みで自動更新</div>
       </div>
-      <canvas id="chart" height="220"></canvas>
+      <div class="chart-wrap"><canvas id="chart" class="chart-canvas"></canvas></div>
     </div>
+
     <div class="card rounded-2xl p-4 lift">
       <h3 class="text-sm text-zinc-300 mb-2">最新のJSON</h3>
       <pre id="json" class="text-xs bg-black/30 border border-zinc-800 rounded p-3 overflow-auto h-[260px] whitespace-pre-wrap">—</pre>
@@ -82,9 +138,18 @@
     </div>
   </section>
 
-  <!-- Source -->
+  <!-- 店舗一覧（ギャラリー） -->
   <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-16">
-    <div class="card rounded-2xl p-4">
+    <div class="mb-3 flex items-center gap-2">
+      <h3 class="text-sm text-zinc-300">店舗一覧</h3>
+      <div class="text-xs text-zinc-500">（画像・URLはカスタム可能／数値は将来拡張で差し替え可）</div>
+    </div>
+
+    <div id="storeGrid" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <!-- JSで生成 -->
+    </div>
+
+    <div class="mt-6 card rounded-2xl p-4">
       <div class="text-sm text-zinc-300">ソース情報</div>
       <div id="source" class="text-xs text-zinc-400 mt-1">—</div>
     </div>
@@ -100,7 +165,8 @@
     }
     updateClock(); setInterval(updateClock, 15000);
 
-    // ===== API 呼び出し
+    // ===== DOM参照
+    const subStore = document.getElementById('subStore');
     const kMen = document.getElementById('k-men');
     const kWomen = document.getElementById('k-women');
     const kTotal = document.getElementById('k-total');
@@ -110,6 +176,7 @@
     const latencyEl = document.getElementById('latency');
     const missingEl = document.getElementById('missing');
 
+    // ===== Chart.js
     const gridColor = 'rgba(200,200,200,0.08)';
     const axisColor = '#cfcfcf';
     const ctx = document.getElementById('chart').getContext('2d');
@@ -123,58 +190,64 @@
         ]
       },
       options:{
+        responsive:true,
+        maintainAspectRatio:false,
+        resizeDelay:200,
+        animation:false,
         scales:{ x:{ grid:{color:gridColor}, ticks:{color:axisColor} }, y:{ grid:{color:gridColor}, ticks:{color:axisColor} } },
         plugins:{ legend:{labels:{color:'#ddd'}}, tooltip:{mode:'index', intersect:false} },
-        interaction:{mode:'index', intersect:false},
-        maintainAspectRatio:false
+        interaction:{mode:'index', intersect:false}
       }
     });
 
     function ymd(d){ return d.toISOString().slice(0,10); }
 
+    // ===== API
     async function fetchCurrent(){
-      const res = await fetch('/api/current');   // {date,time,men,women,total,ts,source,...}
+      const res = await fetch('/api/current');
       const cur = await res.json();
       kMen.textContent   = cur.men   ?? 0;
       kWomen.textContent = cur.women ?? 0;
       kTotal.textContent = cur.total ?? ((cur.men||0)+(cur.women||0));
       srcEl.textContent  = cur.source || '—';
       jsonEl.textContent = JSON.stringify(cur, null, 2);
+      subStore.textContent = cur.store ? `（${cur.store}）` : '';
       return cur;
     }
 
     async function fetchTodayRange(){
       const today = ymd(new Date());
       const res = await fetch(`/api/range?from=${today}&to=${today}&limit=1000`);
-      const out = await res.json(); // {ok:true, rows:[...]}
+      const out = await res.json();
       return out.rows || [];
     }
 
+    // 10分バケット
     function bucket10min(rows){
-      // rows: [{ts, men, women, total}, ...] -> 10分刻みへ
       const map = new Map();
       rows.forEach(r=>{
         if(!r.ts) return;
-        // "HH:MM" を10分単位に丸め
         const t = r.ts.slice(11,16);
         const [H,M] = t.split(':').map(Number);
         const m10 = String(Math.floor(M/10)*10).padStart(2,'0');
         const key = `${String(H).padStart(2,'0')}:${m10}`;
         map.set(key, r);
       });
-      // 19:00〜翌03:00まで並べる
       const labels = [];
       const men=[], women=[], total=[];
-      function push(h,m){ const label=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`; labels.push(label);
+      function push(h,m){
+        const label=`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
+        labels.push(label);
         const r = map.get(label);
-        men.push(r?.men ?? null); women.push(r?.women ?? null); total.push(r?.total ?? ((r?.men||0)+(r?.women||0) || null)); }
+        men.push(r?.men ?? null);
+        women.push(r?.women ?? null);
+        total.push(r?.total ?? ((r?.men||0)+(r?.women||0) || null));
+      }
       for(let h=19;h<24;h++){ for(let m=0;m<60;m+=10) push(h,m); }
       for(let h=0;h<=3;h++){ for(let m=0;m<60;m+=10) push(h,m); }
 
-      // 欠損数・遅延表示
       const missing = total.filter(v=>v==null).length;
       missingEl.textContent = `${missing}枠`;
-      // 最新10分枠の遅延（分）
       const latest = rows.length? new Date(rows[rows.length-1].ts) : null;
       const lagMin = latest? Math.max(0, Math.round((Date.now() - latest.getTime())/60000)) : '—';
       latencyEl.textContent = (latest? `${lagMin}分` : '—');
@@ -199,10 +272,67 @@
       }
     }
 
-    // 初回 & 自動更新
     refresh();
     setInterval(refresh, 60_000);
     document.getElementById('btn-reload').addEventListener('click', refresh);
+
+    // ===== 店舗一覧（フロント側の見た目用データ）
+    // ここに店舗を追記すればタイルが増えます。imageは任意（無ければ自動グラデ）。
+    const STORES = [
+      { name:'長崎',  city:'Kyushu',  url:'https://oriental-lounge.com/stores/38',  image:'' },
+      { name:'梅田',  city:'Osaka',   url:'https://oriental-lounge.com/stores/02',  image:'' },
+      { name:'難波',  city:'Osaka',   url:'https://oriental-lounge.com/stores/03',  image:'' },
+      { name:'渋谷',  city:'Tokyo',   url:'https://oriental-lounge.com/stores/15',  image:'' },
+      { name:'新宿',  city:'Tokyo',   url:'https://oriental-lounge.com/stores/14',  image:'' },
+      { name:'名古屋',city:'Aichi',   url:'https://oriental-lounge.com/stores/08',  image:'' },
+      { name:'福岡',  city:'Fukuoka', url:'https://oriental-lounge.com/stores/05',  image:'' },
+      { name:'札幌',  city:'Hokkaido',url:'https://oriental-lounge.com/stores/09',  image:'' },
+    ];
+
+    const storeGrid = document.getElementById('storeGrid');
+    function avatarBG(i){
+      // インデックスに応じてグラデを変える（画像が無い時用）
+      const presets = [
+        'from-sky-500 to-indigo-500','from-fuchsia-500 to-rose-500',
+        'from-emerald-500 to-cyan-500','from-amber-500 to-pink-500'
+      ];
+      return presets[i % presets.length];
+    }
+    function storeCard(s, idx){
+      const img = s.image ?
+        `<img src="${s.image}" class="h-28 w-full object-cover opacity-90">` :
+        `<div class="h-28 w-full bg-gradient-to-br ${avatarBG(idx)} opacity-80"></div>`;
+      return `
+      <div class="card rounded-2xl overflow-hidden lift">
+        <div class="relative">${img}
+          <div class="absolute inset-0 bg-black/20"></div>
+        </div>
+        <div class="p-3">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-sm font-semibold">${s.name}</div>
+              <div class="text-xs text-zinc-400">${s.city}</div>
+            </div>
+            <a href="${s.url}" target="_blank" class="chip rounded px-2 py-1 text-xs hover:bg-zinc-800">公式</a>
+          </div>
+          <div class="mt-2 grid grid-cols-3 gap-2 text-center text-xs">
+            <div class="rounded glass py-2">
+              <div class="text-[10px] text-zinc-400">男</div><div class="font-semibold">—</div>
+            </div>
+            <div class="rounded glass py-2">
+              <div class="text-[10px] text-zinc-400">女</div><div class="font-semibold">—</div>
+            </div>
+            <div class="rounded glass py-2">
+              <div class="text-[10px] text-zinc-400">合計</div><div class="font-semibold">—</div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }
+    function renderStores(){
+      storeGrid.innerHTML = STORES.map(storeCard).join('');
+    }
+    renderStores();
   </script>
 </body>
 </html>
