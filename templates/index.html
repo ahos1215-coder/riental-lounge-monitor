@@ -124,8 +124,9 @@
   </section>
 
   <script>
-    const START_HOUR = 19;
-    const END_HOUR   = 5;
+    // 営業時間パラメータ
+    const START_HOUR = 19; // 19:00
+    const END_HOUR   = 5;  // 翌 5:00
 
     // 時計
     const clockEl=document.getElementById('clock');
@@ -143,7 +144,7 @@
     const ratioEl=document.getElementById('ratio');
     const missingEl=document.getElementById('missing');
 
-    // Chart.js
+    // Chart.js 準備
     const css=getComputedStyle(document.documentElement);
     const ctx=document.getElementById('chart').getContext('2d');
     const chart=new Chart(ctx,{
@@ -157,8 +158,10 @@
       },
       options:{
         scales:{
-          x:{grid:{color:css.getPropertyValue('--grid').trim()},ticks:{color:css.getPropertyValue('--axis').trim(),maxRotation:0,minRotation:0,autoSkip:true,maxTicksLimit:10}},
-          y:{beginAtZero:true,grid:{color:css.getPropertyValue('--grid').trim()},ticks:{color:css.getPropertyValue('--axis').trim()}}
+          x:{grid:{color:css.getPropertyValue('--grid').trim()},
+             ticks:{color:css.getPropertyValue('--axis').trim(),maxRotation:0,minRotation:0,autoSkip:true,maxTicksLimit:10}},
+          y:{beginAtZero:true,grid:{color:css.getPropertyValue('--grid').trim()},
+             ticks:{color:css.getPropertyValue('--axis').trim()}}
         },
         plugins:{legend:{labels:{color:'#ddd'}}},
         maintainAspectRatio:false
@@ -168,9 +171,10 @@
     // utils
     function ymd(d){return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;}
     function floor10m(d){const x=new Date(d);x.setSeconds(0,0);x.setMinutes(Math.floor(x.getMinutes()/10)*10);return x;}
-    // ラベルは時:分のみ（見やすさ重視）
+    // 軸ラベルは「時:分」だけ（見やすさ重視）
     function fmtLabel(d){const x=floor10m(d);return `${p2(x.getHours())}:${p2(x.getMinutes())}`;}
 
+    // 現在値
     async function fetchCurrent(){
       const res=await fetch('/api/current');
       const cur=await res.json();
@@ -181,27 +185,41 @@
       return cur;
     }
 
+    // 過去ログ
     async function fetchRange(from,to,limit=10000){
       const res=await fetch(`/api/range?from=${from}&to=${to}&limit=${limit}`);
       const out=await res.json();
       return out.rows||[];
     }
 
-    // ★ 前日19:00〜翌05:00 に固定して表示
-    function getPrevWindow19to5(now=new Date()){
-      const todayStart = new Date(now);            // 今日19:00
-      todayStart.setHours(START_HOUR,0,0,0);
+    // ★ 要件どおりの時間枠に自動切替
+    // 19:00〜23:59  → 今日19:00〜明日05:00
+    // 00:00〜04:59 → 昨日19:00〜今日05:00
+    // 05:00〜18:59 → 昨日19:00〜今日05:00（営業外は前夜枠を表示）
+    function getActiveWindow(now = new Date()){
+      const start = new Date(now);
+      const end   = new Date(now);
 
-      const start = new Date(todayStart);          // 前日19:00
-      start.setDate(start.getDate()-1);
-
-      const end = new Date(start);                 // 翌05:00
-      end.setDate(end.getDate()+1);
-      end.setHours(END_HOUR,0,0,0);
-
-      return {start,end};
+      if (now.getHours() < END_HOUR) {
+        // 深夜〜早朝（0-4）
+        start.setDate(start.getDate() - 1);
+        start.setHours(START_HOUR, 0, 0, 0);
+        end.setHours(END_HOUR, 0, 0, 0);
+      } else if (now.getHours() >= START_HOUR) {
+        // 夜（19-23）
+        start.setHours(START_HOUR, 0, 0, 0);
+        end.setDate(end.getDate() + 1);
+        end.setHours(END_HOUR, 0, 0, 0);
+      } else {
+        // 日中（5-18）
+        start.setDate(start.getDate() - 1);
+        start.setHours(START_HOUR, 0, 0, 0);
+        end.setHours(END_HOUR, 0, 0, 0);
+      }
+      return { start, end };
     }
 
+    // 10分バケット
     function bucket10min(rows,startDate,endDate){
       const step=10*60*1000;
       const start=floor10m(startDate).getTime();
@@ -229,12 +247,13 @@
       return {labels,men,women,total,hits:(rows||[]).length};
     }
 
+    // メイン更新
     async function refresh(){
       try{
         await fetchCurrent();
         const now=new Date();
-        const {start,end}=getPrevWindow19to5(now);          // ← “前日枠”
-        const histRows=await fetchRange(ymd(start),ymd(end),50000);
+        const {start,end}=getActiveWindow(now);   // ← ここで営業枠を自動切替
+        const histRows=await fetchRange(ymd(start), ymd(end), 50000);
         const b=bucket10min(histRows,start,end);
         chart.data.labels=b.labels;
         chart.data.datasets[0].data=b.total;
