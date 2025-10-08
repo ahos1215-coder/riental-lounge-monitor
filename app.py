@@ -25,9 +25,10 @@ LOG_FILE = os.path.join(DATA_DIR, "log.jsonl")
 # ---------- Config ----------
 TARGET_URL = os.getenv("TARGET_URL", "https://oriental-lounge.com/stores/38")  # 長崎店ページ
 STORE_NAME = os.getenv("STORE_NAME", "長崎")
-GS_WEBHOOK_URL = os.getenv("GS_WEBHOOK_URL", "")  # Google Apps Script の /exec URL
+GS_WEBHOOK_URL = os.getenv("GS_WEBHOOK_URL", "")  # Google Apps Script の /exec (doPost) URL
+GS_READ_URL    = os.getenv("GS_READ_URL", "")     # Google Apps Script の /exec (doGet) URL ※任意
 WINDOW_START = int(os.getenv("WINDOW_START", "19"))  # 収集開始時刻(時) JST
-WINDOW_END = int(os.getenv("WINDOW_END", "3"))       # 収集終了時刻(翌日, 時) JST
+WINDOW_END   = int(os.getenv("WINDOW_END",   "5"))   # 収集終了時刻(翌日, 時) JST
 
 # ========== Utils ==========
 def ensure_data_dir():
@@ -89,7 +90,7 @@ def scrape_oriental_counts() -> tuple[int | None, int | None]:
         women = None
         full_text = soup.get_text(" ", strip=True)
 
-        # 数字の前後両方から抽出を試みる
+        # 数字の前後両方から抽出
         m_num_before = re.search(r"(\d+)\s*(?:GENTLEMEN|Men|MEN|男性)", full_text, re.IGNORECASE)
         w_num_before = re.search(r"(\d+)\s*(?:LADIES|Women|WOMEN|女性)", full_text, re.IGNORECASE)
         m_label_before = re.search(r"(?:GENTLEMEN|Men|MEN|男性)[^\d]{0,10}(\d+)", full_text, re.IGNORECASE)
@@ -170,18 +171,18 @@ def do_collect(men: int | None = None, women: int | None = None, source: str | N
 # ========== 日またぎ対応の時間ウィンドウ ==========
 def in_collection_window(now: datetime | None = None) -> tuple[bool, datetime, datetime]:
     """
-    19:00〜翌03:00 の営業枠を正確に判定。0時をまたいでも True を返す。
+    19:00〜翌05:00 の営業枠を正確に判定。0時をまたいでも True を返す。
     """
     now = (now or datetime.utcnow()).replace(tzinfo=ZoneInfo("UTC")).astimezone(JST)
 
     start_t = dtime(WINDOW_START, 0)
-    end_t = dtime(WINDOW_END, 0)
+    end_t   = dtime(WINDOW_END, 0)
 
     start_dt = now.replace(hour=start_t.hour, minute=0, second=0, microsecond=0)
-    end_dt = now.replace(hour=end_t.hour, minute=0, second=0, microsecond=0)
+    end_dt   = now.replace(hour=end_t.hour, minute=0, second=0, microsecond=0)
 
     if end_t <= start_t:
-        # 翌日に跨ぐケース（19→03）
+        # 翌日に跨ぐケース（19→05）
         if now.time() < end_t:
             start_dt -= timedelta(days=1)
         else:
@@ -209,15 +210,23 @@ def api_current():
 
 @app.route("/api/range")
 def api_range():
+    """
+    from/to（日付:YYYY-MM-DD）で範囲指定。
+    - まずローカル log.jsonl を読み込み
+    - 環境変数 GS_READ_URL が設定されていれば、Apps Script doGet からも読み込み
+    - ts 重複排除 & ソートして返す
+    """
     start_s = request.args.get("from")
-    end_s = request.args.get("to")
-    limit = int(request.args.get("limit", 500))
+    end_s   = request.args.get("to")
+    limit   = int(request.args.get("limit", 500))
 
-    today = now_jst().date()
+    today   = now_jst().date()
     start_d = parse_ymd(start_s) or today
-    end_d = parse_ymd(end_s) or today
+    end_d   = parse_ymd(end_s)   or today
 
-    rows = []
+    rows: list[dict] = []
+
+    # 1) ローカルログ
     if os.path.exists(LOG_FILE):
         with open(LOG_FILE, encoding="utf-8") as f:
             for line in f:
@@ -228,12 +237,50 @@ def api_range():
                 ts = rec.get("ts")
                 if not ts:
                     continue
-                d = datetime.fromisoformat(ts).date()
+                try:
+                    d = datetime.fromisoformat(ts).date()
+                except Exception:
+                    continue
                 if start_d <= d <= end_d:
                     rows.append(rec)
 
-    rows = rows[-limit:]
-    return jsonify({"ok": True, "rows": rows})
+    # 2) Google Sheets（任意）
+    if GS_READ_URL:
+        try:
+            qs = {"from": start_d.strftime("%Y-%m-%d"), "to": end_d.strftime("%Y-%m-%d")}
+            r = requests.get(GS_READ_URL, params=qs, timeout=10)
+            if r.ok:
+                js = r.json()
+                for rec in js.get("rows", []):
+                    # 型をそろえる
+                    def _to_int(x):
+                        try:
+                            return int(x)
+                        except Exception:
+                            return None
+                    if "men"   in rec: rec["men"]   = _to_int(rec["men"])
+                    if "women" in rec: rec["women"] = _to_int(rec["women"])
+                    if "total" in rec and rec["total"] is not None:
+                        rec["total"] = _to_int(rec["total"])
+                    rows.append(rec)
+        except Exception as e:
+            print("GS_READ_URL fetch error:", e)
+
+    # 3) ts で重複排除＋昇順ソート
+    seen = set()
+    uniq = []
+    for rec in rows:
+        key = rec.get("ts")
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        uniq.append(rec)
+    uniq.sort(key=lambda r: r.get("ts", ""))
+
+    # 4) 上限
+    uniq = uniq[-limit:]
+
+    return jsonify({"ok": True, "rows": uniq})
 
 @app.route("/tasks/collect")
 def collect_task():
@@ -248,7 +295,7 @@ def collect_task():
 
 @app.route("/tasks/tick")
 def tasks_tick():
-    # ← 修正版：0時またぎ対応
+    # 0時またぎ対応
     is_in, start_dt, end_dt = in_collection_window()
     if not is_in:
         return jsonify({
@@ -257,13 +304,13 @@ def tasks_tick():
             "reason": "outside-window",
             "window": {
                 "start": start_dt.isoformat(),
-                "end": end_dt.isoformat()
+                "end":   end_dt.isoformat()
             }
         })
     rec = do_collect()
     return jsonify({"ok": True, "record": rec, "window": {
         "start": start_dt.isoformat(),
-        "end": end_dt.isoformat()
+        "end":   end_dt.isoformat()
     }})
 
 @app.route("/tasks/seed")

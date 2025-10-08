@@ -233,7 +233,7 @@
       try{
         await fetchCurrent();
         const now=new Date();
-        const {start,end}=getPrevWindow19to5(now);          // ← ここで“前日枠”を使用
+        const {start,end}=getPrevWindow19to5(now);          // ← “前日枠”
         const histRows=await fetchRange(ymd(start),ymd(end),50000);
         const b=bucket10min(histRows,start,end);
         chart.data.labels=b.labels;
