@@ -146,15 +146,30 @@
     // Chart.js
     const css=getComputedStyle(document.documentElement);
     const ctx=document.getElementById('chart').getContext('2d');
-    const chart=new Chart(ctx,{data:{labels:[],datasets:[
-      {type:'line',label:'合計',data:[],borderColor:css.getPropertyValue('--total'),backgroundColor:'rgba(147,197,253,.22)',tension:.35,fill:true},
-      {type:'line',label:'男性',data:[],borderColor:css.getPropertyValue('--men'),backgroundColor:css.getPropertyValue('--men-bg'),tension:.35,fill:false},
-      {type:'line',label:'女性',data:[],borderColor:css.getPropertyValue('--women'),backgroundColor:css.getPropertyValue('--women-bg'),tension:.35,fill:false}
-    ]},options:{scales:{x:{grid:{color:css.getPropertyValue('--grid')},ticks:{color:css.getPropertyValue('--axis')}},y:{beginAtZero:true,grid:{color:css.getPropertyValue('--grid')},ticks:{color:css.getPropertyValue('--axis')}}},plugins:{legend:{labels:{color:'#ddd'}}},maintainAspectRatio:false}});
+    const chart=new Chart(ctx,{
+      data:{
+        labels:[],
+        datasets:[
+          {type:'line',label:'合計',data:[],borderColor:css.getPropertyValue('--total').trim(),backgroundColor:'rgba(147,197,253,.22)',tension:.35,fill:true},
+          {type:'line',label:'男性',data:[],borderColor:css.getPropertyValue('--men').trim(),backgroundColor:css.getPropertyValue('--men-bg').trim(),tension:.35,fill:false},
+          {type:'line',label:'女性',data:[],borderColor:css.getPropertyValue('--women').trim(),backgroundColor:css.getPropertyValue('--women-bg').trim(),tension:.35,fill:false}
+        ]
+      },
+      options:{
+        scales:{
+          x:{grid:{color:css.getPropertyValue('--grid').trim()},ticks:{color:css.getPropertyValue('--axis').trim(),maxRotation:0,minRotation:0,autoSkip:true,maxTicksLimit:10}},
+          y:{beginAtZero:true,grid:{color:css.getPropertyValue('--grid').trim()},ticks:{color:css.getPropertyValue('--axis').trim()}}
+        },
+        plugins:{legend:{labels:{color:'#ddd'}}},
+        maintainAspectRatio:false
+      }
+    });
 
+    // utils
     function ymd(d){return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;}
     function floor10m(d){const x=new Date(d);x.setSeconds(0,0);x.setMinutes(Math.floor(x.getMinutes()/10)*10);return x;}
-    function fmtLabel(d){const x=floor10m(d);return `${x.getMonth()+1}/${x.getDate()} ${p2(x.getHours())}:${p2(x.getMinutes())}`;}
+    // ラベルは時:分のみ（見やすさ重視）
+    function fmtLabel(d){const x=floor10m(d);return `${p2(x.getHours())}:${p2(x.getMinutes())}`;}
 
     async function fetchCurrent(){
       const res=await fetch('/api/current');
@@ -172,19 +187,17 @@
       return out.rows||[];
     }
 
-    // ★ 修正版：朝5時より前なら「前日19:00〜今日05:00」
-    function getWindow19to5(now=new Date()){
-      const start=new Date(now);
-      const end=new Date(now);
+    // ★ 前日19:00〜翌05:00 に固定して表示
+    function getPrevWindow19to5(now=new Date()){
+      const todayStart = new Date(now);            // 今日19:00
+      todayStart.setHours(START_HOUR,0,0,0);
 
-      if(now.getHours()<END_HOUR){
-        start.setDate(start.getDate()-1);
-      }
-      start.setHours(START_HOUR,0,0,0);
+      const start = new Date(todayStart);          // 前日19:00
+      start.setDate(start.getDate()-1);
+
+      const end = new Date(start);                 // 翌05:00
+      end.setDate(end.getDate()+1);
       end.setHours(END_HOUR,0,0,0);
-      if(now.getHours()>=END_HOUR){
-        end.setDate(end.getDate()+1);
-      }
 
       return {start,end};
     }
@@ -220,7 +233,7 @@
       try{
         await fetchCurrent();
         const now=new Date();
-        const {start,end}=getWindow19to5(now);
+        const {start,end}=getPrevWindow19to5(now);          // ← ここで“前日枠”を使用
         const histRows=await fetchRange(ymd(start),ymd(end),50000);
         const b=bucket10min(histRows,start,end);
         chart.data.labels=b.labels;
