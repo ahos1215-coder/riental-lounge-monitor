@@ -171,7 +171,7 @@
     // utils
     function ymd(d){return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;}
     function floor10m(d){const x=new Date(d);x.setSeconds(0,0);x.setMinutes(Math.floor(x.getMinutes()/10)*10);return x;}
-    // 軸ラベルは「時:分」だけ（見やすさ重視）
+    // ラベルは「時:分」のみ
     function fmtLabel(d){const x=floor10m(d);return `${p2(x.getHours())}:${p2(x.getMinutes())}`;}
 
     // 現在値
@@ -193,7 +193,7 @@
     }
 
     // ★ 要件どおりの時間枠に自動切替
-    // 19:00〜23:59  → 今日19:00〜明日05:00
+    // 19:00〜23:59 → 今日19:00〜明日05:00
     // 00:00〜04:59 → 昨日19:00〜今日05:00
     // 05:00〜18:59 → 昨日19:00〜今日05:00（営業外は前夜枠を表示）
     function getActiveWindow(now = new Date()){
@@ -201,17 +201,14 @@
       const end   = new Date(now);
 
       if (now.getHours() < END_HOUR) {
-        // 深夜〜早朝（0-4）
         start.setDate(start.getDate() - 1);
         start.setHours(START_HOUR, 0, 0, 0);
         end.setHours(END_HOUR, 0, 0, 0);
       } else if (now.getHours() >= START_HOUR) {
-        // 夜（19-23）
         start.setHours(START_HOUR, 0, 0, 0);
         end.setDate(end.getDate() + 1);
         end.setHours(END_HOUR, 0, 0, 0);
       } else {
-        // 日中（5-18）
         start.setDate(start.getDate() - 1);
         start.setHours(START_HOUR, 0, 0, 0);
         end.setHours(END_HOUR, 0, 0, 0);
@@ -252,7 +249,7 @@
       try{
         await fetchCurrent();
         const now=new Date();
-        const {start,end}=getActiveWindow(now);   // ← ここで営業枠を自動切替
+        const {start,end}=getActiveWindow(now);
         const histRows=await fetchRange(ymd(start), ymd(end), 50000);
         const b=bucket10min(histRows,start,end);
         chart.data.labels=b.labels;
