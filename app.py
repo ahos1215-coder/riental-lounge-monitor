@@ -4,9 +4,16 @@ import re
 import json
 import time
 import requests
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, time as dtime
 from flask import Flask, jsonify, request, render_template
 from bs4 import BeautifulSoup
+
+# ---- タイムゾーン対応 ----
+try:
+    from zoneinfo import ZoneInfo   # Py3.9+
+except ImportError:
+    from backports.zoneinfo import ZoneInfo  # 古い環境向け
+JST = ZoneInfo("Asia/Tokyo")
 
 app = Flask(__name__)
 
@@ -43,8 +50,8 @@ def append_log(record):
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
-def now_jst():
-    return datetime.utcnow() + timedelta(hours=9)
+def now_jst() -> datetime:
+    return datetime.now(ZoneInfo("Asia/Tokyo"))
 
 def parse_ymd(s: str) -> date | None:
     try:
@@ -70,10 +77,7 @@ def save_to_google_sheets(record: dict):
 
 # ========== Scraper ==========
 def scrape_oriental_counts() -> tuple[int | None, int | None]:
-    """
-    対象サイトから (men, women) を抽出。
-    「28 GENTLEMEN / 26 LADIES」の表示を主にテキスト走査で検出。
-    """
+    """対象サイトから (men, women) を抽出。"""
     try:
         resp = requests.get(TARGET_URL, timeout=12, headers={
             "User-Agent": "Mozilla/5.0 (compatible; MonitorBot/1.0)"
@@ -83,15 +87,11 @@ def scrape_oriental_counts() -> tuple[int | None, int | None]:
 
         men = None
         women = None
-
-        # ページ全文テキストから拾う
         full_text = soup.get_text(" ", strip=True)
 
-        # 数字の後にラベル
+        # 数字の前後両方から抽出を試みる
         m_num_before = re.search(r"(\d+)\s*(?:GENTLEMEN|Men|MEN|男性)", full_text, re.IGNORECASE)
         w_num_before = re.search(r"(\d+)\s*(?:LADIES|Women|WOMEN|女性)", full_text, re.IGNORECASE)
-
-        # ラベルの後に数字
         m_label_before = re.search(r"(?:GENTLEMEN|Men|MEN|男性)[^\d]{0,10}(\d+)", full_text, re.IGNORECASE)
         w_label_before = re.search(r"(?:LADIES|Women|WOMEN|女性)[^\d]{0,10}(\d+)", full_text, re.IGNORECASE)
 
@@ -99,13 +99,12 @@ def scrape_oriental_counts() -> tuple[int | None, int | None]:
             men = int(m_num_before.group(1))
         elif m_label_before:
             men = int(m_label_before.group(1))
-
         if w_num_before:
             women = int(w_num_before.group(1))
         elif w_label_before:
             women = int(w_label_before.group(1))
 
-        # 予備: セレクタ候補
+        # セレクタ候補（バックアップ）
         if men is None or women is None:
             candidates_m = [
                 ".men-count", ".male .count", "#menCount", "#men", ".count-men",
@@ -140,10 +139,7 @@ def scrape_oriental_counts() -> tuple[int | None, int | None]:
 
 # ========== Core collect ==========
 def do_collect(men: int | None = None, women: int | None = None, source: str | None = None) -> dict:
-    """
-    収集の中核。men/women が与えられなければスクレイピング。
-    /tasks/collect?men=..&women=.. で手動テスト値を保存可能。
-    """
+    """スクレイピング＋保存＋Googleシート送信。"""
     if men is None or women is None:
         men_s, women_s = scrape_oriental_counts()
         men = men if men is not None else men_s
@@ -153,7 +149,6 @@ def do_collect(men: int | None = None, women: int | None = None, source: str | N
         source = source or "manual"
 
     total = (men + women) if (men is not None and women is not None) else None
-
     ts = now_jst()
     record = {
         "date": ts.strftime("%Y-%m-%d"),
@@ -162,9 +157,6 @@ def do_collect(men: int | None = None, women: int | None = None, source: str | N
         "men": men,
         "women": women,
         "total": total,
-        "weather": None,
-        "temp": None,
-        "precip_mm": None,
         "ts": ts.isoformat(timespec="seconds"),
         "source": source,
     }
@@ -172,21 +164,31 @@ def do_collect(men: int | None = None, women: int | None = None, source: str | N
     save_data(record)
     append_log(record)
     save_to_google_sheets(record)
-
     print(f"[{record['ts']}] Scraped: M={men} W={women} T={total}")
     return record
 
-# ========== Time window ==========
-def is_within_window(ts: datetime | None = None) -> bool:
+# ========== 日またぎ対応の時間ウィンドウ ==========
+def in_collection_window(now: datetime | None = None) -> tuple[bool, datetime, datetime]:
     """
-    収集ウィンドウ: WINDOW_START:00 〜 翌 WINDOW_END:00 （終端を含む）
-    例) 19→3 の場合は 19:00〜翌03:00 を対象（03:00 ちょうど含む）
+    19:00〜翌03:00 の営業枠を正確に判定。0時をまたいでも True を返す。
     """
-    ts = ts or now_jst()
-    hhmm = ts.hour * 60 + ts.minute
-    start = WINDOW_START * 60
-    end = WINDOW_END * 60
-    return (hhmm >= start) or (hhmm <= end)
+    now = (now or datetime.utcnow()).replace(tzinfo=ZoneInfo("UTC")).astimezone(JST)
+
+    start_t = dtime(WINDOW_START, 0)
+    end_t = dtime(WINDOW_END, 0)
+
+    start_dt = now.replace(hour=start_t.hour, minute=0, second=0, microsecond=0)
+    end_dt = now.replace(hour=end_t.hour, minute=0, second=0, microsecond=0)
+
+    if end_t <= start_t:
+        # 翌日に跨ぐケース（19→03）
+        if now.time() < end_t:
+            start_dt -= timedelta(days=1)
+        else:
+            end_dt += timedelta(days=1)
+
+    is_in = start_dt <= now <= end_dt
+    return is_in, start_dt, end_dt
 
 # ========== Routes ==========
 @app.route("/")
@@ -246,10 +248,23 @@ def collect_task():
 
 @app.route("/tasks/tick")
 def tasks_tick():
-    if not is_within_window():
-        return jsonify({"ok": True, "skipped": True, "reason": "outside-window"})
+    # ← 修正版：0時またぎ対応
+    is_in, start_dt, end_dt = in_collection_window()
+    if not is_in:
+        return jsonify({
+            "ok": True,
+            "skipped": True,
+            "reason": "outside-window",
+            "window": {
+                "start": start_dt.isoformat(),
+                "end": end_dt.isoformat()
+            }
+        })
     rec = do_collect()
-    return jsonify({"ok": True, "record": rec})
+    return jsonify({"ok": True, "record": rec, "window": {
+        "start": start_dt.isoformat(),
+        "end": end_dt.isoformat()
+    }})
 
 @app.route("/tasks/seed")
 def tasks_seed():
