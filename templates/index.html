@@ -11,7 +11,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
-    :root {
+    :root{
       color-scheme: dark;
       --men:      #3b82f6;
       --men-bg:   rgba(59,130,246,.18);
@@ -25,15 +25,15 @@
       --card-bg:  #111318;
       --card-br:  #1f2430;
     }
-    html,body {
+    html,body{
       background:#0b0b0b;
       font-family:'Inter','Noto Sans JP',system-ui,-apple-system,Segoe UI,Roboto,'ヒラギノ角ゴ ProN','メイリオ',Arial,sans-serif
     }
-    .card {background:var(--card-bg);border:1px solid var(--card-br);box-shadow:0 12px 30px rgba(0,0,0,.45)}
-    .chip {border:1px solid rgba(255,255,255,.12)}
-    .lift {transition:transform .18s ease, box-shadow .18s ease}
-    .lift:hover {transform:translateY(-2px); box-shadow:0 14px 34px rgba(0,0,0,.55)}
-    .pill {backdrop-filter: blur(6px); border:1px solid rgba(255,255,255,.14)}
+    .card{background:var(--card-bg);border:1px solid var(--card-br);box-shadow:0 12px 30px rgba(0,0,0,.45)}
+    .chip{border:1px solid rgba(255,255,255,.12)}
+    .lift{transition:transform .18s ease, box-shadow .18s ease}
+    .lift:hover{transform:translateY(-2px); box-shadow:0 14px 34px rgba(0,0,0,.55)}
+    .pill{backdrop-filter: blur(6px); border:1px solid rgba(255,255,255,.14)}
   </style>
 </head>
 <body class="text-zinc-100">
@@ -41,11 +41,7 @@
   <header class="sticky top-0 z-50 border-b border-zinc-800 bg-black/70 backdrop-blur">
     <div class="mx-auto max-w-6xl px-4 sm:px-6 py-3 flex items-center gap-3">
       <div class="h-8 w-8 rounded bg-zinc-900 grid place-items-center ring-1 ring-zinc-800">
-        <div class="flex gap-0.5">
-          <span class="block w-0.5 h-5 bg-zinc-300"></span>
-          <span class="block w-0.5 h-6 bg-zinc-300"></span>
-          <span class="block w-0.5 h-4 bg-zinc-300"></span>
-        </div>
+        <div class="flex gap-0.5"><span class="block w-0.5 h-5 bg-zinc-300"></span><span class="block w-0.5 h-6 bg-zinc-300"></span><span class="block w-0.5 h-4 bg-zinc-300"></span></div>
       </div>
       <div class="text-lg sm:text-xl font-extrabold tracking-wide">ORIENTAL LOUNGE</div>
       <div class="ml-2 text-zinc-400 text-sm">(長崎)</div>
@@ -169,43 +165,23 @@
       {type:'line',label:'女性',data:[],borderColor:C_WOMEN,backgroundColor:css.getPropertyValue('--women-bg').trim(),tension:.35,fill:false}
     ]},options:{scales:{x:tidyX(),y:dynamicY()},plugins:{legend:{labels:{color:'#ddd'}},tooltip:{mode:'index',intersect:false}},interaction:{mode:'index',intersect:false},maintainAspectRatio:false}});
 
-    // --- JST対応版 ---
-    function ymd(d){
-      return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;
-    }
-    function floor10m(d){
-      const x=new Date(d);
-      x.setSeconds(0,0);
-      x.setMinutes(Math.floor(x.getMinutes()/10)*10);
-      return x;
-    }
-    function fmtKey(d){
-      const x=floor10m(d);
-      return `${x.getFullYear()}-${p2(x.getMonth()+1)}-${p2(x.getDate())} ${p2(x.getHours())}:${p2(x.getMinutes())}`;
-    }
-    function fmtLabel(d){
-      const x=floor10m(d);
-      return `${x.getMonth()+1}/${x.getDate()} ${p2(x.getHours())}:${p2(x.getMinutes())}`;
-    }
+    // ユーティリティ（JST前提のローカル時計）
+    function ymd(d){return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;}
+    function floor10m(d){const x=new Date(d);x.setSeconds(0,0);x.setMinutes(Math.floor(x.getMinutes()/10)*10);return x;}
+    function fmtLabel(d){const x=floor10m(d);return `${x.getMonth()+1}/${x.getDate()} ${p2(x.getHours())}:${p2(x.getMinutes())}`;}
 
     async function fetchCurrent(){
       const res=await fetch('/api/current');
       const cur=await res.json();
-      const men=cur.men??0;
-      const women=cur.women??0;
-      const total=cur.total??(men+women);
-      kMen.textContent=men;
-      kWomen.textContent=women;
-      kTotal.textContent=total;
-      pillMen.textContent=men;
-      pillWomen.textContent=women;
+      const men=cur.men??0, women=cur.women??0, total=cur.total??(men+women);
+      kMen.textContent=men; kWomen.textContent=women; kTotal.textContent=total;
+      pillMen.textContent=men; pillWomen.textContent=women;
       ratioEl.textContent=(men>0)?(women/men).toFixed(2)+'×':'—';
       return cur;
     }
 
     async function fetchRange(from,to,limit=10000){
-      const url=`/api/range?from=${from}&to=${to}&limit=${limit}`;
-      const res=await fetch(url);
+      const res=await fetch(`/api/range?from=${from}&to=${to}&limit=${limit}`);
       const out=await res.json();
       return out.rows||[];
     }
@@ -217,50 +193,72 @@
       end.setDate(end.getDate()+1);
       end.setHours(END_HOUR,0,0,0);
       if(now<start){start.setDate(start.getDate()-1);end.setDate(end.getDate()-1);}
-      return{start,end};
+      return {start,end};
     }
 
+    // ★数値インデックスで10分バケット化（ズレに強い）
     function bucket10min(rows,startDate,endDate){
-      if(!rows||rows.length===0){return{labels:[],men:[],women:[],total:[],hits:0};}
-      const map=new Map();
-      rows.forEach(r=>{
-        if(!r.ts)return;
-        map.set(fmtKey(new Date(r.ts)),r);
-      });
-      const labels=[],men=[],women=[],total=[];
-      for(let t=new Date(startDate);t<=endDate;t.setMinutes(t.getMinutes()+10)){
-        const key=fmtKey(t);
-        const lab=fmtLabel(t);
-        labels.push(lab);
-        const r=map.get(key);
-        men.push(r?.men??null);
-        women.push(r?.women??null);
-        total.push(r?.total??((r?.men||0)+(r?.women||0)||null));
+      const step = 10*60*1000; // 10分
+      const start = floor10m(startDate).getTime();
+      const end   = floor10m(endDate).getTime();
+      const count = Math.floor((end - start)/step) + 1;
+
+      const labels = new Array(count);
+      const men    = new Array(count).fill(null);
+      const women  = new Array(count).fill(null);
+      const total  = new Array(count).fill(null);
+
+      // ラベル生成
+      for(let i=0;i<count;i++){
+        labels[i] = fmtLabel(new Date(start + i*step));
       }
-      missingEl.textContent=`${total.filter(v=>v==null).length}枠`;
-      return{labels,men,women,total,hits:rows.length};
+
+      // データを最寄り10分に丸めて挿入
+      if(Array.isArray(rows)){
+        for(const r of rows){
+          if(!r || !r.ts) continue;
+          const t = floor10m(new Date(r.ts)).getTime();
+          const idx = Math.round((t - start)/step);
+          if(idx < 0 || idx >= count) continue;
+
+          const m = (typeof r.men   === 'number') ? r.men   : null;
+          const w = (typeof r.women === 'number') ? r.women : null;
+          const tot = (typeof r.total === 'number') ? r.total
+                    : ((m ?? 0) + (w ?? 0)); // 0も正しく扱う（|| ではなく計算）
+
+          men[idx]   = m;
+          women[idx] = w;
+          total[idx] = (Number.isFinite(tot) ? tot : null);
+        }
+      }
+
+      // 欠損数
+      missingEl.textContent = `${total.filter(v=>v==null).length}枠`;
+      return {labels, men, women, total, hits: (rows||[]).length};
     }
 
     async function refresh(){
       try{
         await fetchCurrent();
-        const now=new Date();
-        const {start,end}=getWindow19to5(now);
-        const histRows=await fetchRange(ymd(start),ymd(end),50000);
-        const b=bucket10min(histRows,start,end);
-        chart.data.labels=b.labels;
-        chart.data.datasets[0].data=b.total;
-        chart.data.datasets[1].data=b.men;
-        chart.data.datasets[2].data=b.women;
+        const now = new Date();
+        const {start,end} = getWindow19to5(now);
+        const histRows = await fetchRange(ymd(start), ymd(end), 50000);
+        const b = bucket10min(histRows, start, end);
+
+        chart.data.labels = b.labels;
+        chart.data.datasets[0].data = b.total;
+        chart.data.datasets[1].data = b.men;
+        chart.data.datasets[2].data = b.women;
         chart.update('none');
-        kHits.textContent=b.hits;
+
+        kHits.textContent = b.hits;
         updateClock();
-      }catch(e){console.error(e);}
+      }catch(e){ console.error(e); }
     }
 
     refresh();
-    setInterval(refresh,60000);
-    document.getElementById('btn-reload').addEventListener('click',refresh);
+    setInterval(refresh, 60000);
+    document.getElementById('btn-reload').addEventListener('click', refresh);
   </script>
 </body>
 </html>
