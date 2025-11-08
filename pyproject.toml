@@ -1,0 +1,27 @@
+﻿[project]
+name = "riental-lounge-monitor"
+version = "0.0.0"
+requires-python = ">=3.13"
+dependencies = []
+
+[tool.black]
+line-length = 100
+target-version = ["py313"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+select = ["E", "F", "I", "B", "C4", "PIE", "RUF"]
+ignore = ["B905"]
+
+[tool.ruff.per-file-ignores]
+"oriental/templates/*" = ["ALL"]
+
+[tool.mypy]
+python_version = "3.13"
+plugins = ["pydantic.mypy"]
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.pytest.ini_options]
+addopts = "-q"

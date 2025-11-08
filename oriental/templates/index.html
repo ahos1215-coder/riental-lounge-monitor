@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>ORIENTAL LOUNGE</title>
+  <meta name="theme-color" content="#0b0b0b">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Noto+Sans+JP:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root{
+      color-scheme: dark;
+      --men:      #3b82f6;
+      --men-bg:   rgba(59,130,246,.18);
+      --women:    #ec4899;
+      --women-bg: rgba(236,72,153,.18);
+      --total:    #93c5fd;
+      --grid:     rgba(200,200,200,.08);
+      --axis:     #cfcfcf;
+      --card-bg:  #111318;
+      --card-br:  #1f2430;
+    }
+    html,body{
+      background:#0b0b0b;
+      font-family:'Inter','Noto Sans JP',system-ui,-apple-system,Segoe UI,Roboto,'ヒラギノ角ゴ ProN','メイリオ',Arial,sans-serif;
+    }
+    .card{background:var(--card-bg);border:1px solid var(--card-br);box-shadow:0 12px 30px rgba(0,0,0,.45)}
+    .chip{border:1px solid rgba(255,255,255,.12)}
+    .lift{transition:transform .18s ease, box-shadow .18s ease}
+    .lift:hover{transform:translateY(-2px); box-shadow:0 14px 34px rgba(0,0,0,.55)}
+    .pill{backdrop-filter: blur(6px); border:1px solid rgba(255,255,255,.14)}
+  </style>
+</head>
+<body class="text-zinc-100">
+  <!-- Header -->
+  <header class="sticky top-0 z-50 border-b border-zinc-800 bg-black/70 backdrop-blur">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 py-3 flex items-center gap-3">
+      <div class="h-8 w-8 rounded bg-zinc-900 grid place-items-center ring-1 ring-zinc-800">
+        <div class="flex gap-0.5"><span class="block w-0.5 h-5 bg-zinc-300"></span><span class="block w-0.5 h-6 bg-zinc-300"></span><span class="block w-0.5 h-4 bg-zinc-300"></span></div>
+      </div>
+      <div class="text-lg sm:text-xl font-extrabold tracking-wide">ORIENTAL LOUNGE</div>
+      <div class="ml-2 text-zinc-400 text-sm">(長崎)</div>
+      <div class="ml-auto flex items-center gap-2 text-sm">
+        <div id="clock" class="rounded chip px-2 py-1 text-zinc-300">--:-- 更新</div>
+        <button id="btn-reload" class="rounded chip px-2 py-1 hover:bg-zinc-800">再読込</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- KPI Row -->
+  <section class="border-b border-zinc-800/80 bg-gradient-to-b from-black to-zinc-950/60">
+    <div class="mx-auto max-w-6xl px-4 sm:px-6 py-6 grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="card rounded-2xl p-4 lift">
+        <div class="text-xs text-zinc-400">現在 男</div>
+        <div class="mt-1 text-2xl font-extrabold" style="color:var(--men)" id="k-men">0</div>
+      </div>
+      <div class="card rounded-2xl p-4 lift">
+        <div class="text-xs text-zinc-400">現在 女</div>
+        <div class="mt-1 text-2xl font-extrabold" style="color:var(--women)" id="k-women">0</div>
+      </div>
+      <div class="card rounded-2xl p-4 lift">
+        <div class="text-xs text-zinc-400">現在 合計</div>
+        <div class="mt-1 text-2xl font-extrabold" style="color:var(--total)" id="k-total">0</div>
+      </div>
+      <div class="card rounded-2xl p-4 lift">
+        <div class="text-xs text-zinc-400">本日 取得件数</div>
+        <div id="k-hits" class="mt-1 text-2xl font-extrabold">0</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Hero -->
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="card rounded-2xl overflow-hidden lg:col-span-2 relative">
+      <img class="w-full h-[240px] object-cover opacity-[.92]" src="https://images.unsplash.com/photo-1557264337-e8a93017fe92?q=80&w=1600&auto=format&fit=crop" alt="">
+      <div class="absolute left-4 bottom-5">
+        <div class="text-lg font-bold drop-shadow">長崎</div>
+        <div class="text-xs text-zinc-300/90">現在の来客者数</div>
+      </div>
+      <div class="absolute right-4 bottom-4 flex gap-2">
+        <div class="pill rounded-full px-3 py-1.5 bg-[color:var(--men-bg)]" style="color:var(--men)">
+          <span class="mr-1">♂</span><span id="pill-men">0</span>
+        </div>
+        <div class="pill rounded-full px-3 py-1.5 bg-[color:var(--women-bg)]" style="color:var(--women)">
+          <span class="mr-1">♀</span><span id="pill-women">0</span>
+        </div>
+      </div>
+    </div>
+    <div class="card rounded-2xl p-4">
+      <div class="text-sm text-zinc-300 mb-2">ハイライト</div>
+      <div class="rounded bg-black/30 border border-zinc-800 p-3 mb-2">
+        <div class="text-xs text-zinc-400">女性/男性比</div>
+        <div class="mt-1 text-sm"><span id="ratio">—</span></div>
+      </div>
+      <div class="rounded bg-black/30 border border-zinc-800 p-3">
+        <div class="text-xs text-zinc-400">今日のピーク（予想）</div>
+        <div class="mt-1 text-xl font-bold">21:00</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Chart -->
+  <section class="mx-auto max-w-6xl px-4 sm:px-6 pb-6">
+    <div class="card rounded-2xl p-4 lift">
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-sm text-zinc-300">19:00〜翌05:00の推移（10分刻み：合計 / 男性 / 女性）</h3>
+        <div class="text-xs text-zinc-400">データは10分刻みで自動更新</div>
+      </div>
+      <div class="h-[340px]"><canvas id="chart"></canvas></div>
+      <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
+        <div class="rounded bg-black/30 border border-zinc-800 p-3">
+          <div class="text-xs text-zinc-400">遅延</div>
+          <div id="latency">—</div>
+        </div>
+        <div class="rounded bg-black/30 border border-zinc-800 p-3">
+          <div class="text-xs text-zinc-400">欠損枠</div>
+          <div id="missing">—</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    // 営業時間パラメータ
+    const START_HOUR = 19; // 19:00
+    const END_HOUR   = 5;  // 翌 5:00
+
+    // 時計
+    const clockEl=document.getElementById('clock');
+    const p2=n=>String(n).padStart(2,'0');
+    function updateClock(){const d=new Date();clockEl.textContent=`${p2(d.getHours())}:${p2(d.getMinutes())} 更新`;}
+    updateClock();setInterval(updateClock,15000);
+
+    // 参照
+    const kMen=document.getElementById('k-men');
+    const kWomen=document.getElementById('k-women');
+    const kTotal=document.getElementById('k-total');
+    const kHits=document.getElementById('k-hits');
+    const pillMen=document.getElementById('pill-men');
+    const pillWomen=document.getElementById('pill-women');
+    const ratioEl=document.getElementById('ratio');
+    const missingEl=document.getElementById('missing');
+
+    // Chart.js 準備
+    const css=getComputedStyle(document.documentElement);
+    const ctx=document.getElementById('chart').getContext('2d');
+    const chart=new Chart(ctx,{
+      data:{
+        labels:[],
+        datasets:[
+          {type:'line',label:'合計',data:[],borderColor:css.getPropertyValue('--total').trim(),backgroundColor:'rgba(147,197,253,.22)',tension:.35,fill:true},
+          {type:'line',label:'男性',data:[],borderColor:css.getPropertyValue('--men').trim(),backgroundColor:css.getPropertyValue('--men-bg').trim(),tension:.35,fill:false},
+          {type:'line',label:'女性',data:[],borderColor:css.getPropertyValue('--women').trim(),backgroundColor:css.getPropertyValue('--women-bg').trim(),tension:.35,fill:false}
+        ]
+      },
+      options:{
+        scales:{
+          x:{grid:{color:css.getPropertyValue('--grid').trim()},
+             ticks:{color:css.getPropertyValue('--axis').trim(),maxRotation:0,minRotation:0,autoSkip:true,maxTicksLimit:10}},
+          y:{beginAtZero:true,grid:{color:css.getPropertyValue('--grid').trim()},
+             ticks:{color:css.getPropertyValue('--axis').trim()}}
+        },
+        plugins:{legend:{labels:{color:'#ddd'}}},
+        maintainAspectRatio:false
+      }
+    });
+
+    // utils
+    function ymd(d){return `${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`;}
+    function floor10m(d){const x=new Date(d);x.setSeconds(0,0);x.setMinutes(Math.floor(x.getMinutes()/10)*10);return x;}
+    // ラベルは「時:分」のみ
+    function fmtLabel(d){const x=floor10m(d);return `${p2(x.getHours())}:${p2(x.getMinutes())}`;}
+
+    // 現在値
+    async function fetchCurrent(){
+      const res=await fetch('/api/current');
+      const cur=await res.json();
+      const men=cur.men??0, women=cur.women??0, total=cur.total??(men+women);
+      kMen.textContent=men; kWomen.textContent=women; kTotal.textContent=total;
+      pillMen.textContent=men; pillWomen.textContent=women;
+      ratioEl.textContent=(men>0)?(women/men).toFixed(2)+'×':'—';
+      return cur;
+    }
+
+    // 過去ログ
+    async function fetchRange(from,to,limit=10000){
+      const res=await fetch(`/api/range?from=${from}&to=${to}&limit=${limit}`);
+      const out=await res.json();
+      return out.rows||[];
+    }
+
+    // ★ 要件どおりの時間枠に自動切替
+    // 19:00〜23:59 → 今日19:00〜明日05:00
+    // 00:00〜04:59 → 昨日19:00〜今日05:00
+    // 05:00〜18:59 → 昨日19:00〜今日05:00（営業外は前夜枠を表示）
+    function getActiveWindow(now = new Date()){
+      const start = new Date(now);
+      const end   = new Date(now);
+
+      if (now.getHours() < END_HOUR) {
+        start.setDate(start.getDate() - 1);
+        start.setHours(START_HOUR, 0, 0, 0);
+        end.setHours(END_HOUR, 0, 0, 0);
+      } else if (now.getHours() >= START_HOUR) {
+        start.setHours(START_HOUR, 0, 0, 0);
+        end.setDate(end.getDate() + 1);
+        end.setHours(END_HOUR, 0, 0, 0);
+      } else {
+        start.setDate(start.getDate() - 1);
+        start.setHours(START_HOUR, 0, 0, 0);
+        end.setHours(END_HOUR, 0, 0, 0);
+      }
+      return { start, end };
+    }
+
+    // 10分バケット
+    function bucket10min(rows,startDate,endDate){
+      const step=10*60*1000;
+      const start=floor10m(startDate).getTime();
+      const end=floor10m(endDate).getTime();
+      const count=Math.floor((end-start)/step)+1;
+      const labels=new Array(count);
+      const men=new Array(count).fill(null);
+      const women=new Array(count).fill(null);
+      const total=new Array(count).fill(null);
+
+      for(let i=0;i<count;i++){labels[i]=fmtLabel(new Date(start+i*step));}
+      if(Array.isArray(rows)){
+        for(const r of rows){
+          if(!r||!r.ts)continue;
+          const t=floor10m(new Date(r.ts)).getTime();
+          const idx=Math.round((t-start)/step);
+          if(idx<0||idx>=count)continue;
+          const m=(typeof r.men==='number')?r.men:null;
+          const w=(typeof r.women==='number')?r.women:null;
+          const tot=(typeof r.total==='number')?r.total:((m??0)+(w??0));
+          men[idx]=m; women[idx]=w; total[idx]=tot;
+        }
+      }
+      missingEl.textContent=`${total.filter(v=>v==null).length}枠`;
+      return {labels,men,women,total,hits:(rows||[]).length};
+    }
+
+    // メイン更新
+    async function refresh(){
+      try{
+        await fetchCurrent();
+        const now=new Date();
+        const {start,end}=getActiveWindow(now);
+        const histRows=await fetchRange(ymd(start), ymd(end), 50000);
+        const b=bucket10min(histRows,start,end);
+        chart.data.labels=b.labels;
+        chart.data.datasets[0].data=b.total;
+        chart.data.datasets[1].data=b.men;
+        chart.data.datasets[2].data=b.women;
+        chart.update('none');
+        kHits.textContent=b.hits;
+        updateClock();
+      }catch(e){console.error(e);}
+    }
+
+    refresh();
+    setInterval(refresh,60000);
+    document.getElementById('btn-reload').addEventListener('click',refresh);
+  </script>
+</body>
+</html>

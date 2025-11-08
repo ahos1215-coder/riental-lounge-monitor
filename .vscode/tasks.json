@@ -1,0 +1,40 @@
+﻿{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Lint (ruff)",
+            "type": "shell",
+            "command": "ruff check .",
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Format (black)",
+            "type": "shell",
+            "command": "black .",
+            "group": "none",
+            "problemMatcher": []
+        },
+        {
+            "label": "Type check (mypy)",
+            "type": "shell",
+            "command": "mypy .",
+            "group": "test",
+            "problemMatcher": []
+        },
+        {
+            "label": "pre-commit (all files)",
+            "type": "shell",
+            "command": "pre-commit run --all-files",
+            "group": "test",
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Tests",
+            "type": "shell",
+            "command": "pytest -q",
+            "group": "test",
+            "problemMatcher": []
+        }
+    ]
+}

@@ -1,0 +1,15 @@
+﻿{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Oriental Lounge Monitor",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/app.py",
+            "console": "integratedTerminal",
+            "env": {
+                "FLASK_DEBUG": "1"
+            }
+        }
+    ]
+}
