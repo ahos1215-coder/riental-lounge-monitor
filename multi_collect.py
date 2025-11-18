@@ -8,7 +8,9 @@ import requests
 from bs4 import BeautifulSoup
 
 # .env から GAS_URL を読む（既存の doPost テストと同じ）
-GAS_URL = os.environ["GAS_URL"]
+# Render など環境変数が無い環境では None になり、
+# その場合は POST をスキップしてアプリが落ちないようにしておく。
+GAS_URL = os.environ.get("GAS_URL")
 
 # 店舗を回す間隔（秒）
 BETWEEN_STORES_SEC = float(os.environ.get("BETWEEN_STORES_SEC", "1.0"))
@@ -72,14 +74,21 @@ STORES = [
 
 def post_to_gas(body: dict) -> None:
     """
-    GAS_URL に JSON POST する。429 のときはリトライ。
+    GAS_URL に JSON POST する。429 のときは少し待ってリトライ。
+    GAS_URL が設定されていない環境（Render 本番など）では
+    単に警告を出して何もしない。
     """
+    if not GAS_URL:
+        print(f"[warn] GAS_URL not set; skip POST store={body.get('store')} body={body}")
+        return
+
     for attempt in range(1, GAS_MAX_RETRY + 1):
         try:
             r = requests.post(GAS_URL, json=body, timeout=15)
             if r.status_code == 429 and attempt < GAS_MAX_RETRY:
+                # レート制限のときは少し待ってリトライ
                 wait = 2 * attempt
-                print(f"[warn] GAS 429 retry={attempt} wait={wait}s")
+                print(f"[warn] GAS 429 (rate limit) retry={attempt} wait={wait}s")
                 time.sleep(wait)
                 continue
 
@@ -93,7 +102,7 @@ def post_to_gas(body: dict) -> None:
                 return
 
 
-# ========= スクレイピング =========
+# ========= スクレイピング部 =========
 
 def _extract_count(soup: BeautifulSoup, patterns: list[str], selectors: list[str]) -> int | None:
     text = soup.get_text(" ", strip=True)
@@ -113,6 +122,10 @@ def _extract_count(soup: BeautifulSoup, patterns: list[str], selectors: list[str
 
 
 def scrape_store(url: str) -> tuple[int | None, int | None]:
+    """
+    店舗ページの URL を開いて men / women の人数を返す。
+    取れなかったときは (None, None) を返す。
+    """
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
@@ -123,13 +136,32 @@ def scrape_store(url: str) -> tuple[int | None, int | None]:
 
     resp = requests.get(url, headers=headers, timeout=15)
     resp.raise_for_status()
+
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    patterns_men = [r"男性\s*(\d+)", r"男性来店者数\s*(\d+)", r"男性.*?(\d+)"]
-    selectors_men = [".male .count", ".male-count", ".js-men-count"]
+    patterns_men = [
+        r"男性\s*(\d+)\s*名",
+        r"男性来店者数\s*(\d+)",
+        r"男性.*?(\d+)\s*名"
+    ]
+    selectors_men = [
+        ".store-people .male .count",
+        ".store__people .male .count",
+        ".male-count",
+        ".js-men-count"
+    ]
 
-    patterns_women = [r"女性\s*(\d+)", r"女性来店者数\s*(\d+)", r"女性.*?(\d+)"]
-    selectors_women = [".female .count", ".female-count", ".js-women-count"]
+    patterns_women = [
+        r"女性\s*(\d+)\s*名",
+        r"女性来店者数\s*(\d+)",
+        r"女性.*?(\d+)\s*名"
+    ]
+    selectors_women = [
+        ".store-people .female .count",
+        ".store__people .female .count",
+        ".female-count",
+        ".js-women-count"
+    ]
 
     men = _extract_count(soup, patterns_men, selectors_men)
     women = _extract_count(soup, patterns_women, selectors_women)
@@ -138,11 +170,9 @@ def scrape_store(url: str) -> tuple[int | None, int | None]:
     return men, women
 
 
-# ========= 38店舗ぶんを一気に集めてリストで返す =========
+# ========= 38店舗ぶんを一気に GAS に送る =========
 
-def collect_all_once() -> list[dict]:
-    results: list[dict] = []
-
+def collect_all_once() -> None:
     for entry in STORES:
         store_name = entry["store"]
         url = entry["url"]
@@ -151,40 +181,22 @@ def collect_all_once() -> list[dict]:
             men, women = scrape_store(url)
         except Exception as e:
             print(f"[error] scrape failed store={store_name} url={url} err={e}")
-            results.append({
-                "store": store_name,
-                "men": None,
-                "women": None,
-                "posted": False,
-                "reason": "scrape-error",
-            })
             continue
 
         if men is None or women is None:
-            print(f"[warn] count missing store={store_name}")
-            results.append({
-                "store": store_name,
-                "men": None,
-                "women": None,
-                "posted": False,
-                "reason": "count-missing",
-            })
+            print(f"[warn] count missing store={store_name} men={men} women={women}")
             continue
 
-        # GAS に投げる
-        body = {"store": store_name, "men": int(men), "women": int(women)}
-        post_to_gas(body)
-
-        results.append({
-            "store": store_name,
+        body = {
+            "store": store_name,  # GAS 側の STORE_MAP のキーになる
             "men": int(men),
             "women": int(women),
-            "posted": True,
-        })
+        }
 
+        post_to_gas(body)
+
+        # サイトへの負荷を下げるためにインターバルを空ける
         time.sleep(BETWEEN_STORES_SEC)
-
-    return results
 
 
 if __name__ == "__main__":
