@@ -1,0 +1,12 @@
+[
+  {
+    "store_id": "nagasaki",
+    "store_name": "長崎店",
+    "target_url": "https://oriental-lounge.com/stores/38",
+    "enabled": true,
+    "window": {
+      "start": 19,
+      "end": 5
+    }
+  }
+]

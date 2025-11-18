@@ -1,0 +1,14 @@
+[
+  {"ts":"2025-11-09T19:00:00+09:00","store":"nagasaki","men":6,"women":4,"total":10},
+  {"ts":"2025-11-09T19:15:00+09:00","store":"nagasaki","men":7,"women":5,"total":12},
+  {"ts":"2025-11-09T19:30:00+09:00","store":"nagasaki","men":8,"women":6,"total":14},
+  {"ts":"2025-11-09T19:45:00+09:00","store":"nagasaki","men":9,"women":7,"total":16},
+  {"ts":"2025-11-09T20:00:00+09:00","store":"nagasaki","men":10,"women":8,"total":18},
+  {"ts":"2025-11-09T20:15:00+09:00","store":"nagasaki","men":11,"women":9,"total":20},
+  {"ts":"2025-11-10T19:00:00+09:00","store":"nagasaki","men":5,"women":4,"total":9},
+  {"ts":"2025-11-10T19:15:00+09:00","store":"nagasaki","men":6,"women":5,"total":11},
+  {"ts":"2025-11-10T19:30:00+09:00","store":"nagasaki","men":7,"women":6,"total":13},
+  {"ts":"2025-11-10T19:45:00+09:00","store":"nagasaki","men":8,"women":7,"total":15},
+  {"ts":"2025-11-10T20:00:00+09:00","store":"nagasaki","men":9,"women":8,"total":17},
+  {"ts":"2025-11-10T20:15:00+09:00","store":"nagasaki","men":10,"women":9,"total":19}
+]

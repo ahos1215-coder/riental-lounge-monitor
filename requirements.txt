@@ -1,7 +1,12 @@
-flask
+﻿flask
 requests
 gunicorn
 beautifulsoup4
 lxml
 pydantic>=2.8
 python-dateutil
+pandas
+scikit-learn
+xgboost
+joblib
+

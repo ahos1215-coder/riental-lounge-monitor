@@ -1,0 +1,142 @@
+﻿from __future__ import annotations
+from datetime import timedelta
+import numpy as np
+import pandas as pd
+
+from ..data.provider import GoogleSheetProvider
+from ..models.service import ModelService
+from .preprocess import build_features, prepare_dataframe, FEATURE_COLUMNS
+
+
+class ForecastService:
+    """
+    予測サービス本体。routes から呼ばれる薄いFaçade。
+    - provider.get_records(store_id) -> list[dict]
+    - prepare_dataframe(...) で ts, men, women, total, tz-aware に整形
+    - ModelService(XGB+Poisson+CQR) で p10/p50/p90 を返す
+    """
+
+    def __init__(self, provider: GoogleSheetProvider, timezone: str):
+        self.provider = provider
+        self.timezone = timezone   # e.g., "Asia/Tokyo"
+        self.tz = timezone         # pandas/Timestamp 用に str のまま持つ
+
+    @classmethod
+    def from_app(cls, app):
+        cfg = app.config["APP_CONFIG"]
+        provider = GoogleSheetProvider(cfg.gs_read_url, cfg.data_file, logger=app.logger)
+        return cls(provider=provider, timezone=cfg.timezone)
+
+    # --- public ------------------------------------------------------------
+    def forecast_next_hour(self, store_id: str, freq_min: int) -> dict:
+        periods = max(1, 60 // freq_min)
+
+        def builder(history: pd.DataFrame):
+            ref = history["ts"].iloc[-1] if not history.empty else None
+            return _future_range(ref, freq_min, periods, self.tz)
+
+        return self._forecast_generic(store_id, freq_min, builder)
+
+    def forecast_today(self, store_id: str, freq_min: int, *, start_h: int = 19, end_h: int = 5) -> dict:
+        def builder(_history: pd.DataFrame):
+            now = pd.Timestamp.now(tz=self.tz)
+            start = now.replace(hour=start_h, minute=0, second=0, microsecond=0)
+            if now.hour < start_h:
+                start -= timedelta(days=1)
+            end = (start + timedelta(days=1)).replace(hour=end_h, minute=0, second=0, microsecond=0)
+            return pd.date_range(start=start, end=end, freq=f"{freq_min}min", inclusive="left", tz=self.tz)
+
+        return self._forecast_generic(
+            store_id, freq_min, builder, extra_meta={"start_h": start_h, "end_h": end_h}
+        )
+
+    # --- core --------------------------------------------------------------
+    def _forecast_generic(self, store_id: str, freq_min: int, future_builder, extra_meta: dict | None = None) -> dict:
+        try:
+            records = self.provider.get_records(store_id)
+            df = prepare_dataframe(records, self.timezone)
+            self.provider.logger.info("forecast.service.history size=%d", 0 if df is None else len(df))
+
+            future_times = future_builder(df)
+            if df.empty:
+                data = _zero_payload(future_times)
+            else:
+                data = self._predict_with_history(df, future_times)
+
+            result = {"ok": True, "store": store_id, "freq_min": freq_min, "data": data}
+            if extra_meta:
+                result.update(extra_meta)
+            return result
+        except Exception as exc:
+            self.provider.logger.error("forecast.service.error", exc_info=exc)
+            result = {"ok": True, "store": store_id, "freq_min": freq_min, "data": []}
+            if extra_meta:
+                result.update(extra_meta)
+            return result
+
+    def _predict_with_history(self, history: pd.DataFrame, future_times: pd.DatetimeIndex) -> list[dict]:
+        # p50 学習＋CQR帯（men/womenを別モデル）
+        # 学習用特徴量：履歴データを build_features で加工
+        feats_hist = build_features(history[["ts", "men", "women", "total"]], self.tz)
+
+        # シンプルな時系列 holdout（最後の20%をval）
+        n = len(feats_hist)
+        cut = int(n * 0.8)
+        X_train = feats_hist.iloc[:cut][FEATURE_COLUMNS]
+        y_men = history["men"].iloc[:cut].astype(float)
+        y_women = history["women"].iloc[:cut].astype(float)
+        X_val = feats_hist.iloc[cut:][FEATURE_COLUMNS]
+        y_men_val = history["men"].iloc[cut:].astype(float)
+        y_women_val = history["women"].iloc[cut:].astype(float)
+
+        mdl = ModelService()
+        mdl.fit(X_train, y_men, y_women, X_val, y_men_val, y_women_val)
+
+        future_feats = self._build_future_features(history, future_times)
+        (m10, m50, m90), (w10, w50, w90), (t10, t50, t90) = mdl.predict_interval(future_feats)
+
+        out = []
+        for ts, a, b, c, d, e, f in zip(
+            future_times, m10, m50, m90, w10, w50, w90
+        ):
+            tp10, tp50, tp90 = a + d, b + e, c + f
+            out.append({
+                "ts": pd.Timestamp(ts).isoformat(),
+                "men_p10": float(a), "men_p50": float(b), "men_p90": float(c),
+                "women_p10": float(d), "women_p50": float(e), "women_p90": float(f),
+                "total_p10": float(tp10), "total_p50": float(tp50), "total_p90": float(tp90),
+            })
+        return out
+
+    def _build_future_features(self, history: pd.DataFrame, future_times: pd.DatetimeIndex) -> pd.DataFrame:
+        # 学習時と同じ：履歴＋未来の空行を連結→ build_features → 未来だけ切り出し
+        base_cols = ["ts", "men", "women", "total"]
+        hist_base = history[base_cols]
+        future_df = pd.DataFrame(
+            {"ts": pd.DatetimeIndex(future_times, tz=self.tz), "men": np.nan, "women": np.nan, "total": np.nan}
+        )
+        combined = pd.concat([hist_base, future_df], ignore_index=True)
+        feats = build_features(combined, self.tz)
+        return feats.tail(len(future_times))[FEATURE_COLUMNS]
+
+
+def _future_range(start_dt, freq_min: int, periods: int, tz: str):
+    if start_dt is None:
+        ref = pd.Timestamp.now(tz=tz).replace(second=0, microsecond=0)
+    else:
+        ts = pd.Timestamp(start_dt)
+        ref = ts.tz_convert(tz) if ts.tz is not None else ts.tz_localize(tz)
+    start = ref + pd.Timedelta(minutes=freq_min)
+    return pd.date_range(start=start, periods=periods, freq=f"{freq_min}min", tz=tz)
+
+
+def _zero_payload(future_times):
+    return [
+        {
+            "ts": pd.Timestamp(ts).isoformat(),
+            "men_p10": 0.0, "men_p50": 0.0, "men_p90": 0.0,
+            "women_p10": 0.0, "women_p50": 0.0, "women_p90": 0.0,
+            "total_p10": 0.0, "total_p50": 0.0, "total_p90": 0.0,
+        }
+        for ts in future_times
+    ]

@@ -1,0 +1,22 @@
+### VS Code REST Client でのスモーク
+
+# 本番
+GET https://riental-lounge-monitor.onrender.com/api/range?limit=0
+
+###
+GET https://riental-lounge-monitor.onrender.com/api/range?limit=120000
+
+###
+GET https://riental-lounge-monitor.onrender.com/api/meta?store=nagasaki
+
+###
+GET https://riental-lounge-monitor.onrender.com/api/summary?store=nagasaki
+
+# ローカル
+###
+GET http://127.0.0.1:5000/api/range?limit=0
+###
+GET http://127.0.0.1:5000/api/forecast_next_hour?store=nagasaki
+
+###
+GET http://127.0.0.1:5000/api/forecast_today?store=nagasaki

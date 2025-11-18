@@ -32,7 +32,7 @@ def _config() -> AppConfig:
 def index() -> str | Response:
     try:
         return render_template("index.html")
-    except Exception:  # pragma: no cover - fallback for platform without template access
+    except Exception:  # pragma: no cover
         cfg = _config()
         return jsonify({"msg": "index.html missing", "current": storage.load_latest(cfg)})
 
@@ -49,10 +49,15 @@ def api_range():
     logger = current_app.logger
     params_dict = request.args.to_dict(flat=False)
     logger.info("api_range.start params=%s", format_payload(params_dict))
+
     try:
         query = _parse_range_query(cfg)
     except RangeQueryError as exc:
-        logger.warning("api_range.validation_error detail=%s params=%s", exc, format_payload(params_dict))
+        logger.warning(
+            "api_range.validation_error detail=%s params=%s",
+            exc,
+            format_payload(params_dict),
+        )
         return jsonify({"ok": False, "error": "invalid-parameters", "detail": str(exc)}), 422
 
     rows = list(storage.rows_in_range(cfg, start=query.start, end=query.end))
@@ -75,7 +80,8 @@ def api_range():
         return jsonify({"ok": False, "error": "upstream-google-sheets", "detail": str(exc)}), 502
 
     deduped = _deduplicate_by_ts(rows)
-    limited = deduped[-query.limit :]
+    limited = deduped[-query.limit:]
+
     logger.info(
         "api_range.success window=%s..%s local=%d remote=%d returned=%d limit=%d",
         query.start,
@@ -103,9 +109,7 @@ def api_stores_list():
     return jsonify({"ok": True, "data": []})
 
 
-@bp.get("/api/forecast_today")
-def api_forecast_today():
-    return jsonify({"ok": True, "data": {}})
+# ★★ forecast_today は完全削除しました ★★
 
 
 @bp.get("/api/range_prevweek")
@@ -119,8 +123,8 @@ def api_summary():
 
 
 def _parse_range_query(cfg: AppConfig) -> RangeQuery:
-    """Parse and normalise /api/range query parameters."""
     today = timeutil.now(cfg.timezone).date()
+
     raw_from = request.args.get("from")
     raw_to = request.args.get("to")
     raw_limit = request.args.get("limit")
@@ -145,6 +149,7 @@ def _parse_range_query(cfg: AppConfig) -> RangeQuery:
         raise RangeQueryError("from must be before to")
 
     default_limit = min(500, cfg.max_range_limit)
+
     if raw_limit is None or not str(raw_limit).strip():
         limit = default_limit
     else:
@@ -153,13 +158,14 @@ def _parse_range_query(cfg: AppConfig) -> RangeQuery:
         except (TypeError, ValueError):
             raise RangeQueryError("limit must be an integer")
 
-    limit = max(1, min(limit, cfg.max_range_limit))  # FIX: clamp limit to configured bounds
+    limit = max(1, min(limit, cfg.max_range_limit))
     return RangeQuery(start=start, end=end, limit=limit)
 
 
 def _deduplicate_by_ts(rows: list[dict]) -> list[dict]:
     seen: set[str] = set()
     uniq: list[dict] = []
+
     for rec in sorted(rows, key=lambda r: r.get("ts", "")):
         ts = rec.get("ts")
         if not isinstance(ts, str) or not ts:
@@ -168,4 +174,5 @@ def _deduplicate_by_ts(rows: list[dict]) -> list[dict]:
             continue
         seen.add(ts)
         uniq.append(rec)
+
     return uniq

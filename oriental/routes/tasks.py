@@ -13,6 +13,8 @@ from ..config import AppConfig
 from ..schemas.payloads import CollectIn
 from ..utils import storage, timeutil
 from ..utils.log import format_payload
+from multi_collect import collect_all_once
+
 
 bp = Blueprint("tasks", __name__)
 
@@ -227,3 +229,33 @@ def _extract_count(soup: BeautifulSoup, patterns: list[str], selectors: list[str
         if match:
             return int(match.group())
     return None
+# ======== ここから新規追加: /tasks/multi_collect ========
+
+@bp.get("/tasks/multi_collect")
+def tasks_multi_collect():
+    """
+    全店舗の人数を multi_collect.collect_all_once() で一括スクレイピングして
+    GAS(doPost) に送るタスク。
+    - multi_collect.py の正常動作が前提。
+    - 本関数は「成功したか / 何件処理したか」だけを返す簡易API。
+    """
+
+    logger = current_app.logger
+
+    try:
+        # multi_collect.py 側で全店舗処理して GAS へ送信
+        results = collect_all_once()   # ← ここが全てをやってくれる
+    except Exception as exc:
+        logger.error(
+            "multi_collect.error type=%s detail=%s",
+            exc.__class__.__name__,
+            exc
+        )
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+    # 正常終了
+    return jsonify({
+        "ok": True,
+        "count": len(results),   # 実際に処理した店舗数（38 になる想定）
+        "results": results
+    })

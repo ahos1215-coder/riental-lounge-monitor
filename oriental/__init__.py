@@ -8,7 +8,7 @@ from pydantic import ValidationError
 from .clients.gas_client import GasClient
 from .clients.http import ConfiguredSession
 from .config import AppConfig
-from .routes import data, health, tasks
+from .routes import data, health, tasks, forecast
 from .utils import storage
 from .utils.log import setup_logging
 
@@ -42,6 +42,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     app.register_blueprint(health.bp)
     app.register_blueprint(data.bp)
     app.register_blueprint(tasks.bp)
+    app.register_blueprint(forecast.bp)
 
     @app.errorhandler(ValidationError)
     def _handle_validation_error(err: ValidationError):  # type: ignore[override]

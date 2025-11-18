@@ -33,6 +33,12 @@ class AppConfig:
         http_timeout = float(os.getenv("HTTP_TIMEOUT_S", "12"))
         http_retry = _as_int(os.getenv("HTTP_RETRY", "3"), fallback=3)
         max_range_limit = _as_int(os.getenv("MAX_RANGE_LIMIT", "50000"), fallback=50000)  # FIX
+        data_file_env = os.getenv("DATA_FILE")
+        data_file = Path(data_file_env) if data_file_env else data_dir / "data.json"
+        if not data_file.exists():
+            fallback_plan = Path("plan") / "data.json"
+            if fallback_plan.exists():
+                data_file = fallback_plan
         return cls(
             target_url=os.getenv("TARGET_URL", "https://oriental-lounge.com/stores/38"),
             store_name=os.getenv("STORE_NAME", "長崎店"),
@@ -49,7 +55,7 @@ class AppConfig:
                 "OrientalLoungeMonitor/1.0 (+https://oriental-lounge.com)"
             ),
             data_dir=data_dir,
-            data_file=data_dir / "data.json",
+            data_file=data_file,
             log_file=data_dir / "log.jsonl",
             max_range_limit=max_range_limit,
         )

@@ -72,15 +72,14 @@ STORES = [
 
 def post_to_gas(body: dict) -> None:
     """
-    GAS_URL に JSON POST する。429 のときは少し待ってリトライ。
+    GAS_URL に JSON POST する。429 のときはリトライ。
     """
     for attempt in range(1, GAS_MAX_RETRY + 1):
         try:
             r = requests.post(GAS_URL, json=body, timeout=15)
             if r.status_code == 429 and attempt < GAS_MAX_RETRY:
-                # レート制限のときは少し待ってリトライ
                 wait = 2 * attempt
-                print(f"[warn] GAS 429 (rate limit) retry={attempt} wait={wait}s")
+                print(f"[warn] GAS 429 retry={attempt} wait={wait}s")
                 time.sleep(wait)
                 continue
 
@@ -94,7 +93,7 @@ def post_to_gas(body: dict) -> None:
                 return
 
 
-# ========= スクレイピング部 =========
+# ========= スクレイピング =========
 
 def _extract_count(soup: BeautifulSoup, patterns: list[str], selectors: list[str]) -> int | None:
     text = soup.get_text(" ", strip=True)
@@ -114,10 +113,6 @@ def _extract_count(soup: BeautifulSoup, patterns: list[str], selectors: list[str
 
 
 def scrape_store(url: str) -> tuple[int | None, int | None]:
-    """
-    店舗ページの URL を開いて men / women の人数を返す。
-    取れなかったときは (None, None) を返す。
-    """
     headers = {
         "User-Agent": (
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
@@ -128,32 +123,13 @@ def scrape_store(url: str) -> tuple[int | None, int | None]:
 
     resp = requests.get(url, headers=headers, timeout=15)
     resp.raise_for_status()
-
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    patterns_men = [
-        r"男性\s*(\d+)\s*名",
-        r"男性来店者数\s*(\d+)",
-        r"男性.*?(\d+)\s*名"
-    ]
-    selectors_men = [
-        ".store-people .male .count",
-        ".store__people .male .count",
-        ".male-count",
-        ".js-men-count"
-    ]
+    patterns_men = [r"男性\s*(\d+)", r"男性来店者数\s*(\d+)", r"男性.*?(\d+)"]
+    selectors_men = [".male .count", ".male-count", ".js-men-count"]
 
-    patterns_women = [
-        r"女性\s*(\d+)\s*名",
-        r"女性来店者数\s*(\d+)",
-        r"女性.*?(\d+)\s*名"
-    ]
-    selectors_women = [
-        ".store-people .female .count",
-        ".store__people .female .count",
-        ".female-count",
-        ".js-women-count"
-    ]
+    patterns_women = [r"女性\s*(\d+)", r"女性来店者数\s*(\d+)", r"女性.*?(\d+)"]
+    selectors_women = [".female .count", ".female-count", ".js-women-count"]
 
     men = _extract_count(soup, patterns_men, selectors_men)
     women = _extract_count(soup, patterns_women, selectors_women)
@@ -162,9 +138,11 @@ def scrape_store(url: str) -> tuple[int | None, int | None]:
     return men, women
 
 
-# ========= 38店舗ぶんを一気に GAS に送る =========
+# ========= 38店舗ぶんを一気に集めてリストで返す =========
 
-def collect_all_once() -> None:
+def collect_all_once() -> list[dict]:
+    results: list[dict] = []
+
     for entry in STORES:
         store_name = entry["store"]
         url = entry["url"]
@@ -173,22 +151,40 @@ def collect_all_once() -> None:
             men, women = scrape_store(url)
         except Exception as e:
             print(f"[error] scrape failed store={store_name} url={url} err={e}")
+            results.append({
+                "store": store_name,
+                "men": None,
+                "women": None,
+                "posted": False,
+                "reason": "scrape-error",
+            })
             continue
 
         if men is None or women is None:
-            print(f"[warn] count missing store={store_name} men={men} women={women}")
+            print(f"[warn] count missing store={store_name}")
+            results.append({
+                "store": store_name,
+                "men": None,
+                "women": None,
+                "posted": False,
+                "reason": "count-missing",
+            })
             continue
 
-        body = {
-            "store": store_name,  # GAS 側の STORE_MAP のキーになる
-            "men": int(men),
-            "women": int(women),
-        }
-
+        # GAS に投げる
+        body = {"store": store_name, "men": int(men), "women": int(women)}
         post_to_gas(body)
 
-        # サイトへの負荷を下げるためにインターバルを空ける
+        results.append({
+            "store": store_name,
+            "men": int(men),
+            "women": int(women),
+            "posted": True,
+        })
+
         time.sleep(BETWEEN_STORES_SEC)
+
+    return results
 
 
 if __name__ == "__main__":
