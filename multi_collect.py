@@ -1,16 +1,25 @@
-# app/multi_collect.py
-# 38店舗ぶんの店内人数をスクレイピングして GAS(doPost) に投げるスクリプト
+# multi_collect.py
+# 38店舗ぶんの店内人数をスクレイピングして
+# GAS(doPost) と Supabase(logs) に投げるスクリプト
 
 import os
 import time
 import re
+from datetime import datetime, timezone
+
 import requests
 from bs4 import BeautifulSoup
 
-# .env から GAS_URL を読む（既存の doPost テストと同じ）
-# Render など環境変数が無い環境では None になり、
-# その場合は POST をスキップしてアプリが落ちないようにしておく。
+# ---------- 環境変数 ----------
+
+# GAS (Google Apps Script) 側
 GAS_URL = os.environ.get("GAS_URL")
+HAS_GAS = bool(GAS_URL)
+
+# Supabase 側（Render では Environment に設定済み）
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+HAS_SUPABASE = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
 
 # 店舗を回す間隔（秒）
 BETWEEN_STORES_SEC = float(os.environ.get("BETWEEN_STORES_SEC", "1.0"))
@@ -18,68 +27,66 @@ BETWEEN_STORES_SEC = float(os.environ.get("BETWEEN_STORES_SEC", "1.0"))
 # GAS への POST リトライ回数
 GAS_MAX_RETRY = int(os.environ.get("GAS_MAX_RETRY", "3"))
 
-# 38店舗分の store 名（GAS の STORE_MAP と一致させる）と各店舗 URL
+# 38店舗分の store 名（GAS の STORE_MAP と一致させる）と各店舗 URL・store_id
+# store_id は Supabase の public.stores.id と一致させる
 STORES = [
     # 九州・沖縄・韓国
-    {"store": "長崎",     "url": "https://oriental-lounge.com/stores/38"},
-    {"store": "福岡",     "url": "https://oriental-lounge.com/stores/15"},
-    {"store": "小倉",     "url": "https://oriental-lounge.com/stores/16"},
-    {"store": "大分",     "url": "https://oriental-lounge.com/stores/40"},
-    {"store": "熊本",     "url": "https://oriental-lounge.com/stores/22"},
-    {"store": "宮崎",     "url": "https://oriental-lounge.com/stores/18"},
-    {"store": "鹿児島",   "url": "https://oriental-lounge.com/stores/19"},
-    {"store": "ag沖縄",   "url": "https://oriental-lounge.com/stores/20"},
-    {"store": "ソウル カンナム", "url": "https://oriental-lounge.com/stores/34"},
+    {"store": "長崎",       "store_id": "ol_nagasaki",      "url": "https://oriental-lounge.com/stores/38"},
+    {"store": "福岡",       "store_id": "ol_fukuoka",       "url": "https://oriental-lounge.com/stores/15"},
+    {"store": "小倉",       "store_id": "ol_kokura",        "url": "https://oriental-lounge.com/stores/16"},
+    {"store": "大分",       "store_id": "ol_oita",          "url": "https://oriental-lounge.com/stores/40"},
+    {"store": "熊本",       "store_id": "ol_kumamoto",      "url": "https://oriental-lounge.com/stores/22"},
+    {"store": "宮崎",       "store_id": "ol_miyazaki",      "url": "https://oriental-lounge.com/stores/18"},
+    {"store": "鹿児島",     "store_id": "ol_kagoshima",     "url": "https://oriental-lounge.com/stores/19"},
+    {"store": "ag沖縄",     "store_id": "ol_okinawa_ag",    "url": "https://oriental-lounge.com/stores/20"},
+    {"store": "ソウル カンナム", "store_id": "ol_gangnam", "url": "https://oriental-lounge.com/stores/34"},
 
     # 北海道・東北
-    {"store": "ag札幌",   "url": "https://oriental-lounge.com/stores/1"},
-    {"store": "ag仙台",   "url": "https://oriental-lounge.com/stores/2"},
+    {"store": "ag札幌",     "store_id": "ol_sapporo_ag",    "url": "https://oriental-lounge.com/stores/1"},
+    {"store": "ag仙台",     "store_id": "ol_sendai_ag",     "url": "https://oriental-lounge.com/stores/2"},
 
     # 関東
-    {"store": "渋谷本店", "url": "https://oriental-lounge.com/stores/4"},
-    {"store": "恵比寿",   "url": "https://oriental-lounge.com/stores/35"},
-    {"store": "ag渋谷",   "url": "https://oriental-lounge.com/stores/27"},
-    {"store": "新宿",     "url": "https://oriental-lounge.com/stores/3"},
-    {"store": "上野",     "url": "https://oriental-lounge.com/stores/33"},
-    {"store": "ag上野",   "url": "https://oriental-lounge.com/stores/28"},
-    {"store": "柏",       "url": "https://oriental-lounge.com/stores/42"},
-    {"store": "町田",     "url": "https://oriental-lounge.com/stores/6"},
-    {"store": "横浜",     "url": "https://oriental-lounge.com/stores/23"},
-    {"store": "大宮",     "url": "https://oriental-lounge.com/stores/24"},
-    {"store": "宇都宮",   "url": "https://oriental-lounge.com/stores/26"},
-    {"store": "高崎",     "url": "https://oriental-lounge.com/stores/37"},
+    {"store": "渋谷本店",   "store_id": "ol_shibuya",       "url": "https://oriental-lounge.com/stores/4"},
+    {"store": "恵比寿",     "store_id": "ol_ebisu",         "url": "https://oriental-lounge.com/stores/35"},
+    {"store": "ag渋谷",     "store_id": "ol_shibuya_ag",    "url": "https://oriental-lounge.com/stores/27"},
+    {"store": "新宿",       "store_id": "ol_shinjuku",      "url": "https://oriental-lounge.com/stores/3"},
+    {"store": "上野",       "store_id": "ol_ueno",          "url": "https://oriental-lounge.com/stores/33"},
+    {"store": "ag上野",     "store_id": "ol_ueno_ag",       "url": "https://oriental-lounge.com/stores/28"},
+    {"store": "柏",         "store_id": "ol_kashiwa",       "url": "https://oriental-lounge.com/stores/42"},
+    {"store": "町田",       "store_id": "ol_machida",       "url": "https://oriental-lounge.com/stores/6"},
+    {"store": "横浜",       "store_id": "ol_yokohama",      "url": "https://oriental-lounge.com/stores/23"},
+    {"store": "大宮",       "store_id": "ol_omiya",         "url": "https://oriental-lounge.com/stores/24"},
+    {"store": "宇都宮",     "store_id": "ol_utsunomiya",    "url": "https://oriental-lounge.com/stores/26"},
+    {"store": "高崎",       "store_id": "ol_takasaki",      "url": "https://oriental-lounge.com/stores/37"},
 
     # 中部
-    {"store": "ag名古屋", "url": "https://oriental-lounge.com/stores/32"},
-    {"store": "名古屋 錦", "url": "https://oriental-lounge.com/stores/25"},
-    {"store": "名古屋 栄", "url": "https://oriental-lounge.com/stores/8"},
-    {"store": "静岡",     "url": "https://oriental-lounge.com/stores/7"},
-    {"store": "浜松",     "url": "https://oriental-lounge.com/stores/31"},
-    {"store": "ag金沢",   "url": "https://oriental-lounge.com/stores/36"},
+    {"store": "ag名古屋",   "store_id": "ol_nagoya_ag",     "url": "https://oriental-lounge.com/stores/32"},
+    {"store": "名古屋 錦",  "store_id": "ol_nagoya_nishiki","url": "https://oriental-lounge.com/stores/25"},
+    {"store": "名古屋 栄",  "store_id": "ol_nagoya_sakae",  "url": "https://oriental-lounge.com/stores/8"},
+    {"store": "静岡",       "store_id": "ol_shizuoka",      "url": "https://oriental-lounge.com/stores/7"},
+    {"store": "浜松",       "store_id": "ol_hamamatsu",     "url": "https://oriental-lounge.com/stores/31"},
+    {"store": "ag金沢",     "store_id": "ol_kanazawa_ag",   "url": "https://oriental-lounge.com/stores/36"},
 
     # 関西・中国
-    {"store": "大阪駅前", "url": "https://oriental-lounge.com/stores/41"},
-    {"store": "ag梅田",   "url": "https://oriental-lounge.com/stores/10"},
-    {"store": "天満",     "url": "https://oriental-lounge.com/stores/39"},
-    {"store": "心斎橋",   "url": "https://oriental-lounge.com/stores/11"},
-    {"store": "難波",     "url": "https://oriental-lounge.com/stores/12"},
-    {"store": "京都",     "url": "https://oriental-lounge.com/stores/9"},
-    {"store": "神戸",     "url": "https://oriental-lounge.com/stores/13"},
-    {"store": "岡山",     "url": "https://oriental-lounge.com/stores/29"},
-    {"store": "ag広島",   "url": "https://oriental-lounge.com/stores/14"},
+    {"store": "大阪駅前",   "store_id": "ol_osaka_ekimae",  "url": "https://oriental-lounge.com/stores/41"},
+    {"store": "ag梅田",     "store_id": "ol_umeda_ag",      "url": "https://oriental-lounge.com/stores/10"},
+    {"store": "天満",       "store_id": "ol_tenma",         "url": "https://oriental-lounge.com/stores/39"},
+    {"store": "心斎橋",     "store_id": "ol_shinsaibashi",  "url": "https://oriental-lounge.com/stores/11"},
+    {"store": "難波",       "store_id": "ol_namba",         "url": "https://oriental-lounge.com/stores/12"},
+    {"store": "京都",       "store_id": "ol_kyoto",         "url": "https://oriental-lounge.com/stores/9"},
+    {"store": "神戸",       "store_id": "ol_kobe",          "url": "https://oriental-lounge.com/stores/13"},
+    {"store": "岡山",       "store_id": "ol_okayama",       "url": "https://oriental-lounge.com/stores/29"},
+    {"store": "ag広島",     "store_id": "ol_hiroshima_ag",  "url": "https://oriental-lounge.com/stores/14"},
 ]
-
 
 # ========= GAS への POST（リトライ付き） =========
 
 def post_to_gas(body: dict) -> None:
     """
     GAS_URL に JSON POST する。429 のときは少し待ってリトライ。
-    GAS_URL が設定されていない環境（Render 本番など）では
-    単に警告を出して何もしない。
+    環境変数 GAS_URL が未設定なら何もしない。
     """
-    if not GAS_URL:
-        print(f"[warn] GAS_URL not set; skip POST store={body.get('store')} body={body}")
+    if not HAS_GAS:
         return
 
     for attempt in range(1, GAS_MAX_RETRY + 1):
@@ -92,7 +99,7 @@ def post_to_gas(body: dict) -> None:
                 time.sleep(wait)
                 continue
 
-            print(f"[post] store={body.get('store')} status={r.status_code} body={r.text}")
+            print(f"[GAS] store={body.get('store')} status={r.status_code} body={r.text}")
             return
         except Exception as e:
             print(f"[error] post_to_gas failed attempt={attempt} store={body.get('store')} err={e}")
@@ -101,6 +108,40 @@ def post_to_gas(body: dict) -> None:
             else:
                 return
 
+# ========= Supabase への INSERT =========
+
+def insert_supabase_log(store_id: str, men: int, women: int) -> None:
+    """
+    Supabase の public.logs に 1 行 INSERT する。
+    DNS エラーなどで失敗しても例外は外に投げず、ログだけ出して続行する。
+    """
+    if not HAS_SUPABASE:
+        return
+
+    endpoint = SUPABASE_URL.rstrip("/") + "/rest/v1/logs"
+
+    ts = datetime.now(timezone.utc).isoformat()
+    row = {
+        "store_id": store_id,
+        "ts": ts,
+        "men": int(men),
+        "women": int(women),
+        "total": int(men) + int(women),
+    }
+
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+
+    try:
+        r = requests.post(endpoint, json=row, headers=headers, timeout=10)
+        print(f"[supabase] store_id={store_id} status={r.status_code} body={r.text[:200]}")
+    except Exception as e:
+        # ここで DNS エラーなどを握りつぶす（会社PC対策）
+        print(f"[supabase][error] store_id={store_id} err={e}")
 
 # ========= スクレイピング部 =========
 
@@ -142,25 +183,25 @@ def scrape_store(url: str) -> tuple[int | None, int | None]:
     patterns_men = [
         r"男性\s*(\d+)\s*名",
         r"男性来店者数\s*(\d+)",
-        r"男性.*?(\d+)\s*名"
+        r"男性.*?(\d+)\s*名",
     ]
     selectors_men = [
         ".store-people .male .count",
         ".store__people .male .count",
         ".male-count",
-        ".js-men-count"
+        ".js-men-count",
     ]
 
     patterns_women = [
         r"女性\s*(\d+)\s*名",
         r"女性来店者数\s*(\d+)",
-        r"女性.*?(\d+)\s*名"
+        r"女性.*?(\d+)\s*名",
     ]
     selectors_women = [
         ".store-people .female .count",
         ".store__people .female .count",
         ".female-count",
-        ".js-women-count"
+        ".js-women-count",
     ]
 
     men = _extract_count(soup, patterns_men, selectors_men)
@@ -169,12 +210,12 @@ def scrape_store(url: str) -> tuple[int | None, int | None]:
     print(f"[scrape] url={url} men={men} women={women}")
     return men, women
 
-
-# ========= 38店舗ぶんを一気に GAS に送る =========
+# ========= 38店舗ぶんを一気に送る =========
 
 def collect_all_once() -> None:
     for entry in STORES:
         store_name = entry["store"]
+        store_id = entry["store_id"]
         url = entry["url"]
 
         try:
@@ -187,13 +228,16 @@ def collect_all_once() -> None:
             print(f"[warn] count missing store={store_name} men={men} women={women}")
             continue
 
+        # 1) GAS へ送信（スプレッドシート用）
         body = {
-            "store": store_name,  # GAS 側の STORE_MAP のキーになる
+            "store": store_name,  # GAS 側の STORE_MAP のキーになる（従来通り）
             "men": int(men),
             "women": int(women),
         }
-
         post_to_gas(body)
+
+        # 2) Supabase へログ保存
+        insert_supabase_log(store_id, int(men), int(women))
 
         # サイトへの負荷を下げるためにインターバルを空ける
         time.sleep(BETWEEN_STORES_SEC)
