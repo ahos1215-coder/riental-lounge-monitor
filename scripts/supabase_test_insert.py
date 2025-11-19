@@ -24,12 +24,9 @@ row = {
     "women": 2,
     "total": 3,
 
-    # ★ NOT NULL のカラムをここで埋める
+    # logs テーブルに実際に存在する NOT NULL カラムだけ送る
     "src_brand": "oriental",
-    "src_store": "長崎店",
-    "src_url": "https://oriental-lounge.com/stores/38",
-    "src_version": "test-script",
-    # weather_code / temp / precip_mm などは NULL OK なら省略でよい
+    # weather 系カラムは NULL OK なら省略で OK
 }
 
 resp = requests.post(endpoint, json=row, headers=headers, timeout=10)
