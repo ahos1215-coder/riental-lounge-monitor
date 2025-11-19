@@ -21,6 +21,9 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
 HAS_SUPABASE = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
 
+# Supabase logs.src_brand に入れるブランド名（今回は全部オリエンタル）
+SUPABASE_BRAND = "oriental"
+
 # 店舗を回す間隔（秒）
 BETWEEN_STORES_SEC = float(os.environ.get("BETWEEN_STORES_SEC", "1.0"))
 
@@ -121,12 +124,17 @@ def insert_supabase_log(store_id: str, men: int, women: int) -> None:
     endpoint = SUPABASE_URL.rstrip("/") + "/rest/v1/logs"
 
     ts = datetime.now(timezone.utc).isoformat()
+    total = int(men) + int(women)
+
+    # ★ src_brand は NOT NULL 制約があるので必ず入れる
     row = {
         "store_id": store_id,
         "ts": ts,
         "men": int(men),
         "women": int(women),
-        "total": int(men) + int(women),
+        "total": total,
+        "src_brand": SUPABASE_BRAND,
+        # 他の列（weather_code / temp_c / precip_mm など）は NULL OK なので省略
     }
 
     headers = {
