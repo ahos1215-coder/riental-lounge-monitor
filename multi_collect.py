@@ -13,7 +13,9 @@ from bs4 import BeautifulSoup
 # ---------- 環境変数 ----------
 
 # GAS (Google Apps Script) 側
-GAS_URL = os.environ.get("GAS_URL")
+# Render では GAS_WEBHOOK_URL という名前で設定しているので、
+# まず GAS_URL を見て、なければ GAS_WEBHOOK_URL を使う。
+GAS_URL = os.environ.get("GAS_URL") or os.environ.get("GAS_WEBHOOK_URL")
 HAS_GAS = bool(GAS_URL)
 
 # Supabase 側（Render では Environment に設定済み）
@@ -86,8 +88,8 @@ STORES = [
 
 def post_to_gas(body: dict) -> None:
     """
-    GAS_URL に JSON POST する。429 のときは少し待ってリトライ。
-    環境変数 GAS_URL が未設定なら何もしない。
+    GAS_URL (または GAS_WEBHOOK_URL) に JSON POST する。429 のときは少し待ってリトライ。
+    環境変数が未設定なら何もしない。
     """
     if not HAS_GAS:
         return
