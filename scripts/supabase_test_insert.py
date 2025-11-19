@@ -1,28 +1,35 @@
-# scripts/supabase_test_insert.py
+from datetime import datetime, timezone
 import os
-import datetime as dt
 import requests
 
-SUPABASE_URL = os.environ["SUPABASE_URL"].rstrip("/")
-SERVICE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_SERVICE_ROLE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
 endpoint = f"{SUPABASE_URL}/rest/v1/logs"
 
-now_utc = dt.datetime.now(dt.timezone.utc)
+headers = {
+    "apikey": SUPABASE_SERVICE_ROLE_KEY,
+    "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+    "Content-Type": "application/json",
+    "Prefer": "return=representation",
+}
+
+now = datetime.now(timezone.utc)
 
 row = {
-    "store_id": "ol_nagasaki",      # テストなので長崎固定でOK
-    "ts": now_utc.isoformat(),
+    "store_id": "ol_nagasaki",
+    "ts": now.isoformat(),
+
     "men": 1,
     "women": 2,
     "total": 3,
-}
 
-headers = {
-    "apikey": SERVICE_KEY,
-    "Authorization": f"Bearer {SERVICE_KEY}",
-    "Content-Type": "application/json",
-    "Prefer": "return=representation",
+    # ★ NOT NULL のカラムをここで埋める
+    "src_brand": "oriental",
+    "src_store": "長崎店",
+    "src_url": "https://oriental-lounge.com/stores/38",
+    "src_version": "test-script",
+    # weather_code / temp / precip_mm などは NULL OK なら省略でよい
 }
 
 resp = requests.post(endpoint, json=row, headers=headers, timeout=10)
