@@ -19,20 +19,29 @@ ENABLE_GAS = os.environ.get("ENABLE_GAS", "0") == "1"
 
 # ---------- Supabase（環境変数の揺れ吸収版） ----------
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
+
+# ローカル .env：SUPABASE_SERVICE_KEY
+# Render     ：SUPABASE_SERVICE_ROLE_KEY
 SUPABASE_SERVICE_ROLE_KEY = (
     os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
     or os.environ.get("SUPABASE_SERVICE_KEY")
 )
+
 HAS_SUPABASE = bool(SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY)
 
+# デバッグ出力（問題解決したら消してOK）
 print(
     f"[supabase][debug] HAS_SUPABASE={HAS_SUPABASE} "
     f"url_set={bool(SUPABASE_URL)} key_set={bool(SUPABASE_SERVICE_ROLE_KEY)}"
 )
 
+# Supabase logs.src_brand に入れるブランド名
 SUPABASE_BRAND = "oriental"
 
-BETWEEN_STORES_SEC = float(os.environ.get("BETWEEN_STORES_SEC", "1.0"))
+# 店舗を回す間隔（秒）
+BETWEEN_STORES_SEC = float(os.environ.get("BETWEEN_STORES_SEC", "0.0"))
+
+# GAS への POST リトライ回数
 GAS_MAX_RETRY = int(os.environ.get("GAS_MAX_RETRY", "3"))
 
 # ---------- 全38店舗 ----------
@@ -80,7 +89,9 @@ STORES = [
 # ========= GAS への POST =========
 
 def post_to_gas(body: dict) -> None:
-    if not ENABLE_GAS or not HAS_GAS:
+    if not ENABLE_GAS:
+        return
+    if not HAS_GAS:
         return
 
     for attempt in range(1, GAS_MAX_RETRY + 1):
@@ -97,7 +108,8 @@ def post_to_gas(body: dict) -> None:
             print(f"[error] post_to_gas failed store={body.get('store')} err={e}")
             if attempt < GAS_MAX_RETRY:
                 time.sleep(2 * attempt)
-            return
+            else:
+                return
 
 # ========= Supabase への INSERT =========
 
@@ -131,64 +143,27 @@ def insert_supabase_log(store_id: str, men: int, women: int) -> None:
     except Exception as e:
         print(f"[supabase][error] store_id={store_id} err={e}")
 
-# ========= 新 HTML 対応のスクレイピング部 =========
+# ========= スクレイピング部 =========
 
-def _extract_from_new_section(soup: BeautifulSoup):
-    """
-    新構造：
-    <p class="customers-num num-male">2</p>
-    <p class="customers-num num-female">9</p>
-    """
-    male = None
-    female = None
+def _extract_count(soup: BeautifulSoup, patterns: list[str], selectors: list[str]) -> int | None:
+    """旧HTML向けのフォールバック用."""
+    text = soup.get_text(" ", strip=True)
 
-    male_el = soup.select_one("section.branch-num-customers-wrap p.customers-num.num-male")
-    female_el = soup.select_one("section.branch-num-customers-wrap p.customers-num.num-female")
+    # テキストパターン
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            return int(match.group(1))
 
-    if male_el:
-        m = re.search(r"\d+", male_el.get_text(strip=True))
-        if m:
-            male = int(m.group(0))
-
-    if female_el:
-        m = re.search(r"\d+", female_el.get_text(strip=True))
-        if m:
-            female = int(m.group(0))
-
-    return male, female
-
-
-def _fallback_extract(soup: BeautifulSoup):
-    """
-    ag 店舗など旧構造 fallback
-    """
-    patterns_men = [
-        r"GENTLEMEN[^\d]*(\d+)",
-        r"男性[^\d]*(\d+)",
-    ]
-    patterns_women = [
-        r"LADIES[^\d]*(\d+)",
-        r"女性[^\d]*(\d+)",
-    ]
-
-    txt = soup.get_text(" ", strip=True)
-
-    men = None
-    women = None
-
-    for pat in patterns_men:
-        m = re.search(pat, txt)
-        if m:
-            men = int(m.group(1))
-            break
-
-    for pat in patterns_women:
-        m = re.search(pat, txt)
-        if m:
-            women = int(m.group(1))
-            break
-
-    return men, women
+    # CSS セレクタ
+    for selector in selectors:
+        node = soup.select_one(selector)
+        if not node:
+            continue
+        match = re.search(r"\d+", node.get_text(strip=True).replace(",", ""))
+        if match:
+            return int(match.group())
+    return None
 
 
 def scrape_store(url: str) -> tuple[int | None, int | None]:
@@ -200,27 +175,63 @@ def scrape_store(url: str) -> tuple[int | None, int | None]:
         )
     }
 
-    resp = requests.get(url, headers=headers, timeout=15)
+    resp = requests.get(url, headers=headers, timeout=10)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "html.parser")
 
-    # 新構造を最優先
-    men, women = _extract_from_new_section(soup)
+    # 1. 新デザイン（現在の来客者数セクション）を最優先で読む
+    men_node = soup.select_one(
+        "section[aria-label='現在の来客者数'] .customers-num.num-male"
+    )
+    women_node = soup.select_one(
+        "section[aria-label='現在の来客者数'] .customers-num.num-female"
+    )
 
-    # ダメなら旧構造へ fallback
-    if men is None or women is None:
-        fm, fw = _fallback_extract(soup)
-        if men is None:
-            men = fm
-        if women is None:
-            women = fw
+    if men_node and women_node:
+        try:
+            men = int(re.search(r"\d+", men_node.get_text(strip=True)).group())
+            women = int(re.search(r"\d+", women_node.get_text(strip=True)).group())
+            print(f"[scrape] (new) url={url} men={men} women={women}")
+            return men, women
+        except Exception:
+            # 何かおかしくても下のフォールバックに回す
+            pass
 
-    print(f"[scrape] url={url} men={men} women={women}")
+    # 2. 旧デザイン or 予備パターン（今後の変更に備えて残しておく）
+    patterns_men = [
+        r"男性\s*(\d+)\s*名",
+        r"男性来店者数\s*(\d+)",
+        r"男性.*?(\d+)\s*名",
+    ]
+    selectors_men = [
+        ".store-people .male .count",
+        ".store__people .male .count",
+        ".male-count",
+        ".js-men-count",
+    ]
+
+    patterns_women = [
+        r"女性\s*(\d+)\s*名",
+        r"女性来店者数\s*(\d+)",
+        r"女性.*?(\d+)\s*名",
+    ]
+    selectors_women = [
+        ".store-people .female .count",
+        ".store__people .female .count",
+        ".female-count",
+        ".js-women-count",
+    ]
+
+    men = _extract_count(soup, patterns_men, selectors_men)
+    women = _extract_count(soup, patterns_women, selectors_women)
+
+    print(f"[scrape] (fallback) url={url} men={men} women={women}")
     return men, women
 
 # ========= 38店舗ぶんを一気に送る =========
 
 def collect_all_once() -> None:
+    print("collect_all_once.start")
     for entry in STORES:
         store_name = entry["store"]
         store_id = entry["store_id"]
@@ -237,10 +248,11 @@ def collect_all_once() -> None:
             continue
 
         # GAS（任意）
-        post_to_gas({"store": store_name, "men": men, "women": women})
+        body = {"store": store_name, "men": int(men), "women": int(women)}
+        post_to_gas(body)
 
         # Supabase
-        insert_supabase_log(store_id, men, women)
+        insert_supabase_log(store_id, int(men), int(women))
 
         time.sleep(BETWEEN_STORES_SEC)
 
