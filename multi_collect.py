@@ -3,7 +3,8 @@
 # GAS(doPost) と Supabase(logs) に投げるスクリプト
 #
 # 追加: Open-Meteo から天気を1回だけ取得して
-#      全店舗のレコードに weather_code / weather_label を付与する
+#      全店舗のレコードに
+#      weather_code / weather_label / temp_c / precip_mm を付与する
 
 import os
 import time
@@ -122,19 +123,22 @@ def _weather_code_to_label(code: int | None) -> str | None:
     return f"その他({code})"
 
 
-def fetch_current_weather() -> tuple[int | None, str | None]:
+def fetch_current_weather() -> tuple[int | None, str | None, float | None, float | None]:
     """
-    Open-Meteo から現在の weather_code を1回だけ取得。
-    失敗したら (None, None) を返す。
+    Open-Meteo から現在の
+      - weather_code
+      - temperature_2m (気温, ℃)
+      - precipitation (直近1時間の降水量, mm)
+    を1回だけ取得。失敗したら (None, None, None, None) を返す。
     """
     if not ENABLE_WEATHER:
-        return None, None
+        return None, None, None, None
 
     url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": WEATHER_LAT,
         "longitude": WEATHER_LON,
-        "current": "weather_code",
+        "current": "weather_code,temperature_2m,precipitation",
         "timezone": "Asia/Tokyo",
     }
 
@@ -142,17 +146,22 @@ def fetch_current_weather() -> tuple[int | None, str | None]:
         resp = requests.get(url, params=params, timeout=8)
         resp.raise_for_status()
         data = resp.json()
-        code = data.get("current", {}).get("weather_code")
-        if isinstance(code, int):
-            label = _weather_code_to_label(code)
-            print(f"[weather] code={code} label={label}")
-            return code, label
-        else:
-            print("[weather][warn] no weather_code in response")
-            return None, None
+        current = data.get("current", {})
+
+        code = current.get("weather_code")
+        temp_c = current.get("temperature_2m")
+        precip_mm = current.get("precipitation")
+
+        label = _weather_code_to_label(code) if isinstance(code, int) else None
+
+        print(
+            f"[weather] code={code} label={label} "
+            f"temp_c={temp_c} precip_mm={precip_mm}"
+        )
+        return code, label, temp_c, precip_mm
     except Exception as e:
         print(f"[weather][error] failed to fetch weather: {e}")
-        return None, None
+        return None, None, None, None
 
 # ========= GAS への POST =========
 
@@ -187,6 +196,8 @@ def insert_supabase_log(
     women: int,
     weather_code: int | None,
     weather_label: str | None,
+    temp_c: float | None,
+    precip_mm: float | None,
 ) -> None:
     if not HAS_SUPABASE:
         return
@@ -204,11 +215,15 @@ def insert_supabase_log(
         "src_brand": SUPABASE_BRAND,
     }
 
-    # logs テーブルに weather_code / weather_label カラムがある前提
+    # logs テーブルに weather / 気温 / 降水量 カラムがある前提
     if weather_code is not None:
         row["weather_code"] = weather_code
     if weather_label is not None:
         row["weather_label"] = weather_label
+    if temp_c is not None:
+        row["temp_c"] = float(temp_c)
+    if precip_mm is not None:
+        row["precip_mm"] = float(precip_mm)
 
     headers = {
         "apikey": SUPABASE_SERVICE_ROLE_KEY,
@@ -323,8 +338,10 @@ def collect_all_once() -> None:
     # 天気は 1 回だけ取得して全店舗に使い回す
     weather_code: int | None = None
     weather_label: str | None = None
+    temp_c: float | None = None
+    precip_mm: float | None = None
     if ENABLE_WEATHER:
-        weather_code, weather_label = fetch_current_weather()
+        weather_code, weather_label, temp_c, precip_mm = fetch_current_weather()
 
     for entry in STORES:
         store_name = entry["store"]
@@ -341,7 +358,7 @@ def collect_all_once() -> None:
             print(f"[warn] count missing store={store_name} men={men} women={women}")
             continue
 
-        # GAS（任意）
+        # GAS（任意） — 仕様を壊さないよう、今は天気コードだけ送る
         body = {
             "store": store_name,
             "men": int(men),
@@ -361,6 +378,8 @@ def collect_all_once() -> None:
             int(women),
             weather_code,
             weather_label,
+            temp_c,
+            precip_mm,
         )
 
         time.sleep(BETWEEN_STORES_SEC)
