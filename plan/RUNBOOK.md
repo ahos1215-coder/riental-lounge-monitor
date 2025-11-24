@@ -1,219 +1,493 @@
-# RUNBOOK — Oriental Lounge Monitor
+# めぐりび / MEGRIBI — RUNBOOK（運用手順書）
 
-最終更新: 2025-11-09  
-担当: ahos1215-coder  
-対象環境: Render (Starter) / Python 3.13 / Flask + Gunicorn / Google Apps Script 連携
+最終更新: 2025-11-22  
+対象ブランチ: `main`  
+対象コミット: `85fdee9` + 同 zip に含まれる未コミットファイル（`multi_collect.py`, `frontend/` など）  
+対象フォルダ: `riental-lounge-monitor-main/`
 
----
-
-## 1. 概要
-
-- 目的: オリエンタルラウンジ長崎の入店状況を収集・保存・可視化  
-- バックエンド: Flask アプリ（`wsgi:app` を Gunicorn で起動）  
-- データ保存: GAS 経由で Google スプレッドシート、ローカル運用ログは `data/log.jsonl`  
-- 収集トリガ: cron-job.org から 5 分間隔（19:00–翌05:00 JST）で `/tasks/collect`  
-- 可視化: テンプレート + Chart.js（ダッシュボード画面）  
-- 本番URL: `https://riental-lounge-monitor.onrender.com`
+この Runbook は、次の ChatGPT / 将来の自分が「今の構成と運用方法」を一発で思い出せるようにするためのドキュメントです。  
+詳細な設計方針は `ARCHITECTURE.md`、今後やることの優先順位は `ROADMAP.md` を参照してください。
 
 ---
 
-## 2. ディレクトリ構成（要点）
+## 0. プロジェクトの現在地（運用目線の要約）
 
-```
-oriental/
-  clients/      GAS 連携・HTTPクライアント
-  routes/       Flask Blueprints（/healthz, /api/*, /tasks/*）
-  schemas/      Pydantic v2 スキーマ
-  templates/    ダッシュボード（index.html）
-  utils/        log, storage, timeutil
-wsgi.py         Gunicorn エントリ
-app.py          ローカル実行用（開発）
-data/           data.json, log.jsonl（運用ログ）
-```
-
----
-
-## 3. 環境変数（Render: Environment → Edit）
-
-| KEY | VALUE（例） | 用途 |
-|---|---|---|
-| LOG_LEVEL | INFO | 構造化ログレベル |
-| TIMEZONE | Asia/Tokyo | 基準タイムゾーン |
-| WINDOW_START | 19 | グラフ窓（開始時刻、時） |
-| WINDOW_END | 5 | グラフ窓（終了時刻、時・翌日） |
-| HTTP_TIMEOUT_S | 12 | 外部HTTPタイムアウト |
-| HTTP_RETRY | 3 | 外部HTTPリトライ回数 |
-| MAX_RANGE_LIMIT | 50000 | `/api/range` の最大件数（アプリ内でクランプ） |
-| GS_WEBHOOK_URL | （GASのPOST URL） | `tasks/collect` 書き込み |
-| GS_READ_URL | （GASのGET URL） | `/api/range` 読み取り |
-
-> 機密は必ず環境変数で管理。リポジトリに置かない。
+- プロジェクト名: **めぐりび / MEGRIBI**  
+- 目的:
+  - 相席ラウンジ系店舗（現在はオリエンタルラウンジ全 38 店舗を想定）の  
+    「男女来店人数」と「近未来の混み具合」を見える化する
+  - 天気データも合わせて集め、将来の機械学習に使う
+- データパイプライン（2025-11-22 時点の運用前提）
+  - 収集は **Supabase ログテーブルを主軸** とした多店舗収集スクリプト `multi_collect.py` を中心に設計
+  - `/tasks/collect` エンドポイントから 38 店舗を一括スクレイピング → Supabase `logs` テーブルへ upsert
+  - 旧 Google スプレッドシート / GAS パイプラインのコードは「互換性維持のために残してあるが、当面は使わない」方針
+- 表示:
+  - フロントエンドは Next.js 16（`frontend/`）で構築中
+  - ローカル開発でダッシュボードを確認可能
+  - 将来は「近くのお店（バー・カラオケ・ダーツ・ラーメンなど）」「Web プッシュ通知（PWA）」も組み込む予定
+- 本番運用:
+  - バックエンドは Render（Python / Flask）にデプロイ済み
+  - 定期収集は cron-job.org から Render の `/tasks/collect`（もしくは `/tasks/tick` の旧ルート）を叩く構成を想定
+  - 現時点では「Supabase 38 店舗収集の試験運用中」で、完全本番切り替えは ROADMAP に沿って行う
 
 ---
 
-## 4. デプロイ運用
+## 1. 環境と主要 URL 一覧
 
-### 4.1 自動デプロイ
-- Render → Settings → **Auto Deploy: Yes**（main へ push で自動反映）
+### 1.1 バックエンド（Flask）
 
-### 4.2 手動デプロイ
-- 画面右上 **Manual Deploy → Deploy latest commit**
+- ローカル開発
+  - ベース URL: `http://127.0.0.1:8000`
+  - ヘルスチェック: `http://127.0.0.1:8000/healthz`
+  - データ取得例:  
+    - `GET /api/range?limit=120`  
+    - `GET /api/range?from=2025-11-01&to=2025-11-02&limit=50000`
+- Render（本番 / ステージング）
+  - 例: `https://riental-lounge-monitor.onrender.com`  
+    ※現時点でサービス名は旧名のまま。将来 `meguribi.com` の独自ドメインをかぶせる想定。
+  - 代表エンドポイント
+    - `GET /healthz`
+    - `GET /api/range`
+    - `POST /tasks/collect`（新: 多店舗 Supabase 収集）
+    - `POST /tasks/collect_single`（旧: 長崎店のみ・GAS 経由、当面非推奨）
 
-### 4.3 ロールバック
-- Render → Events → 対象デプロイ → **Rollback**
+### 1.2 フロントエンド（Next.js 16）
+
+- ローカル開発
+  - デフォルト URL: `http://localhost:3000`
+  - `app/page.tsx` … トップのダッシュボード
+  - 近くのお店カード / 予測プレビュー / フィードバックボタンなどを実装中
+- 本番デプロイ
+  - まだ「本番向けの Vercel / Render Frontend」は未決定
+  - 現状はローカル確認のみ  
+  - 将来、独自ドメイン `meguribi.com` 配下に Next.js をデプロイする想定
+
+### 1.3 データストア
+
+- Supabase
+  - プロジェクト名: `meguribi`（仮。実際の名称は Supabase コンソールで確認）
+  - 主要テーブル（現行想定）
+    - `logs`
+      - `id` … PK（UUID / bigint）  
+      - `store_id` … 店舗 ID（`stores.json` の ID と対応）  
+      - `brand` … `'oriental_lounge'` など  
+      - `ts` … 計測時刻（UTC or JST + offset）  
+      - `men`, `women`, `total` … 来店人数  
+      - `weather_code`, `temperature`, `precip_mm`, `wind_speed` … 天気関連  
+      - `source` … `'scraper_v1'` などのバージョンタグ
+    - `stores`
+      - `id` … 店舗 ID  
+      - `brand` … ブランド名（oriental / jis / aisekiya など将来用）  
+      - `name`, `area`, `lat`, `lon`, `url` など
+- ローカル JSON（開発・学習用）
+  - `data/log.jsonl` … 旧ロギング（1 行 1 レコードの JSON Lines）
+  - `data/data.json` … 集約済みデータ（単店舗）
+  - `data/data_10m.json` … 学習用に 10 分刻みに整形した JSON
+
+### 1.4 レガシー（当面は使わないが残っているもの）
+
+- Google スプレッドシート / GAS
+  - 旧構成では Render → GAS → スプレッドシート → Supabase という経路
+  - 現在の方針: **Supabase 直接書き込みがメイン**  
+    GAS / スプレッドは「将来バックアップ用途で復活させるかも」という位置づけ
 
 ---
 
-## 5. ローカル開発
+## 2. ローカル開発の基本フロー
 
-```powershell
-# 事前: Python 3.13 / VSCode
+### 2.1 Python バックエンドの起動
+
+1. ルートディレクトリへ移動
+
+   ```powershell
+   cd "C:\Users\<YOU>\Desktop\All Python project\ORIENTAL\riental-lounge-monitor-main"
+仮想環境を作成・有効化（初回のみ）
+
+powershell
+コードをコピーする
 python -m venv .venv
-.venv\Scripts\activate
+.\.venv\Scripts\activate
+依存パッケージをインストール
+
+powershell
+コードをコピーする
+pip install --upgrade pip
 pip install -r requirements.txt
+.env を作成
 
-# 構文チェック
-python -m compileall .
+plan/ENV.md を見ながら、最低限以下を設定（ローカル開発用）
 
-# 実行
+env
+コードをコピーする
+# 基本
+FLASK_ENV=development
+DEBUG=1
+BASE_URL=http://127.0.0.1:8000
+TARGET_URL=https://oriental-lounge.com/nagasaki
+STORE_NAME=長崎店
+TIMEZONE=Asia/Tokyo
+
+# ログ保存先
+DATA_DIR=./data
+
+# Open-Meteo（ローカル開発で天気を触る場合）
+WEATHER_BASE_URL=https://api.open-meteo.com/v1/forecast
+
+# Supabase（多店舗収集を試すときに設定）
+SUPABASE_URL=<あなたの Supabase URL>
+SUPABASE_SERVICE_ROLE_KEY=<Service Role Key>
+※値の詳細は ENV.md を参照。Supabase 関連は試験中のため、まだ空でも動くようになっている箇所もある。
+
+バックエンド起動
+
+powershell
+コードをコピーする
+.\.venv\Scripts\activate
 python app.py
-# http://127.0.0.1:5000
-```
+動作確認
 
----
+powershell
+コードをコピーする
+curl.exe -s http://127.0.0.1:8000/healthz | python -m json.tool
+curl.exe -s "http://127.0.0.1:8000/api/range?limit=120" | python -m json.tool
+正常なら {"ok": true, ...} が返る。
 
-## 6. スモークテスト（本番URLで）
+2.2 Next.js フロントエンドの起動
+フロントエンドディレクトリへ移動
 
-```powershell
-# 1) ヘルス
-curl.exe -s https://riental-lounge-monitor.onrender.com/healthz | python -m json.tool
+powershell
+コードをコピーする
+cd frontend
+依存インストール（初回のみ）
 
-# 2) 範囲取得（limit=120000 と指定しても内部で MAX_RANGE_LIMIT (=50000) にクランプ）
-curl.exe -s "https://riental-lounge-monitor.onrender.com/api/range?from=2024-11-01&to=2024-11-02&limit=120000" | python -m json.tool
-# 期待: HTTP 200 / JSON、Render Logs に
-#  api_range.success ... limit=50000
+powershell
+コードをコピーする
+npm install
+開発サーバー起動
 
-# 3) ダミーAPI（常に200/ok）
-curl.exe -s "https://riental-lounge-monitor.onrender.com/api/meta?store=nagasaki" | python -m json.tool
-curl.exe -s "https://riental-lounge-monitor.onrender.com/api/heatmap?weeks=8&store=nagasaki" | python -m json.tool
-curl.exe -s "https://riental-lounge-monitor.onrender.com/api/stores/list" | python -m json.tool
-curl.exe -s "https://riental-lounge-monitor.onrender.com/api/forecast_today?weeks=6&store=nagasaki" | python -m json.tool
-curl.exe -s "https://riental-lounge-monitor.onrender.com/api/range_prevweek?from=2024-11-01&to=2024-11-02&limit=50000&store=nagasaki" | python -m json.tool
-curl.exe -s "https://riental-lounge-monitor.onrender.com/api/summary?store=nagasaki" | python -m json.tool
-```
+powershell
+コードをコピーする
+npm run dev
+ブラウザで http://localhost:3000 を開く
 
----
+近くのお店カード
 
-## 7. 定常運用（ジョブ）
+19:00〜05:00 の実績グラフ / 予測プレビュー
 
-### 7.1 収集（cron-job.org）
-- 名称: `collect_5min`  
-- Method: `POST`  
-- URL: `https://riental-lounge-monitor.onrender.com/tasks/collect`  
-- Headers: `Content-Type: application/json`  
-- Body（例: テスト時）
-  ```json
-  {"store":"長崎店","men":12,"women":8,"ts":"{{ISOUTC}}"}
-  ```
-- Interval: 5分  
-- Active window: 19:00–翌05:00 JST
+「お持ち帰りできた」「クソの役にも立たなかった」などのフィードバックボタン（将来実装）
+を確認・改修していく。
 
-### 7.2 ヘルス
-- 名称: `health_15min`  
-- Method: `GET`  
-- URL: `https://riental-lounge-monitor.onrender.com/healthz`  
-- Interval: 15分
+3. 多店舗データ収集（Supabase 版）の運用
+3.1 処理の流れ（概念）
+/tasks/collect へリクエスト（cron-job.org から 5 分おきなど）
 
----
+oriental.routes.tasks.tasks_collect_all が呼ばれる
 
-## 8. 監視
+内部で multi_collect.collect_all_once() を実行
 
-- Render → **Logs**  
-  - 期待ログ: `api_range.start` → `api_range.success ... limit=50000`  
-- Render → **Metrics**（レスポンス/エラー傾向）  
-- ダッシュボードUI（トップ画面）が描画できること
+multi_collect.py が stores_config（38 店舗の設定）を順番に処理
 
----
+店舗ごとに公式サイトをスクレイピングし、男女人数を取得
 
-## 9. 変更管理
+Open-Meteo API から天気情報を取得
 
-- ブランチ: `feat/*`, `fix/*` → PR → main  
-- 事前チェック: `python -m compileall .`  
-- タグ付け（任意）: `git tag vX.Y.Z && git push --tags`  
-- README / RUNBOOK / CODEx_PROMPTS は更新差分に含める
+Supabase logs テーブルへ upsert（バルクでまとめて送信）
 
----
+レスポンスとして、収集結果の概要（件数やエラー数など）を JSON で返す
 
-## 10. トラブルシュート
+3.2 必要な環境変数（Supabase 収集用）
+詳細は ENV.md に譲るが、最低限以下が必要:
 
-| 症状 | 見る場所 | 即応 |
-|---|---|---|
-| `/api/range` が遅い/タイムアウト | Render Logs / Metrics | `MAX_RANGE_LIMIT` を `10000` に一時変更して保存（再起動）、再実行 |
-| `rows: []` が続く | GAS スプレッドシート / `GS_READ_URL` | シートに行が増えているか確認。日付フォーマット不一致に注意 |
-| 502/5xx | Render Logs | 直近デプロイを Rollback。エラースタックを確認 |
-| collect が 4xx | Logs（`tasks/collect`） | `GS_WEBHOOK_URL` を再設定。Body のキー名/型を確認 |
-| デプロイ後に不安定 | Events → Rollback | 直前の安定コミットに戻す。Auto Deploy を一時 OFF |
+env
+コードをコピーする
+SUPABASE_URL=https://xxxxx.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=xxxxx   # Service Role Key を使う（書き込み権限あり）
 
----
+# 収集間隔・チューニング用（すべて multi_collect.py 側で参照）
+BETWEEN_STORES_SEC=3              # 店舗ごとのインターバル（秒）
+BULK_UPSERT_CHUNK_SIZE=50         # Supabase へ送る一括件数
+OPEN_METEO_BASE_URL=https://api.open-meteo.com/v1/forecast
+※値を変えたら、必ず小規模テスト（2〜3 店舗だけ）でエラーやレートリミットを確認する。
 
-## 11. バックアップ / リストア
+3.3 手動で 1 回だけ実行する場合（ローカル）
+powershell
+コードをコピーする
+# バックエンドが起動している前提
+curl.exe -s -X POST "http://127.0.0.1:8000/tasks/collect" | python -m json.tool
+レスポンス例:
 
-- ログ: `data/log.jsonl` を週次で取得し保存（秘匿情報なし）  
-- スプレッドシート: GAS 側で別シートへ定期コピー（フォーマット維持）
+json
+コードをコピーする
+{
+  "ok": true,
+  "stores_processed": 38,
+  "inserted": 38,
+  "errors": []
+}
+エラーがあれば errors 配列に店舗名とメッセージが入る。
+その場合は、対象店舗の公式サイトの HTML 構造が変わっていないか確認する。
 
----
+3.4 旧パイプライン（単店舗 + GAS）の扱い
+/tasks/collect_single /tasks/multi_collect_legacy /tasks/tick など
+→ 旧構成との互換性のために残してあるが、基本は 使わない。
 
-## 12. 既存エンドポイント仕様（抜粋）
+将来的に Google スプレッドシートをバックアップ用途で使う場合だけ
 
-- `GET /healthz` … 200 / 状態サマリ  
-- `GET /api/current` … ダッシュボードの現況  
-- `GET /api/range?from=YYYY-MM-DD&to=YYYY-MM-DD&limit=N`  
-  - `limit` は `MAX_RANGE_LIMIT` を上限に**クランプ**  
-  - 正常時 200 / `{ ok, rows: [...] }`  
-- `POST /tasks/collect` … GAS へ append  
-- ダミーAPI（常に 200 / ok）  
-  - `/api/meta`, `/api/heatmap`, `/api/stores/list`, `/api/forecast_today`, `/api/range_prevweek`, `/api/summary`
+GAS Webhook URL を復活
 
----
+GS_WEBHOOK_URL, GS_READ_URL などの環境変数を設定
 
-## 13. 品質ゲート（受け入れ基準）
+tasks.py 内の「legacy」ルートを順番に見直す
 
-- `python -m compileall .` がエラー無し  
-- 本番 `/healthz` が 200  
-- `/api/range` へ `limit=120000` 指定時、ログに `limit=50000` と記録（クランプ）  
-- ダミー6 API は 200 かつ 404 を出さない  
-- ダッシュボードが表示・グラフが描画
+4. cron-job.org / Render を使った本番収集
+4.1 推奨構成（Supabase 多店舗版）
+Render 側で Flask アプリをデプロイ
 
----
+app.py がエントリポイント
 
-## 14. 定期メンテ提案
+環境変数は ENV.md の「本番相当」セットを参照して設定
 
-- 月1回: 依存パッケージ更新 → スモーク → デプロイ  
-- 月1回: `CODEx_PROMPTS.md` で「堅牢化プロンプト」を回し、差分適用  
-- 四半期: GAS 側の応答時間・スプレッドシート肥大を点検（アーカイブ方針）
+SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY は必須
 
----
+cron-job.org でジョブを作成
 
-## 15. 付録：よく使うコマンド
+URL: https://riental-lounge-monitor.onrender.com/tasks/collect
 
-```powershell
-# ローカル
-python -m compileall .
-python app.py
+メソッド: POST
 
-# 本番スモーク
-curl.exe -s https://riental-lounge-monitor.onrender.com/healthz | python -m json.tool
-curl.exe -s "https://riental-lounge-monitor.onrender.com/api/range?from=2024-11-01&to=2024-11-02&limit=120000" | python -m json.tool
+実行間隔: 5 分おき（将来、実データを見ながら調整）
 
-# Git
-git add .
-git commit -m "update: <message>"
+タイムゾーン: Asia/Tokyo
+
+動作確認
+
+ジョブを 1 回「手動実行」してステータス 200 を確認
+
+Supabase の logs テーブルを確認し、直近の ts が現在時刻付近になっていることを確認
+
+4.2 停止・一時停止の方法
+一時的に止めたい場合
+
+一番安全なのは「cron-job.org のジョブを一時停止」
+
+完全に止める／Render 側から止めたい場合
+
+Render ダッシュボード → 該当サービス → Suspend
+
+もしくは COLLECT_ENABLED=0 のようなフラグを環境変数で導入（今後の改善余地）
+
+5. 予測モデル（XGBoost）の運用
+※このあたりはまだ「ローカルでの試験運用」段階。
+精度を本気で上げるのは 3 か月後以降でよく、「手間を増やさずに土台だけ用意しておく」方針。
+
+5.1 ローカルでの学習フロー
+ログ整形（必要に応じて）
+
+基本は data/data_10m.json をそのまま使う
+
+新しく Supabase からエクスポートしたい場合は、別途スクリプトで
+logs テーブル → 10 分刻み JSON に変換する
+
+学習スクリプトの実行
+
+powershell
+コードをコピーする
+.\.venv\Scripts\activate
+python scripts/train_local.py ^
+  --input data/data_10m.json ^
+  --tz Asia/Tokyo ^
+  --out artifacts/nagasaki ^
+  --freq_min 10
+--freq_min は 10 or 15
+
+10 分: 精度は上げやすいが、データ量が増える
+
+15 分: データ量が減って軽くなるが、時間解像度は落ちる
+
+今の方針: 「手間を増やさない」ので、まずは 10 分で統一し、後で必要なら 15 分版も作る。
+
+学習結果
+
+artifacts/nagasaki/ 配下にモデルファイルとメタ情報が出力される
+
+将来的に LightGBM へ移行する場合も、このディレクトリ構造はなるべく維持する
+
+5.2 予測 API の有効化（ローカル）
+.env に以下を追加
+
+env
+コードをコピーする
+ENABLE_FORECAST=1
+FORECAST_MODEL_DIR=./artifacts/nagasaki
+FORECAST_FREQ_MIN=10
+NIGHT_START_H=19
+NIGHT_END_H=5
+バックエンドを再起動
+
+動作確認
+
+powershell
+コードをコピーする
+curl.exe -s "http://127.0.0.1:8000/api/forecast/preview" | python -m json.tool
+※エンドポイント名は API_CONTRACT.md で最終決定されたものに合わせること。
+ここでは仮に /api/forecast/preview と表記している。
+
+6. トラブルシューティング（よくある詰まりポイント）
+6.1 「データが増えていない / グラフが真っ白」
+Supabase の logs テーブルを確認
+
+今日の日付のレコードがあるか
+
+store_id や ts が正しく入っているか
+
+/tasks/collect のレスポンスを直接確認
+
+powershell
+コードをコピーする
+curl.exe -s -X POST "https://riental-lounge-monitor.onrender.com/tasks/collect" | python -m json.tool
+ok: false や errors に何か入っていれば、そのメッセージに従って調査
+
+Render のログを確認
+
+HTTP タイムアウト / Supabase への接続エラーが出ていないか
+
+Next.js の API 呼び出し確認
+
+frontend/ 内の fetch 先 URL が、最新のバックエンド URL と一致しているか
+
+CORS エラーが出ていないか（ブラウザの DevTools → Network タブ）
+
+6.2 「Open-Meteo で 403 / 429 が出る」
+BETWEEN_STORES_SEC を小さくしすぎていると、レートリミットにかかる可能性あり
+
+対処:
+
+まず 3 秒以上に設定し直す
+
+それでもだめなら、一時的に天気取得を OFF にするオプションを multi_collect.py に追加する（将来の改善）
+
+6.3 「Supabase 側でエラー」
+よくある原因
+
+Service Role Key ではなく anon key を使っている
+
+テーブル名やカラム名のスペルミス
+
+ts のタイムゾーンが不整合で unique 制約に引っかかる
+
+対処
+
+Supabase コンソール → logs テーブル → 「Insert」クエリの履歴 / エラーを確認
+
+必要なら multi_collect.py の payload 生成部分を一度 print して中身を確認
+
+7. 今後の UI / 通知機能の運用メモ（まだ実装前）
+ここは「運用時に気を付けたいこと」を先にメモだけしておくセクション。
+実装が進んだら、具体的な手順に差し替える。
+
+7.1 二次会候補のお店表示
+目的:
+
+めぐりびで「今どの店が良さそうか」を見たあと
+→ その近くで行けるカラオケ・ダーツ・ラーメン・ホテルなどを一覧で出す
+
+想定データソース:
+
+Google Places API / Hotpepper / ぐるなび など
+
+運用時のポイント:
+
+外部 API の無料枠を超えないようにキャッシュ層（Supabase nearby_places テーブルなど）を用意する
+
+API キーは .env / Render の環境変数で管理し、Git には絶対に入れない
+
+7.2 Web プッシュ通知（PWA）での「擬似 LINE 通知」
+目的:
+
+LINE Messaging API は月額コストがかかるため、
+iPhone / Android の「ホーム画面に追加」＋ Web プッシュ通知で代替したい
+
+方針メモ:
+
+Next.js 側で PWA 化（manifest.json, service worker）
+
+Web Push 用の VAPID キーを生成し、サーバー側（Flask or Next.js API）から送信
+
+「毎朝の混雑予報」「今から 1 時間の混み具合」などを通知内容として検討
+
+運用上の注意:
+
+通知の送りすぎは即アンインストールにつながるので、
+「1 日 1 通まで」「ユーザー側で頻度を選べる」などの制御が必要
+
+実際の送信バッチ（cron）や失敗時のリトライは、この Runbook に追記する
+
+8. 既存エンドポイント仕様（現行版サマリ）
+詳細は API_CONTRACT.md に任せるが、運用上よく使うものだけ抜粋しておく。
+
+GET /healthz
+
+サーバーの簡易ヘルスチェック
+
+GET /api/range
+
+クエリ: from, to, limit（いずれも任意）
+
+返却: 時系列の来店人数データ（men / women / total）
+
+GET /api/current
+
+各店舗の「いま」の人数スナップショット
+
+GET /api/forecast/preview（名称は後で確定）
+
+今日の夜〜明け方までの簡易予測（ダッシュボード上部のプレビュー用）
+
+POST /tasks/collect
+
+多店舗データ収集（Supabase へ upsert）
+
+POST /tasks/collect_single（legacy）
+
+長崎店のみを対象にした旧収集処理
+
+9. バックアップ / リストア方針（暫定）
+Supabase
+
+管理画面の「Backups」機能を ON（プランに応じて設定）
+
+週 1 回程度、logs テーブルを CSV / Parquet でエクスポートしてローカルに保存
+
+ローカル JSON
+
+data/log.jsonl / data/data_10m.json を Git 管理はしない（サイズ肥大化を防ぐ）
+
+必要なら backups/ ディレクトリを作り、日付付きでコピーしておく
+
+Google スプレッドシート（将来再利用する場合）
+
+GAS 側で「バックアップ用シート」に定期コピーするようなスクリプトを別途用意
+
+10. Git / 開発の進め方（簡易）
+変更前に必ず git status で現状を確認
+
+小さい単位で commit を刻む
+
+plan/*.md（ドキュメント）を更新したら、必ずコミットメッセージに [docs] などを入れて分かりやすくする
+
+bash
+コードをコピーする
+git status
+
+git add plan/RUNBOOK.md
+git commit -m "[docs] update runbook for Supabase multi-store"
 git push
-```
+11. ChatGPT / AI を使うときのコツ
+まず ONBOARDING.md → ARCHITECTURE.md → この RUNBOOK.md の順で要点を読ませる
 
----
+「いまどのフェーズか」を毎回最初に伝える
 
-## 16. プロンプト運用（合わせ技）
+例: 「今は Supabase 多店舗収集のテスト中で、Next.js の UI にはまだ反映していない」
 
-- 定例の堅牢化: `CODEx_PROMPTS.md` の「1) 堅牢化プロンプト」→「3) 受け入れ基準」で回す  
-- 変更が大きい/迷う場合は、都度この Runbook と併用して AI に相談し、差分を最小に
+大きなリファクタや設計変更は、必ず ROADMAP.md にメモしてからやってもらう
+→ 後続の ChatGPT / 自分が迷子にならないようにする
