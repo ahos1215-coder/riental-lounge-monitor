@@ -1,12 +1,13 @@
 ﻿from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time, timezone
 
 from flask import Blueprint, Response, current_app, jsonify, render_template, request
 
 from ..clients.gas_client import GasClientError
 from ..config import AppConfig
+from ..data.provider import SupabaseError, SupabaseLogsProvider
 from ..utils import storage, timeutil
 from ..utils.log import format_payload
 
@@ -60,6 +61,49 @@ def api_range():
         )
         return jsonify({"ok": False, "error": "invalid-parameters", "detail": str(exc)}), 422
 
+    backend = (cfg.data_backend or "legacy").lower()
+    store_id = _resolve_store_id(cfg)
+
+    if backend == "supabase":
+        provider = _supabase_provider(cfg)
+        if provider is None:
+            logger.warning(
+                "api_range.supabase_missing_config fallback=legacy store_id=%s window=%s..%s",
+                store_id,
+                query.start,
+                query.end,
+            )
+        else:
+            start_utc, end_utc = _range_bounds_to_utc(query, cfg.timezone)
+            try:
+                supabase_rows = provider.fetch_range(
+                    store_id=store_id,
+                    start_ts=start_utc,
+                    end_ts=end_utc,
+                    limit=query.limit,
+                )
+            except SupabaseError as exc:
+                logger.error(
+                    "api_range.supabase_error detail=%s store_id=%s window=%s..%s",
+                    exc,
+                    store_id,
+                    query.start,
+                    query.end,
+                )
+                return jsonify({"ok": False, "error": "upstream-supabase", "detail": str(exc)}), 502
+
+            deduped = _deduplicate_by_ts(supabase_rows)
+            limited = deduped[-query.limit:]
+            logger.info(
+                "api_range.success backend=supabase store_id=%s window=%s..%s returned=%d limit=%d",
+                store_id,
+                query.start,
+                query.end,
+                len(limited),
+                query.limit,
+            )
+            return jsonify({"ok": True, "rows": limited})
+
     rows = list(storage.rows_in_range(cfg, start=query.start, end=query.end))
     local_count = len(rows)
 
@@ -83,7 +127,7 @@ def api_range():
     limited = deduped[-query.limit:]
 
     logger.info(
-        "api_range.success window=%s..%s local=%d remote=%d returned=%d limit=%d",
+        "api_range.success backend=legacy window=%s..%s local=%d remote=%d returned=%d limit=%d",
         query.start,
         query.end,
         local_count,
@@ -96,7 +140,8 @@ def api_range():
 
 @bp.get("/api/meta")
 def api_meta():
-    return jsonify({"ok": True, "data": {}})
+    cfg = _config()
+    return jsonify({"ok": True, "data": cfg.summary()})
 
 
 @bp.get("/api/heatmap")
@@ -176,3 +221,28 @@ def _deduplicate_by_ts(rows: list[dict]) -> list[dict]:
         uniq.append(rec)
 
     return uniq
+
+
+def _supabase_provider(cfg: AppConfig) -> SupabaseLogsProvider | None:
+    if not (cfg.supabase_url and cfg.supabase_service_role_key):
+        return None
+    if "SUPABASE_PROVIDER" not in current_app.config:
+        current_app.config["SUPABASE_PROVIDER"] = SupabaseLogsProvider(
+            base_url=cfg.supabase_url,
+            api_key=cfg.supabase_service_role_key,
+            session=current_app.config.get("HTTP_SESSION"),
+            logger=current_app.logger,
+        )
+    return current_app.config["SUPABASE_PROVIDER"]
+
+
+def _range_bounds_to_utc(query: RangeQuery, tz_name: str) -> tuple[datetime, datetime]:
+    tz = timeutil.get_timezone(tz_name)
+    start_dt = datetime.combine(query.start, time.min, tzinfo=tz)
+    end_dt = datetime.combine(query.end, time.max, tzinfo=tz)
+    return start_dt.astimezone(timezone.utc), end_dt.astimezone(timezone.utc)
+
+
+def _resolve_store_id(cfg: AppConfig) -> str:
+    store_arg = (request.args.get("store_id") or request.args.get("store") or "").strip()
+    return store_arg or cfg.store_id
