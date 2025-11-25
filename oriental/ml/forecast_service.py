@@ -1,11 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Callable, Dict
 
 import numpy as np
 import pandas as pd
 
-from ..data.provider import GoogleSheetProvider
+from ..data.provider import GoogleSheetProvider, SupabaseError, SupabaseLogsProvider
 from .model_xgb import ForecastModel
 from .preprocess import FEATURE_COLUMNS, add_time_features, prepare_dataframe
 
@@ -13,19 +13,55 @@ FutureBuilder = Callable[[pd.DataFrame], pd.DatetimeIndex]
 
 
 class ForecastService:
-    """Facade that orchestrates provider → preprocessing → prediction pipelines."""
+    """Facade that orchestrates provider -> preprocessing -> prediction pipelines."""
 
-    def __init__(self, provider: GoogleSheetProvider, timezone: str):
+    def __init__(
+        self,
+        provider,
+        timezone: str,
+        *,
+        history_days: int = 7,
+        history_limit: int | None = None,
+        fallback_provider=None,
+        backend: str = "legacy",
+    ):
         self.provider = provider
         self.timezone = timezone
         self.tz = timezone
         self.logger = provider.logger
+        self.history_days = history_days
+        self.history_limit = history_limit
+        self.fallback_provider = fallback_provider
+        self.backend = backend
 
     @classmethod
     def from_app(cls, app):
         cfg = app.config["APP_CONFIG"]
-        provider = GoogleSheetProvider(cfg.gs_read_url, cfg.data_file, logger=app.logger)
-        return cls(provider=provider, timezone=cfg.timezone)
+        legacy_provider = GoogleSheetProvider(cfg.gs_read_url, cfg.data_file, logger=app.logger)
+
+        backend = (cfg.data_backend or "legacy").lower()
+        provider = legacy_provider
+        fallback_provider = None
+
+        if backend == "supabase" and cfg.supabase_url and cfg.supabase_service_role_key:
+            provider = SupabaseLogsProvider(
+                base_url=cfg.supabase_url,
+                api_key=cfg.supabase_service_role_key,
+                session=None,  # use clean session to avoid accidental non-ASCII headers
+                logger=app.logger,
+            )
+            fallback_provider = legacy_provider
+
+        history_limit = min(cfg.max_range_limit, 2000)
+
+        return cls(
+            provider=provider,
+            timezone=cfg.timezone,
+            history_days=7,
+            history_limit=history_limit,
+            fallback_provider=fallback_provider,
+            backend=backend,
+        )
 
     def forecast_next_hour(self, store_id: str, freq_min: int) -> dict:
         """Return predictions for the next hour at freq_min cadence."""
@@ -38,7 +74,7 @@ class ForecastService:
         return self._forecast_generic(store_id, freq_min, builder)
 
     def forecast_today(self, store_id: str, freq_min: int, *, start_h: int = 19, end_h: int = 5) -> dict:
-        """Return 19:00-翌05:00 slots for the specified store."""
+        """Return 19:00-05:00 slots for the specified store."""
 
         def builder(_history: pd.DataFrame) -> pd.DatetimeIndex:
             now = pd.Timestamp.now(tz=self.tz)
@@ -63,7 +99,7 @@ class ForecastService:
         extra_meta: Dict[str, int] | None = None,
     ) -> dict:
         try:
-            records = self.provider.get_records(store_id)
+            records = self._fetch_history(store_id)
             df = prepare_dataframe(records, self.timezone)
             self.logger.info("forecast.service.history size=%d", len(df))
 
@@ -80,12 +116,27 @@ class ForecastService:
             if extra_meta:
                 result.update(extra_meta)
             return result
+        except SupabaseError as exc:
+            self.logger.error("forecast.service.supabase_error store=%s", store_id, exc_info=exc)
+            result = {"ok": False, "error": "supabase_error", "detail": str(exc), "store": store_id, "freq_min": freq_min, "data": []}
+            if extra_meta:
+                result.update(extra_meta)
+            return result
         except Exception as exc:  # noqa: BLE001
             self.logger.error("forecast.service.error store=%s", store_id, exc_info=exc)
             result = {"ok": True, "store": store_id, "freq_min": freq_min, "data": []}
             if extra_meta:
                 result.update(extra_meta)
             return result
+
+    def _fetch_history(self, store_id: str) -> list[dict]:
+        try:
+            return self.provider.get_records(store_id, days=self.history_days, limit=self.history_limit)
+        except SupabaseError:
+            if self.backend == "supabase" and self.fallback_provider:
+                self.logger.warning("forecast.service.supabase_fallback store=%s", store_id)
+                return self.fallback_provider.get_records(store_id)
+            raise
 
     def _predict_with_history(self, history: pd.DataFrame, future_times: pd.DatetimeIndex) -> list[dict]:
         model = ForecastModel()

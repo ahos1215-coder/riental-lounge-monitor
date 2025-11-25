@@ -2,6 +2,8 @@
 
 import os
 from flask import Blueprint, current_app, jsonify, request
+
+from ..config import AppConfig
 from ..ml.forecast_service import ForecastService
 
 bp = Blueprint("forecast", __name__, url_prefix="/api")
@@ -17,6 +19,15 @@ def _guard():
     if os.getenv("ENABLE_FORECAST", "0") != "1":
         return jsonify({"ok": False, "error": "forecast-disabled"}), 503
     return None
+
+
+def _config() -> AppConfig:
+    return current_app.config["APP_CONFIG"]
+
+
+def _resolve_store_id(cfg: AppConfig) -> str:
+    store_arg = (request.args.get("store_id") or request.args.get("store") or "").strip()
+    return store_arg or cfg.store_id
 
 
 def _normalize_points(result: dict) -> list[dict]:
@@ -58,11 +69,15 @@ def forecast_next_hour():
     if guard:
         return guard
 
-    store = request.args.get("store", "nagasaki")
+    cfg = _config()
+    store = _resolve_store_id(cfg)
     freq = max(1, int(os.getenv("FORECAST_FREQ_MIN", "15")))
 
     current_app.logger.info("api_forecast.start store=%s horizon=next_hour", store)
     raw = _service().forecast_next_hour(store_id=store, freq_min=freq)
+    if not raw.get("ok", True):
+        current_app.logger.warning("api_forecast.error store=%s detail=%s", store, raw.get("detail"))
+        return jsonify(raw)
     points = _normalize_points(raw)
     current_app.logger.info(
         "api_forecast.success store=%s points=%d", store, len(points)
@@ -78,7 +93,8 @@ def forecast_today():
     if guard:
         return guard
 
-    store = request.args.get("store", "nagasaki")
+    cfg = _config()
+    store = _resolve_store_id(cfg)
     freq = max(1, int(os.getenv("FORECAST_FREQ_MIN", "15")))
 
     start_h = int(os.getenv("NIGHT_START_H", "19"))
@@ -88,6 +104,9 @@ def forecast_today():
     raw = _service().forecast_today(
         store_id=store, freq_min=freq, start_h=start_h, end_h=end_h
     )
+    if not raw.get("ok", True):
+        current_app.logger.warning("api_forecast.error store=%s detail=%s", store, raw.get("detail"))
+        return jsonify(raw)
     points = _normalize_points(raw)
     current_app.logger.info(
         "api_forecast.success store=%s points=%d", store, len(points)
