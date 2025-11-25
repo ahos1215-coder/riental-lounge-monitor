@@ -158,9 +158,10 @@ GET /api/range
 
 データソースは基本 Supabase logs テーブル（ローカル JSON はデバッグ用）。
 
+
 GET /api/forecast/next_hour
 
-現在時刻から 1 時間先までの予測（15 分刻み 4 ポイント）を返す。
+Data source: forecast APIs use Supabase logs when DATA_BACKEND=supabase; legacy uses GoogleSheet/local backup.
 
 ENABLE_FORECAST=1 のときのみ利用。
 
