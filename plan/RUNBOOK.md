@@ -3,18 +3,18 @@ Last updated: 2025-11-26, commit: TODO
 対象ブランチ: main  
 対象フォルダ: `riental-lounge-monitor-main/`
 
-この Runbook は運用担当が「今日の構成を把握し、基本の確認と障害対応」を素早く行うための手順書です。詳細な設計は ARCHITECTURE.md、環境変数は ENV.md を参照してください。
+この Runbook は運用担当が「今日の構成を把握し、基本の確認と障害対応」を素早く行うためのメモです。詳細な設計は ARCHITECTURE.md、環境変数は ENV.md を参照してください。
 
 ---
 
 ## 0. 現在の構成（Supabase メイン）
-- 収集: `multi_collect.py` を `/tasks/tick` 等から呼び出し、38 店舗を Supabase `logs` テーブルに insert。
-- DATA_BACKEND=supabase のとき:
+- 収集: `multi_collect.py` を `/tasks/tick` 等から呼び出し、38 店舗分を Supabase `logs` テーブルに insert。
+- DATA_BACKEND=supabase のとき
   - `/api/range` は SupabaseLogsProvider で `/rest/v1/logs` を読み出し（store_id, ts 範囲, limit）。
   - `/api/forecast_*` は ForecastService が SupabaseLogsProvider で履歴を取り、XGBoost で予測。
   - `/api/meta` は AppConfig.summary() を返し、Supabase 設定や window, timeout などを可視化。
-- legacy（GAS + GoogleSheet + ローカル JSON）はバックアップ/デバッグ用。Supabase に問題がある場合に DATA_BACKEND=legacy で切り戻す。
-- フロント（Next.js /frontend）は API 仕様は従来通り `/api/range`, `/api/forecast_*` を利用。
+- legacy（GAS + GoogleSheet + ローカル JSON）はバックアップ/デバッグ用途。Supabase に問題がある場合に DATA_BACKEND=legacy で戻す。
+- フロント（Next.js /frontend）は API 仕様を従来どおり `/api/range`, `/api/forecast_*` を利用。
 
 ---
 
@@ -42,16 +42,16 @@ Last updated: 2025-11-26, commit: TODO
 ```sh
 curl -s https://<BASE>/api/meta | python -m json.tool
 ```
-- `data.data_backend` が `supabase` になっているか
-- `data.supabase.url`, `service_role` が true か
-- `data.supabase.store_id` が意図どおりか
+- `data.data_backend` が `supabase`
+- `data.supabase.url`, `service_role` が true
+- `data.supabase.store_id` が意図どおり
 - `window.start/end`, `http_timeout`, `http_retry`, `max_range_limit`
 
 2) レンジ取得 `/api/range`  
 ```sh
 curl -s "https://<BASE>/api/range?from=2024-11-01&to=2024-11-02&limit=200&store_id=ol_nagasaki" | python -m json.tool
 ```
-- `ok: true` で rows が返ること
+- `ok: true` で rows が返る
 - DATA_BACKEND=supabase なら logs 由来のフィールド（store_id, weather_code, …）が入る
 
 3) 予測 `/api/forecast_next_hour` / `/api/forecast_today`  
@@ -59,8 +59,14 @@ curl -s "https://<BASE>/api/range?from=2024-11-01&to=2024-11-02&limit=200&store_
 curl -s "https://<BASE>/api/forecast_next_hour?store_id=ol_nagasaki" | python -m json.tool
 curl -s "https://<BASE>/api/forecast_today?store_id=ol_nagasaki" | python -m json.tool
 ```
-- `ok: true` と freq_min, data[] が返ること
-- 必要に応じて ENABLE_FORECAST=1 を確認（/api/meta で見える）
+- `ok: true` と freq_min, data[] が返る
+- 必要に応じて ENABLE_FORECAST=1 を確認（api/meta で見える）
+
+4) ヘルスチェック  
+```sh
+curl -s https://<BASE>/healthz | python -m json.tool
+```
+- `/healthz` が正式なヘルスエンドポイント。`/tasks/*` をヘルスチェックに使わない。
 
 ---
 
@@ -73,12 +79,12 @@ curl -s "https://<BASE>/api/forecast_today?store_id=ol_nagasaki" | python -m jso
 
 ## 5. 障害対応フロー（例）
 1) 症状確認  
-   - `/api/range` が 502 `upstream-supabase` を返す → Supabase 側の障害の可能性。
+   - `/api/range` が 502 `upstream-supabase` を返す → Supabase 側障害の可能性
 2) 一時対応  
    - Render の Environment で `DATA_BACKEND=legacy` に変更 → 再起動  
-   - legacy データ（GAS + ローカル JSON）で最低限の可視化を継続。
-3) 復旧後  
-   - `DATA_BACKEND=supabase` に戻し、/api/meta と /api/range / /api/forecast_* を再確認。
+   - legacy データ（GAS + ローカル JSON）で最低限の可視化を継続
+3) 復旧確認  
+   - `DATA_BACKEND=supabase` に戻し、/api/meta と /api/range / /api/forecast_* を再確認
 
 ---
 
@@ -98,11 +104,11 @@ curl -s "https://<BASE>/api/forecast_today?store_id=ol_nagasaki" | python -m jso
 ## 7. 収集タスク運用ルール（重要）
 - 役割分担
   - `/tasks/collect`: 単一レコード + GAS append 専用（テスト・手動用）。GET/POST で store/men/women/ts を受け付け、バリデーション NG は 400。
-  - `/tasks/multi_collect`: 38 店舗一括収集。`collect_all_once()` を実行し Supabase logs に保存。正常時 `{"ok": true, "stores": 38, "task": "collect_all_once", "duration_sec": ...}`。異常時も JSON を返す（HTTP は実装に準拠）。
+  - `/tasks/multi_collect`: 38 店舗一括収集。`collect_all_once()` を実行し Supabase logs に保存。正常時 `{"ok": true, "stores": 38, "task": "collect_all_once", "duration_sec": ...}`。異常時も JSON を返す（HTTP は実装準拠）。
   - `/api/tasks/collect_all_once`: `/tasks/multi_collect` のエイリアス。
 - Health Check 禁止事項
   - Render の Health Check Path に `/tasks/collect` `/tasks/multi_collect` `/api/tasks/collect_all_once` を設定しない。
-  - ヘルスチェックは `/health` または `/api/meta` を使用する。
+  - ヘルスチェックは `/healthz` または `/api/meta` を使用する。
 - 定期収集（cron）
   - 5 分ごとの定期収集は `/tasks/multi_collect` か `/api/tasks/collect_all_once` のどちらか一方に統一。
   - `/tasks/collect` は cron からは叩かない（テスト・手動確認専用）。
@@ -110,20 +116,23 @@ curl -s "https://<BASE>/api/forecast_today?store_id=ol_nagasaki" | python -m jso
   - ローカル:  
     ```sh
     python app.py
-    curl "http://127.0.0.1:5000/health"
+    curl "http://127.0.0.1:5000/healthz"
     curl "http://127.0.0.1:5000/tasks/multi_collect"
     ```
   - Render Web Shell（例）:  
     ```sh
-    curl -s http://127.0.0.1:10000/health
+    curl -s http://127.0.0.1:10000/healthz
     # 必要に応じて
     curl -s http://127.0.0.1:10000/tasks/multi_collect
     ```
+  - 実行時間の目安: 県別天気キャッシュありで **約 60〜70 秒**（duration_sec ログに表示）。
 
 ---
 
-## 8. 収集タスクの概要（参考）
-- `/tasks/tick` → `multi_collect.collect_all_once()`  
-  - 38 店舗のスクレイピング → Supabase logs に upsert  
-  - 天気(Open-Meteo)を一括取得してレコードに付与  
-- 必要な ENV: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / DATA_BACKEND / STORE_ID / (ENABLE_GAS が必要なら GAS_URL 等)
+## 8. 収集タスクの概要・参照
+- `/tasks/tick` → `multi_collect.collect_all_once()`
+  - 38 店舗のスクレイピング → Supabase logs に upsert
+  - 天気(Open-Meteo)は **都道府県単位で 1 回取得** し、pref キャッシュを 38 店舗で使い回す（座標は `STORES.pref` → `PREF_COORDS` → `WEATHER_LAT/LON` の順で決定）
+- 必要な ENV: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / DATA_BACKEND / STORE_ID / (ENABLE_GAS が必要な場合は GAS_URL 等)
+
+---
