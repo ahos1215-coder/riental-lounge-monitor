@@ -15,7 +15,7 @@ import {
 } from "chart.js";
 import "chartjs-adapter-date-fns";
 import { ja } from "date-fns/locale";
-import type { ForecastPoint } from "./ForecastChart";
+import type { ForecastPoint } from "./ForecastNextHourChart";
 
 type Props = {
   points: ForecastPoint[];
