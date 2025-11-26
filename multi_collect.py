@@ -57,47 +57,270 @@ ENABLE_WEATHER = os.environ.get("ENABLE_WEATHER", "1") == "1"
 WEATHER_LAT = float(os.environ.get("WEATHER_LAT", "32.75"))
 WEATHER_LON = float(os.environ.get("WEATHER_LON", "129.87"))
 
+# 都道府県ごとの代表座標（無ければ環境変数にフォールバック）
+PREF_COORDS: dict[str, tuple[float, float]] = {
+    "nagasaki": (32.744, 129.873),
+    "fukuoka": (33.5902, 130.4017),
+    "oita": (33.2396, 131.6093),
+    "kumamoto": (32.7898, 130.7417),
+    "miyazaki": (31.9077, 131.4202),
+    "kagoshima": (31.5966, 130.5571),
+    "okinawa": (26.2124, 127.6809),
+    "hokkaido": (43.0621, 141.3544),
+    "miyagi": (38.2688, 140.8721),
+    "tokyo": (35.6895, 139.6917),
+    "kanagawa": (35.4437, 139.6380),
+    "saitama": (35.8617, 139.6455),
+    "chiba": (35.6073, 140.1063),
+    "tochigi": (36.5552, 139.8828),
+    "gunma": (36.3907, 139.0604),
+    "aichi": (35.1815, 136.9066),
+    "shizuoka": (34.9756, 138.3828),
+    "ishikawa": (36.5947, 136.6256),
+    "osaka": (34.6937, 135.5023),
+    "kyoto": (35.0116, 135.7681),
+    "hyogo": (34.6901, 135.1955),
+    "okayama": (34.6551, 133.9195),
+    "hiroshima": (34.3853, 132.4553),
+    "seoul": (37.5665, 126.9780),
+}
+
 # ---------- 全38店舗 ----------
 
 STORES = [
-    {"store": "長崎", "store_id": "ol_nagasaki", "url": "https://oriental-lounge.com/stores/38"},
-    {"store": "福岡", "store_id": "ol_fukuoka", "url": "https://oriental-lounge.com/stores/15"},
-    {"store": "小倉", "store_id": "ol_kokura", "url": "https://oriental-lounge.com/stores/16"},
-    {"store": "大分", "store_id": "ol_oita", "url": "https://oriental-lounge.com/stores/40"},
-    {"store": "熊本", "store_id": "ol_kumamoto", "url": "https://oriental-lounge.com/stores/22"},
-    {"store": "宮崎", "store_id": "ol_miyazaki", "url": "https://oriental-lounge.com/stores/18"},
-    {"store": "鹿児島", "store_id": "ol_kagoshima", "url": "https://oriental-lounge.com/stores/19"},
-    {"store": "ag沖縄", "store_id": "ol_okinawa_ag", "url": "https://oriental-lounge.com/stores/20"},
-    {"store": "ソウル カンナム", "store_id": "ol_gangnam", "url": "https://oriental-lounge.com/stores/34"},
-    {"store": "ag札幌", "store_id": "ol_sapporo_ag", "url": "https://oriental-lounge.com/stores/1"},
-    {"store": "ag仙台", "store_id": "ol_sendai_ag", "url": "https://oriental-lounge.com/stores/2"},
-    {"store": "渋谷本店", "store_id": "ol_shibuya", "url": "https://oriental-lounge.com/stores/4"},
-    {"store": "恵比寿", "store_id": "ol_ebisu", "url": "https://oriental-lounge.com/stores/35"},
-    {"store": "ag渋谷", "store_id": "ol_shibuya_ag", "url": "https://oriental-lounge.com/stores/27"},
-    {"store": "新宿", "store_id": "ol_shinjuku", "url": "https://oriental-lounge.com/stores/3"},
-    {"store": "上野", "store_id": "ol_ueno", "url": "https://oriental-lounge.com/stores/33"},
-    {"store": "ag上野", "store_id": "ol_ueno_ag", "url": "https://oriental-lounge.com/stores/28"},
-    {"store": "柏", "store_id": "ol_kashiwa", "url": "https://oriental-lounge.com/stores/42"},
-    {"store": "町田", "store_id": "ol_machida", "url": "https://oriental-lounge.com/stores/6"},
-    {"store": "横浜", "store_id": "ol_yokohama", "url": "https://oriental-lounge.com/stores/23"},
-    {"store": "大宮", "store_id": "ol_omiya", "url": "https://oriental-lounge.com/stores/24"},
-    {"store": "宇都宮", "store_id": "ol_utsunomiya", "url": "https://oriental-lounge.com/stores/26"},
-    {"store": "高崎", "store_id": "ol_takasaki", "url": "https://oriental-lounge.com/stores/37"},
-    {"store": "ag名古屋", "store_id": "ol_nagoya_ag", "url": "https://oriental-lounge.com/stores/32"},
-    {"store": "名古屋 錦", "store_id": "ol_nagoya_nishiki", "url": "https://oriental-lounge.com/stores/25"},
-    {"store": "名古屋 栄", "store_id": "ol_nagoya_sakae", "url": "https://oriental-lounge.com/stores/8"},
-    {"store": "静岡", "store_id": "ol_shizuoka", "url": "https://oriental-lounge.com/stores/7"},
-    {"store": "浜松", "store_id": "ol_hamamatsu", "url": "https://oriental-lounge.com/stores/31"},
-    {"store": "ag金沢", "store_id": "ol_kanazawa_ag", "url": "https://oriental-lounge.com/stores/36"},
-    {"store": "大阪駅前", "store_id": "ol_osaka_ekimae", "url": "https://oriental-lounge.com/stores/41"},
-    {"store": "ag梅田", "store_id": "ol_umeda_ag", "url": "https://oriental-lounge.com/stores/10"},
-    {"store": "天満", "store_id": "ol_tenma", "url": "https://oriental-lounge.com/stores/39"},
-    {"store": "心斎橋", "store_id": "ol_shinsaibashi", "url": "https://oriental-lounge.com/stores/11"},
-    {"store": "難波", "store_id": "ol_namba", "url": "https://oriental-lounge.com/stores/12"},
-    {"store": "京都", "store_id": "ol_kyoto", "url": "https://oriental-lounge.com/stores/9"},
-    {"store": "神戸", "store_id": "ol_kobe", "url": "https://oriental-lounge.com/stores/13"},
-    {"store": "岡山", "store_id": "ol_okayama", "url": "https://oriental-lounge.com/stores/29"},
-    {"store": "ag広島", "store_id": "ol_hiroshima_ag", "url": "https://oriental-lounge.com/stores/14"},
+    # Optional per-store coordinates for weather; defaults to WEATHER_LAT/WEATHER_LON when missing.
+    {
+        "store": "長崎",
+        "store_id": "ol_nagasaki",
+        "url": "https://oriental-lounge.com/stores/38",
+        "pref": "nagasaki",
+        "lat": 32.744,
+        "lon": 129.873,
+    },
+    {
+        "store": "福岡",
+        "store_id": "ol_fukuoka",
+        "url": "https://oriental-lounge.com/stores/15",
+        "pref": "fukuoka",
+        "lat": 33.5902,
+        "lon": 130.4017,
+    },
+    {
+        "store": "小倉",
+        "store_id": "ol_kokura",
+        "url": "https://oriental-lounge.com/stores/16",
+        "pref": "fukuoka",
+    },
+    {
+        "store": "大分",
+        "store_id": "ol_oita",
+        "url": "https://oriental-lounge.com/stores/40",
+        "pref": "oita",
+    },
+    {
+        "store": "熊本",
+        "store_id": "ol_kumamoto",
+        "url": "https://oriental-lounge.com/stores/22",
+        "pref": "kumamoto",
+    },
+    {
+        "store": "宮崎",
+        "store_id": "ol_miyazaki",
+        "url": "https://oriental-lounge.com/stores/18",
+        "pref": "miyazaki",
+    },
+    {
+        "store": "鹿児島",
+        "store_id": "ol_kagoshima",
+        "url": "https://oriental-lounge.com/stores/19",
+        "pref": "kagoshima",
+    },
+    {
+        "store": "ag沖縄",
+        "store_id": "ol_okinawa_ag",
+        "url": "https://oriental-lounge.com/stores/20",
+        "pref": "okinawa",
+    },
+    {
+        "store": "ソウル カンナム",
+        "store_id": "ol_gangnam",
+        "url": "https://oriental-lounge.com/stores/34",
+        "pref": "seoul",
+    },
+    {
+        "store": "ag札幌",
+        "store_id": "ol_sapporo_ag",
+        "url": "https://oriental-lounge.com/stores/1",
+        "pref": "hokkaido",
+    },
+    {
+        "store": "ag仙台",
+        "store_id": "ol_sendai_ag",
+        "url": "https://oriental-lounge.com/stores/2",
+        "pref": "miyagi",
+    },
+    {
+        "store": "渋谷本店",
+        "store_id": "ol_shibuya",
+        "url": "https://oriental-lounge.com/stores/4",
+        "pref": "tokyo",
+    },
+    {
+        "store": "恵比寿",
+        "store_id": "ol_ebisu",
+        "url": "https://oriental-lounge.com/stores/35",
+        "pref": "tokyo",
+    },
+    {
+        "store": "ag渋谷",
+        "store_id": "ol_shibuya_ag",
+        "url": "https://oriental-lounge.com/stores/27",
+        "pref": "tokyo",
+    },
+    {
+        "store": "新宿",
+        "store_id": "ol_shinjuku",
+        "url": "https://oriental-lounge.com/stores/3",
+        "pref": "tokyo",
+    },
+    {
+        "store": "上野",
+        "store_id": "ol_ueno",
+        "url": "https://oriental-lounge.com/stores/33",
+        "pref": "tokyo",
+    },
+    {
+        "store": "ag上野",
+        "store_id": "ol_ueno_ag",
+        "url": "https://oriental-lounge.com/stores/28",
+        "pref": "tokyo",
+    },
+    {
+        "store": "柏",
+        "store_id": "ol_kashiwa",
+        "url": "https://oriental-lounge.com/stores/42",
+        "pref": "chiba",
+    },
+    {
+        "store": "町田",
+        "store_id": "ol_machida",
+        "url": "https://oriental-lounge.com/stores/6",
+        "pref": "tokyo",
+    },
+    {
+        "store": "横浜",
+        "store_id": "ol_yokohama",
+        "url": "https://oriental-lounge.com/stores/23",
+        "pref": "kanagawa",
+    },
+    {
+        "store": "大宮",
+        "store_id": "ol_omiya",
+        "url": "https://oriental-lounge.com/stores/24",
+        "pref": "saitama",
+    },
+    {
+        "store": "宇都宮",
+        "store_id": "ol_utsunomiya",
+        "url": "https://oriental-lounge.com/stores/26",
+        "pref": "tochigi",
+    },
+    {
+        "store": "高崎",
+        "store_id": "ol_takasaki",
+        "url": "https://oriental-lounge.com/stores/37",
+        "pref": "gunma",
+    },
+    {
+        "store": "ag名古屋",
+        "store_id": "ol_nagoya_ag",
+        "url": "https://oriental-lounge.com/stores/32",
+        "pref": "aichi",
+    },
+    {
+        "store": "名古屋 錦",
+        "store_id": "ol_nagoya_nishiki",
+        "url": "https://oriental-lounge.com/stores/25",
+        "pref": "aichi",
+    },
+    {
+        "store": "名古屋 栄",
+        "store_id": "ol_nagoya_sakae",
+        "url": "https://oriental-lounge.com/stores/8",
+        "pref": "aichi",
+    },
+    {
+        "store": "静岡",
+        "store_id": "ol_shizuoka",
+        "url": "https://oriental-lounge.com/stores/7",
+        "pref": "shizuoka",
+    },
+    {
+        "store": "浜松",
+        "store_id": "ol_hamamatsu",
+        "url": "https://oriental-lounge.com/stores/31",
+        "pref": "shizuoka",
+    },
+    {
+        "store": "ag金沢",
+        "store_id": "ol_kanazawa_ag",
+        "url": "https://oriental-lounge.com/stores/36",
+        "pref": "ishikawa",
+    },
+    {
+        "store": "大阪駅前",
+        "store_id": "ol_osaka_ekimae",
+        "url": "https://oriental-lounge.com/stores/41",
+        "pref": "osaka",
+    },
+    {
+        "store": "ag梅田",
+        "store_id": "ol_umeda_ag",
+        "url": "https://oriental-lounge.com/stores/10",
+        "pref": "osaka",
+    },
+    {
+        "store": "天満",
+        "store_id": "ol_tenma",
+        "url": "https://oriental-lounge.com/stores/39",
+        "pref": "osaka",
+    },
+    {
+        "store": "心斎橋",
+        "store_id": "ol_shinsaibashi",
+        "url": "https://oriental-lounge.com/stores/11",
+        "pref": "osaka",
+    },
+    {
+        "store": "難波",
+        "store_id": "ol_namba",
+        "url": "https://oriental-lounge.com/stores/12",
+        "pref": "osaka",
+    },
+    {
+        "store": "京都",
+        "store_id": "ol_kyoto",
+        "url": "https://oriental-lounge.com/stores/9",
+        "pref": "kyoto",
+    },
+    {
+        "store": "神戸",
+        "store_id": "ol_kobe",
+        "url": "https://oriental-lounge.com/stores/13",
+        "pref": "hyogo",
+    },
+    {
+        "store": "岡山",
+        "store_id": "ol_okayama",
+        "url": "https://oriental-lounge.com/stores/29",
+        "pref": "okayama",
+    },
+    {
+        "store": "ag広島",
+        "store_id": "ol_hiroshima_ag",
+        "url": "https://oriental-lounge.com/stores/14",
+        "pref": "hiroshima",
+    },
 ]
 
 # ========= 天気ユーティリティ =========
@@ -123,7 +346,9 @@ def _weather_code_to_label(code: int | None) -> str | None:
     return f"その他({code})"
 
 
-def fetch_current_weather() -> tuple[int | None, str | None, float | None, float | None]:
+def fetch_current_weather(
+    lat: float | None = None, lon: float | None = None
+) -> tuple[int | None, str | None, float | None, float | None]:
     """
     Open-Meteo から現在の
       - weather_code
@@ -135,9 +360,11 @@ def fetch_current_weather() -> tuple[int | None, str | None, float | None, float
         return None, None, None, None
 
     url = "https://api.open-meteo.com/v1/forecast"
+    latitude = WEATHER_LAT if lat is None else float(lat)
+    longitude = WEATHER_LON if lon is None else float(lon)
     params = {
-        "latitude": WEATHER_LAT,
-        "longitude": WEATHER_LON,
+        "latitude": latitude,
+        "longitude": longitude,
         "current": "weather_code,temperature_2m,precipitation",
         "timezone": "Asia/Tokyo",
     }
@@ -155,7 +382,7 @@ def fetch_current_weather() -> tuple[int | None, str | None, float | None, float
         label = _weather_code_to_label(code) if isinstance(code, int) else None
 
         print(
-            f"[weather] code={code} label={label} "
+            f"[weather] lat={latitude} lon={longitude} code={code} label={label} "
             f"temp_c={temp_c} precip_mm={precip_mm}"
         )
         return code, label, temp_c, precip_mm
@@ -335,18 +562,48 @@ def scrape_store(url: str) -> tuple[int | None, int | None]:
 def collect_all_once() -> None:
     print("collect_all_once.start")
 
-    # 天気は 1 回だけ取得して全店舗に使い回す
-    weather_code: int | None = None
-    weather_label: str | None = None
-    temp_c: float | None = None
-    precip_mm: float | None = None
-    if ENABLE_WEATHER:
-        weather_code, weather_label, temp_c, precip_mm = fetch_current_weather()
+    # 県ごとに天気を1回だけ取り、prefキャッシュで使い回す
+    weather_by_pref: dict[
+        str, tuple[int | None, str | None, float | None, float | None]
+    ] = {}
+
+    def resolve_weather_key_and_coords(entry: dict) -> tuple[str, tuple[float, float]]:
+        pref = entry.get("pref")
+        lat = entry.get("lat")
+        lon = entry.get("lon")
+
+        if pref:
+            coord = PREF_COORDS.get(pref)
+            if coord:
+                return pref, coord
+            if lat is not None and lon is not None:
+                return pref, (float(lat), float(lon))
+            return pref, (WEATHER_LAT, WEATHER_LON)
+
+        # pref が無い店舗は共通キーでまとめ、手元の lat/lon が無ければ環境変数を使う
+        if lat is not None and lon is not None:
+            return "_default", (float(lat), float(lon))
+        return "_default", (WEATHER_LAT, WEATHER_LON)
 
     for entry in STORES:
         store_name = entry["store"]
         store_id = entry["store_id"]
         url = entry["url"]
+
+        weather_code: int | None = None
+        weather_label: str | None = None
+        temp_c: float | None = None
+        precip_mm: float | None = None
+        if ENABLE_WEATHER:
+            weather_key, (lat, lon) = resolve_weather_key_and_coords(entry)
+            if weather_key not in weather_by_pref:
+                weather_by_pref[weather_key] = fetch_current_weather(lat, lon)
+                print(
+                    f"[weather][pref-cache] key={weather_key} lat={lat} lon={lon} fetched"
+                )
+            weather_code, weather_label, temp_c, precip_mm = weather_by_pref[
+                weather_key
+            ]
 
         try:
             men, women = scrape_store(url)

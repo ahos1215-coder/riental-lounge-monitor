@@ -1,6 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import re
+import time
 from datetime import datetime
 from typing import Any, Tuple
 
@@ -8,69 +9,95 @@ from bs4 import BeautifulSoup
 from flask import Blueprint, current_app, jsonify, request
 from pydantic import ValidationError
 
-# ==== プロジェクト内部 ====
 from ..config import AppConfig
 from ..utils import storage, timeutil
-from ..utils.log import format_payload
-
-# ==== 旧 GAS 用（残すけど使わない）====
 from ..clients.gas_client import GasClient, GasClientError
-
-# ==== 新：38店舗収集 ====
 from multi_collect import collect_all_once, STORES
-
 
 bp = Blueprint("tasks", __name__)
 
 
-# ==========================================================
-# 38 店舗一括収集タスク：Render / cron-job.org の本番エンドポイント
-# ==========================================================
 @bp.route("/tasks/collect", methods=["GET", "POST"])
-def tasks_collect_all():
+def tasks_collect_single():
     """
-    38 店舗を multi_collect.collect_all_once() で一括収集し、
-    Supabase(public.logs) に自動保存するタスク。
+    単一レコードを受け取り、GAS append のみを行うエンドポイント。
+    - GET: クエリ store / men / women / ts
+    - POST: JSON {store, men, women, ts}
+    バリデーション失敗は 400 を返す。
+    """
+    logger = current_app.logger
+    payload = request.get_json(silent=True) or {}
+    if request.method == "GET":
+        payload = request.args.to_dict(flat=True)
 
-    正常時: {"ok": true, "stores": 38}
-    異常時: {"ok": false, "error": "..."} （※常に HTTP 200）
+    store = str(payload.get("store", "")).strip()
+    if not store:
+        return _bad_request("store is required")
+
+    try:
+        men = int(payload.get("men"))
+        women = int(payload.get("women"))
+    except (TypeError, ValueError):
+        return _bad_request("men and women must be integers")
+
+    ts_raw = payload.get("ts")
+    try:
+        ts_dt = datetime.fromisoformat(str(ts_raw))
+    except Exception:  # noqa: BLE001
+        return _bad_request("ts must be ISO8601 with timezone")
+    if ts_dt.tzinfo is None:
+        return _bad_request("ts must include timezone")
+
+    record = {
+        "store": store,
+        "men": men,
+        "women": women,
+        "total": men + women,
+        "ts": ts_dt.isoformat(),
+    }
+
+    try:
+        _gas_client().append_row(record)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("tasks.collect.append_failed")
+        return jsonify({"ok": False, "error": str(exc)}), 200
+
+    return jsonify({"ok": True}), 200
+
+
+def _bad_request(message: str):
+    return jsonify({"ok": False, "error": message}), 400
+
+
+@bp.route("/tasks/multi_collect", methods=["GET", "POST"])
+def tasks_multi_collect():
+    """
+    38 店舗を multi_collect.collect_all_once() で一括収集し、Supabase(public.logs) に保存するタスク。
+
+    正常時: {"ok": true, "stores": 38, "task": "collect_all_once"}
+    異常時: {"ok": false, "error": "..."}（HTTP 200 を維持）
     """
     logger = current_app.logger
     logger.info("collect_all_once.start")
+    started = time.perf_counter()
 
     try:
-        # 副作用：38 店舗スクレイピング → Supabase へ INSERT
         collect_all_once()
-
         store_count = len(STORES)
-        logger.info(f"collect_all_once.success stores={store_count}")
-        return jsonify({
-            "ok": True,
-            "task": "collect_all_once",
-            "stores": store_count
-        })
-
-    except Exception as exc:
-        logger.exception("collect_all_once.failed")
-        return jsonify({
-            "ok": False,
-            "task": "collect_all_once",
-            "error": str(exc)
-        })
+        duration = time.perf_counter() - started
+        logger.info("collect_all_once.success stores=%d duration_sec=%.3f", store_count, duration)
+        return jsonify({"ok": True, "task": "collect_all_once", "stores": store_count})
+    except Exception as exc:  # noqa: BLE001
+        duration = time.perf_counter() - started
+        logger.exception("collect_all_once.failed duration_sec=%.3f", duration)
+        return jsonify({"ok": False, "task": "collect_all_once", "error": str(exc)})
 
 
-# ==========================================================
-# 旧エンドポイント（後方互換）→ すべて新しい collect_all に委譲
-# ==========================================================
-@bp.get("/tasks/multi_collect")
-def tasks_multi_collect():
-    """旧 API。内部的には /tasks/collect を呼び出すだけ。"""
-    return tasks_collect_all()
+@bp.route("/api/tasks/collect_all_once", methods=["GET", "POST"])
+def api_tasks_collect_all_once():
+    """Alias: /api/tasks/collect_all_once -> /tasks/multi_collect"""
+    return tasks_multi_collect()
 
-
-# ==========================================================
-# 以下は “単店舗用の旧処理” → 現在は使わないが互換のため残す
-# ==========================================================
 
 @bp.get("/tasks/tick")
 def tasks_tick():
@@ -84,12 +111,7 @@ def tasks_tick():
     )
     window_payload = {"start": start_dt.isoformat(), "end": end_dt.isoformat()}
     if not is_in:
-        return jsonify({
-            "ok": True,
-            "skipped": True,
-            "reason": "outside-window",
-            "window": window_payload
-        })
+        return jsonify({"ok": True, "skipped": True, "reason": "outside-window", "window": window_payload})
 
     record = _run_collection(cfg)
     return jsonify({"ok": True, "record": record, "window": window_payload})
@@ -104,10 +126,6 @@ def tasks_seed():
     record = _run_collection(cfg)
     return jsonify({"ok": True, "seeded": True, "record": record})
 
-
-# ==========================================================
-# 単店舗用の旧ロジック（互換性維持のため残す）
-# ==========================================================
 
 def _config() -> AppConfig:
     return current_app.config["APP_CONFIG"]
@@ -155,10 +173,7 @@ def _serialise_errors(errors: list[Any]) -> list[Any]:
     serialised: list[Any] = []
     for item in errors:
         if isinstance(item, dict):
-            serialised.append({
-                k: (str(v) if isinstance(v, Exception) else v)
-                for k, v in item.items()
-            })
+            serialised.append({k: (str(v) if isinstance(v, Exception) else v) for k, v in item.items()})
         else:
             serialised.append(str(item))
     return serialised
@@ -172,8 +187,6 @@ def _run_collection(
     ts: datetime | None = None,
     source: str | None = None,
 ) -> dict[str, Any]:
-
-    # 旧：単店舗スクレイピング（多店舗には使わない）
     logger = current_app.logger
     session = _session()
 
@@ -226,12 +239,12 @@ def _scrape_oriental_counts(session, url: str) -> Tuple[int | None, int | None]:
     men = _extract_count(
         soup,
         [r"(\d+)\s*(?:GENTLEMEN|Men|MEN|男性)"],
-        selectors=[".men-count", ".male .count", "#menCount", "#men", ".count-men"]
+        selectors=[".men-count", ".male .count", "#menCount", "#men", ".count-men"],
     )
     women = _extract_count(
         soup,
         [r"(\d+)\s*(?:LADIES|Women|WOMEN|女性)"],
-        selectors=[".women-count", ".female .count", "#womenCount", "#women", ".count-women"]
+        selectors=[".women-count", ".female .count", "#womenCount", "#women", ".count-women"],
     )
     return men, women
 

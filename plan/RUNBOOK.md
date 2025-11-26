@@ -1,20 +1,20 @@
 # めぐりび / MEGRIBI RUNBOOK（運用手順）
-最終更新: 2025-11-25  
+Last updated: 2025-11-26, commit: TODO  
 対象ブランチ: main  
 対象フォルダ: `riental-lounge-monitor-main/`
 
-この Runbook は、運用担当が「今日の構成を把握し、基本の確認と障害対応」を素早く行うための手順書です。詳細な設計は ARCHITECTURE.md、環境変数は ENV.md を併読してください。
+この Runbook は運用担当が「今日の構成を把握し、基本の確認と障害対応」を素早く行うための手順書です。詳細な設計は ARCHITECTURE.md、環境変数は ENV.md を参照してください。
 
 ---
 
 ## 0. 現在の構成（Supabase メイン）
-- 収集: `multi_collect.py` を `/tasks/tick` 経由で呼び出し、38 店舗ぶんを Supabase `logs` テーブルに insert。
+- 収集: `multi_collect.py` を `/tasks/tick` 等から呼び出し、38 店舗を Supabase `logs` テーブルに insert。
 - DATA_BACKEND=supabase のとき:
-  - `/api/range` は SupabaseLogsProvider で `/rest/v1/logs` を直接読む（store_id, ts 範囲, limit）。
-  - `/api/forecast_*` は ForecastService が SupabaseLogsProvider で履歴を読み、XGBoost モデルで予測。
-  - `/api/meta` は AppConfig.summary() を返し、Supabase 設定や window, timeout 等を可視化。
+  - `/api/range` は SupabaseLogsProvider で `/rest/v1/logs` を読み出し（store_id, ts 範囲, limit）。
+  - `/api/forecast_*` は ForecastService が SupabaseLogsProvider で履歴を取り、XGBoost で予測。
+  - `/api/meta` は AppConfig.summary() を返し、Supabase 設定や window, timeout などを可視化。
 - legacy（GAS + GoogleSheet + ローカル JSON）はバックアップ/デバッグ用。Supabase に問題がある場合に DATA_BACKEND=legacy で切り戻す。
-- フロント（Next.js /frontend）は API 仕様は従来通り `/api/range`, `/api/forecast_*` を叩く。
+- フロント（Next.js /frontend）は API 仕様は従来通り `/api/range`, `/api/forecast_*` を利用。
 
 ---
 
@@ -30,7 +30,7 @@
 
 ## 2. 起動・再起動・設定反映
 - Render 環境変数を変更したら「Deploy latest commit」または「Restart service」で反映。
-- Supabase のキー（SUPABASE_SERVICE_ROLE_KEY 等）は Git にコミットしない。Render の Environment にのみ設定。
+- Supabase のキー（SUPABASE_SERVICE_ROLE_KEY 等）は Git にコミットしない。Render Environment にのみ設定。
 - ローカル開発:
   - `.env` を用意して `python app.py`
   - DATA_BACKEND=supabase で Supabase を叩く／DATA_BACKEND=legacy でローカル/GAS を試す
@@ -95,8 +95,35 @@ curl -s "https://<BASE>/api/forecast_today?store_id=ol_nagasaki" | python -m jso
 
 ---
 
-## 7. 収集タスクの概要（参考）
+## 7. 収集タスク運用ルール（重要）
+- 役割分担
+  - `/tasks/collect`: 単一レコード + GAS append 専用（テスト・手動用）。GET/POST で store/men/women/ts を受け付け、バリデーション NG は 400。
+  - `/tasks/multi_collect`: 38 店舗一括収集。`collect_all_once()` を実行し Supabase logs に保存。正常時 `{"ok": true, "stores": 38, "task": "collect_all_once", "duration_sec": ...}`。異常時も JSON を返す（HTTP は実装に準拠）。
+  - `/api/tasks/collect_all_once`: `/tasks/multi_collect` のエイリアス。
+- Health Check 禁止事項
+  - Render の Health Check Path に `/tasks/collect` `/tasks/multi_collect` `/api/tasks/collect_all_once` を設定しない。
+  - ヘルスチェックは `/health` または `/api/meta` を使用する。
+- 定期収集（cron）
+  - 5 分ごとの定期収集は `/tasks/multi_collect` か `/api/tasks/collect_all_once` のどちらか一方に統一。
+  - `/tasks/collect` は cron からは叩かない（テスト・手動確認専用）。
+- 簡易確認コマンド
+  - ローカル:  
+    ```sh
+    python app.py
+    curl "http://127.0.0.1:5000/health"
+    curl "http://127.0.0.1:5000/tasks/multi_collect"
+    ```
+  - Render Web Shell（例）:  
+    ```sh
+    curl -s http://127.0.0.1:10000/health
+    # 必要に応じて
+    curl -s http://127.0.0.1:10000/tasks/multi_collect
+    ```
+
+---
+
+## 8. 収集タスクの概要（参考）
 - `/tasks/tick` → `multi_collect.collect_all_once()`  
   - 38 店舗のスクレイピング → Supabase logs に upsert  
   - 天気(Open-Meteo)を一括取得してレコードに付与  
-- ENV で必要なキー: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / DATA_BACKEND / STORE_ID / (ENABLE_GAS が必要なら GAS_URL 等)
+- 必要な ENV: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY / DATA_BACKEND / STORE_ID / (ENABLE_GAS が必要なら GAS_URL 等)
