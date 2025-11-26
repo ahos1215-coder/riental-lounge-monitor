@@ -26,8 +26,11 @@ def _config() -> AppConfig:
 
 
 def _resolve_store_id(cfg: AppConfig) -> str:
-    store_arg = (request.args.get("store_id") or request.args.get("store") or "").strip()
-    return store_arg or cfg.store_id
+    from ..utils.stores import resolve_store_identifier
+
+    store_arg = request.args.get("store_id") or request.args.get("store")
+    store_id, _ = resolve_store_identifier(store_arg, cfg.store_id)
+    return store_id
 
 
 def _normalize_points(result: dict) -> list[dict]:

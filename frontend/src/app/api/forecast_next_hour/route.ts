@@ -1,11 +1,7 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
+import { DEFAULT_STORE } from "../../config/stores";
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:5000";
-
-// 対応店舗 ID 型（将来ここに増やしていく）
-export type StoreId = "nagasaki";
-
-const DEFAULT_STORE: StoreId = "nagasaki";
 
 type ErrorBody = {
   ok: false;
@@ -13,60 +9,38 @@ type ErrorBody = {
   detail?: string;
 };
 
-function resolveStore(searchParams: URLSearchParams): StoreId {
+function resolveStore(searchParams: URLSearchParams): string {
   const raw = searchParams.get("store");
-  if (!raw) return DEFAULT_STORE;
-
-  if (raw === "nagasaki") {
-    return raw;
-  }
-
-  // 想定外の store が来た場合はログを出してデフォルトにフォールバック
-  console.warn(
-    `api/forecast_next_hour: unknown store "${raw}", fallback to "${DEFAULT_STORE}"`
-  );
-  return DEFAULT_STORE;
-}
-
-function backendError(detail: string) {
-  const body: ErrorBody = {
-    ok: false,
-    error: "backend-error",
-    detail,
-  };
-  return NextResponse.json(body, { status: 502 });
-}
-
-function unexpectedError(detail: string) {
-  const body: ErrorBody = {
-    ok: false,
-    error: "unexpected-error",
-    detail,
-  };
-  return NextResponse.json(body, { status: 500 });
+  return (raw && raw.trim()) || DEFAULT_STORE;
 }
 
 export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url);
+  const store = resolveStore(searchParams);
+
+  const base = BACKEND_URL.replace(/\/+$/, "");
+  const apiUrl = `${base}/api/forecast_next_hour?store=${encodeURIComponent(
+    store
+  )}`;
+
   try {
-    const { searchParams } = new URL(req.url);
-    const store = resolveStore(searchParams);
+    const backendRes = await fetch(apiUrl, { next: { revalidate: 0 } });
+    const buf = await backendRes.arrayBuffer();
 
-    const apiUrl = `${BACKEND_URL}/api/forecast_next_hour?store=${encodeURIComponent(
-      store
-    )}`;
-
-    const res = await fetch(apiUrl);
-
-    if (!res.ok) {
-      const detail = `backend responded with status ${res.status}`;
-      console.error("api/forecast_next_hour backend error:", detail);
-      return backendError(detail);
+    const headers = new Headers();
+    const contentType = backendRes.headers.get("content-type");
+    if (contentType) {
+      headers.set("content-type", contentType);
     }
 
-    const data = await res.json();
-    return NextResponse.json(data);
+    return new NextResponse(buf, {
+      status: backendRes.status,
+      statusText: backendRes.statusText,
+      headers,
+    });
   } catch (err) {
-    console.error("api/forecast_next_hour unexpected error:", err);
-    return unexpectedError("proxy request failed");
+    const detail = err instanceof Error ? err.message : String(err);
+    const body: ErrorBody = { ok: false, error: "proxy-error", detail };
+    return NextResponse.json(body, { status: 502 });
   }
 }
