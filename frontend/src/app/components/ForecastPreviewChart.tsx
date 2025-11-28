@@ -1,139 +1,133 @@
 ﻿"use client";
 
-import { useRef, useEffect } from "react";
+import { Line } from "react-chartjs-2";
 import {
-  Chart,
-  LineController,
+  Chart as ChartJS,
   LineElement,
-  PointElement,
-  LinearScale,
-  TimeScale,
-  Tooltip,
-  Legend,
-  Filler,
   CategoryScale,
-} from "chart.js";
-import "chartjs-adapter-date-fns";
-import { ja } from "date-fns/locale";
-import type { ForecastPoint } from "./ForecastNextHourChart";
-
-type Props = {
-  points: ForecastPoint[];
-};
-
-Chart.register(
-  LineController,
-  LineElement,
-  PointElement,
   LinearScale,
-  TimeScale,
+  PointElement,
   Tooltip,
   Legend,
-  Filler,
-  CategoryScale
+} from "chart.js";
+import type { ForecastPoint as BaseForecastPoint } from "./ForecastNextHourChart";
+
+ChartJS.register(
+  LineElement,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  Tooltip,
+  Legend,
 );
 
+// Combined 用: ForecastPoint に total_actual を足したもの
+export type CombinedPoint = BaseForecastPoint & {
+  total_actual?: number | null;
+};
+
+type Props = {
+  points: CombinedPoint[];
+};
+
+function formatTimeLabel(ts: string): string {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return ts;
+  const h = d.getHours().toString().padStart(2, "0");
+  const m = d.getMinutes().toString().padStart(2, "0");
+  return `${h}:${m}`;
+}
+
 export default function ForecastPreviewChart({ points }: Props) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const chartRef = useRef<Chart | null>(null);
+  if (!points || points.length === 0) {
+    return (
+      <div className="rounded border border-slate-200 bg-slate-900/40 p-4 text-sm text-slate-400">
+        データがありません。
+      </div>
+    );
+  }
 
-  useEffect(() => {
-    const ctx = canvasRef.current?.getContext("2d");
-    if (!ctx) return;
+  // 時刻順にソートしてからラベルとデータを作る
+  const sorted = [...points].sort((a, b) => {
+    const ta = new Date(a.ts).getTime();
+    const tb = new Date(b.ts).getTime();
+    return ta - tb;
+  });
 
-    // 既存チャートがあれば破棄
-    if (chartRef.current) {
-      chartRef.current.destroy();
-      chartRef.current = null;
-    }
+  const labels = sorted.map((p) => formatTimeLabel(p.ts));
 
-    const labels = points.map((p) => new Date(p.ts));
+  const actualData = sorted.map((p) =>
+    p.total_actual != null ? p.total_actual : null,
+  );
+  const forecastData = sorted.map((p) =>
+    p.total_pred != null ? p.total_pred : null,
+  );
 
-    const data = {
-      labels,
-      datasets: [
-        {
-          label: "女性（予測）",
-          data: points.map((p) => p.women_pred),
-          borderWidth: 2,
-          tension: 0.3,
-          pointRadius: 0,
-          fill: false,
-        },
-        {
-          label: "男性（予測）",
-          data: points.map((p) => p.men_pred),
-          borderWidth: 2,
-          borderDash: [4, 4],
-          tension: 0.3,
-          pointRadius: 0,
-          fill: false,
-        },
-      ],
-    };
+  const data = {
+    labels,
+    datasets: [
+      {
+        label: "実測 合計",
+        data: actualData,
+        borderColor: "#3B82F6", // 青
+        backgroundColor: "rgba(59,130,246,0.15)",
+        borderWidth: 2,
+        tension: 0.3,
+        spanGaps: true,
+      },
+      {
+        label: "予測 合計",
+        data: forecastData,
+        borderColor: "#F97316", // オレンジ
+        backgroundColor: "rgba(249,115,22,0.0)",
+        borderWidth: 2,
+        borderDash: [6, 4],
+        tension: 0.3,
+        spanGaps: true,
+      },
+    ],
+  };
 
-    const chart = new Chart(ctx, {
-      type: "line",
-      data,
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: "index", intersect: false },
-        scales: {
-          x: {
-            type: "time",
-            time: {
-              unit: "hour",
-              displayFormats: { hour: "HH:mm" },
-            } as any,
-            adapters: {
-              date: { locale: ja },
-            },
-            ticks: {
-              maxRotation: 0,
-              autoSkip: true,
-            },
-            grid: {
-              display: true,
-            },
-          },
-          y: {
-            beginAtZero: true,
-            ticks: {
-              stepSize: 5,
-            },
-          },
-        },
-        plugins: {
-          legend: {
-            display: true,
-            labels: { boxWidth: 12 },
-          },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => {
-                const y = ctx.parsed.y ?? 0;
-                const label = ctx.dataset.label ?? "";
-                return `${label}: ${y.toFixed(1)} 人`;
-              },
-            },
-          },
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        labels: {
+          color: "#e5e7eb",
         },
       },
-    });
-
-    chartRef.current = chart;
-
-    // クリーンアップ
-    return () => {
-      chart.destroy();
-      chartRef.current = null;
-    };
-  }, [points]);
+      tooltip: {
+        mode: "index" as const,
+        intersect: false,
+      },
+    },
+    scales: {
+      x: {
+        ticks: {
+          color: "#9ca3af",
+          maxRotation: 0,
+          minRotation: 0,
+        },
+        grid: {
+          color: "rgba(148,163,184,0.2)",
+        },
+      } as const,
+      y: {
+        beginAtZero: true,
+        ticks: {
+          color: "#9ca3af",
+        },
+        grid: {
+          color: "rgba(148,163,184,0.2)",
+        },
+      } as const,
+    },
+  };
 
   return (
-    <div className="relative w-full h-72 md:h-80 lg:h-96">
-      <canvas ref={canvasRef} />
+    <div className="h-64">
+      <Line data={data} options={options} />
     </div>
   );
 }

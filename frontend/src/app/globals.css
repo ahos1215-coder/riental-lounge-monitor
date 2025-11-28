@@ -2,6 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
+
 /* 仮の見た目（後で調整OK） */
 html, body {
   background-color: #0f172a;
