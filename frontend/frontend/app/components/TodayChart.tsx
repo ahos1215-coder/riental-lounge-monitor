@@ -101,7 +101,7 @@ export default function TodayChart({ points, title }: Props) {
           tooltip: {
             callbacks: {
               label: (ctx) =>
-                ${ctx.dataset.label}:  人,
+                `${ctx.dataset.label}: ${ctx.parsed.y}人`,
             },
           },
         },
