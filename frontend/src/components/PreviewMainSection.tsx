@@ -83,17 +83,14 @@ const cardClass = "rounded-3xl border border-slate-800 bg-slate-950/80";
 /* - menActual / womenActual（Area 用）の英語キーは非表示
    - 「予測」が付くシリーズだけ小数 1 桁、それ以外は整数表示 */
 
-function TimelineTooltip({
-  active,
-  label,
-  payload,
-}: TooltipProps<number, string>) {
+function TimelineTooltip(props: TooltipProps<number, string>) {
+  const { active, payload, label = "" } = props;
+
   if (!active || !payload || payload.length === 0) return null;
 
   const filtered = payload.filter((entry) => {
     const name = entry.name as string | undefined;
     if (!name) return false;
-    // Area の英語キーは除外して、Line の「男性（実測）」「女性（予測）」だけ表示
     return name !== "menActual" && name !== "womenActual";
   });
 
@@ -116,7 +113,6 @@ function TimelineTooltip({
 
         let valueText = "-";
         if (typeof raw === "number") {
-          // 予測シリーズだけ小数 1 桁、それ以外は整数
           valueText = name.includes("予測")
             ? raw.toFixed(1)
             : Math.round(raw).toString();
