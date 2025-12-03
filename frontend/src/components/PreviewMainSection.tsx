@@ -83,8 +83,12 @@ const cardClass = "rounded-3xl border border-slate-800 bg-slate-950/80";
 /* - menActual / womenActual（Area 用）の英語キーは非表示
    - 「予測」が付くシリーズだけ小数 1 桁、それ以外は整数表示 */
 
-function TimelineTooltip(props: TooltipProps<number, string>) {
-  const { active, payload, label = "" } = props;
+type TimelineTooltipProps = TooltipProps<number, string> & {
+  label?: string | number;
+  payload?: any[]; // payload は配列であればよいので any[] で十分とする
+};
+
+function TimelineTooltip({ active, payload, label = "" }: TimelineTooltipProps) {
 
   if (!active || !payload || payload.length === 0) return null;
 

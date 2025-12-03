@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import MeguribiDashboardPreview from "../components/MeguribiDashboardPreview";
 
 export default function Page() {
@@ -19,7 +20,9 @@ export default function Page() {
       >
         DEBUG: Meguribi PREVIEW v1
       </div>
-      <MeguribiDashboardPreview />
+      <Suspense fallback={null}>
+        <MeguribiDashboardPreview />
+      </Suspense>
     </>
   );
 }
