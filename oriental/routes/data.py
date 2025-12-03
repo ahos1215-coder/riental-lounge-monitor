@@ -8,6 +8,7 @@ from flask import Blueprint, Response, current_app, jsonify, render_template, re
 from ..clients.gas_client import GasClientError
 from ..config import AppConfig
 from ..data.provider import SupabaseError, SupabaseLogsProvider
+from ..data.second_venues_repository import SecondVenuesRepository
 from ..utils import storage, timeutil
 from ..utils.log import format_payload
 
@@ -16,8 +17,8 @@ bp = Blueprint("data", __name__)
 
 @dataclass(slots=True)
 class RangeQuery:
-    start: date
-    end: date
+    start: date | None
+    end: date | None
     limit: int
 
 
@@ -74,7 +75,10 @@ def api_range():
                 query.end,
             )
         else:
-            start_utc, end_utc = _range_bounds_to_utc(query, cfg.timezone)
+            if query.start and query.end:
+                start_utc, end_utc = _range_bounds_to_utc(query.start, query.end, cfg.timezone)
+            else:
+                start_utc, end_utc = None, None
             try:
                 supabase_rows = provider.fetch_range(
                     store_id=store_id,
@@ -104,24 +108,28 @@ def api_range():
             )
             return jsonify({"ok": True, "rows": limited})
 
-    rows = list(storage.rows_in_range(cfg, start=query.start, end=query.end))
+    if query.start and query.end:
+        rows = list(storage.rows_in_range(cfg, start=query.start, end=query.end))
+    else:
+        rows = list(storage.iter_log_rows(cfg))
     local_count = len(rows)
 
     gas_client = current_app.config["GAS_CLIENT"]
     remote_count = 0
-    try:
-        remote_rows = gas_client.fetch_range(start=query.start, end=query.end)
-        remote_count = len(remote_rows)
-        rows.extend(remote_rows)
-    except GasClientError as exc:
-        logger.error(
-            "api_range.upstream_error type=%s detail=%s window=%s..%s",
-            exc.__class__.__name__,
-            exc,
-            query.start,
-            query.end,
-        )
-        return jsonify({"ok": False, "error": "upstream-google-sheets", "detail": str(exc)}), 502
+    if query.start and query.end:
+        try:
+            remote_rows = gas_client.fetch_range(start=query.start, end=query.end)
+            remote_count = len(remote_rows)
+            rows.extend(remote_rows)
+        except GasClientError as exc:
+            logger.error(
+                "api_range.upstream_error type=%s detail=%s window=%s..%s",
+                exc.__class__.__name__,
+                exc,
+                query.start,
+                query.end,
+            )
+            return jsonify({"ok": False, "error": "upstream-google-sheets", "detail": str(exc)}), 502
 
     deduped = _deduplicate_by_ts(rows)
     limited = deduped[-query.limit:]
@@ -167,19 +175,47 @@ def api_summary():
     return jsonify({"ok": True, "data": {}})
 
 
-def _parse_range_query(cfg: AppConfig) -> RangeQuery:
-    today = timeutil.now(cfg.timezone).date()
+@bp.get("/api/second_venues")
+def api_second_venues():
+    logger = current_app.logger
+    params_dict = request.args.to_dict(flat=False)
+    logger.info("api_second_venues.start params=%s", format_payload(params_dict))
 
+    cfg = _config()
+    store_id = _resolve_store_id(cfg)
+
+    if not (cfg.supabase_url and cfg.supabase_service_role_key):
+        logger.warning("api_second_venues.supabase_missing_config store_id=%s", store_id)
+        return jsonify({"ok": True, "rows": []})
+
+    repo = SecondVenuesRepository(
+        base_url=cfg.supabase_url,
+        api_key=cfg.supabase_service_role_key,
+        session=current_app.config.get("HTTP_SESSION"),
+        logger=logger,
+    )
+
+    try:
+        rows = repo.get_by_store(store_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("api_second_venues.fetch_failed store_id=%s detail=%s", store_id, exc)
+        rows = []
+
+    return jsonify({"ok": True, "rows": rows})
+
+
+def _parse_range_query(cfg: AppConfig) -> RangeQuery:
     raw_from = request.args.get("from")
     raw_to = request.args.get("to")
     raw_limit = request.args.get("limit")
+
+    start = None
+    end = None
 
     if raw_from:
         start = timeutil.parse_ymd(raw_from)
         if start is None:
             raise RangeQueryError("from must be a valid YYYY-MM-DD")
-    else:
-        start = today
 
     if raw_to:
         end = timeutil.parse_ymd(raw_to)
@@ -187,10 +223,8 @@ def _parse_range_query(cfg: AppConfig) -> RangeQuery:
             raise RangeQueryError("to must be a valid YYYY-MM-DD")
     elif raw_from:
         end = start
-    else:
-        end = today
 
-    if start > end:
+    if start and end and start > end:
         raise RangeQueryError("from must be before to")
 
     default_limit = min(500, cfg.max_range_limit)
@@ -236,10 +270,10 @@ def _supabase_provider(cfg: AppConfig) -> SupabaseLogsProvider | None:
     return current_app.config["SUPABASE_PROVIDER"]
 
 
-def _range_bounds_to_utc(query: RangeQuery, tz_name: str) -> tuple[datetime, datetime]:
+def _range_bounds_to_utc(start: date, end: date, tz_name: str) -> tuple[datetime, datetime]:
     tz = timeutil.get_timezone(tz_name)
-    start_dt = datetime.combine(query.start, time.min, tzinfo=tz)
-    end_dt = datetime.combine(query.end, time.max, tzinfo=tz)
+    start_dt = datetime.combine(start, time.min, tzinfo=tz)
+    end_dt = datetime.combine(end, time.max, tzinfo=tz)
     return start_dt.astimezone(timezone.utc), end_dt.astimezone(timezone.utc)
 
 
@@ -249,3 +283,4 @@ def _resolve_store_id(cfg: AppConfig) -> str:
     store_arg = request.args.get("store_id") or request.args.get("store")
     store_id, _ = resolve_store_identifier(store_arg, cfg.store_id)
     return store_id
+

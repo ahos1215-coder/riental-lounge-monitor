@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Area,
   CartesianGrid,
@@ -9,175 +9,17 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  type TooltipProps,
 } from "recharts";
+
 import type {
   StoreId,
   StoreSnapshot,
   TimeSeriesPoint,
 } from "./MeguribiDashboardPreview";
-import type { ReactNode } from "react";
+import SecondVenuesList from "./SecondVenuesList";
 
-type PlaceCategory = "karaoke" | "darts" | "lovehotel" | "ramen" | "bar";
-
-type NearbyPlace = {
-  id: string;
-  name: string;
-  category: PlaceCategory;
-  distanceMin: number; // 徒歩分
-  isOpen: boolean;
-  hoursLabel: string; // 例: "18:00〜05:00"
-  closingRank: number; // 閉店遅さソート用（大きいほど遅い）
-  rating: number;
-  reviews: number;
-  extra?: {
-    vacancy?: string; // ラブホ用
-    price?: string; // ラブホ用
-    ramenStyle?: string; // ラーメン用
-  };
-};
-
-const NEARBY_PLACES: NearbyPlace[] = [
-  {
-    id: "k1",
-    name: "カラオケ スカイサイド長崎",
-    category: "karaoke",
-    distanceMin: 3,
-    isOpen: true,
-    hoursLabel: "18:00〜05:00",
-    closingRank: 29,
-    rating: 4.1,
-    reviews: 96,
-  },
-  {
-    id: "k2",
-    name: "カラオケ ミッドナイト",
-    category: "karaoke",
-    distanceMin: 6,
-    isOpen: true,
-    hoursLabel: "19:00〜03:00",
-    closingRank: 27,
-    rating: 3.9,
-    reviews: 54,
-  },
-  {
-    id: "d1",
-    name: "ダーツバー Orbit",
-    category: "darts",
-    distanceMin: 4,
-    isOpen: true,
-    hoursLabel: "20:00〜04:00",
-    closingRank: 28,
-    rating: 4.3,
-    reviews: 71,
-  },
-  {
-    id: "d2",
-    name: "ダーツカフェ Vector",
-    category: "darts",
-    distanceMin: 9,
-    isOpen: false,
-    hoursLabel: "17:00〜24:00",
-    closingRank: 24,
-    rating: 4.0,
-    reviews: 39,
-  },
-  {
-    id: "l1",
-    name: "ホテル ベイサイド",
-    category: "lovehotel",
-    distanceMin: 7,
-    isOpen: true,
-    hoursLabel: "チェックイン 20:00〜 / 〜12:00",
-    closingRank: 36,
-    rating: 4.2,
-    reviews: 128,
-    extra: {
-      vacancy: "空 5 / 20",
-      price: "¥7,800〜",
-    },
-  },
-  {
-    id: "l2",
-    name: "ホテル コーストライン",
-    category: "lovehotel",
-    distanceMin: 11,
-    isOpen: true,
-    hoursLabel: "チェックイン 19:00〜 / 〜11:00",
-    closingRank: 35,
-    rating: 4.0,
-    reviews: 84,
-    extra: {
-      vacancy: "空 2 / 18",
-      price: "¥8,500〜",
-    },
-  },
-  {
-    id: "r1",
-    name: "ラーメン まるぎん とんこつ",
-    category: "ramen",
-    distanceMin: 2,
-    isOpen: true,
-    hoursLabel: "18:00〜02:00",
-    closingRank: 26,
-    rating: 4.4,
-    reviews: 212,
-    extra: {
-      ramenStyle: "とんこつ",
-    },
-  },
-  {
-    id: "r2",
-    name: "家系ラーメン 六三家",
-    category: "ramen",
-    distanceMin: 5,
-    isOpen: true,
-    hoursLabel: "19:00〜05:00",
-    closingRank: 29,
-    rating: 4.1,
-    reviews: 134,
-    extra: {
-      ramenStyle: "家系",
-    },
-  },
-  {
-    id: "b1",
-    name: "スタンド カドヤ",
-    category: "bar",
-    distanceMin: 4,
-    isOpen: true,
-    hoursLabel: "18:00〜02:00",
-    closingRank: 26,
-    rating: 4.6,
-    reviews: 89,
-  },
-  {
-    id: "b2",
-    name: "BAR 星",
-    category: "bar",
-    distanceMin: 8,
-    isOpen: false,
-    hoursLabel: "19:00〜24:00",
-    closingRank: 24,
-    rating: 4.8,
-    reviews: 41,
-  },
-];
-
-const PLACE_CATEGORY_LABEL: Record<PlaceCategory, string> = {
-  karaoke: "カラオケ",
-  darts: "ダーツ",
-  lovehotel: "ラブホ",
-  ramen: "ラーメン",
-  bar: "バー",
-};
-
-const PLACE_CATEGORY_ORDER: PlaceCategory[] = [
-  "karaoke",
-  "darts",
-  "lovehotel",
-  "ramen",
-  "bar",
-];
+/* ------- 全国店舗サンプル ------- */
 
 type NationalStore = {
   id: string;
@@ -215,7 +57,6 @@ const NATIONAL_STORES: NationalStore[] = [
     area: "新宿・歌舞伎町",
     prefecture: "東京",
     hours: "18:00〜05:00",
-    storeId: "ol_shibuya", // ダミー
   },
   {
     id: "ns_umeda",
@@ -224,7 +65,6 @@ const NATIONAL_STORES: NationalStore[] = [
     area: "大阪・梅田",
     prefecture: "大阪",
     hours: "18:00〜05:00",
-    storeId: "ol_fukuoka", // ダミー
   },
   {
     id: "ns_fukuoka",
@@ -239,11 +79,70 @@ const NATIONAL_STORES: NationalStore[] = [
 
 const cardClass = "rounded-3xl border border-slate-800 bg-slate-950/80";
 
+/* ------- タイムライン用ツールチップ ------- */
+/* - menActual / womenActual（Area 用）の英語キーは非表示
+   - 「予測」が付くシリーズだけ小数 1 桁、それ以外は整数表示 */
+
+function TimelineTooltip({
+  active,
+  label,
+  payload,
+}: TooltipProps<number, string>) {
+  if (!active || !payload || payload.length === 0) return null;
+
+  const filtered = payload.filter((entry) => {
+    const name = entry.name as string | undefined;
+    if (!name) return false;
+    // Area の英語キーは除外して、Line の「男性（実測）」「女性（予測）」だけ表示
+    return name !== "menActual" && name !== "womenActual";
+  });
+
+  if (filtered.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        backgroundColor: "#020617",
+        border: "1px solid #1f2937",
+        borderRadius: 8,
+        fontSize: 11,
+        padding: "6px 8px",
+      }}
+    >
+      <p style={{ marginBottom: 4, color: "#e5e7eb" }}>{label}</p>
+      {filtered.map((entry) => {
+        const name = entry.name as string;
+        const raw = entry.value as number | undefined | null;
+
+        let valueText = "-";
+        if (typeof raw === "number") {
+          // 予測シリーズだけ小数 1 桁、それ以外は整数
+          valueText = name.includes("予測")
+            ? raw.toFixed(1)
+            : Math.round(raw).toString();
+        }
+
+        const color = entry.color ?? "#e5e7eb";
+
+        return (
+          <p key={name} style={{ color }}>
+            {name}：{valueText}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ------- メインセクション ------- */
+
 type PreviewMainSectionProps = {
   storeId: StoreId;
   snapshot: StoreSnapshot;
   storeDataMap: Record<StoreId, StoreSnapshot>;
   onSelectStore: (id: StoreId) => void;
+  loading?: boolean;
+  error?: string | null;
 };
 
 export default function PreviewMainSection({
@@ -251,7 +150,16 @@ export default function PreviewMainSection({
   snapshot,
   storeDataMap,
   onSelectStore,
+  loading,
+  error,
 }: PreviewMainSectionProps) {
+  // Recharts width/height -1 警告対策: クライアントマウント後にだけ描画する
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
+
   return (
     <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6">
       {/* 現在見ている店舗 + KPI */}
@@ -266,6 +174,14 @@ export default function PreviewMainSection({
               19:00〜05:00 の推移（実測 &amp; 予測 / 男性・女性）
             </p>
           </div>
+          {loading && (
+            <p className="text-[10px] text-slate-500">データ取得中…</p>
+          )}
+          {error && (
+            <p className="text-[10px] text-rose-400">
+              データ取得に失敗しました（ダミーデータを表示中）
+            </p>
+          )}
 
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[10px] text-emerald-300 ring-1 ring-emerald-500/40">
             <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -309,6 +225,7 @@ export default function PreviewMainSection({
         </div>
 
         <div className="mt-3 h-72 w-full rounded-2xl bg-gradient-to-b from-slate-950 via-black to-black p-3">
+          {isClient && (
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart
               data={snapshot.series}
@@ -325,26 +242,21 @@ export default function PreviewMainSection({
                 stroke="#4b5563"
                 allowDecimals={false}
               />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: "#020617",
-                  border: "1px solid #1f2937",
-                  borderRadius: 8,
-                  fontSize: 11,
-                }}
-              />
+              <Tooltip content={<TimelineTooltip />} />
               <Legend
                 wrapperStyle={{ fontSize: 10, color: "#9ca3af" }}
                 iconSize={8}
               />
 
-              {/* 実測値 Area */}
+              {/* 実測値 Area（塗りつぶし） */}
               <Area
                 type="monotone"
                 dataKey="menActual"
                 stroke="none"
                 fill="#38bdf8"
                 fillOpacity={0.24}
+                connectNulls
+                legendType="none"
               />
               <Area
                 type="monotone"
@@ -352,6 +264,8 @@ export default function PreviewMainSection({
                 stroke="none"
                 fill="#f472b6"
                 fillOpacity={0.24}
+                connectNulls
+                legendType="none"
               />
 
               {/* 実測線 */}
@@ -397,6 +311,7 @@ export default function PreviewMainSection({
               />
             </ComposedChart>
           </ResponsiveContainer>
+          )}
         </div>
       </section>
 
@@ -405,9 +320,9 @@ export default function PreviewMainSection({
         <FeedbackPoll storeId={storeId} storeName={snapshot.name} />
       </section>
 
-      {/* 近くのお店 */}
+      {/* Nearby second venues */}
       <section className={`${cardClass} p-3 text-xs`}>
-        <NearbyPlacesSection />
+        <SecondVenuesList storeId={storeId} />
       </section>
 
       {/* 全国店舗一覧 */}
@@ -621,196 +536,6 @@ function FeedbackPoll({ storeId }: FeedbackPollProps) {
         <p className="mt-2 text-[11px] text-emerald-300">
           フィードバックありがとうございます。サービス改善のヒントとして活用します。
         </p>
-      )}
-    </div>
-  );
-}
-
-/* ------- 近くのお店 ------- */
-
-type NearbyPlacesSectionProps = {};
-
-type SortMode = "distance" | "closing";
-
-type CategoryLimitMap = Record<PlaceCategory, number>;
-
-function NearbyPlacesSection(_props: NearbyPlacesSectionProps) {
-  const [sortMode, setSortMode] = useState<SortMode>("distance");
-  const [visibleCount, setVisibleCount] = useState(6);
-  const [categoryLimits, setCategoryLimits] = useState<CategoryLimitMap>({
-    karaoke: 3,
-    darts: 3,
-    lovehotel: 3,
-    ramen: 3,
-    bar: 3,
-  });
-
-  const openPlaces = useMemo(() => NEARBY_PLACES.filter((p) => p.isOpen), []);
-
-  const sortedPlaces = useMemo(() => {
-    const arr = [...openPlaces];
-    if (sortMode === "distance") {
-      arr.sort((a, b) => a.distanceMin - b.distanceMin);
-    } else {
-      arr.sort((a, b) => b.closingRank - a.closingRank);
-    }
-    return arr;
-  }, [openPlaces, sortMode]);
-
-  const limitedPlaces = useMemo(() => {
-    const grouped: Record<PlaceCategory, NearbyPlace[]> = {
-      karaoke: [],
-      darts: [],
-      lovehotel: [],
-      ramen: [],
-      bar: [],
-    };
-
-    sortedPlaces.forEach((p) => {
-      grouped[p.category].push(p);
-    });
-
-    const flattened: NearbyPlace[] = [];
-    PLACE_CATEGORY_ORDER.forEach((cat) => {
-      const limit = categoryLimits[cat] ?? 0;
-      const list = grouped[cat] ?? [];
-      list.slice(0, limit).forEach((p) => flattened.push(p));
-    });
-
-    return flattened;
-  }, [sortedPlaces, categoryLimits]);
-
-  const visiblePlaces = limitedPlaces.slice(0, visibleCount);
-  const canLoadMore = visibleCount < limitedPlaces.length;
-
-  const handleCategoryLimitChange = (cat: PlaceCategory, value: string) => {
-    const num = Number(value);
-    if (Number.isNaN(num) || num < 0) return;
-    setCategoryLimits((prev) => ({ ...prev, [cat]: num }));
-  };
-
-  return (
-    <div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <p className="text-xs font-semibold text-slate-100">
-            近くのお店（営業中のみ・サンプル）
-          </p>
-          <p className="mt-0.5 text-[11px] text-slate-400">
-            距離が近い順/閉店が遅い順でソート。カテゴリの上限を指定できます。
-          </p>
-        </div>
-
-        <div className="flex items-center gap-2 text-[11px] text-slate-300">
-          <span className="text-slate-400">並び替え</span>
-          <div className="flex items-center gap-1 rounded-full bg-slate-900 p-1">
-            <button
-              type="button"
-              onClick={() => setSortMode("distance")}
-              className={`rounded-full px-2 py-0.5 ${
-                sortMode === "distance"
-                  ? "bg-slate-100 text-slate-900"
-                  : "text-slate-300"
-              }`}
-            >
-              距離が近い順
-            </button>
-            <button
-              type="button"
-              onClick={() => setSortMode("closing")}
-              className={`rounded-full px-2 py-0.5 ${
-                sortMode === "closing"
-                  ? "bg-slate-100 text-slate-900"
-                  : "text-slate-300"
-              }`}
-            >
-              閉店が遅い順
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* カテゴリごとの最大件数 */}
-      <div className="mt-3 flex flex-wrap items-center gap-3 text-[10px] text-slate-300">
-        <span className="text-slate-400">カテゴリ別の最大件数</span>
-        {PLACE_CATEGORY_ORDER.map((cat) => (
-          <label key={cat} className="inline-flex items-center gap-1">
-            <span>{PLACE_CATEGORY_LABEL[cat]}</span>
-            <input
-              type="number"
-              min={0}
-              className="w-12 rounded border border-slate-700 bg-slate-950 px-1 py-0.5 text-[10px] text-slate-50 outline-none"
-              value={categoryLimits[cat] ?? 0}
-              onChange={(e) => handleCategoryLimitChange(cat, e.target.value)}
-            />
-          </label>
-        ))}
-      </div>
-
-      {/* 一覧 */}
-      <div className="mt-3 space-y-2">
-        {visiblePlaces.map((place) => (
-          <div
-            key={place.id}
-            className="flex flex-col gap-1 rounded-2xl border border-slate-800 bg-slate-950/90 p-2.5 text-[11px] text-slate-100 md:flex-row md:items-center md:justify-between"
-          >
-            <div className="flex-1">
-              <div className="flex flex-wrap items-center gap-1">
-                <span className="text-[11px] font-semibold text-slate-50">
-                  {place.name}
-                </span>
-                <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[10px] text-slate-300">
-                  {PLACE_CATEGORY_LABEL[place.category]}
-                </span>
-                <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-300">
-                  営業中
-                </span>
-              </div>
-
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-300">
-                <span>徒歩 {place.distanceMin} 分</span>
-                <span>営業時間: {place.hoursLabel}</span>
-                <span className="flex items-center gap-0.5">
-                  <span className="text-amber-300">★</span>
-                  <span>
-                    {place.rating.toFixed(1)} ({place.reviews})
-                  </span>
-                </span>
-              </div>
-
-              {place.category === "lovehotel" && place.extra && (
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-slate-300">
-                  {place.extra.vacancy && <span>空: {place.extra.vacancy}</span>}
-                  {place.extra.price && <span>料金: {place.extra.price}</span>}
-                </div>
-              )}
-
-              {place.category === "ramen" && place.extra?.ramenStyle && (
-                <div className="mt-1 text-[10px] text-slate-300">
-                  系統: {place.extra.ramenStyle}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-
-        {visiblePlaces.length === 0 && (
-          <p className="text-[11px] text-slate-500">
-            現在営業中のお店はサンプルデータに含まれていません。
-          </p>
-        )}
-      </div>
-
-      {canLoadMore && (
-        <div className="mt-3 flex justify-center">
-          <button
-            type="button"
-            onClick={() => setVisibleCount((prev) => prev + 6)}
-            className="rounded-full border border-slate-700 bg-slate-900 px-4 py-1.5 text-[11px] font-medium text-slate-100 hover:border-amber-400 hover:text-amber-200"
-          >
-            もっと見る（+6）
-          </button>
-        </div>
       )}
     </div>
   );

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import time
 from datetime import datetime
@@ -9,10 +10,13 @@ from bs4 import BeautifulSoup
 from flask import Blueprint, current_app, jsonify, request
 from pydantic import ValidationError
 
-from ..config import AppConfig
-from ..utils import storage, timeutil
 from ..clients.gas_client import GasClient, GasClientError
-from multi_collect import collect_all_once, STORES
+from ..clients.google_places import GooglePlacesClient
+from ..config import AppConfig
+from ..data.second_venues_repository import SecondVenuesRepository
+from ..tasks.update_second_venues import update_all_second_venues
+from ..utils import storage, timeutil
+from multi_collect import PREF_COORDS, STORES, collect_all_once
 
 bp = Blueprint("tasks", __name__)
 
@@ -125,6 +129,45 @@ def tasks_seed():
         return jsonify({"ok": True, "seeded": False})
     record = _run_collection(cfg)
     return jsonify({"ok": True, "seeded": True, "record": record})
+
+
+@bp.route("/tasks/update_second_venues", methods=["GET", "POST"])
+def tasks_update_second_venues():
+    cfg = _config()
+    logger = current_app.logger
+    api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")
+
+    stores = STORES
+    if not api_key:
+        logger.warning("update_second_venues.skip_no_google_api_key stores=%d", len(stores))
+        return jsonify({"ok": True, "updated": 0, "stores": len(stores)})
+
+    started = time.perf_counter()
+    try:
+        summary = update_all_second_venues(
+            stores=stores,
+            google_client=GooglePlacesClient(api_key=api_key, session=_session(), logger=logger),
+            repository=SecondVenuesRepository(
+                base_url=cfg.supabase_url,
+                api_key=cfg.supabase_service_role_key,
+                session=_session(),
+                logger=logger,
+            ),
+            logger=logger,
+            pref_coords=PREF_COORDS,
+        )
+        duration = time.perf_counter() - started
+        logger.info(
+            "update_second_venues.success stores=%d total_venues=%d duration_sec=%.3f",
+            summary.get("stores", 0),
+            summary.get("total_venues", 0),
+            duration,
+        )
+        return jsonify({"ok": True, "updated": summary.get("total_venues", 0), "stores": summary.get("stores", 0)})
+    except Exception as exc:  # noqa: BLE001
+        duration = time.perf_counter() - started
+        logger.warning("update_second_venues.failed duration_sec=%.3f detail=%s", duration, exc)
+        return jsonify({"ok": True, "updated": 0, "stores": len(stores)})
 
 
 def _config() -> AppConfig:

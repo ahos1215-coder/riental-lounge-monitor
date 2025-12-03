@@ -80,20 +80,30 @@ class SupabaseLogsProvider(DataProvider):
         self.session.mount("http://", adapter)
         self.session.mount("https://", adapter)
 
-    def fetch_range(self, store_id: str, start_ts: datetime, end_ts: datetime, limit: int) -> list[dict]:
+    def fetch_range(
+        self,
+        *,
+        store_id: str,
+        limit: int,
+        start_ts: datetime | None = None,
+        end_ts: datetime | None = None,
+    ) -> list[dict]:
         if not self.endpoint or not self.api_key:
             raise SupabaseError("supabase is not configured")
         if limit <= 0:
             return []
 
+        # 最新を優先して取得するため Supabase には ts.desc で問い合わせる
         params: list[tuple[str, str]] = [
             ("select", "store_id,ts,men,women,total,weather_code,weather_label,temp_c,precip_mm,src_brand"),
             ("store_id", f"eq.{store_id}"),
-            ("ts", f"gte.{start_ts.isoformat()}"),
-            ("ts", f"lte.{end_ts.isoformat()}"),
-            ("order", "ts.asc"),
+            ("order", "ts.desc"),
             ("limit", str(limit)),
         ]
+        if start_ts is not None:
+            params.append(("ts", f"gte.{start_ts.isoformat()}"))
+        if end_ts is not None:
+            params.append(("ts", f"lte.{end_ts.isoformat()}"))
         headers = {
             "apikey": self.api_key,
             "Authorization": f"Bearer {self.api_key}",
@@ -135,6 +145,9 @@ class SupabaseLogsProvider(DataProvider):
                 if extra in row:
                     entry[extra] = row.get(extra)
             rows.append(entry)
+
+        # Supabase からは ts.desc（新しい順）で取得しているので、描画しやすいよう昇順に並べ替える
+        rows.sort(key=lambda r: r.get("ts", ""))
 
         self.logger.info(
             "supabase.provider.fetch_range_ok store_id=%s returned=%d limit=%d",

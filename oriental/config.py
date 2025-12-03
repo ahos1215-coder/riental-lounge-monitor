@@ -3,6 +3,16 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env from project root if present (do not override existing env vars)
+try:
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    if env_path.is_file():
+        load_dotenv(env_path, override=False)
+except Exception as exc:  # pragma: no cover
+    # Fallback to a simple warning without breaking app startup
+    print(f"[config] failed to load .env from {env_path}: {exc}")
 
 
 @dataclass(slots=True)

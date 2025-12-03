@@ -20,3 +20,13 @@ GET http://127.0.0.1:5000/api/forecast_next_hour?store=nagasaki
 
 ###
 GET http://127.0.0.1:5000/api/forecast_today?store=nagasaki
+
+### Second venues (local)
+GET http://127.0.0.1:5000/api/second_venues?store=nagasaki
+
+### Update second venues (local)
+POST http://127.0.0.1:5000/tasks/update_second_venues
+
+###
+# 二次会スポット更新
+GET http://127.0.0.1:5000/tasks/update_second_venues

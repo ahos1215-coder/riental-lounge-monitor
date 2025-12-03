@@ -1,12 +1,11 @@
 "use client";
 
 // MEGRIBI PREVIEW v1 layout
-// このコンポーネントの見た目を今後のダッシュボード標準として扱う（見た目を変える場合は要相談）
-
+// こ�Eコンポ�Eネント�E見た目を今後�EダチE��ュボ�Eド標準として扱ぁE��見た目を変える場合�E要相諁E��E
+import { useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import PreviewHeader from "./PreviewHeader";
 import PreviewMainSection from "./PreviewMainSection";
-import { useStorePreviewData } from "../app/hooks/useStorePreviewData";
 
 export type StoreId = "ol_nagasaki" | "ol_shibuya" | "ol_fukuoka";
 
@@ -24,21 +23,21 @@ function resolveStoreIdFromSlug(slug: string | null): StoreId {
   return STORE_SLUG_TO_ID[key] ?? DEFAULT_STORE_ID;
 }
 
-export function getSlugFromStoreId(id: StoreId): string {
+function getSlugFromStoreId(id: StoreId): string {
   const entry = Object.entries(STORE_SLUG_TO_ID).find(
     ([, value]) => value === id,
   );
   return entry?.[0] ?? "nagasaki";
 }
 
-export type CongestionLevel = "空いている" | "やや混み" | "混んでいる";
+export type CongestionLevel = "空ぁE��ぁE��" | "めE��混み" | "混んでぁE��";
 
 export type TimeSeriesPoint = {
   label: string;
-  menActual: number | null;
-  womenActual: number | null;
-  menForecast: number | null;
-  womenForecast: number | null;
+  menActual: number;
+  womenActual: number;
+  menForecast: number;
+  womenForecast: number;
 };
 
 export type StoreSnapshot = {
@@ -54,17 +53,17 @@ export type StoreSnapshot = {
   series: TimeSeriesPoint[];
 };
 
-export const MOCK_STORE_DATA: Record<StoreId, StoreSnapshot> = {
+const MOCK_STORE_DATA: Record<StoreId, StoreSnapshot> = {
   ol_nagasaki: {
-    name: "オリエンタルラウンジ 長崎",
-    area: "長崎・浜の町",
-    level: "やや混み",
+    name: "オリエンタルラウンジ 長崁E,
+    area: "長崎�E浜�E町",
+    level: "めE��混み",
     nowTotal: 34,
     nowMen: 20,
     nowWomen: 14,
     peakTimeLabel: "24:00 ごろ",
     peakTotal: 38,
-    recommendation: "終電前後で動きやすいタイミング。",
+    recommendation: "終電前後で動きめE��ぁE��イミング、E,
     series: [
       {
         label: "19:00",
@@ -155,13 +154,13 @@ export const MOCK_STORE_DATA: Record<StoreId, StoreSnapshot> = {
   ol_shibuya: {
     name: "オリエンタルラウンジ 渋谷",
     area: "東京・渋谷",
-    level: "混んでいる",
+    level: "混んでぁE��",
     nowTotal: 76,
     nowMen: 48,
     nowWomen: 28,
     peakTimeLabel: "24:30 ごろ",
     peakTotal: 85,
-    recommendation: "かなり混雑。早めに動きたいタイミング。",
+    recommendation: "かなり混雑。早めに動きたいタイミング、E,
     series: [
       {
         label: "19:00",
@@ -251,14 +250,14 @@ export const MOCK_STORE_DATA: Record<StoreId, StoreSnapshot> = {
   },
   ol_fukuoka: {
     name: "オリエンタルラウンジ 福岡",
-    area: "福岡・天神",
-    level: "空いている",
+    area: "福岡・天祁E,
+    level: "空ぁE��ぁE��",
     nowTotal: 18,
     nowMen: 11,
     nowWomen: 7,
     peakTimeLabel: "23:00 ごろ",
     peakTotal: 40,
-    recommendation: "ゆっくり話しやすい雰囲気。",
+    recommendation: "めE��くり話しやすい雰囲気、E,
     series: [
       {
         label: "19:00",
@@ -354,7 +353,7 @@ export default function MeguribiDashboardPreview() {
 
   const slug = searchParams.get("store");
   const storeId = resolveStoreIdFromSlug(slug);
-  const { snapshot, loading, error } = useStorePreviewData(storeId);
+  const snapshot = useMemo(() => MOCK_STORE_DATA[storeId], [storeId]);
 
   const handleSelectStore = (nextId: StoreId) => {
     if (nextId === storeId) return;
@@ -375,8 +374,6 @@ export default function MeguribiDashboardPreview() {
         snapshot={snapshot}
         storeDataMap={MOCK_STORE_DATA}
         onSelectStore={handleSelectStore}
-        loading={loading}
-        error={error}
       />
     </div>
   );
