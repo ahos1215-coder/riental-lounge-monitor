@@ -1,22 +1,21 @@
 import { useSecondVenues } from "../app/hooks/useSecondVenues";
-import type { StoreId } from "./MeguribiDashboardPreview";
 
 type SecondVenuesListProps = {
-  storeId: StoreId;
+  storeSlug: string;
 };
 
-export default function SecondVenuesList({ storeId }: SecondVenuesListProps) {
-  const { data, loading, error } = useSecondVenues(storeId);
+export default function SecondVenuesList({ storeSlug }: SecondVenuesListProps) {
+  const { data, loading, error } = useSecondVenues(storeSlug);
 
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-xs font-semibold text-slate-100">
-            二次会で使えるスポット（Googleマップで検索）
+            近くの二次会候補（Google マップ検索リンク）
           </p>
           <p className="text-[11px] text-slate-500">
-            ダーツ / カラオケ / ラーメン / ラブホをワンタップで検索します。
+            ダーツ / カラオケ / ラーメン / ラブホテル をワンクリックで検索します。
           </p>
         </div>
         {loading && <span className="text-[10px] text-slate-500">読み込み中…</span>}
@@ -37,16 +36,15 @@ export default function SecondVenuesList({ storeId }: SecondVenuesListProps) {
             <p className="text-sm font-semibold text-slate-50">{link.label}</p>
             <p className="mt-0.5 text-[11px] text-slate-400">{link.description}</p>
             <p className="mt-2 text-[11px] font-semibold text-amber-200">
-              Googleマップを開く →
+              Google マップで開く ↗
             </p>
           </a>
         ))}
 
         {!loading && !error && data.length === 0 && (
-          <p className="text-[11px] text-slate-500">リンクを用意できませんでした。</p>
+          <p className="text-[11px] text-slate-500">リンクを生成できませんでした。</p>
         )}
       </div>
     </div>
   );
 }
-

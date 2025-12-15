@@ -8,3 +8,18 @@ html, body {
   background-color: #0f172a;
   color: #ffffff;
 }
+
+/* 横スクロール用にスクロールバーを隠す */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
+/* Stitch 由来のフォント指定クラス（fallback） */
+.font-display {
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Noto Sans JP", sans-serif;
+}

@@ -1,14 +1,34 @@
 // frontend/src/app/hooks/useStorePreviewData.ts
 import { useEffect, useMemo, useState } from "react";
 import {
-  MOCK_STORE_DATA,
-  type StoreId,
-  type StoreSnapshot,
-  type TimeSeriesPoint,
-  getSlugFromStoreId,
-} from "../../components/MeguribiDashboardPreview";
+  DEFAULT_STORE,
+  getStoreMetaBySlug,
+  type StoreMeta,
+} from "../config/stores";
 
-/** /api/range の1点分（実測） */
+export type TimeSeriesPoint = {
+  label: string;
+  menActual: number | null;
+  womenActual: number | null;
+  menForecast: number | null;
+  womenForecast: number | null;
+};
+
+export type StoreSnapshot = {
+  slug: string;
+  name: string;
+  area: string;
+  level: string;
+  nowTotal: number;
+  nowMen: number;
+  nowWomen: number;
+  peakTimeLabel: string;
+  peakTotal: number;
+  recommendation: string;
+  series: TimeSeriesPoint[];
+  hasData: boolean;
+};
+
 type RangePoint = {
   ts?: string;
   men?: number;
@@ -16,7 +36,6 @@ type RangePoint = {
   total?: number;
 };
 
-/** /api/forecast_today の1点分（予測） */
 type ForecastPoint = {
   ts?: string;
   men_pred?: number;
@@ -34,6 +53,40 @@ export type StorePreviewState = {
   error: string | null;
   snapshot: StoreSnapshot;
 };
+
+function buildEmptySeries(): TimeSeriesPoint[] {
+  const labels: string[] = [];
+  for (let h = 19; h <= 24; h += 1) {
+    labels.push(`${h.toString().padStart(2, "0")}:00`);
+  }
+  for (let h = 25; h <= 30; h += 1) {
+    labels.push(`${(h - 24).toString().padStart(2, "0")}:00`);
+  }
+  return labels.map((label) => ({
+    label,
+    menActual: null,
+    womenActual: null,
+    menForecast: null,
+    womenForecast: null,
+  }));
+}
+
+function buildBaseSnapshot(meta: StoreMeta): StoreSnapshot {
+  return {
+    slug: meta.slug,
+    name: `オリエンタルラウンジ ${meta.label}`,
+    area: meta.areaLabel,
+    level: "データなし",
+    nowTotal: 0,
+    nowMen: 0,
+    nowWomen: 0,
+    peakTimeLabel: "--:--",
+    peakTotal: 0,
+    recommendation: "データなし",
+    series: buildEmptySeries(),
+    hasData: false,
+  };
+}
 
 function isRangePoint(row: any): row is RangePoint {
   return row && typeof row.ts === "string";
@@ -78,18 +131,12 @@ function computeNightWindow(now: Date = new Date()): NightWindow {
   return { start, end };
 }
 
-function isWithinNight(
-  ts: string | undefined,
-  window: NightWindow,
-): boolean {
+function isWithinNight(ts: string | undefined, window: NightWindow): boolean {
   if (!ts) return false;
   const t = new Date(ts);
   if (Number.isNaN(t.getTime())) return false;
   const time = t.getTime();
-  return (
-    time >= window.start.getTime() &&
-    time <= window.end.getTime()
-  );
+  return time >= window.start.getTime() && time <= window.end.getTime();
 }
 
 function formatLabel(ts: string): string {
@@ -98,11 +145,6 @@ function formatLabel(ts: string): string {
   return d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
 }
 
-/**
- * 実測と予測を 1 本の TimeSeries にマージする。
- * - 実測: そのまま menActual / womenActual
- * - 予測: 「最後の実測時刻より後」のポイントだけ menForecast / womenForecast として描画
- */
 function buildSeries(
   actuals: RangePoint[],
   forecasts: ForecastPoint[],
@@ -126,7 +168,6 @@ function buildSeries(
 
   const map = new Map<string, TimeSeriesPoint>();
 
-  // 1) 実測を入れる
   for (const p of sortedActuals) {
     if (!p.ts) continue;
     map.set(p.ts, {
@@ -138,7 +179,6 @@ function buildSeries(
     });
   }
 
-  // 2) 予測をマージ
   for (const p of sortedForecasts) {
     if (!p.ts) continue;
     const t = new Date(p.ts).getTime();
@@ -153,14 +193,12 @@ function buildSeries(
         : existing?.womenForecast ?? null;
 
     if (existing) {
-      // 実測と同じ時刻には「未来分であれば」予測を載せる
       map.set(p.ts, {
         ...existing,
         menForecast: isFutureOnly ? menForecast : null,
         womenForecast: isFutureOnly ? womenForecast : null,
       });
     } else {
-      // 実測がない純粋な未来ポイント
       map.set(p.ts, {
         label: formatLabel(p.ts),
         menActual: null,
@@ -176,19 +214,23 @@ function buildSeries(
     .map(([, v]) => v);
 }
 
-/** 最新の実測値から「今の人数」を拾う */
 function pickCurrentActual(series: TimeSeriesPoint[]) {
   const last = [...series]
     .reverse()
-    .find((p) => p.menActual !== null || p.womenActual !== null);
+    .find(
+      (p) =>
+        p.menActual !== null ||
+        p.womenActual !== null ||
+        p.menForecast !== null ||
+        p.womenForecast !== null,
+    );
   if (!last) return { nowMen: 0, nowWomen: 0 };
   return {
-    nowMen: last.menActual ?? 0,
-    nowWomen: last.womenActual ?? 0,
+    nowMen: last.menActual ?? last.menForecast ?? 0,
+    nowWomen: last.womenActual ?? last.womenForecast ?? 0,
   };
 }
 
-/** 実測+予測をざっくり見て、一番多い時刻と人数を取る */
 function pickPeak(series: TimeSeriesPoint[]) {
   let bestLabel = "";
   let bestTotal = 0;
@@ -206,37 +248,47 @@ function pickPeak(series: TimeSeriesPoint[]) {
   return { peakTotal: bestTotal, peakTimeLabel: bestLabel || "--:--" };
 }
 
+function hasSeriesData(series: TimeSeriesPoint[]) {
+  return series.some(
+    (p) =>
+      p.menActual !== null ||
+      p.womenActual !== null ||
+      p.menForecast !== null ||
+      p.womenForecast !== null,
+  );
+}
+
 /**
  * PREVIEW 用のデータ取得フック
- * - まず MOCK_STORE_DATA をベースにして
- * - /api/range, /api/forecast_today を取得
- * - 成功したらグラフ用 series / 現在人数 / ピーク値を差し替える
- * - 失敗したらダミーデータのまま（エラー文言だけ出す）
+ * - /api/range と /api/forecast_today を叩き、19:00–05:00 をフロントで絞り込む
+ * - データが無い場合でも baseSnapshot を返し、UI を安全に表示する
  */
-export function useStorePreviewData(storeId: StoreId): StorePreviewState {
-  const base = useMemo(() => MOCK_STORE_DATA[storeId], [storeId]);
+export function useStorePreviewData(
+  storeSlug: string | null | undefined,
+): StorePreviewState {
+  const meta = useMemo(
+    () => getStoreMetaBySlug(storeSlug ?? DEFAULT_STORE),
+    [storeSlug],
+  );
+  const baseSnapshot = useMemo(() => buildBaseSnapshot(meta), [meta]);
+
   const [state, setState] = useState<StorePreviewState>({
     loading: true,
     error: null,
-    snapshot: base,
+    snapshot: baseSnapshot,
   });
 
   useEffect(() => {
     let cancelled = false;
-    const slug = getSlugFromStoreId(storeId);
 
     async function run() {
-      setState((prev) => ({ ...prev, loading: true, error: null }));
+      setState({ loading: true, error: null, snapshot: baseSnapshot });
       try {
-        // いまの時刻から「どの夜(19:00–05:00)を表示するか」を決める
         const nightWindow = computeNightWindow();
 
-        // /api/range は API_CONTRACT.md に従い from/to なしで 1 回だけ
         const [rangeRes, forecastRes] = await Promise.all([
-          fetch(
-            `/api/range?store=${encodeURIComponent(slug)}&limit=400`,
-          ),
-          fetch(`/api/forecast_today?store=${encodeURIComponent(slug)}`),
+          fetch(`/api/range?store=${encodeURIComponent(meta.slug)}&limit=400`),
+          fetch(`/api/forecast_today?store=${encodeURIComponent(meta.slug)}`),
         ]);
 
         const rangeJson = await rangeRes.json().catch(() => ({}));
@@ -245,7 +297,6 @@ export function useStorePreviewData(storeId: StoreId): StorePreviewState {
         const allRangePoints = parseRangePoints(rangeJson);
         const allForecastPoints = parseForecastPoints(forecastJson);
 
-        // 19:00–05:00 の夜間ウィンドウ内だけに絞り込む
         const rangePoints = allRangePoints.filter((p) =>
           isWithinNight(p.ts, nightWindow),
         );
@@ -254,19 +305,24 @@ export function useStorePreviewData(storeId: StoreId): StorePreviewState {
         );
 
         const series = buildSeries(rangePoints, forecastPoints);
-        const effectiveSeries = series.length > 0 ? series : base.series;
+        const effectiveSeries =
+          series.length > 0 ? series : baseSnapshot.series;
+        const hasData = hasSeriesData(series);
 
         const { nowMen, nowWomen } = pickCurrentActual(effectiveSeries);
         const { peakTotal, peakTimeLabel } = pickPeak(effectiveSeries);
 
         const snapshot: StoreSnapshot = {
-          ...base,
+          ...baseSnapshot,
+          level: hasData ? "データ取得済み" : "データなし",
+          recommendation: hasData ? "データ取得済み" : "データなし",
           nowMen,
           nowWomen,
           nowTotal: nowMen + nowWomen,
           peakTotal,
           peakTimeLabel,
           series: effectiveSeries,
+          hasData,
         };
 
         if (!cancelled) {
@@ -278,7 +334,7 @@ export function useStorePreviewData(storeId: StoreId): StorePreviewState {
           setState({
             loading: false,
             error: detail,
-            snapshot: base,
+            snapshot: { ...baseSnapshot, hasData: false, level: "データなし" },
           });
         }
         // eslint-disable-next-line no-console
@@ -291,7 +347,7 @@ export function useStorePreviewData(storeId: StoreId): StorePreviewState {
     return () => {
       cancelled = true;
     };
-  }, [storeId, base]);
+  }, [meta, baseSnapshot]);
 
   return state;
 }

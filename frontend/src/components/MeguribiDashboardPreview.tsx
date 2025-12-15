@@ -1,383 +1,44 @@
 "use client";
 
-// MEGRIBI PREVIEW v1 layout
-// このコンポーネントの見た目を今後のダッシュボード標準として扱う（見た目を変える場合は要相談）
-
 import { useRouter, useSearchParams } from "next/navigation";
-import PreviewHeader from "./PreviewHeader";
 import PreviewMainSection from "./PreviewMainSection";
 import { useStorePreviewData } from "../app/hooks/useStorePreviewData";
-
-export type StoreId = "ol_nagasaki" | "ol_shibuya" | "ol_fukuoka";
-
-const DEFAULT_STORE_ID: StoreId = "ol_nagasaki";
-
-const STORE_SLUG_TO_ID: Record<string, StoreId> = {
-  nagasaki: "ol_nagasaki",
-  shibuya: "ol_shibuya",
-  fukuoka: "ol_fukuoka",
-};
-
-function resolveStoreIdFromSlug(slug: string | null): StoreId {
-  if (!slug) return DEFAULT_STORE_ID;
-  const key = slug.toLowerCase();
-  return STORE_SLUG_TO_ID[key] ?? DEFAULT_STORE_ID;
-}
-
-export function getSlugFromStoreId(id: StoreId): string {
-  const entry = Object.entries(STORE_SLUG_TO_ID).find(
-    ([, value]) => value === id,
-  );
-  return entry?.[0] ?? "nagasaki";
-}
-
-export type CongestionLevel = "空いている" | "やや混み" | "混んでいる";
-
-export type TimeSeriesPoint = {
-  label: string;
-  menActual: number | null;
-  womenActual: number | null;
-  menForecast: number | null;
-  womenForecast: number | null;
-};
-
-export type StoreSnapshot = {
-  name: string;
-  area: string;
-  level: CongestionLevel;
-  nowTotal: number;
-  nowMen: number;
-  nowWomen: number;
-  peakTimeLabel: string;
-  peakTotal: number;
-  recommendation: string;
-  series: TimeSeriesPoint[];
-};
-
-export const MOCK_STORE_DATA: Record<StoreId, StoreSnapshot> = {
-  ol_nagasaki: {
-    name: "オリエンタルラウンジ 長崎",
-    area: "長崎・浜の町",
-    level: "やや混み",
-    nowTotal: 34,
-    nowMen: 20,
-    nowWomen: 14,
-    peakTimeLabel: "24:00 ごろ",
-    peakTotal: 38,
-    recommendation: "終電前後で動きやすいタイミング。",
-    series: [
-      {
-        label: "19:00",
-        menActual: 6,
-        womenActual: 4,
-        menForecast: 6,
-        womenForecast: 4,
-      },
-      {
-        label: "20:00",
-        menActual: 10,
-        womenActual: 7,
-        menForecast: 11,
-        womenForecast: 8,
-      },
-      {
-        label: "21:00",
-        menActual: 13,
-        womenActual: 9,
-        menForecast: 15,
-        womenForecast: 10,
-      },
-      {
-        label: "22:00",
-        menActual: 15,
-        womenActual: 10,
-        menForecast: 18,
-        womenForecast: 12,
-      },
-      {
-        label: "23:00",
-        menActual: 17,
-        womenActual: 12,
-        menForecast: 20,
-        womenForecast: 14,
-      },
-      {
-        label: "24:00",
-        menActual: 18,
-        womenActual: 13,
-        menForecast: 22,
-        womenForecast: 15,
-      },
-      {
-        label: "25:00",
-        menActual: 17,
-        womenActual: 12,
-        menForecast: 20,
-        womenForecast: 14,
-      },
-      {
-        label: "26:00",
-        menActual: 15,
-        womenActual: 10,
-        menForecast: 17,
-        womenForecast: 12,
-      },
-      {
-        label: "27:00",
-        menActual: 11,
-        womenActual: 8,
-        menForecast: 13,
-        womenForecast: 9,
-      },
-      {
-        label: "28:00",
-        menActual: 7,
-        womenActual: 5,
-        menForecast: 9,
-        womenForecast: 6,
-      },
-      {
-        label: "29:00",
-        menActual: 4,
-        womenActual: 3,
-        menForecast: 6,
-        womenForecast: 4,
-      },
-      {
-        label: "30:00",
-        menActual: 2,
-        womenActual: 2,
-        menForecast: 3,
-        womenForecast: 2,
-      },
-    ],
-  },
-  ol_shibuya: {
-    name: "オリエンタルラウンジ 渋谷",
-    area: "東京・渋谷",
-    level: "混んでいる",
-    nowTotal: 76,
-    nowMen: 48,
-    nowWomen: 28,
-    peakTimeLabel: "24:30 ごろ",
-    peakTotal: 85,
-    recommendation: "かなり混雑。早めに動きたいタイミング。",
-    series: [
-      {
-        label: "19:00",
-        menActual: 12,
-        womenActual: 10,
-        menForecast: 12,
-        womenForecast: 10,
-      },
-      {
-        label: "20:00",
-        menActual: 18,
-        womenActual: 14,
-        menForecast: 20,
-        womenForecast: 16,
-      },
-      {
-        label: "21:00",
-        menActual: 24,
-        womenActual: 18,
-        menForecast: 28,
-        womenForecast: 20,
-      },
-      {
-        label: "22:00",
-        menActual: 30,
-        womenActual: 22,
-        menForecast: 36,
-        womenForecast: 26,
-      },
-      {
-        label: "23:00",
-        menActual: 34,
-        womenActual: 25,
-        menForecast: 40,
-        womenForecast: 30,
-      },
-      {
-        label: "24:00",
-        menActual: 36,
-        womenActual: 26,
-        menForecast: 42,
-        womenForecast: 32,
-      },
-      {
-        label: "25:00",
-        menActual: 34,
-        womenActual: 24,
-        menForecast: 40,
-        womenForecast: 30,
-      },
-      {
-        label: "26:00",
-        menActual: 30,
-        womenActual: 21,
-        menForecast: 36,
-        womenForecast: 26,
-      },
-      {
-        label: "27:00",
-        menActual: 26,
-        womenActual: 18,
-        menForecast: 30,
-        womenForecast: 22,
-      },
-      {
-        label: "28:00",
-        menActual: 20,
-        womenActual: 14,
-        menForecast: 24,
-        womenForecast: 18,
-      },
-      {
-        label: "29:00",
-        menActual: 13,
-        womenActual: 9,
-        menForecast: 18,
-        womenForecast: 12,
-      },
-      {
-        label: "30:00",
-        menActual: 8,
-        womenActual: 6,
-        menForecast: 12,
-        womenForecast: 8,
-      },
-    ],
-  },
-  ol_fukuoka: {
-    name: "オリエンタルラウンジ 福岡",
-    area: "福岡・天神",
-    level: "空いている",
-    nowTotal: 18,
-    nowMen: 11,
-    nowWomen: 7,
-    peakTimeLabel: "23:00 ごろ",
-    peakTotal: 40,
-    recommendation: "ゆっくり話しやすい雰囲気。",
-    series: [
-      {
-        label: "19:00",
-        menActual: 4,
-        womenActual: 3,
-        menForecast: 4,
-        womenForecast: 3,
-      },
-      {
-        label: "20:00",
-        menActual: 6,
-        womenActual: 4,
-        menForecast: 7,
-        womenForecast: 5,
-      },
-      {
-        label: "21:00",
-        menActual: 8,
-        womenActual: 5,
-        menForecast: 10,
-        womenForecast: 7,
-      },
-      {
-        label: "22:00",
-        menActual: 9,
-        womenActual: 6,
-        menForecast: 12,
-        womenForecast: 8,
-      },
-      {
-        label: "23:00",
-        menActual: 10,
-        womenActual: 7,
-        menForecast: 14,
-        womenForecast: 9,
-      },
-      {
-        label: "24:00",
-        menActual: 9,
-        womenActual: 6,
-        menForecast: 12,
-        womenForecast: 8,
-      },
-      {
-        label: "25:00",
-        menActual: 8,
-        womenActual: 5,
-        menForecast: 10,
-        womenForecast: 7,
-      },
-      {
-        label: "26:00",
-        menActual: 6,
-        womenActual: 4,
-        menForecast: 8,
-        womenForecast: 5,
-      },
-      {
-        label: "27:00",
-        menActual: 5,
-        womenActual: 3,
-        menForecast: 6,
-        womenForecast: 4,
-      },
-      {
-        label: "28:00",
-        menActual: 3,
-        womenActual: 2,
-        menForecast: 4,
-        womenForecast: 3,
-      },
-      {
-        label: "29:00",
-        menActual: 2,
-        womenActual: 2,
-        menForecast: 3,
-        womenForecast: 2,
-      },
-      {
-        label: "30:00",
-        menActual: 1,
-        womenActual: 1,
-        menForecast: 2,
-        womenForecast: 1,
-      },
-    ],
-  },
-};
+import {
+  DEFAULT_STORE,
+  getStoreMetaBySlug,
+} from "../app/config/stores";
 
 export default function MeguribiDashboardPreview() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const slug = searchParams.get("store");
-  const storeId = resolveStoreIdFromSlug(slug);
-  const { snapshot, loading, error } = useStorePreviewData(storeId);
+  const slug = searchParams.get("store") ?? DEFAULT_STORE;
+  const meta = getStoreMetaBySlug(slug);
 
-  const handleSelectStore = (nextId: StoreId) => {
-    if (nextId === storeId) return;
+  const { snapshot, loading, error } = useStorePreviewData(meta.slug);
 
-    const nextSlug = getSlugFromStoreId(nextId);
+  const handleSelectStore = (nextSlug: string) => {
+    if (!nextSlug || nextSlug === meta.slug) return;
+
     const params = new URLSearchParams(searchParams.toString());
     params.set("store", nextSlug);
     const query = params.toString();
 
-    router.push(query ? `/?${query}` : "/", { scroll: false });
+    router.push(
+      query ? `/store/${nextSlug}?${query}` : `/store/${nextSlug}`,
+      { scroll: false },
+    );
   };
 
   return (
-    <div className="min-h-screen bg-black text-slate-50">
-      <PreviewHeader />
+    <main className="mx-auto max-w-6xl px-4 py-6 text-slate-50">
       <PreviewMainSection
-        storeId={storeId}
+        storeSlug={meta.slug}
         snapshot={snapshot}
-        storeDataMap={MOCK_STORE_DATA}
         onSelectStore={handleSelectStore}
         loading={loading}
         error={error}
       />
-    </div>
+    </main>
   );
 }

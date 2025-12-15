@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 
-import type { StoreId } from "../../components/MeguribiDashboardPreview";
 import { getSecondVenueMapLinks, type SecondVenueMapLink } from "../config/secondVenueMapLinks";
 
 export type SecondVenue = SecondVenueMapLink;
@@ -11,7 +10,7 @@ type SecondVenuesState = {
   data: SecondVenue[];
 };
 
-export function useSecondVenues(storeId: StoreId): SecondVenuesState {
+export function useSecondVenues(storeSlug: string): SecondVenuesState {
   const [state, setState] = useState<SecondVenuesState>({
     loading: true,
     error: null,
@@ -24,7 +23,7 @@ export function useSecondVenues(storeId: StoreId): SecondVenuesState {
     function run() {
       // ネットワークアクセスは行わず、ローカル設定からリンクを生成する
       try {
-        const links = getSecondVenueMapLinks(storeId);
+        const links = getSecondVenueMapLinks(storeSlug);
         if (!cancelled) {
           setState({ loading: false, error: null, data: links });
         }
@@ -43,7 +42,7 @@ export function useSecondVenues(storeId: StoreId): SecondVenuesState {
     return () => {
       cancelled = true;
     };
-  }, [storeId]);
+  }, [storeSlug]);
 
   return state;
 }

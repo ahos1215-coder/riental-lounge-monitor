@@ -1,4 +1,5 @@
-﻿import "./globals.css";
+import "./globals.css";
+import { MeguribiHeader } from "@/components/MeguribiHeader";
 
 export const metadata = {
   title: "MEGRIBI Dashboard",
@@ -12,7 +13,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja">
-      <body>{children}</body>
+      <body className="bg-black">
+        <MeguribiHeader />
+        <div className="min-h-screen text-slate-50">{children}</div>
+      </body>
     </html>
   );
 }
