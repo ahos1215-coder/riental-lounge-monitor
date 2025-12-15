@@ -1,45 +1,31 @@
 # ONBOARDING
+Last updated: YYYY-MM-DD / commit: TODO
 
-Welcome to MEGRIBI. This document is the single source for how to get productive quickly.
+「今の MEGRIBI を最初から動かす」ための手順と前提のまとめ。
 
-## What We Are Building
-- Data flow: **Supabase logs (source of truth) -> Flask API -> Next.js 16 frontend**.
-- Legacy Google Sheet/GAS exists only as a fallback path; do not extend it.
-- Night view: UI shows a single night window 19:00-05:00 local time. The frontend filters; the backend does not time-filter.
+## 1) Backend (Render Starter, Flask)
+- Render Starter で常時起動。`DATA_BACKEND=supabase` をデフォルトに設定。
+- 環境変数: `BACKEND_URL`（フロントから参照）、`SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY`、`ENABLE_FORECAST`、`STORE_ID`、`MAX_RANGE_LIMIT=50000`。
+- デプロイ後、`/tasks/tick` が 5 分間隔で実行され、夜間(19:00–05:00)も連続で 38 店舗を収集。`ENABLE_FORECAST=1` のときのみ予測更新。
 
-## Core Specs You Must Know
-- `/api/range`: accepts `store` and `limit` only. No `from/to`. Backend returns up to `limit` rows ordered by `ts` ascending; Supabase is queried newest-first and resorted before returning. `max_range_limit = 50000`.
-- Forecast APIs (e.g., `/api/forecast_today`) are active only when `ENABLE_FORECAST=1`.
-- Store resolution: query `?store=xxx` wins; env default is the fallback store.
-- Multi-brand (Oriental / Aisekiya / JIS) is coming via a `stores` table; design forward-compatible identifiers.
+## 2) Frontend (Vercel, Next.js 16)
+- GitHub 連携 → main への push で自動デプロイ。
+- 独自ドメイン `https://meguribi.jp` を割り当て。反映確認時は Shift+F5 / DevTools Network → Disable Cache 推奨。
+- `BACKEND_URL` を Render の API に向ける。フロントから直接 Supabase へはアクセスしない。
+- `useSearchParams` を使うコンポーネントは必ず `Suspense` 配下に置く。Recharts の Tooltip は `TooltipProps` を独自型で拡張して `label`/`payload` を許容する。
 
-## Local Setup (Backend)
-```sh
-python -m venv .venv
-. .venv/Scripts/activate  # Windows
-pip install -r requirements.txt
-set DATA_BACKEND=supabase
-python app.py
-```
+## 3) Local Development
+- Backend: `python -m venv .venv && . .venv/Scripts/activate && pip install -r requirements.txt && set DATA_BACKEND=supabase && python app.py`
+- Frontend: `cd frontend && npm install && npm run dev`
+- 動作確認: `http://localhost:3000/?store=nagasaki` で UI、`http://127.0.0.1:5000/api/range?store=nagasaki&limit=400` で生データ。
 
-## Local Setup (Frontend)
-```sh
-cd frontend
-npm install
-npm run dev
-```
-- The frontend calls the Flask backend `/api/*` endpoints; no direct Supabase calls from the browser.
-- `useStorePreviewData.ts` owns `computeNightWindow` and `isWithinNight` to filter to 19:00-05:00.
+## 4) Night Window Responsibility
+- 夜時間帯 19:00–05:00 の判定・絞り込みはフロント専任（`useStorePreviewData.ts`）。**バックエンドで時間フィルタを入れない。**
 
-## Daily Flow
-- Start backend (`python app.py`) and frontend (`npm run dev`), then open `http://localhost:3000/?store=nagasaki`.
-- Use `curl http://127.0.0.1:5000/api/range?store=nagasaki&limit=400` to inspect raw rows.
+## 5) Second Venues
+- 現行仕様は **map-link frontend only**（Google マップ検索リンクを生成するだけ）。Google Places API や Supabase `second_venues` は使用しない。
 
-## Key Files
-- Backend: `oriental/data/provider.py`, `oriental/routes/data.py`, `oriental/config.py`.
-- Frontend: `frontend/src/app/hooks/useStorePreviewData.ts`.
-- Cron collector: `multi_collect.py` (writes directly into Supabase; weather cached per prefecture).
+## 6) Supabase (将来的に使用・強化)
+- `logs`/`stores` がシングル source of truth。Render backend は Supabase を読み書きする前提。
+- 将来的な拡張: レガシー GAS/Sheet からの完全移行、second venues の軽量レコメンド対応など。環境変数に鍵を置き、ハードコードしない。
 
-## Support Channels
-- If unsure about API behavior, re-read `API_CONTRACT.md`.
-- If adding stores/brands, reflect them in Supabase `stores` and keep the default env store as fallback.

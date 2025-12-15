@@ -1,6 +1,13 @@
 # SECOND_VENUES
+Last updated: YYYY-MM-DD / commit: TODO
 
-Supabase table memo for 二次会スポット (`second_venues`).
+## 現行方針
+- **Backend 保存なし / Supabase `second_venues` は使用停止**。
+- 二次会スポットは **frontend の map-link 方式に一本化**（Google マップ検索リンクを生成するだけ）。
+- ジャンル・距離・営業時間バッジなどの表示はフロントエンドの責務。バックエンドや Google Places API に戻さない。
+
+## テーブル定義（参考・非推奨 / legacy）
+Supabase `second_venues` テーブルは過去の実装で使用していた参考情報。現在は非推奨。
 
 ```sql
 create table if not exists public.second_venues (
@@ -21,6 +28,6 @@ create table if not exists public.second_venues (
 create index if not exists second_venues_store_id_idx on public.second_venues(store_id);
 ```
 
-Notes:
-- Use `(store_id, place_id)` as the upsert conflict target.
-- `weekday_text` expects an array of strings (e.g. Google Places opening hours).
+Notes (legacy only):
+- `(store_id, place_id)` を upsert conflict target とする。
+- `weekday_text` は文字列配列（Google Places の opening hours を想定）。

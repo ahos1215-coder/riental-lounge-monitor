@@ -1,25 +1,31 @@
 # ARCHITECTURE
+Last updated: YYYY-MM-DD / commit: TODO
 
-## High-Level
-- Three layers: **Supabase logs (source of truth) -> Flask API -> Next.js 16 frontend**.
-- Forecasting is optional (`ENABLE_FORECAST=1`); falls back to actuals-only when disabled.
-- Legacy Google Sheet/GAS path remains only as a fallback.
+## High-Level Overview
+- Stack: **Supabase (logs/stores, source of truth) → Flask API (Render Starter, 24h常時起動) → Next.js 16 frontend (Vercel)**.
+- Data source priority: Supabase is primary; Google Sheet/GAS is legacy fallback only (do not expand).
+- Second venues: **map-link frontend only** (Google Maps search links). Google Places API/Supabase保存は現状使わない。
+- Forecasting is optional (`ENABLE_FORECAST=1`); when disabled, frontend shows actuals only.
 
 ## Data Flow
-1. Collectors (`multi_collect.py`, `/tasks/tick`) write directly to Supabase `logs`; weather cached per prefecture.
-2. Flask serves `/api/range` and `/api/forecast_today`, reading from Supabase by default (`DATA_BACKEND=supabase`).
-3. Frontend calls `/api/*` via the backend, then filters to the night window (19:00-05:00) client-side.
+1) Collectors (`multi_collect.py`, `/tasks/tick`) run every 5 minutes, fetch ~38 stores, and write to Supabase `logs` (weather cached per prefecture).  
+2) Flask API serves `/api/range`, `/api/current`, `/api/forecast_next_hour`, `/api/forecast_today`, reading from Supabase by default (`DATA_BACKEND=supabase`).  
+3) Frontend (Next.js 16 on Vercel) calls the Flask API via API Routes; it owns night-window filtering (19:00–05:00) client-side.  
+4) Responses remain `{ ok: true, rows/data: [...] }` even when empty.
 
-## Key Components
-- `oriental/data/provider.py`: Supabase client (newest-first fetch, returns asc).
-- `oriental/routes/data.py`: `/api/range` contract enforcement; no server-side time filter.
-- `frontend/src/app/hooks/useStorePreviewData.ts`: `computeNightWindow` and `isWithinNight`.
-- `multi_collect.py`: batch ingestion plus forecast refresh; caches weather.
+## Key Contracts / Constraints
+- `/api/range`: query only `store` + `limit`; Supabase `ts.desc` fetch → response `ts.asc`. **Server-side時間フィルタ禁止**（from/to や夜間絞り込みなし）。Night window判定は `useStorePreviewData.ts` で実施。
+- `max_range_limit = 50000`; frontend推奨 200–400。
+- Store resolution: `?store=` (or `store_id`) overrides env default.
+- Keep core endpoints stable: `/healthz`, `/api/meta`, `/api/current`, `/api/range`, `/api/forecast_*`, `/tasks/tick`.
+- No hardcoded secrets; use environment variables.
 
-## Store Resolution
-- Query `?store=xxx` (or `store_id`) is authoritative; env default store is fallback.
-- Multi-brand support (Oriental / Aisekiya / JIS) planned via `stores` table; design IDs and metadata to be brand-aware.
+## Components / Files of Interest
+- Backend: `oriental/data/provider.py` (Supabase client, newest-first fetch, returns asc), `oriental/routes/data.py` (`/api/range` contract enforcement).
+- Frontend: `frontend/src/app/hooks/useStorePreviewData.ts` (night window helpers), `frontend/src/app/page.tsx` (Suspense wrapping for `useSearchParams`), `frontend/src/components/PreviewMainSection.tsx` (Recharts Tooltip型拡張).
+- Ingestion: `multi_collect.py` and `/tasks/tick` (cron entrypoint, forecast refresh when enabled).
 
-## Constraints
-- `max_range_limit = 50000`; frontend should request 200-400 rows.
-- Backend must not reintroduce `from/to` filtering in standard flows; UI owns night filtering.
+## Legacy Notes
+- GAS/Google Sheet path exists only as fallback; do not extend beyond parity.
+- `/api/second_venues` retained for future lightweight recommendations; production UX is map-link only.
+

@@ -1,22 +1,23 @@
 # ROADMAP
+Last updated: YYYY-MM-DD / commit: TODO
 
-## Now (Stabilize)
-- Guarantee `/api/range` returns latest data: Supabase queried `ts.desc`, then responses returned `ts.asc`.
-- Keep `DATA_BACKEND=supabase` as default; legacy path is fallback only.
-- Enforce `max_range_limit = 50000`; frontend should use `limit` 200-400.
-- Ensure `useStorePreviewData` night filtering (19:00-05:00) remains intact.
-- Second-venue UX is now Google Maps search links (darts/karaoke/ramen/love hotel); legacy Google Places/NearbySearch path is paused and only considered for future NLP experiments.
+## P0 (完了)
+- Next.js 最小版動作（フロント: Vercel）、バックエンド: Render/Flask。
+- `/api/range` 安定（Supabase `ts.desc` 取得→`ts.asc` 返却、store+limit のみ、max_range_limit=50000、夜フィルタなし）。
+- useSearchParams + Suspense 対応、Recharts Tooltip 型拡張でビルド安定。
+- 二次会スポット: map-link frontend only（Google Maps 検索リンク）。
 
-## Next (Q1)
-- Introduce multi-brand support via `stores` table (Oriental / Aisekiya / JIS) with routing/display metadata.
-- Harden forecast toggling: respect `ENABLE_FORECAST=1` and degrade gracefully when disabled.
-- Improve observability for `/tasks/tick` cron: per-run success/fail metrics every 5 minutes.
+## P1（進行中）
+- Supabase `logs`/`stores` 導入・移行（GAS 二重書き込み継続しつつ Supabase を優先）。
+- UI コンポーネント整理（ダッシュボード最小セットの安定化）。
+- Render Starter での cron `/tasks/tick` 運用（5分間隔、38店舗収集、ENABLE_FORECAST トグル）。
 
-## Later
-- Weather cache governance and eviction per prefecture.
-- Per-store retention/archival policy in Supabase logs.
-- Backfill tooling to re-push historical nights when schemas change.
+## P2（予定）
+- マルチ店舗・ブランド化（Oriental / Aisekiya / JIS）とルーティング/メタデータ反映。
+- 豪華ダッシュボード化（カード/グラフ/近隣案内の拡充、ただし second venues は map-link 方針維持）。
+- 観測・運用強化（cron 可観測性、ログ/メトリクスの拡張）。
 
-## Nice-to-haves
-- Admin UI to inspect raw Supabase logs and cron status.
-- E2E smoke that the frontend renders a full 19:00-05:00 night for a chosen store.
+## P3（将来）
+- NLPベースのクエリや二次会高度化（必要に応じ `/api/second_venues` を軽量レコメンド化）。
+- 天気/人気傾向連動の高度推定。
+- 追加ストア/ブランドの自動拡張と管理UI。
