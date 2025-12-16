@@ -1,5 +1,5 @@
 # ENV
-Last updated: 2025-12-16 / commit: 8316d5a
+Last updated: 2025-12-16 / commit: cf6d7b5
 
 「今必要な env と置き場所」を最小限で整理する（値そのものは書かない）。
 
