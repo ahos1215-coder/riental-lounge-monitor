@@ -1,43 +1,165 @@
-# CODEX_PROMPTS
+# MEGRIBI / めぐり灯 — Codex Master Prompts（正式版）
 
-Guidance for GPT-5.1-Codex-Max on MEGRIBI.
-Last updated: TODO, commit: TODO
+Last updated: 2025-12-16  
+commit: TODO
 
-## Core Principles
-- Source of truth: Supabase `logs` / `stores`. Google Sheet/GAS is legacy fallback only.
-- Architecture: Supabase -> Flask API (Render) -> Next.js 16 frontend (Vercel).
-- `/api/range`: only `store` + `limit`; no `from/to`. Supabase queried `ts.desc`, response sorted `ts.asc`. **Backendは夜間(19:00-05:00)フィルタ禁止**; 夜判定はフロント専任。
-- `max_range_limit = 50000`; frontend推奨 200-400.
-- Forecast APIs gated by `ENABLE_FORECAST=1`.
-- Store resolution: `?store=` overrides env default.
-- Second venues: **map-link frontend only** (Google Maps search links). Backend/Supabase/Places API を使う実装に戻さない。
+---
 
-## Frontend Rules
-- Next.js 16 App Router: `useSearchParams` / `useRouter` を使うコンポーネントは必ず `Suspense` 配下に置く。
-- Recharts `TooltipProps` には `label`/`payload` が型定義されていないため、独自型で拡張して使う（例: `label?: string | number; payload?: any[];`）。
-- Night window (19:00-05:00) は `useStorePreviewData.ts` の責務。サーバー側で時間フィルタを入れない。
+## このドキュメントの位置づけ
 
-## Backend Rules
-- 主要エンドポイント `/healthz`, `/api/meta`, `/api/current`, `/api/range`, `/api/forecast_*`, `/tasks/tick` の契約を壊さない。
-- `/api/range` にサーバー側時間絞り込みを入れない。クエリ追加は禁止（store/limitのみ）。
-- 機密値は環境変数経由で扱い、ハードコード禁止。
+この `plan/CODEx_PROMPTS.md` は、  
+**MEGRIBI（めぐり灯）プロジェクトにおける Codex / ChatGPT 用の唯一の正本（single source of truth）** です。
 
-## Modes the model must follow
-- [BUGFIX]: ログ/テストから原因候補を列挙→期待挙動を明文化→修正方針→最小diff→実行コマンド提示。DNS系はコード変更前に「ローカルDNSの可能性」「本番での再現確認」を案内。
-- [FEATURE]: 仕様と plan/* 整合を確認→設計メモ→diff→追加テスト案/requests.http案。
-- [REFACTOR]: 目的を明示→互換性確認→小さなステップに分解しdiff提示。
-- [DOC]: 実装との差分を指摘→必要箇所に Last updated/commit を追記するdiff。
-- [EXPLAIN]: 役割/データフロー説明のみ。diffは出さない。
+今後、チャット冒頭に毎回長文の「マスタープロンプト」を貼る必要はありません。  
+Codex には **「このファイルを必ず読め」** と指示するだけで十分です。
 
-## Prohibited / Caution
-- DNS/ENOTFOUND系エラー時にホスト名やコードを書き換えない。まず本番(Render/Vercel)での再現確認を提案。
-- フロントから直接 Supabase へアクセスさせない。
-- `/api/range` に from/to や夜間フィルタを追加しない。
-- Legacy Google Sheet/GAS を拡張しない。
-- 二次会スポットを Places API や Supabase連携に戻さない（map-link方針を維持）。
+---
 
-## Good Prompt Examples
-- "Update `/api/range` handler to keep legacy fallback but skip any time filtering; Supabase newest-first, respond asc."
-- "Add brand metadata to `stores` table while keeping store IDs stable; brands: Oriental / Aisekiya / JIS."
-- "Ensure frontend night window (19:00-05:00) stays intact while adding a new series."
-- "Keep second-venue feature as Google Maps search links; no Places API, no backend changes."
+## プロジェクト共通前提
+
+- 対象リポジトリ: `riental-lounge-monitor-main/`
+- このチャットでは **本リポジトリの開発のみ** を扱う
+- データソースの source of truth は **Supabase `logs` テーブル**
+  - Google Sheet / GAS はレガシー fallback
+  - 機能拡張は禁止
+- フロントエンド
+  - Next.js 16（App Router）
+  - TypeScript / Tailwind CSS
+  - 既存ルーティングを壊さないこと  
+    `/`, `/stores`, `/store/[id]`, `src/app/api/*/route.ts`
+
+---
+
+## 重要な設計制約（絶対遵守）
+
+### /api/range の制約
+- 受け付けるクエリは **store / limit のみ**
+- Supabase では `ts.desc` で取得し、**レスポンスは ts.asc に並べ替える**
+- from / to などの時間フィルタを **追加してはいけない**
+- 19:00–05:00 の night window 判定は **フロントエンド責務**
+  - `useStorePreviewData.ts`
+  - バックエンドに同様のロジックを入れない
+
+### 既存 API 互換性
+- `/health`
+- `/api/meta`
+- `/api/current`
+- `/api/range`
+- `/api/forecast_*`
+- `/tasks/tick`
+
+これらの挙動を **壊してはいけない**。
+
+### Second Venues
+- map-link 方式が正
+- Google Places API による詳細収集は原則行わない
+- `/api/second_venues` は補助情報でありコアではない
+
+---
+
+## 機密情報の扱い
+
+- Supabase URL / KEY
+- Render 環境変数
+- Google API Key
+
+**すべてハードコード禁止**  
+必ず環境変数経由で扱うこと。
+
+---
+
+## 出力・作業ルール
+
+### patch(diff) ルール
+- 変更は必ず patch(diff) 形式で提示
+- 広範囲・破壊的変更は事前説明なしに行わない
+
+### PowerShell ルール
+- 実行コマンドは **必ず 1 つのコードブロック**
+- `cd` パスは実ディレクトリ構成に正確に合わせる
+
+---
+
+## ネットワーク / DNS 注意事項
+
+以下のエラーが出た場合：
+
+- Temporary failure in name resolution
+- getaddrinfo ENOTFOUND
+
+**コードや URL を変更して直そうとしないこと。**
+
+まず：
+- ローカル PC の DNS 問題の可能性を説明
+- Render 本番環境での再現確認
+- Render Logs の確認
+
+を提案すること。
+
+---
+
+## モード判定（必須）
+
+ユーザー入力を以下のいずれかに分類する。
+
+- [ONBOARDING]
+- [BUGFIX]
+- [FEATURE]
+- [REFACTOR]
+- [DOC]
+- [EXPLAIN]
+
+最初に **判定したモード + 要約 + 関連ファイル名** を提示する。
+
+---
+
+## モード別フロー概要
+
+### [ONBOARDING]
+- 現状整理・方針確認のみ
+- diff は出さない
+- 読むべきファイル・注意点を列挙
+
+### [BUGFIX]
+- ログ・テストから原因候補を列挙
+- 修正方針 → 最小 diff
+- 実行コマンドを最後に提示
+
+### [FEATURE]
+- 既存仕様との整合性確認
+- 設計メモ → diff
+- 必要なテスト・requests.http を提案
+
+### [REFACTOR]
+- 目的明示
+- API 互換性チェック
+- 小さなステップで diff
+
+### [DOC]
+- 実装との差分指摘
+- Last updated / commit を追記
+
+### [EXPLAIN]
+- 読み解きのみ
+- diff は出さない
+
+---
+
+## 出力フォーマット（厳守）
+
+1. モード判定 + 要約  
+2. 方針・設計  
+3. patch(diff)（必要な場合のみ）  
+4. 実行コマンド一覧
+
+---
+
+## 補足運用ルール
+
+- ユーザーは短文・ログ断片のみ送ることが多い
+- モード未指定時は内容から推測する
+- 大規模変更は **設計 → 確認 → diff**
+
+---
+
+以上。

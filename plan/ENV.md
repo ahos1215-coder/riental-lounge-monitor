@@ -1,26 +1,43 @@
 # ENV
-Last updated: YYYY-MM-DD / commit: TODO
+Last updated: 2025-12-16 / commit: 8316d5a
 
-Required and common environment variables for MEGRIBI.
+「今必要な env と置き場所」を最小限で整理する（値そのものは書かない）。
 
-## Backend (Render / Flask)
-- `DATA_BACKEND` (default `supabase`): primary source is Supabase; legacy fallback exists but not default.
-- `BACKEND_URL`: base URL used by Vercel frontend to reach the Render backend.
+## Frontend（Next.js / Vercel）
+- 置き場所（ローカル）: `frontend/.env.local`
+- 置き場所（本番）: Vercel の Environment Variables
+- 使用箇所: Next API routes（`frontend/src/app/api/*/route.ts`）が `process.env.BACKEND_URL` を参照して backend に proxy する。
+
+`frontend/.env.local`（例）
+```env
+BACKEND_URL=http://localhost:5000
+NEXT_PUBLIC_BASE_URL=http://localhost:3000
+```
+
+- Vercel に設定するキー名（値は環境ごとに設定）
+  - `BACKEND_URL`
+  - `NEXT_PUBLIC_BASE_URL`（任意。現状はコード参照が無いが、絶対 URL が必要な場合に備えて保持）
+
+## Backend（Flask / Render）
+- 置き場所（ローカル）: リポジトリ直下の `.env`（`oriental/config.py` が読みに行く）
+- 置き場所（本番）: Render の Environment Variables
+
+必須（`DATA_BACKEND=supabase` 運用の前提）
+- `DATA_BACKEND`（`supabase`）
 - `SUPABASE_URL`
-- `SUPABASE_ANON_KEY`
-- `SUPABASE_SERVICE_ROLE_KEY` (server-side only; never expose to frontend)
-- `MAX_RANGE_LIMIT` (default `50000`): hard cap for `/api/range`.
-- `ENABLE_FORECAST` (`1` to enable forecasts; unset/0 to disable gracefully).
-- `STORE_ID` (default store when query `?store` is absent).
-- `TIMEZONE` (e.g., `Asia/Tokyo`): for logging/labels; backend must not use it for `/api/range` filtering.
+- `SUPABASE_SERVICE_ROLE_KEY`（または互換用に `SUPABASE_SERVICE_KEY`）
 
-## Frontend (Vercel / Next.js 16)
-- Calls backend `/api/*` via `BACKEND_URL`; no direct Supabase access.
-- Store selection via query `?store=xxx`; backend env default is fallback.
-- Google Places API key: **not used** (second venues are map-link only).
+よく使う（任意）
+- `STORE_ID`（`?store` 未指定時のデフォルト。例: `ol_nagasaki`）
+- `MAX_RANGE_LIMIT`（既定 50000）
+- `ENABLE_FORECAST`（`1` のときのみ `/api/forecast_*` を有効化）
 
-## Cron / Collectors
-- Use the same Supabase credentials as backend.
-- `ENABLE_FORECAST` toggles forecast refresh in `/tasks/tick`.
-- Weather cache handled internally; no extra env required.
+レガシー/補助（必要なときだけ）
+- Google Sheet/GAS: `ENABLE_GAS`, `GAS_URL`/`GAS_WEBHOOK_URL`, `GS_WEBHOOK_URL`, `GS_READ_URL`
+- Weather: `ENABLE_WEATHER`, `WEATHER_LAT`, `WEATHER_LON`
+- Places（本流ではない）: `GOOGLE_PLACES_API_KEY`（`/tasks/update_second_venues` のみ）
 
+## 絶対にコミットしないもの
+- `.env` / `frontend/.env.local`
+- `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_SERVICE_KEY`（サービスロール）
+- `NEXT_PUBLIC_*` に秘密値（ブラウザへ配布される）
