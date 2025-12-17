@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Area,
   CartesianGrid,
@@ -114,7 +114,17 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
   const activeRangeMode = rangeMode ?? "today";
   const canControlRange = typeof onChangeRangeMode === "function";
 
-  const [isClient, setIsClient] = useState(false);
+  
+  const dateInputRef = useRef<HTMLInputElement | null>(null);
+
+  const openDatePicker = () => {
+    const el =
+      dateInputRef.current as (HTMLInputElement & { showPicker?: () => void }) | null;
+    if (!el) return;
+    el.focus();
+    el.showPicker?.();
+  };
+const [isClient, setIsClient] = useState(false);
   useEffect(() => setIsClient(true), []);
 
   return (
@@ -156,7 +166,12 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
                     <button
                       key={opt.id}
                       type="button"
-                      onClick={() => onChangeRangeMode(opt.id)}
+                      onClick={() => {
+                        onChangeRangeMode(opt.id);
+                        if (opt.id === "custom") {
+                          setTimeout(() => openDatePicker(), 0);
+                        }
+                      }}
                       className={[
                         "rounded-full border px-3 py-1 text-[11px] font-semibold transition",
                         active
@@ -172,6 +187,7 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
 
               <div className="flex flex-wrap items-center gap-2 md:ml-auto">
                 <input
+ref={dateInputRef}
                   type="date"
                   value={customDate}
                   onChange={(e) => {
