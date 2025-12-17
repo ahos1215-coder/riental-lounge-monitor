@@ -124,7 +124,8 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
     el.focus();
     el.showPicker?.();
   };
-const [isClient, setIsClient] = useState(false);
+
+  const [isClient, setIsClient] = useState(false);
   useEffect(() => setIsClient(true), []);
 
   return (
@@ -169,8 +170,7 @@ const [isClient, setIsClient] = useState(false);
                       onClick={() => {
                         onChangeRangeMode(opt.id);
                         if (opt.id === "custom") {
-                          setTimeout(() => openDatePicker(), 0);
-                        }
+                          openDatePicker();}
                       }}
                       className={[
                         "rounded-full border px-3 py-1 text-[11px] font-semibold transition",
@@ -187,7 +187,7 @@ const [isClient, setIsClient] = useState(false);
 
               <div className="flex flex-wrap items-center gap-2 md:ml-auto">
                 <input
-ref={dateInputRef}
+                  ref={dateInputRef}
                   type="date"
                   value={customDate}
                   onChange={(e) => {
