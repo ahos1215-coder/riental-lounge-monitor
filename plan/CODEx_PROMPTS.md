@@ -1,130 +1,119 @@
-# MEGRIBI / 繧√＄繧顔・ 窶・Codex Master Prompts・域ｭ｣蠑冗沿・・
-Last updated: 2025-12-16  
-commit: cf6d7b5
+﻿# CODEx_PROMPTS
+Last updated: 2025-12-17
+
+MEGRIBI の開発補助 AI（Codex）向けのガイドライン。既存の決定事項と契約を壊さないこと。
 
 ---
 
-## 縺薙・繝峨く繝･繝｡繝ｳ繝医・菴咲ｽｮ縺･縺・
-縺薙・ `plan/CODEx_PROMPTS.md` 縺ｯ縲・ 
-**MEGRIBI・医ａ縺舌ｊ轣ｯ・峨・繝ｭ繧ｸ繧ｧ繧ｯ繝医↓縺翫￠繧・Codex / ChatGPT 逕ｨ縺ｮ蜚ｯ荳縺ｮ豁｣譛ｬ・・ingle source of truth・・* 縺ｧ縺吶・
-莉雁ｾ後√メ繝｣繝・ヨ蜀帝ｭ縺ｫ豈主屓髟ｷ譁・・縲後・繧ｹ繧ｿ繝ｼ繝励Ο繝ｳ繝励ヨ縲阪ｒ雋ｼ繧句ｿ・ｦ√・縺ゅｊ縺ｾ縺帙ｓ縲・ 
-Codex 縺ｫ縺ｯ **縲後％縺ｮ繝輔ぃ繧､繝ｫ繧貞ｿ・★隱ｭ繧√・* 縺ｨ謖・､ｺ縺吶ｋ縺縺代〒蜊∝・縺ｧ縺吶・
----
+## Start Here（初見のChatGPT / Codex向け）
+このリポジトリはファイル数が多いため、初見のAIは探索で迷子になりがちです。
+まず以下の順で読むことで、無駄な探索時間を最小化できます。
 
-## 繝励Ο繧ｸ繧ｧ繧ｯ繝亥・騾壼燕謠・
-- 蟇ｾ雎｡繝ｪ繝昴ず繝医Μ: `riental-lounge-monitor-main/`
-- 縺薙・繝√Ε繝・ヨ縺ｧ縺ｯ **譛ｬ繝ｪ繝昴ず繝医Μ縺ｮ髢狗匱縺ｮ縺ｿ** 繧呈桶縺・- 繝・・繧ｿ繧ｽ繝ｼ繧ｹ縺ｮ source of truth 縺ｯ **Supabase `logs` 繝・・繝悶Ν**
-  - Google Sheet / GAS 縺ｯ繝ｬ繧ｬ繧ｷ繝ｼ fallback
-  - 讖溯・諡｡蠑ｵ縺ｯ遖∵ｭ｢
-- 繝輔Ο繝ｳ繝医お繝ｳ繝・  - Next.js 16・・pp Router・・  - TypeScript / Tailwind CSS
-  - 譌｢蟄倥Ν繝ｼ繝・ぅ繝ｳ繧ｰ繧貞｣翫＆縺ｪ縺・％縺ｨ  
-    `/`, `/stores`, `/store/[id]`, `src/app/api/*/route.ts`
+1) plan/INDEX.md（全体の地図・読む順番・重要ファイル一覧）
+2) plan/STATUS.md（現状の稼働状況 / 今動いている機能）
+3) plan/DECISIONS.md（重要な意思決定の履歴）
+4) plan/API_CONTRACT.md（API契約。壊してはいけないもの）
+5) plan/ARCHITECTURE.md（全体アーキテクチャ）
+6) plan/RUNBOOK.md（起動/検証手順）
+7) plan/CRON.md / plan/ENV.md（運用と環境変数）
+8) plan/SECOND_VENUES.md（二次会スポット方針）
 
----
-
-## 驥崎ｦ√↑險ｭ險亥宛邏・ｼ育ｵｶ蟇ｾ驕ｵ螳茨ｼ・
-### /api/range 縺ｮ蛻ｶ邏・- 蜿励￠莉倥￠繧九け繧ｨ繝ｪ縺ｯ **store / limit 縺ｮ縺ｿ**
-- Supabase 縺ｧ縺ｯ `ts.desc` 縺ｧ蜿門ｾ励＠縲・*繝ｬ繧ｹ繝昴Φ繧ｹ縺ｯ ts.asc 縺ｫ荳ｦ縺ｹ譖ｿ縺医ｋ**
-- from / to 縺ｪ縺ｩ縺ｮ譎る俣繝輔ぅ繝ｫ繧ｿ繧・**霑ｽ蜉縺励※縺ｯ縺・￠縺ｪ縺・*
-- 19:00窶・5:00 縺ｮ night window 蛻､螳壹・ **繝輔Ο繝ｳ繝医お繝ｳ繝芽ｲｬ蜍・*
-  - `useStorePreviewData.ts`
-  - 繝舌ャ繧ｯ繧ｨ繝ｳ繝峨↓蜷梧ｧ倥・繝ｭ繧ｸ繝・け繧貞・繧後↑縺・
-### 譌｢蟄・API 莠呈鋤諤ｧ
-- `/health`
-- `/api/meta`
-- `/api/current`
-- `/api/range`
-- `/api/forecast_*`
-- `/tasks/tick`
-
-縺薙ｌ繧峨・謖吝虚繧・**螢翫＠縺ｦ縺ｯ縺・￠縺ｪ縺・*縲・
-### Second Venues
-- map-link 譁ｹ蠑上′豁｣
-- Google Places API 縺ｫ繧医ｋ隧ｳ邏ｰ蜿朱寔縺ｯ蜴溷援陦後ｏ縺ｪ縺・- `/api/second_venues` 縺ｯ陬懷勧諠・ｱ縺ｧ縺ゅｊ繧ｳ繧｢縺ｧ縺ｯ縺ｪ縺・
----
-
-## 讖溷ｯ・ュ蝣ｱ縺ｮ謇ｱ縺・
-- Supabase URL / KEY
-- Render 迺ｰ蠅・､画焚
-- Google API Key
-
-**縺吶∋縺ｦ繝上・繝峨さ繝ｼ繝臥ｦ∵ｭ｢**  
-蠢・★迺ｰ蠅・､画焚邨檎罰縺ｧ謇ｱ縺・％縺ｨ縲・
----
-
-## 蜃ｺ蜉帙・菴懈･ｭ繝ｫ繝ｼ繝ｫ
-
-### patch(diff) 繝ｫ繝ｼ繝ｫ
-- 螟画峩縺ｯ蠢・★ patch(diff) 蠖｢蠑上〒謠千､ｺ
-- 蠎・ｯ・峇繝ｻ遐ｴ螢顔噪螟画峩縺ｯ莠句燕隱ｬ譏弱↑縺励↓陦後ｏ縺ｪ縺・
-### PowerShell 繝ｫ繝ｼ繝ｫ
-- 螳溯｡後さ繝槭Φ繝峨・ **蠢・★ 1 縺､縺ｮ繧ｳ繝ｼ繝峨ヶ繝ｭ繝・け**
-- `cd` 繝代せ縺ｯ螳溘ョ繧｣繝ｬ繧ｯ繝医Μ讒区・縺ｫ豁｣遒ｺ縺ｫ蜷医ｏ縺帙ｋ
+補助：plan/repo_map.txt がある場合は、先に見て全体像を掴む。
 
 ---
 
-## 繝阪ャ繝医Ρ繝ｼ繧ｯ / DNS 豕ｨ諢丈ｺ矩・
-莉･荳九・繧ｨ繝ｩ繝ｼ縺悟・縺溷ｴ蜷茨ｼ・
-- Temporary failure in name resolution
-- getaddrinfo ENOTFOUND
-
-**繧ｳ繝ｼ繝峨ｄ URL 繧貞､画峩縺励※逶ｴ縺昴≧縺ｨ縺励↑縺・％縺ｨ縲・*
-
-縺ｾ縺夲ｼ・- 繝ｭ繝ｼ繧ｫ繝ｫ PC 縺ｮ DNS 蝠城｡後・蜿ｯ閭ｽ諤ｧ繧定ｪｬ譏・- Render 譛ｬ逡ｪ迺ｰ蠅・〒縺ｮ蜀咲樟遒ｺ隱・- Render Logs 縺ｮ遒ｺ隱・
-繧呈署譯医☆繧九％縺ｨ縲・
----
-
-## 繝｢繝ｼ繝牙愛螳夲ｼ亥ｿ・茨ｼ・
-繝ｦ繝ｼ繧ｶ繝ｼ蜈･蜉帙ｒ莉･荳九・縺・★繧後°縺ｫ蛻・｡槭☆繧九・
-- [ONBOARDING]
-- [BUGFIX]
-- [FEATURE]
-- [REFACTOR]
-- [DOC]
-- [EXPLAIN]
-
-譛蛻昴↓ **蛻､螳壹＠縺溘Δ繝ｼ繝・+ 隕∫ｴ・+ 髢｢騾｣繝輔ぃ繧､繝ｫ蜷・* 繧呈署遉ｺ縺吶ｋ縲・
----
-
-## 繝｢繝ｼ繝牙挨繝輔Ο繝ｼ讎りｦ・
-### [ONBOARDING]
-- 迴ｾ迥ｶ謨ｴ逅・・譁ｹ驥晉｢ｺ隱阪・縺ｿ
-- diff 縺ｯ蜃ｺ縺輔↑縺・- 隱ｭ繧縺ｹ縺阪ヵ繧｡繧､繝ｫ繝ｻ豕ｨ諢冗せ繧貞・謖・
-### [BUGFIX]
-- 繝ｭ繧ｰ繝ｻ繝・せ繝医°繧牙次蝗蛟呵｣懊ｒ蛻玲嫌
-- 菫ｮ豁｣譁ｹ驥・竊・譛蟆・diff
-- 螳溯｡後さ繝槭Φ繝峨ｒ譛蠕後↓謠千､ｺ
-
-### [FEATURE]
-- 譌｢蟄倅ｻ墓ｧ倥→縺ｮ謨ｴ蜷域ｧ遒ｺ隱・- 險ｭ險医Γ繝｢ 竊・diff
-- 蠢・ｦ√↑繝・せ繝医・requests.http 繧呈署譯・
-### [REFACTOR]
-- 逶ｮ逧・・遉ｺ
-- API 莠呈鋤諤ｧ繝√ぉ繝・け
-- 蟆上＆縺ｪ繧ｹ繝・ャ繝励〒 diff
-
-### [DOC]
-- 螳溯｣・→縺ｮ蟾ｮ蛻・欠鞫・- Last updated / commit 繧定ｿｽ險・
-### [EXPLAIN]
-- 隱ｭ縺ｿ隗｣縺阪・縺ｿ
-- diff 縺ｯ蜃ｺ縺輔↑縺・
----
-
-## 蜃ｺ蜉帙ヵ繧ｩ繝ｼ繝槭ャ繝茨ｼ亥宍螳茨ｼ・
-1. 繝｢繝ｼ繝牙愛螳・+ 隕∫ｴ・ 
-2. 譁ｹ驥昴・險ｭ險・ 
-3. patch(diff)・亥ｿ・ｦ√↑蝣ｴ蜷医・縺ｿ・・ 
-4. 螳溯｡後さ繝槭Φ繝我ｸ隕ｧ
+## 正本（source of truth）の扱い
+- 実装の事実（いま実際にどう動いているか）はコードが正
+- 設計意図・制約・壊してはいけない前提は plan/*.md が正
+- コードと plan が食い違っていた場合は、まず「plan が古い可能性」を前提に差分を確認し、
+  基本は plan を更新して整合させる（必要なら、そのうえでコード修正）
 
 ---
 
-## 陬懆ｶｳ驕狗畑繝ｫ繝ｼ繝ｫ
-
-- 繝ｦ繝ｼ繧ｶ繝ｼ縺ｯ遏ｭ譁・・繝ｭ繧ｰ譁ｭ迚・・縺ｿ騾√ｋ縺薙→縺悟､壹＞
-- 繝｢繝ｼ繝画悴謖・ｮ壽凾縺ｯ蜀・ｮｹ縺九ｉ謗ｨ貂ｬ縺吶ｋ
-- 螟ｧ隕乗ｨ｡螟画峩縺ｯ **險ｭ險・竊・遒ｺ隱・竊・diff**
+## Core Principles
+- 対象リポジトリ: riental-lounge-monitor-main/ の開発のみを扱う。
+- Source of truth: Supabase logs。Google Sheet / GAS は legacy fallback（拡張禁止）。
+- Architecture: Supabase -> Flask API（Render）-> Next.js 16（Vercel）。
+- Secrets（Supabase URL/KEY, Render/Vercel env, Google API Key など）はコードに書かない。必ず環境変数経由。
+  - NEXT_PUBLIC_* に秘密値を入れない（ブラウザへ配布される）。
+- 既存 API / ルーティングの互換性を壊さない（特に /healthz, /api/meta, /api/current, /api/range, /api/forecast_*, /tasks/*）。
 
 ---
 
-莉･荳翫・
+## Frontend Rules（Next.js 16 / App Router）
+- 既存ルーティング構成を壊さない:
+  - /, /stores, /store/[id], src/app/api/*/route.ts
+- /store/[id] は params.id を slug として受け取り、クエリ ?store=slug と併用する前提を変えない。
+- Night window（19:00-05:00）の判定・絞り込みはフロント専任（frontend/src/app/hooks/useStorePreviewData.ts）。
+  - Backend / Next API routes に同様の時間ロジックを入れない。
+- Next.js 16 の制約:
+  - useSearchParams / useRouter を使うコンポーネントは Suspense 配下に置く。
+- Recharts の型:
+  - TooltipProps の label / payload が型定義されていないケースがあるため、独自型で拡張して使う。
 
+---
+
+## Backend Rules（Flask）
+### /api/range（最重要制約）
+- 公開契約として受け付けるクエリは store + limit のみ（新規クエリ追加禁止）。
+- Supabase には ts.desc でクエリし、応答では ts.asc に並べ替えて返す。
+- from/to のような時間フィルタや、夜窓（19:00-05:00）のサーバーサイド絞り込みを追加しない。
+  - 夜窓ロジックはフロント責務。
+- MAX_RANGE_LIMIT（既定 50000）で limit を clamp する。フロント推奨は 200-400。
+
+### Forecast
+- /api/forecast_today / /api/forecast_next_hour は ENABLE_FORECAST=1 のときのみ有効。
+  - 無効時は 503 { ok:false, error:"forecast-disabled" }。
+
+### Tasks / Cron
+- 本番の収集入口は GET /tasks/multi_collect（alias: GET /api/tasks/collect_all_once）。
+- /tasks/tick は legacy（単店舗 + ローカル/GAS向け）。Supabase logs insert 経路ではない。
+
+---
+
+## Second Venues（仕様固定）
+- 本流は map-link 方式（フロントで Google Maps 検索リンクを生成）。
+- Places API によるデータ収集・保存を必須にしない（その設計に戻さない）。
+- Backend の /api/second_venues は補助/将来用として維持（例外でも落とさず { ok:true, rows: [] } を返す前提）。
+
+---
+
+## Network / DNS に関する注意
+- Temporary failure in name resolution, getaddrinfo ENOTFOUND 等が出た場合:
+  - ホスト名や BASE URL を書き換えたり、怪しいワークアラウンドコードを入れない。
+  - ローカル PC の DNS 問題の可能性を明示し、別環境での再現確認とログ確認を提案する。
+
+---
+
+## Modes（必ず判定）
+入力内容を見て、以下のどれかを最初に判定する:
+- [ONBOARDING] 初回の状況整理・方針確認・関連ファイルの読み込み
+- [BUGFIX] テスト失敗/例外/HTTP 500 などの修正
+- [FEATURE] 新機能追加/挙動変更
+- [REFACTOR] 構造整理/責務分離
+- [DOC] plan/*.md や README の更新・同期
+- [EXPLAIN] 説明だけ（diff を出さない）
+
+---
+
+## 出力フォーマット（必ず守る）
+1) 1段目: モード判定 と 要約
+2) 2段目: 方針・設計 の箇条書き
+3) 3段目: 必要な場合のみ patch(diff)
+4) 4段目: 私が実行すべきコマンド/テスト一覧（PowerShell、1つのコードブロックにまとめる）
+
+---
+
+## Prohibited / Caution（抜粋）
+- /api/range にクエリ追加・サーバ側時間フィルタ追加をしない。
+- 夜窓（19:00-05:00）をサーバ側で判定/絞り込みしない。
+- legacy Google Sheet / GAS を拡張しない。
+- Second venues を Places API / Supabase 保存前提に戻さない（map-link を維持）。
+- Secrets をハードコードしない。
+
+---
+
+## Good Prompt Examples
+- "Update /api/range handler to keep legacy fallback but skip any time filtering; Supabase newest-first, respond asc."
+- "Ensure frontend night window (19:00-05:00) stays intact while adding a new series."
+- "Keep second-venue feature as Google Maps search links; no Places API, no backend changes."
