@@ -15,7 +15,16 @@ export default function MeguribiDashboardPreview() {
   const slug = searchParams.get("store") ?? DEFAULT_STORE;
   const meta = getStoreMetaBySlug(slug);
 
-  const { snapshot, loading, error } = useStorePreviewData(meta.slug);
+  const {
+    snapshot,
+    loading,
+    error,
+    rangeMode,
+    setRangeMode,
+    customDate,
+    setCustomDate,
+    selectedBaseDate,
+  } = useStorePreviewData(meta.slug);
 
   const handleSelectStore = (nextSlug: string) => {
     if (!nextSlug || nextSlug === meta.slug) return;
@@ -38,6 +47,11 @@ export default function MeguribiDashboardPreview() {
         onSelectStore={handleSelectStore}
         loading={loading}
         error={error}
+        rangeMode={rangeMode}
+        onChangeRangeMode={setRangeMode}
+        customDate={customDate}
+        onChangeCustomDate={setCustomDate}
+        selectedBaseDate={selectedBaseDate}
       />
     </main>
   );

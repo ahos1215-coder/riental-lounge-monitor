@@ -15,9 +15,19 @@ import {
 } from "recharts";
 
 import SecondVenuesList from "./SecondVenuesList";
-import type { StoreSnapshot } from "../app/hooks/useStorePreviewData";
+import type {
+  PreviewRangeMode,
+  StoreSnapshot,
+} from "../app/hooks/useStorePreviewData";
 
 const cardClass = "rounded-3xl border border-slate-800 bg-slate-950/80";
+
+const RANGE_MODE_OPTIONS: { id: PreviewRangeMode; label: string }[] = [
+  { id: "today", label: "今日" },
+  { id: "yesterday", label: "昨日" },
+  { id: "lastWeek", label: "先週" },
+  { id: "custom", label: "カスタム" },
+];
 
 type TimelinePayloadEntry = {
   name?: string;
@@ -81,11 +91,28 @@ type PreviewMainSectionProps = {
   loading?: boolean;
   error?: string | null;
   onSelectStore?: (slug: string) => void;
+  rangeMode?: PreviewRangeMode;
+  onChangeRangeMode?: (mode: PreviewRangeMode) => void;
+  customDate?: string;
+  onChangeCustomDate?: (value: string) => void;
+  selectedBaseDate?: string;
 };
 
 export default function PreviewMainSection(props: PreviewMainSectionProps) {
-  const { storeSlug, snapshot, loading, error } = props;
+  const {
+    storeSlug,
+    snapshot,
+    loading,
+    error,
+    rangeMode,
+    onChangeRangeMode,
+    customDate = "",
+    onChangeCustomDate,
+    selectedBaseDate,
+  } = props;
   const hasData = snapshot.hasData;
+  const activeRangeMode = rangeMode ?? "today";
+  const canControlRange = typeof onChangeRangeMode === "function";
 
   const [isClient, setIsClient] = useState(false);
   useEffect(() => setIsClient(true), []);
@@ -100,7 +127,7 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
               {snapshot.area} / {snapshot.name}
             </p>
             <p className="text-[11px] text-slate-500">
-              19:00–05:00 の推移（実測 &amp; 予測 / 男性・女性）
+              19:00-05:00 の推移（実測 &amp; 予測 / 男性・女性）
             </p>
           </div>
 
@@ -118,6 +145,51 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
             </p>
           )}
         </div>
+
+        {canControlRange && (
+          <div className="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-950/60 px-3 py-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap items-center gap-1">
+                {RANGE_MODE_OPTIONS.map((opt) => {
+                  const active = activeRangeMode === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => onChangeRangeMode(opt.id)}
+                      className={[
+                        "rounded-full border px-3 py-1 text-[11px] font-semibold transition",
+                        active
+                          ? "border-amber-300/80 bg-amber-400/10 text-amber-100"
+                          : "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-500",
+                      ].join(" ")}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 md:ml-auto">
+                <input
+                  type="date"
+                  value={customDate}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    onChangeCustomDate?.(next);
+                    onChangeRangeMode("custom");
+                  }}
+                  className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-[11px] text-slate-200"
+                />
+                {selectedBaseDate && (
+                  <span className="text-[11px] text-slate-500">
+                    表示: {selectedBaseDate}（19:00-05:00）
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="grid gap-2 text-xs md:grid-cols-5">
           <MetricBox label="♂ 男性人数" value={`${snapshot.nowMen} 人`} tone="male" />

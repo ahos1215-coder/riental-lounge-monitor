@@ -6,6 +6,8 @@ import {
   type StoreMeta,
 } from "../config/stores";
 
+export type PreviewRangeMode = "today" | "yesterday" | "lastWeek" | "custom";
+
 export type TimeSeriesPoint = {
   label: string;
   menActual: number | null;
@@ -52,6 +54,21 @@ export type StorePreviewState = {
   loading: boolean;
   error: string | null;
   snapshot: StoreSnapshot;
+};
+
+export type StorePreviewControls = {
+  rangeMode: PreviewRangeMode;
+  setRangeMode: (mode: PreviewRangeMode) => void;
+  customDate: string; // yyyy-mm-dd
+  setCustomDate: (date: string) => void;
+  selectedBaseDate: string; // yyyy-mm-dd
+};
+
+const RANGE_LIMIT_BY_MODE: Record<PreviewRangeMode, number> = {
+  today: 400,
+  yesterday: 1600,
+  lastWeek: 5200,
+  custom: 5200,
 };
 
 function buildEmptySeries(): TimeSeriesPoint[] {
@@ -112,23 +129,90 @@ function parseForecastPoints(raw: unknown): ForecastPoint[] {
   return rows.filter(isForecastPoint);
 }
 
-function computeNightWindow(now: Date = new Date()): NightWindow {
-  const base = new Date(now);
-  const isEvening = base.getHours() >= 19;
-  const baseDate = new Date(
-    base.getFullYear(),
-    base.getMonth(),
-    base.getDate() + (isEvening ? 0 : -1),
+function formatYMD(date: Date): string {
+  const y = date.getFullYear();
+  const m = (date.getMonth() + 1).toString().padStart(2, "0");
+  const d = date.getDate().toString().padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+function parseYMD(value: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (!m) return null;
+
+  const year = Number(m[1]);
+  const month = Number(m[2]);
+  const day = Number(m[3]);
+
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) {
+    return null;
+  }
+
+  const date = new Date(year, month - 1, day);
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null;
+  }
+
+  return date;
+}
+
+function computeNightBaseDate(now: Date): Date {
+  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (now.getHours() < 19) {
+    base.setDate(base.getDate() - 1);
+  }
+  return base;
+}
+
+function computeNightWindowFromBaseDate(baseDate: Date): NightWindow {
+  const start = new Date(
+    baseDate.getFullYear(),
+    baseDate.getMonth(),
+    baseDate.getDate(),
+    19,
+    0,
+    0,
+    0,
   );
-
-  const start = new Date(baseDate);
-  start.setHours(19, 0, 0, 0);
-
-  const end = new Date(baseDate);
-  end.setDate(end.getDate() + 1);
-  end.setHours(5, 0, 0, 0);
-
+  const end = new Date(
+    baseDate.getFullYear(),
+    baseDate.getMonth(),
+    baseDate.getDate() + 1,
+    5,
+    0,
+    0,
+    0,
+  );
   return { start, end };
+}
+
+function computeSelectedNightBaseDate(
+  mode: PreviewRangeMode,
+  customDate: string,
+  now: Date,
+): Date {
+  const todayBase = computeNightBaseDate(now);
+  const selected = new Date(todayBase);
+
+  if (mode === "yesterday") {
+    selected.setDate(selected.getDate() - 1);
+    return selected;
+  }
+
+  if (mode === "lastWeek") {
+    selected.setDate(selected.getDate() - 7);
+    return selected;
+  }
+
+  if (mode === "custom") {
+    return parseYMD(customDate) ?? todayBase;
+  }
+
+  return todayBase;
 }
 
 function isWithinNight(ts: string | undefined, window: NightWindow): boolean {
@@ -260,17 +344,28 @@ function hasSeriesData(series: TimeSeriesPoint[]) {
 
 /**
  * PREVIEW 用のデータ取得フック
- * - /api/range と /api/forecast_today を叩き、19:00–05:00 をフロントで絞り込む
+ * - /api/range（store/limit のみ）を叩き、選択した baseDate の夜窓（19:00-05:00）をフロントで絞り込む
+ * - 予測（/api/forecast_today）は today モードのみ取得（それ以外は取得しない）
  * - データが無い場合でも baseSnapshot を返し、UI を安全に表示する
  */
 export function useStorePreviewData(
   storeSlug: string | null | undefined,
-): StorePreviewState {
+): StorePreviewState & StorePreviewControls {
   const meta = useMemo(
     () => getStoreMetaBySlug(storeSlug ?? DEFAULT_STORE),
     [storeSlug],
   );
   const baseSnapshot = useMemo(() => buildBaseSnapshot(meta), [meta]);
+
+  const [rangeMode, setRangeMode] = useState<PreviewRangeMode>("today");
+  const [customDate, setCustomDate] = useState<string>(() =>
+    formatYMD(computeNightBaseDate(new Date())),
+  );
+
+  const selectedBaseDate = useMemo(() => {
+    const base = computeSelectedNightBaseDate(rangeMode, customDate, new Date());
+    return formatYMD(base);
+  }, [rangeMode, customDate]);
 
   const [state, setState] = useState<StorePreviewState>({
     loading: true,
@@ -284,15 +379,25 @@ export function useStorePreviewData(
     async function run() {
       setState({ loading: true, error: null, snapshot: baseSnapshot });
       try {
-        const nightWindow = computeNightWindow();
+        const now = new Date();
+        const baseDate = computeSelectedNightBaseDate(rangeMode, customDate, now);
+        const nightWindow = computeNightWindowFromBaseDate(baseDate);
+
+        const rangeLimit = RANGE_LIMIT_BY_MODE[rangeMode] ?? 400;
+        const rangeUrl = `/api/range?store=${encodeURIComponent(meta.slug)}&limit=${rangeLimit}`;
+
+        const forecastUrl = `/api/forecast_today?store=${encodeURIComponent(meta.slug)}`;
 
         const [rangeRes, forecastRes] = await Promise.all([
-          fetch(`/api/range?store=${encodeURIComponent(meta.slug)}&limit=400`),
-          fetch(`/api/forecast_today?store=${encodeURIComponent(meta.slug)}`),
+          fetch(rangeUrl),
+          rangeMode === "today" ? fetch(forecastUrl) : Promise.resolve(null),
         ]);
 
         const rangeJson = await rangeRes.json().catch(() => ({}));
-        const forecastJson = await forecastRes.json().catch(() => ({}));
+        const forecastJson =
+          forecastRes === null
+            ? { data: [] }
+            : await forecastRes.json().catch(() => ({}));
 
         const allRangePoints = parseRangePoints(rangeJson);
         const allForecastPoints = parseForecastPoints(forecastJson);
@@ -347,7 +452,14 @@ export function useStorePreviewData(
     return () => {
       cancelled = true;
     };
-  }, [meta, baseSnapshot]);
+  }, [meta, baseSnapshot, rangeMode, customDate]);
 
-  return state;
+  return {
+    ...state,
+    rangeMode,
+    setRangeMode,
+    customDate,
+    setCustomDate,
+    selectedBaseDate,
+  };
 }
