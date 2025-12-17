@@ -170,7 +170,8 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
                       onClick={() => {
                         onChangeRangeMode(opt.id);
                         if (opt.id === "custom") {
-                          openDatePicker();}
+                          openDatePicker();
+                        }
                       }}
                       className={[
                         "rounded-full border px-3 py-1 text-[11px] font-semibold transition",
