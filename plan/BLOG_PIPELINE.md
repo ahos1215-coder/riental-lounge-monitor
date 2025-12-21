@@ -44,3 +44,13 @@ C) 文章化（Render）＝LLM
 5) 通知〜承認（半自動の肝）
 - n8n → LINE通知（PRリンク/要点/注意/X文案）
 - あなた → PR確認 → マージ（公開）
+
+## 公開Facts生成（ローカル）
+- MDX frontmatter の date/store/facts_id から夜窓（19:00-翌05:00 JST）を計算し、insight を自動生成する。
+- 実行場所は repo root / `frontend` どちらでも可（`content/blog` を自動検出）。
+- `/api/range?store=...&limit=1000` を優先し、窓内が空なら `/api/forecast_today` を使う。forecast の日付ズレは +1日シフトで救済する。
+
+```powershell
+cd frontend
+npm run facts:generate -- --slug shibuya-tonight-20251221 --backend http://127.0.0.1:5000
+```
