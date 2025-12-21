@@ -1,10 +1,13 @@
-﻿* text=auto
-*.md text eol=lf
-*.txt text eol=lf
-*.py text eol=lf
-*.ts text eol=lf
+# Normalize line endings by file type (repo policy)
+# Web / Python / docs -> LF
+*.ts  text eol=lf
 *.tsx text eol=lf
-*.js text eol=lf
+*.js  text eol=lf
+*.mjs text eol=lf
 *.json text eol=lf
-*.yml text eol=lf
-*.yaml text eol=lf
+*.md  text eol=lf
+*.py  text eol=lf
+/.gitignore text eol=lf
+
+# PowerShell scripts -> CRLF (Windows friendly)
+*.ps1 text eol=crlf
