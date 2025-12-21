@@ -1,0 +1,234 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+
+import { FactsSummaryCard } from "@/components/blog/FactsSummaryCard";
+import { getAllPostMetas, getPostBySlug, formatYmdToSlash } from "@/lib/blog/content";
+import { readPublicFacts } from "@/lib/blog/publicFacts";
+
+export const dynamicParams = false;
+
+export async function generateStaticParams(): Promise<Array<{ slug: string }>> {
+  const metas = getAllPostMetas();
+  return metas.map((m: any) => ({ slug: String(m.slug) }));
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}): Promise<Metadata> {
+  const { slug } = await params;
+  const post = getPostBySlug(slug);
+  if (!post) {
+    return {
+      title: "記事が見つかりません | めぐりび",
+      description: "指定された記事は見つかりませんでした。",
+    };
+  }
+  return {
+    title: `${(post as any).title ?? "ブログ"} | めぐりび`,
+    description: (post as any).description ?? "",
+  };
+}
+
+function pickFactsId(post: any): string | null {
+  const v =
+    post?.facts_id ??
+    post?.factsId ??
+    post?.frontmatter?.facts_id ??
+    post?.frontmatter?.factsId ??
+    post?.meta?.facts_id ??
+    post?.meta?.factsId;
+  if (typeof v === "string" && v.trim().length) return v.trim();
+  return null;
+}
+
+function normalizePostBody(post: any): string {
+  const body = post?.mdx ?? post?.content ?? post?.body ?? post?.markdown ?? null;
+  if (Array.isArray(body)) return body.map((x: any) => String(x ?? "")).join("\n\n").trim();
+  if (typeof body === "string") return body.trim();
+  return "";
+}
+
+export default async function BlogPostPage({
+  params,
+}: {
+  params: Promise<{ slug: string }>;
+}) {
+  const { slug } = await params;
+
+  const post = getPostBySlug(slug);
+  if (!post) notFound();
+
+  const factsId = pickFactsId(post as any);
+  const factsVisibility = (post as any).factsVisibility ?? "show";
+  const facts = factsId ? readPublicFacts(String(factsId)) : null;
+
+  // Factsカードは「factsIdあり」かつ「visibilityがhideじゃない」かつ「JSONが読めた」時だけ表示
+  const showFacts = Boolean(factsId) && factsVisibility !== "hide" && Boolean(facts);
+
+  const metas = getAllPostMetas();
+  const related = metas
+    .filter((m: any) => String(m.slug) !== slug)
+    .slice(0, 3);
+
+  const body = normalizePostBody(post as any);
+
+  return (
+    <main className="relative min-h-[calc(100vh-80px)] bg-black text-white">
+      <div className="pointer-events-none absolute inset-0">
+        <div className={"absolute inset-0 " + ((post as any).heroClassName ?? "bg-white/5")} />
+        <div className="absolute inset-0 bg-black/35" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.10),transparent_55%)]" />
+      </div>
+
+      <div className="relative mx-auto w-full max-w-3xl px-4 py-10 md:py-14">
+        <div className="mb-4">
+          <Link href="/blog" className="text-sm text-white/70 hover:text-white">
+            ← ブログ一覧に戻る
+          </Link>
+        </div>
+
+        <article className="rounded-3xl border border-white/10 bg-black/35 p-6 shadow-[0_0_80px_rgba(0,0,0,0.4)] md:p-8">
+          <div className="flex items-center gap-3">
+            <span
+              className={
+                "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold text-white " +
+                String((post as any).badgeClassName ?? "bg-white/10")
+              }
+            >
+              {String((post as any).categoryLabel ?? "記事")}
+            </span>
+
+            <span className="text-xs text-white/40">
+              {formatYmdToSlash(String((post as any).date ?? ""))}
+              {(post as any).minutes ? ` ・ ${(post as any).minutes}分` : ""}
+            </span>
+          </div>
+
+          <h1 className="mt-4 text-2xl font-black tracking-tight md:text-3xl">
+            {String((post as any).title ?? slug)}
+          </h1>
+
+          {(post as any).description && (
+            <p className="mt-4 text-sm text-white/70 md:text-base">{String((post as any).description)}</p>
+          )}
+
+          {/* Facts（任意表示） */}
+          {showFacts && <FactsSummaryCard facts={facts} />}
+
+          {/* 本文（Markdownレンダリング） */}
+          {body ? (
+            <div className="mt-8 text-[15px] leading-7 text-white/80">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={{
+                  h2: ({ node, className, ...props }) => (
+                    <h2 className={"mt-8 text-xl font-black tracking-tight text-white " + (className ?? "")} {...props} />
+                  ),
+                  h3: ({ node, className, ...props }) => (
+                    <h3 className={"mt-6 text-lg font-bold tracking-tight text-white " + (className ?? "")} {...props} />
+                  ),
+                  h4: ({ node, className, ...props }) => (
+                    <h4 className={"mt-5 text-base font-bold tracking-tight text-white " + (className ?? "")} {...props} />
+                  ),
+                  p: ({ node, className, ...props }) => (
+                    <p className={"mt-4 leading-7 text-white/80 " + (className ?? "")} {...props} />
+                  ),
+                  ul: ({ node, className, ...props }) => (
+                    <ul className={"mt-4 list-disc space-y-2 pl-5 text-white/80 " + (className ?? "")} {...props} />
+                  ),
+                  ol: ({ node, className, ...props }) => (
+                    <ol className={"mt-4 list-decimal space-y-2 pl-5 text-white/80 " + (className ?? "")} {...props} />
+                  ),
+                  li: ({ node, className, ...props }) => (
+                    <li className={"leading-7 " + (className ?? "")} {...props} />
+                  ),
+                  a: ({ node, className, ...props }) => (
+                    <a
+                      className={"text-amber-300 underline underline-offset-4 hover:text-amber-200 " + (className ?? "")}
+                      {...props}
+                    />
+                  ),
+                  code: (props: any) => {
+                    const { inline, className, node, ...rest } = props ?? {};
+                    return inline ? (
+                      <code
+                        className={
+                          "rounded bg-white/10 px-1.5 py-0.5 font-mono text-[0.92em] text-white/90 " + (className ?? "")
+                        }
+                        {...rest}
+                      />
+                    ) : (
+                      <code className={"font-mono text-[13px] text-white/90 " + (className ?? "")} {...rest} />
+                    );
+                  },
+                  pre: ({ node, className, ...props }) => (
+                    <pre
+                      className={
+                        "mt-4 overflow-x-auto rounded-xl border border-white/10 bg-black/40 p-4 text-[13px] text-white/90 " +
+                        (className ?? "")
+                      }
+                      {...props}
+                    />
+                  ),
+                  hr: ({ node, className, ...props }) => (
+                    <hr className={"my-8 border-white/10 " + (className ?? "")} {...props} />
+                  ),
+                  blockquote: ({ node, className, ...props }) => (
+                    <blockquote className={"mt-4 border-l-2 border-white/15 pl-4 text-white/70 " + (className ?? "")} {...props} />
+                  ),
+                }}
+              >
+                {body}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            <div className="mt-8 rounded-xl border border-white/10 bg-black/30 p-4 text-sm text-white/70">
+              本文が空です（content.ts の読み込み結果を確認してください）
+            </div>
+          )}
+        </article>
+
+        {related.length > 0 && (
+          <section className="mt-10">
+            <h2 className="text-lg font-bold">他の記事</h2>
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {related.map((p: any) => (
+                <Link
+                  key={String(p.slug)}
+                  href={`/blog/${String(p.slug)}`}
+                  className="rounded-2xl border border-white/10 bg-white/5 p-4 hover:border-white/20"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span
+                      className={
+                        "inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold text-white " +
+                        String(p.badgeClassName ?? "bg-white/10")
+                      }
+                    >
+                      {String(p.categoryLabel ?? "")}
+                    </span>
+                    <span className="text-xs text-white/40">{formatYmdToSlash(String(p.date ?? ""))}</span>
+                  </div>
+
+                  <p className="mt-2 text-sm font-bold leading-snug text-white">{String(p.title ?? "")}</p>
+
+                  {p.description && (
+                    <p className="mt-2 text-xs text-white/60 [display:-webkit-box] [-webkit-line-clamp:2] [-webkit-box-orient:vertical] overflow-hidden">
+                      {String(p.description)}
+                    </p>
+                  )}
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+      </div>
+    </main>
+  );
+}

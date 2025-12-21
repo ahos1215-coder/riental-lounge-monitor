@@ -1,4 +1,4 @@
-# MEGRIBI / めぐり灯 — 現状ステータス
+﻿# MEGRIBI / めぐり灯 — 現状ステータス
 
 - Last updated: 2025-12-17
 - Branch: main
@@ -61,13 +61,3 @@
 - ROADMAP.md
 - CHECKLISTS.md
 - ONBOARDING.md
-
----
-## 2025-12-20 ブログMDX基盤（現状）
-
-- Next.js App Router の blog 一覧 / slug ページが build 通過
-- 記事は frontend/content/blog/*.mdx で管理
-- 公開Factsは frontend/content/facts/public/*.json（最小）で管理
-- 「10秒まとめ（Facts）」は公開Factsから自動表示する方針で確定
-- 実行ポリシー変更が禁止の環境があるため、スクリプト実行は powershell.exe -ExecutionPolicy Bypass -File ... を標準手順にする
-

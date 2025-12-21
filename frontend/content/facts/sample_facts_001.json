@@ -1,0 +1,20 @@
+{
+  "facts_id": "sample_facts_001",
+  "store_id": "shibuya",
+  "period": "tonight",
+  "level": "easy",
+  "range": "2025-12-19T19:00:00+09:00 - 2025-12-20T05:00:00+09:00",
+  "signals": {
+    "trend_label": "early_peak",
+    "confidence": 0.62
+  },
+  "numbers_minimal": {
+    "peak_hour": "23",
+    "avoid_hour": "01",
+    "arrival_hint": "22"
+  },
+  "notes": [
+    "欠損がある場合は結論を強く言わない",
+    "イベント日はズレやすい"
+  ]
+}

@@ -1,0 +1,145 @@
+﻿[CmdletBinding()]
+param([Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][string]$Slug,[string]$Title="",[string]$FactsId="",[string]$CategoryId="guide")
+
+$ErrorActionPreference = "Stop"
+
+function Write-Utf8NoBom([string]$path, [string]$text) {
+  $enc = New-Object System.Text.UTF8Encoding($false)
+  $dir = Split-Path -Parent $path
+  if ($dir -and !(Test-Path $dir)) { New-Item -ItemType Directory -Force $dir | Out-Null }
+  [IO.File]::WriteAllText($path, $text, $enc)
+}
+
+function Escape-YamlDouble([string]$s) {
+  if ($null -eq $s) { return "" }
+  $t = [string]$s
+  $t = $t.Replace("\", "\\").Replace('"', '\"')
+  $t = $t.Replace("`r", "").Replace("`n", " ")
+  return $t
+}
+
+function Upsert-FrontMatterKey([string]$mdx, [string]$key, [string]$value) {
+  $escaped = Escape-YamlDouble $value
+  $newLine = ('{0}: "{1}"' -f $key, $escaped)
+
+  # frontmatter が無ければ作る
+  if ($mdx -notmatch '^(?s)---\s*\r?\n') {
+    return ("---`r`n{0}`r`n---`r`n`r`n{1}" -f $newLine, $mdx)
+  }
+
+  # 先頭 frontmatter を取り出す
+  $m = [regex]::Match($mdx, '^(?s)---\s*\r?\n(?<fm>.*?)\r?\n---\s*\r?\n')
+  if (-not $m.Success) { return $mdx }
+
+  $fm = $m.Groups["fm"].Value
+  $body = $mdx.Substring($m.Length)
+
+  $lines = $fm -split "\r?\n"
+  $found = $false
+  for ($i=0; $i -lt $lines.Length; $i++) {
+    if ($lines[$i] -match ('^\s*' + [regex]::Escape($key) + '\s*:')) {
+      $lines[$i] = $newLine
+      $found = $true
+      break
+    }
+  }
+  if (-not $found) { $lines += $newLine }
+
+  $newFm = ($lines -join "`r`n")
+  return ("---`r`n{0}`r`n---`r`n{1}" -f $newFm, $body)
+}
+
+# root は scripts の1つ上（= frontend）
+$appRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+
+$Slug = $Slug.Trim()
+if (-not $Slug) { throw "Slug が空です" }
+$Slug = $Slug.ToLowerInvariant()
+
+if (-not $FactsId) { $FactsId = $Slug }
+if (-not $CategoryId) { $CategoryId = "guide" }
+
+$templatePath = Join-Path $appRoot "content\blog\_templates\_TEMPLATE.mdx"
+$mdxPath      = Join-Path $appRoot ("content\blog\{0}.mdx" -f $Slug)
+$factsPath    = Join-Path $appRoot ("content\facts\public\{0}.json" -f $FactsId)
+
+New-Item -ItemType Directory -Force (Split-Path -Parent $mdxPath) | Out-Null
+New-Item -ItemType Directory -Force (Split-Path -Parent $factsPath) | Out-Null
+
+# --- MDX 作成 ---
+if (Test-Path $mdxPath) { throw "既に存在します: $mdxPath" }
+
+if (Test-Path $templatePath) {
+  $mdx = Get-Content -LiteralPath $templatePath -Raw -Encoding UTF8
+} else {
+  $today = Get-Date -Format "yyyy-MM-dd"
+  $mdx = @"
+---
+title: ""
+description: ""
+date: "$today"
+minutes: 3
+views: 0
+categoryId: ""
+factsId: ""
+---
+
+## 今日の一言
+（短い一文）
+
+## 理由はこれ
+（根拠1つ）
+
+## 初心者メモ
+（失敗しない動き方）
+
+## くわしく（任意）
+（注意点・補足）
+"@
+}
+
+# frontmatter を上書き
+if ($Title) { $mdx = Upsert-FrontMatterKey $mdx "title" $Title }
+$mdx = Upsert-FrontMatterKey $mdx "factsId" $FactsId
+$mdx = Upsert-FrontMatterKey $mdx "categoryId" $CategoryId
+
+# プレースホルダ置換
+$mdx = $mdx.Replace("__SLUG__", $Slug).Replace("__FACTS_ID__", $FactsId)
+
+Write-Utf8NoBom $mdxPath ($mdx.Trim() + "`r`n")
+
+# --- Public facts stub 作成（無ければ） ---
+if (!(Test-Path $factsPath)) {
+  $stub = @"
+{
+  "facts_id": "$FactsId",
+  "store": "",
+  "range": {
+    "label": "",
+    "from": "",
+    "to": ""
+  },
+  "insight": {
+    "peak_time": "",
+    "avoid_time": "",
+    "crowd_label": ""
+  },
+  "quality_flags": {
+    "notes": []
+  }
+}
+"@
+  Write-Utf8NoBom $factsPath $stub
+  Write-Host "created: $factsPath"
+} else {
+  Write-Host "exists : $factsPath"
+}
+
+Write-Host ""
+Write-Host "created: $mdxPath"
+Write-Host "facts  : $factsPath"
+Write-Host ""
+Write-Host "Next:"
+Write-Host "  1) MDX frontmatter（title/description/date など）を埋める"
+Write-Host "  2) facts JSON insight（peak/avoid/label）を埋める"
+Write-Host "  3) npm run dev で /blog/$Slug を確認"

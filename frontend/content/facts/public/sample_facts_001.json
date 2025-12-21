@@ -1,0 +1,25 @@
+{
+  "facts_id": "sample_facts_001",
+  "store": { "id": "shibuya", "label": "渋谷" },
+  "range": { "from": "2025-12-20T19:00:00+09:00", "to": "2025-12-20T23:30:00+09:00", "timezone": "Asia/Tokyo" },
+  "level": "easy",
+  "insight": {
+    "peak_time": "21:30",
+    "avoid_time": "20:00",
+    "crowd_label": "普通"
+  },
+  "series_min": [
+    { "t": "19:00", "total": 18 },
+    { "t": "20:00", "total": 28 },
+    { "t": "21:00", "total": 34 },
+    { "t": "21:30", "total": 40 },
+    { "t": "22:00", "total": 33 }
+  ],
+  "quality_flags": {
+    "missing": false,
+    "notes": [
+      "欠損がある場合は結論を強く言わない",
+      "イベント日はズレやすい"
+    ]
+  }
+}

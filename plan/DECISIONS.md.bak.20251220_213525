@@ -1,4 +1,4 @@
-# DECISIONS
+﻿# DECISIONS
 Last updated: 2025-12-17 / commit: d4538a0
 
 ## Decision 2025-12-17: Supabase `logs` を唯一の Source of Truth にする
@@ -143,15 +143,3 @@ Last updated: 2025-12-17 / commit: d4538a0
 
 **補足**
 - 必須依存を増やす場合は `plan/ARCHITECTURE.md` / `plan/API_CONTRACT.md` の前提を再確認する。
-
----
-## 2025-12-20 ブログ運用MVP（MDX/Facts分離）
-
-- AIは自動投稿ではなく半自動編集（人が最終責任）
-- MVPは「作る→確認→公開→告知」の通しを最小で成立させる（予約投稿は後回し）
-- Facts と Render を分離する
-  - Supabase：Facts完全版（正本）
-  - GitHub：公開して良い最小Factsスナップショット＋MDX＋画像
-- Supabase に記事本文/画像を溜めない（無料枠圧迫回避）
-- 記事の「10秒まとめ」は Facts（公開最小facts）から自動表示（クローズ）
-
