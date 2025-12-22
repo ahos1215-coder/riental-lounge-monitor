@@ -1,0 +1,49 @@
+name: Generate Public Facts
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '5 10 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: generate-public-facts
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Generate public facts
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_BASE_URL: https://www.meguribi.jp
+        run: npm run facts:generate
+
+      - name: Commit & push if changed
+        run: |
+          if [ -z "" ]; then
+            echo "No changes."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A frontend/content/facts
+          git commit -m "chore: update public facts"
+          git push
