@@ -2,14 +2,14 @@
   "analysis_id": "weekly:shibuya:2025-12-22",
   "type": "weekly",
   "store": "shibuya",
-  "generated_at": "2025-12-22T06:35:30.769378+00:00",
+  "generated_at": "2025-12-22T08:06:21.957302+00:00",
   "period": {
     "start": "2025-12-13T16:40:26.437510+00:00",
     "end": "2025-12-21T19:55:25.196012+00:00"
   },
   "params": {
-    "threshold": 0.8,
-    "min_duration_minutes": 120,
+    "threshold": 0.75,
+    "min_duration_minutes": 60,
     "ideal": 0.7,
     "gender_weight": 1.5,
     "occupancy_baseline": 237.24999999999977
