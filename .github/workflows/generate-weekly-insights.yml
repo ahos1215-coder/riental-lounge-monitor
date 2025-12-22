@@ -39,12 +39,18 @@ jobs:
           python -m pip install -r requirements.txt
           python -m pip install pytest
 
+      - name: Warm up insights endpoint
+        run: |
+          curl -fsSL --retry 3 --retry-all-errors --max-time 60 "https://www.meguribi.jp/api/range?store=shibuya&limit=1" >/dev/null
+
       - name: Generate weekly insights
         env:
           NEXT_PUBLIC_BASE_URL: https://www.meguribi.jp
           INSIGHTS_STORES: shibuya
           INSIGHTS_THRESHOLD: "0.4"
           INSIGHTS_MIN_DURATION_MINUTES: "60"
+          INSIGHTS_HTTP_TIMEOUT_SECONDS: "90"
+          INSIGHTS_HTTP_RETRIES: "4"
         run: |
           if [ -n "${{ github.event.inputs.stores }}" ]; then
             export INSIGHTS_STORES="${{ github.event.inputs.stores }}"

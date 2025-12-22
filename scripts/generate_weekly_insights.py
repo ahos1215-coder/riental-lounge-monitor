@@ -5,6 +5,8 @@ import importlib.util
 import inspect
 import json
 import os
+import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -33,6 +35,9 @@ DEFAULT_SCORE_THRESHOLD = 0.80
 DEFAULT_MIN_DURATION_MINUTES = 120
 DEFAULT_IDEAL = 0.7
 DEFAULT_GENDER_WEIGHT = 1.5
+DEFAULT_HTTP_TIMEOUT_SECONDS = 60
+DEFAULT_HTTP_RETRIES = 3
+DEFAULT_USER_AGENT = "MEGRIBI-weekly-insights-bot"
 
 
 def _pick_value(row: dict[str, Any], keys: Iterable[str]) -> Any:
@@ -97,19 +102,49 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.isoformat()
 
 
-def _load_rows(base_url: str, store: str, limit: int) -> list[dict[str, Any]]:
+def _load_rows(
+    base_url: str,
+    store: str,
+    limit: int,
+    *,
+    timeout_seconds: int,
+    retries: int,
+    user_agent: str,
+) -> list[dict[str, Any]]:
     query = urlencode({"store": store, "limit": str(limit)})
     url = f"{base_url.rstrip('/')}/api/range?{query}"
-    req = Request(url, headers={"accept": "application/json"})
-    with urlopen(req, timeout=20) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-    if isinstance(payload, list):
-        return payload
-    if isinstance(payload, dict):
-        rows = payload.get("rows")
-        if isinstance(rows, list):
-            return rows
-    return []
+    headers = {"accept": "application/json", "User-Agent": user_agent}
+    last_error: Exception | None = None
+
+    for attempt in range(1, retries + 1):
+        try:
+            req = Request(url, headers=headers)
+            with urlopen(req, timeout=timeout_seconds) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            if isinstance(payload, list):
+                return payload
+            if isinstance(payload, dict):
+                rows = payload.get("rows")
+                if isinstance(rows, list):
+                    return rows
+            return []
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            print(
+                f"[weekly-insights] fetch failed attempt {attempt}/{retries}: {exc}",
+                file=sys.stderr,
+            )
+            if attempt < retries:
+                sleep_seconds = min(2 ** (attempt - 1), 10)
+                print(
+                    f"[weekly-insights] retrying in {sleep_seconds}s",
+                    file=sys.stderr,
+                )
+                time.sleep(sleep_seconds)
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("weekly insights fetch failed")
 
 
 def _collect_totals(rows: list[dict[str, Any]]) -> list[float]:
@@ -241,6 +276,8 @@ def main() -> int:
         if args.gender_weight is not None
         else _env_float("INSIGHTS_GENDER_WEIGHT", DEFAULT_GENDER_WEIGHT)
     )
+    timeout_seconds = max(1, _env_int("INSIGHTS_HTTP_TIMEOUT_SECONDS", DEFAULT_HTTP_TIMEOUT_SECONDS))
+    retries = max(1, _env_int("INSIGHTS_HTTP_RETRIES", DEFAULT_HTTP_RETRIES))
 
     base_url = (
         os.environ.get("MEGRIBI_BASE_URL")
@@ -268,7 +305,14 @@ def main() -> int:
     generated_at = _iso(now)
 
     for store in stores:
-        rows = _load_rows(base_url, store, args.limit)
+        rows = _load_rows(
+            base_url,
+            store,
+            args.limit,
+            timeout_seconds=timeout_seconds,
+            retries=retries,
+            user_agent=DEFAULT_USER_AGENT,
+        )
         timestamps = [ts for ts in (_parse_timestamp(r) for r in rows) if ts is not None]
         period_start = min(timestamps) if timestamps else None
         period_end = max(timestamps) if timestamps else None
