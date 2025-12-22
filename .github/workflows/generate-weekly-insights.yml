@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       stores:
-        description: "対象ストア（スペース/カンマ区切り）"
+        description: "蟇ｾ雎｡繧ｹ繝医い・医せ繝壹・繧ｹ/繧ｫ繝ｳ繝槫玄蛻・ｊ・・
         required: false
         default: "shibuya"
       threshold:
-        description: "Good Window 閾値"
+        description: "Good Window 髢ｾ蛟､"
         required: false
         default: "0.4"
       min_duration_minutes:
-        description: "最小連続分数"
+        description: "譛蟆城｣邯壼・謨ｰ"
         required: false
         default: "60"
   schedule:
