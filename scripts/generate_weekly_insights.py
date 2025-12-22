@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import inspect
 import json
 import os
 from datetime import datetime, timezone
@@ -184,16 +185,62 @@ def _parse_store_list(value: str | None) -> list[str]:
     return [item.strip() for item in raw if item.strip()]
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _call_find_good_windows(points: list[dict[str, Any]], **kwargs: Any) -> list[dict[str, Any]]:
+    sig = inspect.signature(find_good_windows)
+    accepts_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
+    if accepts_var_kw:
+        return find_good_windows(points, **kwargs)
+    filtered = {key: value for key, value in kwargs.items() if key in sig.parameters}
+    return find_good_windows(points, **filtered)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--stores", help="comma/space separated store slugs")
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
+    parser.add_argument("--threshold", type=float)
+    parser.add_argument("--min-duration-minutes", type=int)
+    parser.add_argument("--ideal", type=float)
+    parser.add_argument("--gender-weight", type=float)
     args = parser.parse_args()
 
     stores_value = args.stores or os.environ.get("INSIGHTS_STORES")
     stores = _parse_store_list(stores_value)
     if not stores:
         raise SystemExit("stores are required. Use --stores or INSIGHTS_STORES.")
+
+    threshold = args.threshold if args.threshold is not None else _env_float("INSIGHTS_THRESHOLD", DEFAULT_SCORE_THRESHOLD)
+    min_duration_minutes = (
+        args.min_duration_minutes
+        if args.min_duration_minutes is not None
+        else _env_int("INSIGHTS_MIN_DURATION_MINUTES", DEFAULT_MIN_DURATION_MINUTES)
+    )
+    ideal = args.ideal if args.ideal is not None else _env_float("INSIGHTS_IDEAL", DEFAULT_IDEAL)
+    gender_weight = (
+        args.gender_weight
+        if args.gender_weight is not None
+        else _env_float("INSIGHTS_GENDER_WEIGHT", DEFAULT_GENDER_WEIGHT)
+    )
 
     base_url = (
         os.environ.get("MEGRIBI_BASE_URL")
@@ -231,10 +278,12 @@ def main() -> int:
         baseline = baseline if baseline > 0 else 0.0
 
         points = _build_points(rows, baseline)
-        windows = find_good_windows(
+        windows = _call_find_good_windows(
             points,
-            score_threshold=DEFAULT_SCORE_THRESHOLD,
-            min_duration_minutes=DEFAULT_MIN_DURATION_MINUTES,
+            score_threshold=threshold,
+            min_duration_minutes=min_duration_minutes,
+            ideal=ideal,
+            gender_weight=gender_weight,
         )
         serialized_windows = _serialize_windows(windows)
         top_windows = sorted(
@@ -250,10 +299,10 @@ def main() -> int:
             "generated_at": generated_at,
             "period": {"start": _iso(period_start), "end": _iso(period_end)},
             "params": {
-                "threshold": DEFAULT_SCORE_THRESHOLD,
-                "min_duration_minutes": DEFAULT_MIN_DURATION_MINUTES,
-                "ideal": DEFAULT_IDEAL,
-                "gender_weight": DEFAULT_GENDER_WEIGHT,
+                "threshold": threshold,
+                "min_duration_minutes": min_duration_minutes,
+                "ideal": ideal,
+                "gender_weight": gender_weight,
                 "occupancy_baseline": baseline,
             },
             "metrics": {
@@ -268,13 +317,17 @@ def main() -> int:
         store_dir = base_dir / store
         _ensure_dir(store_dir)
         out_path = store_dir / f"{date_label}.json"
-        out_path.write_text(json.dumps(payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+        with out_path.open("w", encoding="utf-8", newline="\n") as handle:
+            json.dump(payload, handle, ensure_ascii=True, indent=2)
+            handle.write("\n")
 
         stores_index[store] = {"latest_file": out_path.name, "generated_at": generated_at}
 
     index_payload["generated_at"] = generated_at
     index_payload["stores"] = stores_index
-    index_path.write_text(json.dumps(index_payload, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+    with index_path.open("w", encoding="utf-8", newline="\n") as handle:
+        json.dump(index_payload, handle, ensure_ascii=True, indent=2)
+        handle.write("\n")
     return 0
 
 

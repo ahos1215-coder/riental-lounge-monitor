@@ -2,6 +2,19 @@ name: Generate Weekly Insights
 
 on:
   workflow_dispatch:
+    inputs:
+      stores:
+        description: "対象ストア（スペース/カンマ区切り）"
+        required: false
+        default: "shibuya"
+      threshold:
+        description: "Good Window 閾値"
+        required: false
+        default: "0.8"
+      min_duration_minutes:
+        description: "最小連続分数"
+        required: false
+        default: "120"
   schedule:
     - cron: "30 15 * * 0"
 
@@ -20,8 +33,22 @@ jobs:
         env:
           NEXT_PUBLIC_BASE_URL: https://www.meguribi.jp
           INSIGHTS_STORES: shibuya
+          INSIGHTS_THRESHOLD: "0.8"
+          INSIGHTS_MIN_DURATION_MINUTES: "120"
         run: |
-          python scripts/generate_weekly_insights.py --stores "$INSIGHTS_STORES"
+          if [ -n "${{ github.event.inputs.stores }}" ]; then
+            export INSIGHTS_STORES="${{ github.event.inputs.stores }}"
+          fi
+          if [ -n "${{ github.event.inputs.threshold }}" ]; then
+            export INSIGHTS_THRESHOLD="${{ github.event.inputs.threshold }}"
+          fi
+          if [ -n "${{ github.event.inputs.min_duration_minutes }}" ]; then
+            export INSIGHTS_MIN_DURATION_MINUTES="${{ github.event.inputs.min_duration_minutes }}"
+          fi
+          python scripts/generate_weekly_insights.py \
+            --stores "$INSIGHTS_STORES" \
+            --threshold "$INSIGHTS_THRESHOLD" \
+            --min-duration-minutes "$INSIGHTS_MIN_DURATION_MINUTES"
       - name: Commit and push if changed
         run: |
           git config user.name "github-actions[bot]"
