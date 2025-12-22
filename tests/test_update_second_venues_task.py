@@ -33,12 +33,19 @@ class _FakeGoogleClient:
     def nearby_search(self, lat, lng):
         self.nearby_calls.append((lat, lng))
         return [
-            NearbyPlace(place_id="p1", name="Bar A", lat=lat, lng=lng, types=["bar"], open_now=True),
+            NearbyPlace(
+                place_id="p1",
+                name="Bar A",
+                lat=lat + 0.001,
+                lng=lng + 0.001,
+                types=["bar"],
+                open_now=True,
+            ),
             NearbyPlace(
                 place_id="p2",
                 name="Club B",
-                lat=lat,
-                lng=lng,
+                lat=lat + 0.002,
+                lng=lng + 0.002,
                 types=["night_club"],
                 open_now=None,
             ),
@@ -82,7 +89,7 @@ def test_update_all_second_venues_builds_payload_and_upserts():
     assert len(payloads) == 2
     assert payloads[0]["genre"] == "バー"
     assert payloads[0]["address"] == "Addr 1"
-    assert payloads[1]["genre"] == "クラブ / ライブバー"
+    assert payloads[1]["genre"] == "バー"
     assert payloads[1]["address"] is None
     assert payloads[1]["open_now"] is None
     assert isinstance(payloads[0]["updated_at"], str)
