@@ -4,18 +4,16 @@ on:
   workflow_dispatch:
     inputs:
       stores:
-        description: "対象ストア（スペース/カンマ区切り）"
+        description: "蟇ｾ雎｡繧ｹ繝医い・医せ繝壹・繧ｹ/繧ｫ繝ｳ繝槫玄蛻・ｊ・・
         required: false
         default: "shibuya"
       threshold:
-        description: "Good Window 閾値"
+        description: "Good Window 髢ｾ蛟､"
         required: false
-        default: "0.8"
-      min_duration_minutes:
-        description: "最小連続分数"
+        default: "0.4"min_duration_minutes:
+        description: "譛蟆城｣邯壼・謨ｰ"
         required: false
-        default: "120"
-  schedule:
+        default: "60"schedule:
     - cron: "30 15 * * 0"
 
 permissions:
@@ -33,8 +31,8 @@ jobs:
         env:
           NEXT_PUBLIC_BASE_URL: https://www.meguribi.jp
           INSIGHTS_STORES: shibuya
-          INSIGHTS_THRESHOLD: "0.8"
-          INSIGHTS_MIN_DURATION_MINUTES: "120"
+          INSIGHTS_THRESHOLD: "0.4"
+          INSIGHTS_MIN_DURATION_MINUTES: "60"
         run: |
           if [ -n "${{ github.event.inputs.stores }}" ]; then
             export INSIGHTS_STORES="${{ github.event.inputs.stores }}"
