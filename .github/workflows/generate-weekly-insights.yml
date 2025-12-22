@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       stores:
-        description: "蟇ｾ雎｡繧ｹ繝医い・医せ繝壹・繧ｹ/繧ｫ繝ｳ繝槫玄蛻・ｊ・・
+        description: "対象ストア（スペース/カンマ区切り）"
         required: false
         default: "shibuya"
       threshold:
-        description: "Good Window 髢ｾ蛟､"
+        description: "Good Window 閾値"
         required: false
         default: "0.4"
       min_duration_minutes:
-        description: "譛蟆城｣邯壼・謨ｰ"
+        description: "最小連続分数"
         required: false
         default: "60"
   schedule:
@@ -31,12 +31,13 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
+          python -m pip install pytest
 
       - name: Generate weekly insights
         env:
@@ -68,5 +69,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add frontend/content/insights/weekly
-          git diff --cached --quiet || git commit -m "chore(insights): generate weekly insights"
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "chore(insights): generate weekly insights"
           git push
