@@ -13,6 +13,7 @@ export function FactsSummaryCard({ facts }: { facts: PublicFacts | null }) {
   const avoid = safeText(facts.insight?.avoid_time);
   const label = safeText(facts.insight?.crowd_label);
 
+  const showFactsDebug = process.env.NEXT_PUBLIC_SHOW_FACTS_DEBUG === "1";
   const notes = facts.quality_flags?.notes ?? [];
   const hasNotes = Array.isArray(notes) && notes.length > 0;
 
@@ -40,7 +41,7 @@ export function FactsSummaryCard({ facts }: { facts: PublicFacts | null }) {
         </div>
       </div>
 
-      {hasNotes && (
+      {showFactsDebug && hasNotes && (
         <div className="border-t border-white/10 px-5 py-4">
           <p className="text-xs font-bold text-white/80">注意</p>
           <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-white/65">
