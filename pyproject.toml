@@ -1,4 +1,4 @@
-﻿[project]
+[project]
 name = "riental-lounge-monitor"
 version = "0.0.0"
 requires-python = ">=3.13"
