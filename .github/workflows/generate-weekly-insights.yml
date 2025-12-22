@@ -1,0 +1,35 @@
+name: Generate Weekly Insights
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "30 15 * * 0"
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Generate weekly insights
+        env:
+          NEXT_PUBLIC_BASE_URL: https://www.meguribi.jp
+          INSIGHTS_STORES: shibuya
+        run: |
+          python scripts/generate_weekly_insights.py --stores "$INSIGHTS_STORES"
+      - name: Commit and push if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add frontend/content/insights
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+            exit 0
+          fi
+          git commit -m "chore(insights): generate weekly insights"
+          git push
