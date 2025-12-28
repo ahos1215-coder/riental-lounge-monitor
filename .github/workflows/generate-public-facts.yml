@@ -3,7 +3,7 @@ name: Generate Public Facts
 on:
   workflow_dispatch:
   schedule:
-    # 毎日 09:30 JST (= 00:30 UTC)
+    # 髮惹ｺ･蜿呵輔・09:30 JST (= 00:30 UTC)
     - cron: "30 0 * * *"
 
 permissions:
@@ -33,16 +33,19 @@ jobs:
         working-directory: frontend
         env:
           NEXT_PUBLIC_BASE_URL: https://www.meguribi.jp
-        run: npm run facts:generate
+        run: |
+          npm run facts:generate
+          node scripts/build-public-facts-index.mjs
 
       - name: Commit & push if changed
         run: |
-          if [ -z "" ]; then
-            echo "No changes."
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A frontend/content/facts
-          git commit -m "chore: update public facts"
+          if git diff --cached --quiet; then
+            echo "No changes."
+            exit 0
+          fi
+          git commit -m "chore(facts): update public facts"
           git push
+

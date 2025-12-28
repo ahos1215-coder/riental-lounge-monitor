@@ -1,19 +1,20 @@
-﻿{
-    "facts_id":  "shibuya-tonight-20251220",
-    "store":  "shibuya",
-    "range":  {
-                  "label":  "Tonight",
-                  "from":  "2025-12-20T19:00:00+09:00",
-                  "to":  "2025-12-21T05:00:00+09:00"
-              },
-    "insight":  {
-                    "peak_time":  "21:30",
-                    "avoid_time":  "20:00",
-                    "crowd_label":  "混み始め"
-                },
-    "quality_flags":  {
-                          "notes":  [
-                                        "preview: stub values"
-                                    ]
-                      }
+{
+  "facts_id": "shibuya-tonight-20251220",
+  "store": "shibuya",
+  "range": {
+    "label": "Tonight",
+    "from": "2025-12-20T19:00:00+09:00",
+    "to": "2025-12-21T05:00:00+09:00"
+  },
+  "insight": {
+    "peak_time": "23:35",
+    "avoid_time": "19:00",
+    "crowd_label": "混み"
+  },
+  "quality_flags": {
+    "notes": [
+      "generated_from:api/range",
+      "shift:none"
+    ]
+  }
 }
