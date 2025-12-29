@@ -35,6 +35,10 @@ Last updated: 2025-12-17 / commit: d4538a0
 - Second venues（map-link）:
   - config: `frontend/src/app/config/secondVenueMapLinks.ts`
   - UI: `frontend/src/components/SecondVenuesList.tsx`
+- Blog / Facts（契約・運用）:
+  - request schema: `plan/BLOG_REQUEST_SCHEMA.md`
+  - pipeline: `plan/BLOG_PIPELINE.md`
+  - content policy: `plan/BLOG_CONTENT.md`
 
 ## Constraints（短縮版）
 - Supabase `logs` が source of truth（Sheets/GAS は legacy fallback、拡張禁止）。

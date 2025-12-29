@@ -47,6 +47,7 @@ C) 文章化（Render）＝LLM
 
 ## 公開Facts生成（ローカル）
 - MDX frontmatter の date/store/facts_id から夜窓（19:00-翌05:00 JST）を計算し、insight を自動生成する。
+- facts_id_public は facts_id の別名として扱う（互換用）。
 - 実行場所は repo root / `frontend` どちらでも可（`content/blog` を自動検出）。
 - `/api/range?store=...&limit=1000` を優先し、窓内が空なら `/api/forecast_today` を使う。forecast の日付ズレは +1日シフトで救済する。
 
