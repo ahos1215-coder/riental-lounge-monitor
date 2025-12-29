@@ -1,10 +1,10 @@
 {
-  "facts_id": "shibuya-tonight-20251220",
+  "facts_id": "shibuya-tonight-20251228",
   "store": "shibuya",
   "range": {
     "label": "Tonight",
-    "from": "2025-12-20T19:00:00+09:00",
-    "to": "2025-12-21T05:00:00+09:00"
+    "from": "2025-12-28T19:00:00+09:00",
+    "to": "2025-12-29T05:00:00+09:00"
   },
   "insight": {
     "peak_time": "",

@@ -1,5 +1,5 @@
 {
-  "generated_at": "2025-12-28",
+  "generated_at": "2025-12-29",
   "facts": [
     {
       "slug": "shibuya-tonight-20251220",
@@ -16,9 +16,17 @@
       },
       "date": "2025-12-21",
       "level": "easy"
+    },
+    {
+      "slug": "shibuya-tonight-20251228",
+      "store": {
+        "id": "shibuya"
+      },
+      "date": "2025-12-28",
+      "level": "easy"
     }
   ],
   "latest_by_store": {
-    "shibuya": "shibuya-tonight-20251221"
+    "shibuya": "shibuya-tonight-20251228"
   }
 }
