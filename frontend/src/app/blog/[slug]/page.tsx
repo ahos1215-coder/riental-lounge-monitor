@@ -9,9 +9,19 @@ import { FactsSummaryCard } from "@/components/blog/FactsSummaryCard";
 import { readPublicFacts } from "@/lib/blog/publicFacts";
 import { getAllPostMetas, getPostBySlug } from "@/lib/blog/content";
 
+export const dynamicParams = true;
+
+type SearchParams = Record<string, string | string[] | undefined>;
+
 type Props = {
-  params: { slug: string };
+  params: Promise<{ slug: string }>;
+  searchParams?: Promise<SearchParams>;
 };
+
+function normalizeParam(value: string | string[] | undefined): string | undefined {
+  if (!value) return undefined;
+  return Array.isArray(value) ? value[0] : value;
+}
 
 function pickFactsId(post: any): string | null {
   const v =
@@ -37,22 +47,29 @@ export function generateStaticParams() {
   return posts.map((p: any) => ({ slug: p.slug }));
 }
 
-export function generateMetadata({ params }: Props): Metadata {
-  const post = getPostBySlug(params.slug);
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
+  const post = getPostBySlug(slug, { includeDraft: true });
   if (!post) return {};
-  const title = String((post as any).title ?? (post as any).name ?? params.slug ?? "Blog");
+  const title = String((post as any).title ?? (post as any).name ?? slug ?? "Blog");
   const description = (post as any).description ? String((post as any).description) : "";
   return { title, description };
 }
 
-export default function BlogPostPage({ params }: Props) {
-  const post = getPostBySlug(params.slug);
+export default async function BlogPostPage({ params, searchParams }: Props) {
+  const { slug } = await params;
+  const sp = searchParams ? await searchParams : undefined;
+  const preview = normalizeParam(sp?.preview);
+  const isPreview = Boolean(preview) && preview === process.env.BLOG_PREVIEW_TOKEN;
+
+  const post = getPostBySlug(slug, { includeDraft: true });
   if (!post) notFound();
+  if ((post as any).draft && !isPreview) notFound();
 
   const factsId = pickFactsId(post);
   const facts = factsId ? readPublicFacts(factsId) : null;
 
-  const title = String((post as any).title ?? params.slug);
+  const title = String((post as any).title ?? slug);
   const date = String((post as any).date ?? "");
   const store = String((post as any).store ?? "");
   const description = (post as any).description ? String((post as any).description) : "";
