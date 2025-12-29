@@ -47,10 +47,22 @@ export function generateStaticParams() {
   return posts.map((p: any) => ({ slug: p.slug }));
 }
 
-export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+export async function generateMetadata({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams?: Promise<SearchParams>;
+}): Promise<Metadata> {
   const { slug } = await params;
-  const post = getPostBySlug(slug, { includeDraft: true });
+  const sp = searchParams ? await searchParams : undefined;
+  const preview = normalizeParam(sp?.preview);
+  const isPreview = preview === process.env.BLOG_PREVIEW_TOKEN;
+
+  const post = getPostBySlug(slug, { includeDraft: isPreview });
   if (!post) return {};
+  if ((post as any).draft && !preview) return {};
+
   const title = String((post as any).title ?? (post as any).name ?? slug ?? "Blog");
   const description = (post as any).description ? String((post as any).description) : "";
   return { title, description };
