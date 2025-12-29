@@ -61,7 +61,7 @@ export async function generateMetadata({
 
   const post = getPostBySlug(slug, { includeDraft: isPreview });
   if (!post) return {};
-  if ((post as any).draft && !preview) return {};
+  if ((post as any).draft && !isPreview) return {};
 
   const title = String((post as any).title ?? (post as any).name ?? slug ?? "Blog");
   const description = (post as any).description ? String((post as any).description) : "";
