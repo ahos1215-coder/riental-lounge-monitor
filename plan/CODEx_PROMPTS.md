@@ -1,5 +1,5 @@
 # CODEx_PROMPTS
-Last updated: 2025-12-29 / commit: fb524be
+Last updated: 2025-12-29 / commit: 4299ff1
 
 MEGRIBI の開発補助 AI (Codex) 向けガイドライン。既存の決定事項と契約を壊さないこと。
 

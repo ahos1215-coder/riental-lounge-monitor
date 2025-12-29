@@ -1,5 +1,5 @@
 # ROADMAP
-Last updated: 2025-12-29 / commit: fb524be
+Last updated: 2025-12-29 / commit: 4299ff1
 
 ## Done (as of 2025-12-29)
 - Supabase `logs` を source of truth に固定。

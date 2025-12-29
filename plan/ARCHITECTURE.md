@@ -1,5 +1,5 @@
 # ARCHITECTURE
-Last updated: 2025-12-29 / commit: fb524be
+Last updated: 2025-12-29 / commit: 4299ff1
 
 ## High-Level Overview
 - Stack: **Supabase → Flask API (Render) → Next.js 16 (Vercel)**.

@@ -1,5 +1,5 @@
 # ENV
-Last updated: 2025-12-29 / commit: fb524be
+Last updated: 2025-12-29 / commit: 4299ff1
 
 環境変数は **値をコミットしない**。`.env` / `frontend/.env.local` は gitignore。
 

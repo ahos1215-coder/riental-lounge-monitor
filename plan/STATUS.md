@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2025-12-29 / commit: fb524be
+Last updated: 2025-12-29 / commit: 4299ff1
 
 ## Now (SSOT)
 - Supabase `/api/range` が実データを返すことを確認済み。

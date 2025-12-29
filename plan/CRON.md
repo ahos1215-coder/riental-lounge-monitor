@@ -1,5 +1,5 @@
 # CRON
-Last updated: 2025-12-29 / commit: fb524be
+Last updated: 2025-12-29 / commit: 4299ff1
 
 ## Current (production assumption)
 - `/tasks/multi_collect` を定期実行して Supabase `logs` に書き込む。

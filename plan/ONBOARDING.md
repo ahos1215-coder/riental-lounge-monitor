@@ -1,5 +1,5 @@
 # ONBOARDING
-Last updated: 2025-12-29 / commit: fb524be
+Last updated: 2025-12-29 / commit: 4299ff1
 
 「今の MEGRIBI を最初から動かす」ための手順と前提のまとめ。
 

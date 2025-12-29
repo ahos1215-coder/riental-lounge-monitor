@@ -1,5 +1,5 @@
 # SECOND_VENUES
-Last updated: 2025-12-29 / commit: fb524be
+Last updated: 2025-12-29 / commit: 4299ff1
 
 ## Current UX (map-link 方針)
 - UI は **map-link** のみ（Google Maps 検索リンクを生成）。

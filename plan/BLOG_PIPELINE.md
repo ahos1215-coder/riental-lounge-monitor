@@ -1,5 +1,5 @@
 # MEGRIBI Blog Pipeline（n8n / GitHub Actions / Supabase / GitHub）
-Last updated: 2025-12-29 / commit: fb524be
+Last updated: 2025-12-29 / commit: 4299ff1
 
 ## 配管の全体像（結論）
 - 司令塔: n8n（セルフホスト）

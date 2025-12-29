@@ -1,5 +1,5 @@
 # API_CONTRACT
-Last updated: 2025-12-29 / commit: fb524be
+Last updated: 2025-12-29 / commit: 4299ff1
 
 Authoritative contract for MEGRIBI backend endpoints. Keep existing behavior stable.
 

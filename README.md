@@ -1,5 +1,5 @@
 # MEGRIBI (riental-lounge-monitor-main)
-Last updated: 2025-12-29 / commit: fb524be
+Last updated: 2025-12-29 / commit: 4299ff1
 
 MEGRIBI は Supabase logs を source of truth とする混雑モニタ + blog/facts 運用のリポジトリです。
 バックエンドは Flask、フロントエンドは Next.js 16 (App Router) で構成します。

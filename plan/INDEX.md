@@ -1,5 +1,5 @@
 # INDEX
-Last updated: 2025-12-29 / commit: fb524be
+Last updated: 2025-12-29 / commit: 4299ff1
 
 このファイルは「全体の地図」「読む順番」「重要ファイル一覧」をまとめる入口です。
 
