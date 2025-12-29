@@ -1,59 +1,72 @@
-﻿# Oriental Lounge Monitor
+# MEGRIBI (riental-lounge-monitor-main)
+Last updated: 2025-12-29 / commit: cf8c998
 
-堅牢化した Flask + Google Sheets 連携アプリです。構成をモジュール化し、Pydantic v2 によるバリデーションや構造化ログ、HTTP リトライ付きクライアントを備えています。
+MEGRIBI は Supabase logs を source of truth にした店舗混雑モニタ + blog/facts 運用のリポジトリです。
+バックエンドは Flask、フロントエンドは Next.js 16(App Router) で構成します。
 
-## ディレクトリ構成
+## Repository Layout
+- `app.py`, `wsgi.py`: Flask entrypoint
+- `oriental/`: backend (Flask API)
+- `frontend/`: Next.js 16 frontend
+- `frontend/content/blog/`: blog MDX
+- `frontend/content/facts/public/`: public facts JSON + index.json
+- `plan/`: SSOT docs (制約・運用・契約)
 
-```
-oriental/
-├─ __init__.py          # Flask アプリ factory
-├─ config.py            # 環境変数ベースの設定
-├─ routes/              # healthz / api / tasks ルート
-├─ clients/             # HTTP 共通クライアント & GAS クライアント
-├─ schemas/             # Pydantic モデル
-├─ utils/               # logging / time / storage など
-└─ templates/           # index.html
-```
+## Local Development (PowerShell)
 
-## 必須環境変数
-
-| 変数 | 役割 | デフォルト |
-| --- | --- | --- |
-| `TARGET_URL` | スクレイピング対象 URL | https://oriental-lounge.com/stores/38 |
-| `STORE_NAME` | 店舗名 | 長崎店 |
-| `GS_WEBHOOK_URL` | GAS append 用 URL | 空 (無効) |
-| `GS_READ_URL` | GAS range 取得 URL | 空 (無効) |
-| `LOG_LEVEL` | 構造化ログのレベル | INFO |
-| `HTTP_TIMEOUT_S` | 外部 HTTP タイムアウト秒 | 12 |
-| `HTTP_RETRY` | リトライ回数 | 3 |
-| `TIMEZONE` | 標準タイムゾーン | Asia/Tokyo |
-
-Render では環境変数をダッシュボードから設定してください。
-
-## ローカル開発
-
-```bash
+### Backend (Flask)
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python app.py  # or use VS Code F5 (launch.json)
+
+$env:DATA_BACKEND="supabase"
+$env:SUPABASE_URL="<YOUR_SUPABASE_URL>"
+$env:SUPABASE_SERVICE_ROLE_KEY="<YOUR_SERVICE_ROLE_KEY>"
+
+python app.py
 ```
 
-### VS Code
-- F5: `.vscode/launch.json` で `app.py` を直接起動
-- `Terminal > Run Task` から Ruff / Black / MyPy / pre-commit を実行
+疎通確認:
+```powershell
+curl.exe "http://127.0.0.1:5000/healthz"
+curl.exe "http://127.0.0.1:5000/api/range?store=shibuya&limit=400"
+```
 
-## デプロイ
+`.env` は `oriental/config.py` が読みます。**UTF-8 no BOM** で保存し、コミットしないでください。
 
-Procfile で `gunicorn wsgi:app` を起動します。Render でそのまま使用できます。
+### Frontend (Next.js 16)
+```powershell
+cd frontend
+npm install
+$env:BACKEND_URL="http://127.0.0.1:5000"
+npm run dev
+```
 
-## テスト / 品質ツール
+ビルド確認:
+```powershell
+cd frontend
+npm run build
+```
 
-- `python -m compileall .` : 構文チェック
-- `ruff check .`, `black .`, `mypy .` : `.vscode/tasks.json` および `.pre-commit-config.yaml`
+## Blog + Facts Workflow (Public)
+1) `frontend/content/blog/*.mdx` に記事を追加/更新。
+   - 必須: `title`, `date`(YYYY-MM-DD), `store`, `facts_id` または `facts_id_public`
+   - 任意: `description`, `categoryId`, `level`, `period`, `draft`
+2) Public facts を生成:
+```powershell
+cd frontend
+npm run facts:generate
+node scripts/build-public-facts-index.mjs
+```
+3) `frontend/content/facts/public/*.json` と `index.json` を commit/push。
 
-## エンドポイント
+## Draft Preview Gate
+- `draft: true` の記事は通常アクセスで非表示。
+- `?preview=<token>` が `BLOG_PREVIEW_TOKEN` と一致する場合のみ表示。
+- metadata も同じ gate を通す（draft の title/description 漏れ防止）。
 
-- `GET /healthz` : ok と設定サマリを返却
-- `GET /` : templates/index.html
-- `GET /api/current`, `GET /api/range`
-- `GET|POST /tasks/collect` (Pydantic 検証付き)
-- `GET /tasks/tick`, `GET /tasks/seed`
+## Constraints / Notes
+- `/api/range` の公開契約は `store` + `limit` のみ。夜窓(19:00-05:00)の絞り込みはフロント責務。
+- Supabase Python SDK は不要。backend は REST (`requests`) を使用。
+- Secrets は env のみ。`.env` / `frontend/.env.local` を commit しない。

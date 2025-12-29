@@ -1,70 +1,84 @@
 # RUNBOOK
-Last updated: YYYY-MM-DD / commit: TODO
+Last updated: 2025-12-29 / commit: cf8c998
 
 Operational tasks for MEGRIBI (Render backend / Vercel frontend).
 
-## Services
-- Backend: Flask (Render Starter, 24h), default `DATA_BACKEND=supabase`.
-- Frontend: Next.js 16 (Vercel), calls backend `/api/*`.
-- Cron: `/tasks/tick` every 5 minutes in production; collects ~38 stores and updates forecasts when `ENABLE_FORECAST=1`.
+## Local Setup (PowerShell)
 
-## Frontend Development
+### Backend (Flask)
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 
-### ローカル起動
+$env:DATA_BACKEND="supabase"
+$env:SUPABASE_URL="<YOUR_SUPABASE_URL>"
+$env:SUPABASE_SERVICE_ROLE_KEY="<YOUR_SERVICE_ROLE_KEY>"
+
+python app.py
 ```
+
+### Frontend (Next.js 16)
+```powershell
 cd frontend
 npm install
+$env:BACKEND_URL="http://127.0.0.1:5000"
 npm run dev
 ```
 
-### 本番デプロイ（Vercel）
-- main ブランチへ push → Vercel が自動デプロイ。
-- Next.js 16 ビルドルール:
-  - `useSearchParams` を使うコンポーネントは `Suspense` 配下に置く。
-  - Recharts の `TooltipProps` は `label`/`payload` を独自型で拡張して型エラーを防ぐ。
-- ドメイン: `https://meguribi.jp`（反映確認は Shift+F5 または DevTools Network→Disable Cache）。
-
-## Backend Operations (Render)
-- `DATA_BACKEND=supabase` をデフォルト設定。
-- `/tasks/tick` が 5 分間隔で動作しているか Render ログで確認。
-- `/api/range?store=nagasaki&limit=400` が `ts.asc` で最新を返すか確認。サーバ側で時間フィルタを入れない。
-
-## Start / Stop (Local)
-```
-# Backend
-set DATA_BACKEND=supabase
-python app.py
-
-# Frontend
+### Build
+```powershell
 cd frontend
-npm run dev
+npm run build
 ```
-- Visit `http://localhost:3000/?store=nagasaki`.
 
-## Health Checks
-- Range: `curl "http://127.0.0.1:5000/api/range?store=nagasaki&limit=400"`; expect newest nights included and `ts` ascending.
-- Forecast (when `ENABLE_FORECAST=1`): `curl "http://127.0.0.1:5000/api/forecast_today?store=nagasaki"` (empty array is acceptable when disabled).
-- Cron status: check Render logs for `/tasks/tick` success every 5 minutes.
+## API Smoke Checks
+PowerShell では `&` を含む URL を必ず引用符で囲む（`curl.exe` を使う）。
+```powershell
+curl.exe "http://127.0.0.1:5000/healthz"
+curl.exe "http://127.0.0.1:5000/api/range?store=shibuya&limit=400"
+curl.exe "http://127.0.0.1:5000/api/forecast_today?store=shibuya"
+```
 
-## Incident Playbook
-- Missing recent data: hit `/api/range?limit=400`; if empty, check `/tasks/tick` logs and Supabase insert path.
-- Forecast absent: ensure `ENABLE_FORECAST=1`; frontend should still render actuals.
-- Store mismatch: confirm `?store=` query; env default otherwise.
-- DNS キャッシュ疑い: Shift+F5 または DevTools Network→Disable Cache。DNSやENOTFOUND系はコードを書き換えず、まず本番/別環境での再現確認を提案。
+## Blog Draft / Preview
+- `draft: true` の記事は通常アクセスで 404。
+- `?preview=<token>` が `BLOG_PREVIEW_TOKEN` と一致すると表示。
+- metadata も同じ gate を通す。
 
-## Second Venues (map-link)
-- 現行仕様は frontend の Google マップ検索リンクのみ。バックエンドや Google Places API は使用しない。
-- UI で「Nearby second venues」のボタンが Google Maps 検索を開くことを確認。
+## Public Facts Generation
+```powershell
+cd frontend
+$env:BACKEND_URL="http://127.0.0.1:5000"
+npm run facts:generate
+node scripts/build-public-facts-index.mjs
+```
+- 生成物: `frontend/content/facts/public/*.json` と `index.json`
+- 生成元: backend `/api/range` → 足りない場合は `/api/forecast_today`
+
+## .env UTF-8 BOM Issue (重要)
+`.env` に BOM があると `\ufeffSUPABASE_URL` になり読み込めない事故が起きる。
+PowerShell で no BOM に書き直す例:
+```powershell
+$path = ".env"
+$raw = Get-Content -Raw $path
+[System.IO.File]::WriteAllText($path, $raw, New-Object System.Text.UTF8Encoding($false))
+```
+
+## PowerShell Notes
+`python - << 'PY'` は使えない。here-string を `python -` に渡す:
+```powershell
+@'
+print("hello")
+'@ | python -
+```
 
 ## Backup ZIP (User-driven)
-1) Stop backend/cron if running.
-2) From repo root (Windows PowerShell):
-```
+Desktop が OneDrive にリダイレクトされる場合があるため `DesktopDirectory` を使う。
+```powershell
+$desktop = [Environment]::GetFolderPath("DesktopDirectory")
 $date = Get-Date -Format "yyyyMMdd_HHmmss"
-Compress-Archive -Path oriental,frontend,requirements.txt,app.py -DestinationPath "backup_$date.zip"
+Compress-Archive -Path oriental,frontend,requirements.txt,app.py -DestinationPath (Join-Path $desktop "backup_$date.zip")
 ```
-3) Store ZIP securely. Restart services as needed.
 
-## Maintenance
-- Do not reintroduce `from/to` filtering on the backend; night filtering is frontend-only.
-- If Supabase is unavailable, legacy path may respond but is not a priority beyond parity.
+## TODO
+- LINE/n8n は次スレで整理・実装する。

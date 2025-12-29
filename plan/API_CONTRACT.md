@@ -1,53 +1,65 @@
 # API_CONTRACT
-Last updated: YYYY-MM-DD / commit: TODO
+Last updated: 2025-12-29 / commit: cf8c998
 
-Authoritative contract for MEGRIBI backend endpoints. Keep existing behavior stable; do not introduce breaking changes.
+Authoritative contract for MEGRIBI backend endpoints. Keep existing behavior stable.
 
 ## Architecture / Data Sources
-- Source of truth: Supabase `logs` (metrics) and `stores` (metadata). Google Sheet/GAS is legacy fallback only.
-- Stack: Supabase → Flask API (Render) → Next.js 16 frontend (Vercel). Frontend calls API Routes; no direct Supabase access.
-- Night window判定 (19:00–05:00) はフロント専任（`useStorePreviewData.ts` など）。サーバー側で時間フィルタを入れない。
-- `max_range_limit = 50000`（リクエストをクランプ）。フロント推奨 `limit` は 200–400。
-- 空データでも `{ ok: true, data: [] }` または `{ ok: true, rows: [] }` を返す。
+- Source of truth: Supabase `logs` (metrics) and `stores` (metadata).
+- Google Sheet/GAS is legacy fallback only (do not expand).
+- Frontend calls Flask via Next.js API routes (proxy). No direct Supabase access.
+- Night window (19:00-05:00) filtering is frontend responsibility.
+
+## Common Fields (Supabase logs)
+`ts`, `store_id`, `src_brand`, `men`, `women`, `total`, `temp_c`, `precip_mm`, `weather_code`, `weather_label`
+
+## GET /healthz
+- Response: `{ ok: true, store, target, gs_webhook, gs_read, timezone, window, data_backend, supabase, http_timeout, http_retry, max_range_limit }`
+
+## GET /api/meta
+- Response: `{ ok: true, data: { store, store_id, data_backend, supabase, timezone, window, http_timeout, http_retry, max_range_limit } }`
 
 ## GET /api/current
-- Purpose: latest snapshot for a store.
-- Query:
-  - `store` (or `store_id`): store identifier. Overrides env default.
-- Behavior: Fetch the newest row for the store from Supabase (`logs`). No time filtering beyond “latest”.
-- Response: `{ ok: true, data: { ts, men, women, total, store_id?, weather_code?, weather_label?, temp_c?, precip_mm?, src_brand? } }`
+- Query: `store` or `store_id` (optional)
+- Behavior: return latest record for the store (legacy/local storage).
+- Response: record object or `{}` when missing.
 
 ## GET /api/range
 - Purpose: return raw log rows.
-- Query:
-  - `store` (or `store_id`): store identifier.
-  - `limit` (int): number of rows to return; clamped to `max_range_limit = 50000`. Frontend推奨 200–400。
+- Query (public contract):
+  - `store` or `store_id`
+  - `limit` (int, clamped to `MAX_RANGE_LIMIT`, default `min(500, MAX_RANGE_LIMIT)`)
 - Behavior:
-  - Supabase query ordered `ts.desc` to fetch newest rows, then response sorted `ts.asc`.
-  - **Server-side時間フィルタ禁止**（from/to なし、夜間フィルタなし）。夜ウィンドウ判定はフロントで実施。
-- Response: `{ ok: true, rows: [ { ts, men, women, total, store_id?, weather_code?, weather_label?, temp_c?, precip_mm?, src_brand? } ] }`
+  - Supabase query uses `ts.desc` to fetch newest, response sorted `ts.asc`.
+  - **Server-side time filtering is not part of the public contract.**
+  - `from` / `to` exist for internal/debug only (do not rely on them externally).
+- Response:
+  - `{ ok: true, rows: [ { ts, men, women, total, store_id?, src_brand?, temp_c?, precip_mm?, weather_code?, weather_label? } ] }`
 
 ## GET /api/forecast_next_hour
-- Purpose: short-horizon forecast for the next ~hour.
-- Query: `store`.
-- Behavior: Enabled only when `ENABLE_FORECAST=1`; otherwise may return empty data with `ok: true`.
-- Response: `{ ok: true, data: [ { ts, men, women, total } ] }` (empty array permitted).
+- Query: `store` or `store_id`
+- Behavior: enabled only when `ENABLE_FORECAST=1`, otherwise `503 { ok:false, error:"forecast-disabled" }`
+- Response: `{ ok: true, data: [ { ts, men_pred, women_pred, total_pred } ] }`
 
 ## GET /api/forecast_today
-- Purpose: forecast points for the current night window.
-- Query: `store`.
-- Behavior: Enabled only when `ENABLE_FORECAST=1`; otherwise returns `{ ok: true, data: [] }`.
-- Response: `{ ok: true, data: [ { ts, men, women, total } ] }` (empty array permitted).
+- Query: `store` or `store_id`
+- Behavior: enabled only when `ENABLE_FORECAST=1`, otherwise `503 { ok:false, error:"forecast-disabled" }`
+- Response: `{ ok: true, data: [ { ts, men_pred, women_pred, total_pred } ] }`
 
-## Other endpoints (stable, minimal)
-- `/api/meta`: returns config summary.
-- `/api/heatmap`, `/api/range_prevweek`, `/api/summary`, `/api/stores/list`: placeholders / minimal responses; keep contracts unchanged.
-- `/tasks/tick`: cron entry point (every 5 minutes in production) that collects ~38 stores, writes to Supabase, and refreshes forecasts when enabled.
+## GET /api/second_venues
+- Query: `store` or `store_id`
+- Response: `{ ok: true, rows: [ { place_id, name, lat, lng, genre?, address?, open_now?, weekday_text?, updated_at? } ] }`
+- If Supabase config is missing, returns `{ ok: true, rows: [] }`.
 
-## Second Venues (legacy note)
-- Current production UX is **frontend map-link only** (Google Maps search links). No backend/Supabase usage for second venues.
-- `/api/second_venues` is retained for future lightweight recommendations; keep existing behavior stable but do not expand without explicit direction.
+## Tasks / Cron
+- `GET|POST /tasks/multi_collect` (alias `/api/tasks/collect_all_once`)
+  - Response: `{ ok: true, task: "collect_all_once", stores: <count> }`
+- `GET /tasks/tick`
+  - Legacy single-store collection (local/GAS). Not the Supabase ingestion path.
+- `GET|POST /tasks/update_second_venues`
+  - Optional. Runs only when `GOOGLE_PLACES_API_KEY` is set.
 
-## Legacy GAS/Google Sheet path (fallback-only)
-- Legacy path may still exist as a fallback. Do not expand its scope beyond parity; Supabase is the primary data source.
-
+## Frontend API Routes (Next.js proxy)
+- `GET /api/range` → backend `/api/range` (query passthrough)
+- `GET /api/forecast_today` → backend `/api/forecast_today`
+- `GET /api/forecast_next_hour` → backend `/api/forecast_next_hour`
+- `GET /api/second_venues` → backend `/api/second_venues`

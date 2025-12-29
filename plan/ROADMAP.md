@@ -1,41 +1,19 @@
 # ROADMAP
-Last updated: YYYY-MM-DD / commit: TODO
+Last updated: 2025-12-29 / commit: cf8c998
 
-## P0 (完了)
-- Next.js 最小版動作（フロント: Vercel）、バックエンド: Render/Flask。
-- `/api/range` 安定（Supabase `ts.desc` 取得→`ts.asc` 返却、store+limit のみ、max_range_limit=50000、夜フィルタなし）。
-- useSearchParams + Suspense 対応、Recharts Tooltip 型拡張でビルド安定。
-- 二次会スポット: map-link frontend only（Google Maps 検索リンク）。
+## Done (as of 2025-12-29)
+- Supabase `logs` を source of truth に固定。
+- `/api/range` の store/limit 契約を維持しつつ実データで動作確認。
+- Next.js 16 App Router 構成が安定（`useSearchParams`/Suspense 対応済み）。
+- Blog の draft/preview gate を厳密化（metadata も gate）。
+- Public facts 生成 & `index.json` 自動生成を運用に組み込み、commit 済み。
+- 公開ブログ例: `shibuya-tonight-20251228`.
 
-## P1（進行中）
-- Supabase `logs`/`stores` 導入・移行（GAS 二重書き込み継続しつつ Supabase を優先）。
-- UI コンポーネント整理（ダッシュボード最小セットの安定化）。
-- Render Starter での cron `/tasks/tick` 運用（5分間隔、38店舗収集、ENABLE_FORECAST トグル）。
+## Next (P0)
+- LINE → n8n の受け取りスキーマ確定と配管準備（`plan/BLOG_REQUEST_SCHEMA.md`）。
+- facts → MDX ドラフト → PR の半自動化（最小安全な境界）。
+- Public facts の対象拡張（複数 store / 日付）。
 
-## P2（予定）
-- マルチ店舗・ブランド化（Oriental / Aisekiya / JIS）とルーティング/メタデータ反映。
-- 豪華ダッシュボード化（カード/グラフ/近隣案内の拡充、ただし second venues は map-link 方針維持）。
-- 観測・運用強化（cron 可観測性、ログ/メトリクスの拡張）。
-
-## P3（将来）
-- NLPベースのクエリや二次会高度化（必要に応じ `/api/second_venues` を軽量レコメンド化）。
-- 天気/人気傾向連動の高度推定。
-- 追加ストア/ブランドの自動拡張と管理UI。
-
----
-## 2025-12-20 ブログ（MDX運用）関連の次タスク
-
-### P0（今やる）
-- ブログ記事を MDX で管理し、記事追加が「ファイル追加だけ」で回る状態を維持
-- 公開Facts（content/facts/public）を最小化し、Facts完全版はSupabaseに寄せる方針を固定
-- 記事作成の補助スクリプト（new-blog-post.ps1）を repo に常設（テンプレ生成＋facts stub）
-- 実行ポリシー制約がある環境向けに「powershell.exe -ExecutionPolicy Bypass -File ...」で実行する手順を明記
-- n8n→Actions→PR→LINE通知→マージのMVPフローを実装に落とす（最初は手動でも可）
-
-### P1（回り始めてから）
-- 下書きストック一覧（MDX一覧の可視化）
-- 辞書/テンプレの差し替えをファイルで管理（prompt/ や config/ の追加）
-
-### P2（後で良い）
-- 予約投稿・自動公開・X画像付き自動投稿
-
+## Later
+- UI 体験改善（読み込み体感・skeleton・キャッシュ方針）。
+- Forecast 精度/運用の見直し。
