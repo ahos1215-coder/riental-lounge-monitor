@@ -1,28 +1,28 @@
 # CODEx_PROMPTS
-Last updated: 2025-12-29 / commit: cf8c998
+Last updated: 2025-12-29 / commit: fb524be
 
-MEGRIBI の開発補助 AI（Codex）向けガイドライン。既存の決定事項と契約を壊さないこと。
+MEGRIBI の開発補助 AI (Codex) 向けガイドライン。既存の決定事項と契約を壊さないこと。
 
-## Start Here（初見のChatGPT / Codex向け）
+## Start Here (初見のChatGPT / Codex向け)
 1) `README.md`
-2) `plan/INDEX.md`（全体地図・読む順番・重要ファイル一覧）
-3) `plan/STATUS.md`（現状の稼働状況）
-4) `plan/DECISIONS.md`（意思決定の履歴）
-5) `plan/API_CONTRACT.md`（API契約）
-6) `plan/ARCHITECTURE.md`（アーキテクチャ）
-7) `plan/RUNBOOK.md`（起動/検証手順）
-8) `plan/ENV.md` / `plan/CRON.md`（env/運用）
-9) `plan/SECOND_VENUES.md`（二次会スポット方針）
-10) `plan/ROADMAP.md`（次の作業）
+2) `plan/INDEX.md`
+3) `plan/STATUS.md`
+4) `plan/DECISIONS.md`
+5) `plan/API_CONTRACT.md`
+6) `plan/ARCHITECTURE.md`
+7) `plan/RUNBOOK.md`
+8) `plan/ENV.md` / `plan/CRON.md`
+9) `plan/SECOND_VENUES.md`
+10) `plan/ROADMAP.md`
 
 補助: `plan/repo_map.txt` があれば先に見る。
 
-## SSOT（正本）の扱い
+## SSOT (正本) の扱い
 - 実装の事実はコードが正。
 - 設計意図・制約は plan/*.md が正。
 - 食い違いがあれば plan を更新して整合させる（コード修正は別判断）。
 
-## Core Constraints（絶対に壊すな）
+## Core Constraints (絶対に壊すな)
 - `/api/range` 公開契約は `store` + `limit` のみ。サーバ側の時間フィルタは追加しない。
 - 夜窓(19:00-05:00)の絞り込みはフロント責務（`useStorePreviewData.ts` / facts生成スクリプト）。
 - Supabase logs が唯一の source of truth。
@@ -30,12 +30,12 @@ MEGRIBI の開発補助 AI（Codex）向けガイドライン。既存の決定�
 - Second venues は map-link 方針（Places API 収集・保存型に戻さない）。
 - Secrets をハードコードしない（`NEXT_PUBLIC_*` に秘密値禁止）。
 
-## Frontend Rules（Next.js 16 / App Router）
+## Frontend Rules (Next.js 16 / App Router)
 - `useSearchParams` / `useRouter` を使うコンポーネントは `Suspense` 配下に置く。
 - Blog の draft/preview gate は `BLOG_PREVIEW_TOKEN` の一致のみ有効。metadata も同じ gate。
 - Public facts は `frontend/content/facts/public/` に commit する前提。
 
-## Backend Rules（Flask）
+## Backend Rules (Flask)
 - `DATA_BACKEND=supabase` が基本。Supabase 設定が無い場合のみ legacy に fallback。
 - Forecast は `ENABLE_FORECAST=1` のときのみ有効。
 - 本番収集の入口は `/tasks/multi_collect`（`/tasks/tick` は legacy）。

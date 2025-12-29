@@ -1,31 +1,49 @@
 # ONBOARDING
-Last updated: YYYY-MM-DD / commit: TODO
+Last updated: 2025-12-29 / commit: fb524be
 
 「今の MEGRIBI を最初から動かす」ための手順と前提のまとめ。
 
-## 1) Backend (Render Starter, Flask)
-- Render Starter で常時起動。`DATA_BACKEND=supabase` をデフォルトに設定。
-- 環境変数: `BACKEND_URL`（フロントから参照）、`SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY`、`ENABLE_FORECAST`、`STORE_ID`、`MAX_RANGE_LIMIT=50000`。
-- デプロイ後、`/tasks/tick` が 5 分間隔で実行され、夜間(19:00–05:00)も連続で 38 店舗を収集。`ENABLE_FORECAST=1` のときのみ予測更新。
+## 1) Backend (Render / Flask)
+- Render で常時起動。`DATA_BACKEND=supabase` をデフォルトに設定。
+- 環境変数（例）:
+  - `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`
+  - `STORE_ID` or `SUPABASE_STORE_ID`
+  - `MAX_RANGE_LIMIT=50000`
+  - `ENABLE_FORECAST` (任意)
+- 収集の主経路は `/tasks/multi_collect`。`/tasks/tick` は legacy。
+- `.env` は UTF-8 no BOM で保存（BOM 付きだと `SUPABASE_URL` が読めない）。
 
-## 2) Frontend (Vercel, Next.js 16)
+## 2) Frontend (Vercel / Next.js 16)
 - GitHub 連携 → main への push で自動デプロイ。
-- 独自ドメイン `https://meguribi.jp` を割り当て。反映確認時は Shift+F5 / DevTools Network → Disable Cache 推奨。
-- `BACKEND_URL` を Render の API に向ける。フロントから直接 Supabase へはアクセスしない。
-- `useSearchParams` を使うコンポーネントは必ず `Suspense` 配下に置く。Recharts の Tooltip は `TooltipProps` を独自型で拡張して `label`/`payload` を許容する。
+- `BACKEND_URL` を Render の API に向ける。フロントから Supabase へ直アクセスしない。
+- `useSearchParams` を使うコンポーネントは必ず `Suspense` 配下に置く。
 
 ## 3) Local Development
-- Backend: `python -m venv .venv && . .venv/Scripts/activate && pip install -r requirements.txt && set DATA_BACKEND=supabase && python app.py`
-- Frontend: `cd frontend && npm install && npm run dev`
-- 動作確認: `http://localhost:3000/?store=nagasaki` で UI、`http://127.0.0.1:5000/api/range?store=nagasaki&limit=400` で生データ。
+```powershell
+# Backend
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+$env:DATA_BACKEND="supabase"
+$env:SUPABASE_URL="<YOUR_SUPABASE_URL>"
+$env:SUPABASE_SERVICE_ROLE_KEY="<YOUR_SERVICE_ROLE_KEY>"
+python app.py
+
+# Frontend
+cd frontend
+npm install
+$env:BACKEND_URL="http://127.0.0.1:5000"
+npm run dev
+```
 
 ## 4) Night Window Responsibility
-- 夜時間帯 19:00–05:00 の判定・絞り込みはフロント専任（`useStorePreviewData.ts`）。**バックエンドで時間フィルタを入れない。**
+- 夜窓(19:00-05:00)の判定・絞り込みはフロント専任。
+- バックエンドに同等の時間フィルタを入れない。
 
 ## 5) Second Venues
-- 現行仕様は **map-link frontend only**（Google マップ検索リンクを生成するだけ）。Google Places API や Supabase `second_venues` は使用しない。
+- 現行仕様は **map-link frontend only**（Google Maps 検索リンクを生成するだけ）。
+- Backend `/api/second_venues` は互換/将来用として残置。
 
-## 6) Supabase (将来的に使用・強化)
-- `logs`/`stores` がシングル source of truth。Render backend は Supabase を読み書きする前提。
-- 将来的な拡張: レガシー GAS/Sheet からの完全移行、second venues の軽量レコメンド対応など。環境変数に鍵を置き、ハードコードしない。
-
+## 6) Supabase
+- `logs`/`stores` が single source of truth。
+- API キーは env で管理し、ハードコードしない。

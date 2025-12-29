@@ -1,6 +1,5 @@
 # MEGRIBI Blog Content 方針（最新版 / MVP）
-
-最終更新: 2025-12-20
+Last updated: 2025-12-29 / commit: fb524be
 
 ## 目的
 - SEO流入を増やす（夜遊び・相席系の検索需要）

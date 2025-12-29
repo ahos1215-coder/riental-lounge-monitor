@@ -1,8 +1,8 @@
 # MEGRIBI (riental-lounge-monitor-main)
-Last updated: 2025-12-29 / commit: cf8c998
+Last updated: 2025-12-29 / commit: fb524be
 
-MEGRIBI は Supabase logs を source of truth にした店舗混雑モニタ + blog/facts 運用のリポジトリです。
-バックエンドは Flask、フロントエンドは Next.js 16(App Router) で構成します。
+MEGRIBI は Supabase logs を source of truth とする混雑モニタ + blog/facts 運用のリポジトリです。
+バックエンドは Flask、フロントエンドは Next.js 16 (App Router) で構成します。
 
 ## Repository Layout
 - `app.py`, `wsgi.py`: Flask entrypoint
@@ -27,14 +27,6 @@ $env:SUPABASE_SERVICE_ROLE_KEY="<YOUR_SERVICE_ROLE_KEY>"
 python app.py
 ```
 
-疎通確認:
-```powershell
-curl.exe "http://127.0.0.1:5000/healthz"
-curl.exe "http://127.0.0.1:5000/api/range?store=shibuya&limit=400"
-```
-
-`.env` は `oriental/config.py` が読みます。**UTF-8 no BOM** で保存し、コミットしないでください。
-
 ### Frontend (Next.js 16)
 ```powershell
 cd frontend
@@ -43,19 +35,20 @@ $env:BACKEND_URL="http://127.0.0.1:5000"
 npm run dev
 ```
 
-ビルド確認:
+### Smoke Checks
 ```powershell
-cd frontend
-npm run build
+curl.exe "http://127.0.0.1:5000/healthz"
+curl.exe "http://127.0.0.1:5000/api/range?store=shibuya&limit=400"
 ```
 
-## Blog + Facts Workflow (Public)
+## Blog + Public Facts
 1) `frontend/content/blog/*.mdx` に記事を追加/更新。
    - 必須: `title`, `date`(YYYY-MM-DD), `store`, `facts_id` または `facts_id_public`
    - 任意: `description`, `categoryId`, `level`, `period`, `draft`
 2) Public facts を生成:
 ```powershell
 cd frontend
+$env:BACKEND_URL="http://127.0.0.1:5000"
 npm run facts:generate
 node scripts/build-public-facts-index.mjs
 ```
@@ -66,7 +59,12 @@ node scripts/build-public-facts-index.mjs
 - `?preview=<token>` が `BLOG_PREVIEW_TOKEN` と一致する場合のみ表示。
 - metadata も同じ gate を通す（draft の title/description 漏れ防止）。
 
-## Constraints / Notes
+## Notes / Constraints
 - `/api/range` の公開契約は `store` + `limit` のみ。夜窓(19:00-05:00)の絞り込みはフロント責務。
+- Supabase → Flask → Next.js のレイヤ構造を維持（フロントから Supabase 直叩きしない）。
 - Supabase Python SDK は不要。backend は REST (`requests`) を使用。
-- Secrets は env のみ。`.env` / `frontend/.env.local` を commit しない。
+- Secrets は env のみ。`.env` / `frontend/.env.local` は commit しない。
+- `.env` は **UTF-8 no BOM** で保存（BOM があると `SUPABASE_URL` が読めない）。
+
+## Legacy (Google Sheets/GAS)
+- Google Sheet/GAS 経路は legacy fallback のみ。拡張しない。

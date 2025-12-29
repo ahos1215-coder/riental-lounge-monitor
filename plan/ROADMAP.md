@@ -1,5 +1,5 @@
 # ROADMAP
-Last updated: 2025-12-29 / commit: cf8c998
+Last updated: 2025-12-29 / commit: fb524be
 
 ## Done (as of 2025-12-29)
 - Supabase `logs` を source of truth に固定。
@@ -7,7 +7,7 @@ Last updated: 2025-12-29 / commit: cf8c998
 - Next.js 16 App Router 構成が安定（`useSearchParams`/Suspense 対応済み）。
 - Blog の draft/preview gate を厳密化（metadata も gate）。
 - Public facts 生成 & `index.json` 自動生成を運用に組み込み、commit 済み。
-- 公開ブログ例: `shibuya-tonight-20251228`.
+- 公開ブログ例: `shibuya-tonight-20251228`。
 
 ## Next (P0)
 - LINE → n8n の受け取りスキーマ確定と配管準備（`plan/BLOG_REQUEST_SCHEMA.md`）。

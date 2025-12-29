@@ -1,5 +1,5 @@
 # ENV
-Last updated: 2025-12-29 / commit: cf8c998
+Last updated: 2025-12-29 / commit: fb524be
 
 環境変数は **値をコミットしない**。`.env` / `frontend/.env.local` は gitignore。
 
@@ -9,9 +9,9 @@ Last updated: 2025-12-29 / commit: cf8c998
 
 主要キー:
 - `BACKEND_URL` (backend API base)
-- `BLOG_PREVIEW_TOKEN` (draft preview gate; **server-only**)
-- `NEXT_PUBLIC_SHOW_FACTS_DEBUG` (optional; Facts debug notes 표시)
-- `NEXT_PUBLIC_BASE_URL` (optional; 絶対URLが必要なときのみ)
+- `BLOG_PREVIEW_TOKEN` (draft preview gate; server-only)
+- `NEXT_PUBLIC_SHOW_FACTS_DEBUG` (optional; Facts debug notes)
+- `NEXT_PUBLIC_BASE_URL` (optional; 絶対URLが必要な場合のみ)
 
 注意:
 - `NEXT_PUBLIC_*` に秘密値を入れない。

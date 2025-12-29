@@ -1,5 +1,5 @@
 # API_CONTRACT
-Last updated: 2025-12-29 / commit: cf8c998
+Last updated: 2025-12-29 / commit: fb524be
 
 Authoritative contract for MEGRIBI backend endpoints. Keep existing behavior stable.
 
@@ -23,7 +23,7 @@ Authoritative contract for MEGRIBI backend endpoints. Keep existing behavior sta
 - Behavior: return latest record for the store (legacy/local storage).
 - Response: record object or `{}` when missing.
 
-## GET /api/range
+## GET /api/range (最重要)
 - Purpose: return raw log rows.
 - Query (public contract):
   - `store` or `store_id`
@@ -37,13 +37,15 @@ Authoritative contract for MEGRIBI backend endpoints. Keep existing behavior sta
 
 ## GET /api/forecast_next_hour
 - Query: `store` or `store_id`
-- Behavior: enabled only when `ENABLE_FORECAST=1`, otherwise `503 { ok:false, error:"forecast-disabled" }`
-- Response: `{ ok: true, data: [ { ts, men_pred, women_pred, total_pred } ] }`
+- Enabled: only when `ENABLE_FORECAST=1`
+- Disabled: `503 { ok:false, error:"forecast-disabled" }`
+- Response (enabled): `{ ok: true, data: [ { ts, men_pred, women_pred, total_pred } ] }`
 
 ## GET /api/forecast_today
 - Query: `store` or `store_id`
-- Behavior: enabled only when `ENABLE_FORECAST=1`, otherwise `503 { ok:false, error:"forecast-disabled" }`
-- Response: `{ ok: true, data: [ { ts, men_pred, women_pred, total_pred } ] }`
+- Enabled: only when `ENABLE_FORECAST=1`
+- Disabled: `503 { ok:false, error:"forecast-disabled" }`
+- Response (enabled): `{ ok: true, data: [ { ts, men_pred, women_pred, total_pred } ] }`
 
 ## GET /api/second_venues
 - Query: `store` or `store_id`

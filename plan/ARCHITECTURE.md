@@ -1,5 +1,5 @@
 # ARCHITECTURE
-Last updated: 2025-12-29 / commit: cf8c998
+Last updated: 2025-12-29 / commit: fb524be
 
 ## High-Level Overview
 - Stack: **Supabase → Flask API (Render) → Next.js 16 (Vercel)**.
@@ -13,8 +13,8 @@ Last updated: 2025-12-29 / commit: cf8c998
 4) Night window (19:00-05:00) filtering is done in frontend (no server-side filtering).
 
 ## Forecast (Optional)
-- `ENABLE_FORECAST=1` で `/api/forecast_today` / `/api/forecast_next_hour` が有効。
-- 予測に使う履歴データも Supabase `logs` から取得。
+- `ENABLE_FORECAST=1` のとき `/api/forecast_today` / `/api/forecast_next_hour` が有効。
+- 予測の履歴データも Supabase `logs` から取得する。
 
 ## Blog / Facts Pipeline
 - Blog MDX: `frontend/content/blog/*.mdx`
@@ -26,9 +26,12 @@ Last updated: 2025-12-29 / commit: cf8c998
 
 ## Responsibility Split
 - Night window filtering: frontend only (`useStorePreviewData.ts` / facts生成スクリプト)。
-- Draft preview gate: `BLOG_PREVIEW_TOKEN` が一致した場合のみ表示/metadata 生成。
+- Draft preview gate: `BLOG_PREVIEW_TOKEN` 一致時のみ表示/metadata 生成。
 - Secrets: 環境変数のみ。`NEXT_PUBLIC_*` に秘密値禁止。
 
 ## Second Venues
 - UI は map-link 方針（Google Maps 検索リンクを生成）。
-- Backend `/api/second_venues` は将来用/互換として残置。
+- Backend `/api/second_venues` は互換/将来用として残置。
+
+## Legacy
+- `/tasks/tick` は legacy（単店/ローカル/GAS向け）。主経路は `/tasks/multi_collect`。

@@ -1,5 +1,5 @@
 # BLOG_REQUEST_SCHEMA
-Last updated: 2025-12-28
+Last updated: 2025-12-29 / commit: fb524be
 
 LINE 依頼 → n8n 受付 → Facts/MDX 生成の「最小入力」を固定するための SSOT。
 実装は次フェーズで行い、ここでは契約（スキーマと境界）だけを定義する。
