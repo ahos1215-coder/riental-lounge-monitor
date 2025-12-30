@@ -3,7 +3,7 @@ name: Generate Public Facts
 on:
   workflow_dispatch:
   schedule:
-    # 髮惹ｺ･蜿呵輔・09:30 JST (= 00:30 UTC)
+    # 鬮ｮ諠ｹ・ｺ・･陷ｿ蜻ｵ・ｰ霈斐・09:30 JST (= 00:30 UTC)
     - cron: "30 0 * * *"
 
 permissions:
@@ -32,6 +32,7 @@ jobs:
       - name: Generate public facts
         working-directory: frontend
         env:
+          BACKEND_URL: https://riental-lounge-monitor.onrender.com
           NEXT_PUBLIC_BASE_URL: https://www.meguribi.jp
         run: |
           npm run facts:generate
