@@ -1,0 +1,24 @@
+{
+  "analysis_id": "weekly:shibuya:2026-01-04",
+  "type": "weekly",
+  "store": "shibuya",
+  "generated_at": "2026-01-04T15:37:53.406216+00:00",
+  "period": {
+    "start": "2025-12-27T12:10:27.434711+00:00",
+    "end": "2026-01-04T15:35:25.226355+00:00"
+  },
+  "params": {
+    "threshold": 0.4,
+    "min_duration_minutes": 60,
+    "ideal": 0.7,
+    "gender_weight": 1.5,
+    "occupancy_baseline": 229.0
+  },
+  "metrics": {
+    "points_used": 998,
+    "baseline_p95_total": 229.0,
+    "reliability_score": 1.0
+  },
+  "windows": [],
+  "top_windows": []
+}
