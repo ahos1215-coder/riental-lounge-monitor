@@ -7,14 +7,15 @@
     "to": "2025-12-29T05:00:00+09:00"
   },
   "insight": {
-    "peak_time": "01:35",
-    "avoid_time": "04:55",
-    "crowd_label": "混み"
+    "peak_time": "",
+    "avoid_time": "",
+    "crowd_label": ""
   },
   "quality_flags": {
     "notes": [
-      "generated_from:api/range",
-      "shift:none"
+      "generated_from:api/forecast_today",
+      "shift:none",
+      "no_samples_in_window"
     ]
   }
 }
