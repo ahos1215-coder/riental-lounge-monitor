@@ -1,0 +1,50 @@
+{
+  "analysis_id": "weekly:shibuya:2026-02-08",
+  "type": "weekly",
+  "store": "shibuya",
+  "generated_at": "2026-02-08T15:47:12.767115+00:00",
+  "period": {
+    "start": "2026-01-31T12:25:24.374604+00:00",
+    "end": "2026-02-08T15:45:26.572234+00:00"
+  },
+  "params": {
+    "threshold": 0.4,
+    "min_duration_minutes": 60,
+    "ideal": 0.7,
+    "gender_weight": 1.5,
+    "occupancy_baseline": 250.0
+  },
+  "metrics": {
+    "points_used": 985,
+    "baseline_p95_total": 250.0,
+    "reliability_score": 1.0
+  },
+  "windows": [
+    {
+      "start": "2026-02-06T11:35:24.120887+00:00",
+      "end": "2026-02-06T13:45:27.142563+00:00",
+      "duration_minutes": 130.05036126666667,
+      "avg_score": 0.5542805859689225
+    },
+    {
+      "start": "2026-02-07T11:50:28.685302+00:00",
+      "end": "2026-02-07T13:15:27.064171+00:00",
+      "duration_minutes": 84.97298115,
+      "avg_score": 0.5588330451419227
+    }
+  ],
+  "top_windows": [
+    {
+      "start": "2026-02-07T11:50:28.685302+00:00",
+      "end": "2026-02-07T13:15:27.064171+00:00",
+      "duration_minutes": 84.97298115,
+      "avg_score": 0.5588330451419227
+    },
+    {
+      "start": "2026-02-06T11:35:24.120887+00:00",
+      "end": "2026-02-06T13:45:27.142563+00:00",
+      "duration_minutes": 130.05036126666667,
+      "avg_score": 0.5542805859689225
+    }
+  ]
+}
