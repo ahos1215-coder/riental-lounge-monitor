@@ -1,89 +1,52 @@
 # RUNBOOK
-Last updated: 2025-12-29 / commit: 4299ff1
+Last updated: 2025-12-23
+Target commit: 10e50d6
 
-Operational tasks for MEGRIBI (Render backend / Vercel frontend).
-
-## Local Setup (PowerShell)
-
+## Local Development
 ### Backend (Flask)
-```powershell
+```
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-
-$env:DATA_BACKEND="supabase"
-$env:SUPABASE_URL="<YOUR_SUPABASE_URL>"
-$env:SUPABASE_SERVICE_ROLE_KEY="<YOUR_SERVICE_ROLE_KEY>"
-
+# .env に必要な環境変数を設定（plan/ENV.md 参照）
 python app.py
 ```
 
-### Frontend (Next.js 16)
-```powershell
+### Frontend (Next.js)
+```
 cd frontend
 npm install
-$env:BACKEND_URL="http://127.0.0.1:5000"
+# frontend/.env.local に必要な環境変数を設定（plan/ENV.md 参照）
 npm run dev
 ```
 
-### Build
-```powershell
-cd frontend
-npm run build
-```
+## Local Checks
+- `/api/range?store=...&limit=...` が `ts` 昇順で返ること
+- `/api/forecast_today?store=...`（`ENABLE_FORECAST=1` のとき）
+- `/insights/weekly` が `index.json` を読めること
 
-## API Smoke Checks
-PowerShell では `&` を含む URL を必ず引用符で囲む。
-```powershell
-curl.exe "http://127.0.0.1:5000/healthz"
-curl.exe "http://127.0.0.1:5000/api/range?store=shibuya&limit=400"
-curl.exe "http://127.0.0.1:5000/api/forecast_today?store=shibuya"
-```
+## GitHub Actions (Ops)
+### Weekly Insights
+- Workflow: `Generate Weekly Insights`
+- Schedule: `30 15 * * 0` (UTC) = JST 月曜 00:30
+- 手動実行: `workflow_dispatch` の inputs で `stores/threshold/min_duration_minutes` を指定可能
+- 成果物: `frontend/content/insights/weekly`
 
-## Public Facts Generation
-```powershell
-cd frontend
-$env:BACKEND_URL="http://127.0.0.1:5000"
-npm run facts:generate
-node scripts/build-public-facts-index.mjs
-```
-- 生成物: `frontend/content/facts/public/*.json` と `index.json`
-- 生成元: backend `/api/range` → 足りない場合は `/api/forecast_today`
+### Public Facts
+- Workflow: `Generate Public Facts`
+- Schedule: `30 0 * * *` (UTC) = JST 09:30
+- 成果物: `frontend/content/facts/public`
 
-## Blog Draft / Preview
-- `draft: true` の記事は通常アクセスで 404。
-- `?preview=<token>` が `BLOG_PREVIEW_TOKEN` と一致すると表示。
-- metadata も同じ gate を通す。
+### Blog CI
+- Workflow: `blog-ci`（push / PR の frontend 変更で実行）
 
-## Operations Notes
-- 本番収集の入口は `/tasks/multi_collect`。
-- `/tasks/tick` は legacy（単店/ローカル/GAS向け）。
+## Production Notes
+- Backend: Render (Flask)
+- Frontend: Vercel (Next.js 16)
+- Vercel には `BACKEND_URL` を設定して backend を指す
 
-## .env UTF-8 BOM Issue (重要)
-`.env` に BOM があると `\ufeffSUPABASE_URL` になり読めない事故が起きる。
-PowerShell で no BOM に書き直す例:
-```powershell
-$path = ".env"
-$raw = Get-Content -Raw $path
-[System.IO.File]::WriteAllText($path, $raw, New-Object System.Text.UTF8Encoding($false))
-```
-
-## PowerShell Notes
-`python - << 'PY'` は使えない。here-string を `python -` に渡す:
-```powershell
-@'
-print("hello")
-'@ | python -
-```
-
-## Backup ZIP (User-driven)
-Desktop が OneDrive にリダイレクトされる場合があるため `DesktopDirectory` を使う。
-`MEGRIBI_repo_*.zip` は `.gitignore` で除外済み。
-```powershell
-$desktop = [Environment]::GetFolderPath("DesktopDirectory")
-$date = Get-Date -Format "yyyyMMdd_HHmmss"
-Compress-Archive -Path oriental,frontend,requirements.txt,app.py -DestinationPath (Join-Path $desktop "MEGRIBI_repo_$date.zip")
-```
-
-## Next
-- LINE/n8n は次スレで整理・実装する。
+## Troubleshooting
+- `/api/range` が空: Supabase `logs` の状態と `/tasks/multi_collect` の実行を確認
+- Forecast が 503: `ENABLE_FORECAST=1` を設定
+- DNS / name resolution エラー: URL を書き換えず、別環境で再現確認（Render Logs など）
+- `/insights/weekly` が読めない: `index.json` の有無と JSON 破損を確認

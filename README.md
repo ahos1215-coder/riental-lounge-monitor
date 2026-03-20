@@ -1,70 +1,56 @@
-# MEGRIBI (riental-lounge-monitor-main)
-Last updated: 2025-12-29 / commit: 4299ff1
+# MEGRIBI / Oriental Lounge Monitor
 
-MEGRIBI は Supabase logs を source of truth とする混雑モニタ + blog/facts 運用のリポジトリです。
-バックエンドは Flask、フロントエンドは Next.js 16 (App Router) で構成します。
+このリポジトリは、MEGRIBI の混雑可視化を支える Flask API と Next.js 16（App Router）のフロントエンドを含むモノレポです。
+運用・制約・設計の正本は plan/ 配下にあります。
 
-## Repository Layout
-- `app.py`, `wsgi.py`: Flask entrypoint
-- `oriental/`: backend (Flask API)
-- `frontend/`: Next.js 16 frontend
-- `frontend/content/blog/`: blog MDX
-- `frontend/content/facts/public/`: public facts JSON + index.json
-- `plan/`: SSOT docs (制約・運用・契約)
+## Read First（読む順番）
+1. README.md
+2. [plan/INDEX.md](plan/INDEX.md)
+3. [plan/CODEx_PROMPTS.md](plan/CODEx_PROMPTS.md)
+4. [plan/STATUS.md](plan/STATUS.md)
+5. [plan/DECISIONS.md](plan/DECISIONS.md)
+6. [plan/API_CONTRACT.md](plan/API_CONTRACT.md)
+7. [plan/ARCHITECTURE.md](plan/ARCHITECTURE.md)
+8. [plan/RUNBOOK.md](plan/RUNBOOK.md)
+9. [plan/CRON.md](plan/CRON.md)
+10. [plan/ENV.md](plan/ENV.md)
+11. [plan/SECOND_VENUES.md](plan/SECOND_VENUES.md)
+12. [plan/ROADMAP.md](plan/ROADMAP.md)
 
-## Local Development (PowerShell)
-
-### Backend (Flask)
-```powershell
+## Quick Start（ローカル起動）
+Backend（Flask）
+```
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-
-$env:DATA_BACKEND="supabase"
-$env:SUPABASE_URL="<YOUR_SUPABASE_URL>"
-$env:SUPABASE_SERVICE_ROLE_KEY="<YOUR_SERVICE_ROLE_KEY>"
-
+# .env に必要な環境変数を設定（plan/ENV.md 参照）
 python app.py
 ```
 
-### Frontend (Next.js 16)
-```powershell
+Frontend（Next.js）
+```
 cd frontend
 npm install
-$env:BACKEND_URL="http://127.0.0.1:5000"
+# frontend/.env.local に必要な環境変数を設定（plan/ENV.md 参照）
 npm run dev
 ```
 
-### Smoke Checks
-```powershell
-curl.exe "http://127.0.0.1:5000/healthz"
-curl.exe "http://127.0.0.1:5000/api/range?store=shibuya&limit=400"
-```
+## 重要な制約（必ず守る）
+- `/api/range` の引数は `store` / `limit` のみ（from/to などの追加は禁止）。
+- 夜窓（19:00–05:00）の判定・絞り込みはフロント責務。
+- データの正本は Supabase `logs`。Google Sheet / GAS はレガシー fallback。
+- レイヤ構造は Supabase → Flask → Next.js を維持（フロントから Supabase を直接叩かない）。
+- 二次会スポットは map-link 方式（Places API 依存に戻さない）。
+- 秘密値はコードに書かない。環境変数のみ（`NEXT_PUBLIC_*` に秘密を入れない）。
 
-## Blog + Public Facts
-1) `frontend/content/blog/*.mdx` に記事を追加/更新。
-   - 必須: `title`, `date`(YYYY-MM-DD), `store`, `facts_id` または `facts_id_public`
-   - 任意: `description`, `categoryId`, `level`, `period`, `draft`
-2) Public facts を生成:
-```powershell
-cd frontend
-$env:BACKEND_URL="http://127.0.0.1:5000"
-npm run facts:generate
-node scripts/build-public-facts-index.mjs
-```
-3) `frontend/content/facts/public/*.json` と `index.json` を commit/push。
+## よくある詰まり（PowerShell）
+- `[]` を含むパスは `-LiteralPath` を使う（例: `frontend/src/app/insights/weekly/[store]/page.tsx`）。
+- `Get-Content -Raw` が使えない環境では `Get-Content ... | Out-String` を使用。
+- ドキュメントは UTF-8 (no BOM) + LF を維持。CRLF で差分が出やすい点に注意。
 
-## Draft Preview Gate
-- `draft: true` の記事は通常アクセスで非表示。
-- `?preview=<token>` が `BLOG_PREVIEW_TOKEN` と一致する場合のみ表示。
-- metadata も同じ gate を通す（draft の title/description 漏れ防止）。
+## やらないこと（抜粋）
+- `/api/range` にクエリ追加・サーバ側の夜窓フィルタ追加。
+- Places API / DB 保存を前提に二次会スポットを作り直す。
+- フロントから Supabase に直接アクセス。
 
-## Notes / Constraints
-- `/api/range` の公開契約は `store` + `limit` のみ。夜窓(19:00-05:00)の絞り込みはフロント責務。
-- Supabase → Flask → Next.js のレイヤ構造を維持（フロントから Supabase 直叩きしない）。
-- Supabase Python SDK は不要。backend は REST (`requests`) を使用。
-- Secrets は env のみ。`.env` / `frontend/.env.local` は commit しない。
-- `.env` は **UTF-8 no BOM** で保存（BOM があると `SUPABASE_URL` が読めない）。
-
-## Legacy (Google Sheets/GAS)
-- Google Sheet/GAS 経路は legacy fallback のみ。拡張しない。
+詳細は [plan/DECISIONS.md](plan/DECISIONS.md) を参照してください。

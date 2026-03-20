@@ -1,14 +1,22 @@
 # CRON
-Last updated: 2025-12-29 / commit: 4299ff1
+Last updated: 2025-12-23
+Target commit: 10e50d6
 
-## Current (production assumption)
-- `/tasks/multi_collect` を定期実行して Supabase `logs` に書き込む。
-  - 目安: 5分間隔 / 夜窓(19:00-05:00)に合わせて運用側で制御。
-- `/tasks/tick` は legacy（単店 + ローカル/GAS向け）。Supabase の主経路ではない。
+## GitHub Actions (repo managed)
+- Generate Weekly Insights
+  - Schedule: `30 15 * * 0` (UTC) = JST 月曜 00:30
+  - Workflow: `.github/workflows/generate-weekly-insights.yml`
+- Generate Public Facts
+  - Schedule: `30 0 * * *` (UTC) = JST 09:30
+  - Workflow: `.github/workflows/generate-public-facts.yml`
+- Blog CI
+  - Trigger: push / pull_request（schedule なし）
+  - Workflow: `.github/workflows/blog-ci.yml`
 
-## Manual / On-demand
-- `/tasks/update_second_venues` は `GOOGLE_PLACES_API_KEY` がある場合のみ実行。
+## External Cron (ops managed)
+- `/tasks/multi_collect` を 5 分間隔で叩く想定
+  - 設定は運用側（Render / 外部 scheduler）
+  - リポジトリ内に cron 定義は存在しない
 
-## Not Automated Yet
-- Public facts 生成: `npm run facts:generate` + `node scripts/build-public-facts-index.mjs`
-- Blog publish: draft → review → `draft` を外して公開
+## Not Implemented (if needed, add to ROADMAP)
+- 追加の定期処理は未実装

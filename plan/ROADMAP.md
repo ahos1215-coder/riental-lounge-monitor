@@ -1,19 +1,20 @@
 # ROADMAP
-Last updated: 2025-12-29 / commit: 4299ff1
+Last updated: 2025-12-23
+Target commit: 10e50d6
 
-## Done (as of 2025-12-29)
-- Supabase `logs` を source of truth に固定。
-- `/api/range` の store/limit 契約を維持しつつ実データで動作確認。
-- Next.js 16 App Router 構成が安定（`useSearchParams`/Suspense 対応済み）。
-- Blog の draft/preview gate を厳密化（metadata も gate）。
-- Public facts 生成 & `index.json` 自動生成を運用に組み込み、commit 済み。
-- 公開ブログ例: `shibuya-tonight-20251228`。
+## P0 (次に着手すること)
+- Weekly Insights の品質改善（score 閾値・最小継続時間の運用調整）
+- `/api/current` の位置づけ見直し（Supabase 直取得に寄せるか、現状維持かを決定）
+- 主要ドキュメントの継続同期（plan/* と README の整合維持）
 
-## Next (P0)
-- LINE → n8n の受け取りスキーマ確定と配管準備（`plan/BLOG_REQUEST_SCHEMA.md`）。
-- facts → MDX ドラフト → PR の半自動化（最小安全な境界）。
-- Public facts の対象拡張（複数 store / 日付）。
+## P1
+- 週次 Insights の可視化強化（series_compact の導入や説明文の追加）
+- ブログ / Facts の運用負荷削減（テンプレ整理、入力バリデーション）
+- 監視・運用の可視化（ログの整理、Render/Vercel 運用の整理）
 
-## Later
-- UI 体験改善（読み込み体感・skeleton・キャッシュ方針）。
-- Forecast 精度/運用の見直し。
+## P2
+- 複数店舗/ブランドの拡張（表示/UI の拡張）
+- 予測の精度改善（必要性を確認した上で）
+
+## 未実装メモ
+- 新規 cron / 新規 API の追加は未実装。必要であれば仕様を決めてから着手。

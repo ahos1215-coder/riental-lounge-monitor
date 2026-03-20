@@ -1,48 +1,56 @@
 # INDEX
-Last updated: 2025-12-29 / commit: 4299ff1
+Last updated: 2025-12-23
+Target commit: 10e50d6
 
 このファイルは「全体の地図」「読む順番」「重要ファイル一覧」をまとめる入口です。
 
-## Read Order (Start Here)
-1) `README.md`
-2) `plan/STATUS.md`
-3) `plan/DECISIONS.md`
-4) `plan/API_CONTRACT.md`
-5) `plan/ARCHITECTURE.md`
-6) `plan/RUNBOOK.md`
-7) `plan/ENV.md`
-8) `plan/CRON.md`
-9) `plan/SECOND_VENUES.md`
-10) `plan/ROADMAP.md`
-11) `plan/CODEx_PROMPTS.md`
+## Read Order（Start Here）
+1) `plan/CODEx_PROMPTS.md`（AI の作業ルール）
+2) `plan/STATUS.md`（現状の稼働状況）
+3) `plan/DECISIONS.md`（壊してはいけない判断）
+4) `plan/API_CONTRACT.md`（API 契約）
+5) `plan/ARCHITECTURE.md`（全体アーキテクチャ）
+6) `plan/RUNBOOK.md`（起動 / 運用）
+7) `plan/CRON.md`（定期処理）
+8) `plan/ENV.md`（環境変数）
+9) `plan/SECOND_VENUES.md`（二次会スポット方針）
+10) `plan/ROADMAP.md`（今後の計画）
 
-補助: `plan/repo_map.txt` がある場合は先に見る。
-
-## Repo Map (主要ディレクトリ)
-- Backend (Flask): `app.py`, `wsgi.py`, `oriental/`
-- Collector: `multi_collect.py` (`/tasks/multi_collect` から呼ばれる)
-- Frontend (Next.js 16): `frontend/`
-  - API routes: `frontend/src/app/api/*/route.ts`
-  - Blog: `frontend/content/blog/*.mdx`
-  - Public facts: `frontend/content/facts/public/*.json`
-  - Scripts: `frontend/scripts/*.mjs`
-- Specs: `plan/`
+## Repo Map（主要ディレクトリ）
+- Backend（Flask）: `app.py`, `oriental/`
+- Collector: `multi_collect.py`
+- Frontend（Next.js 16）: `frontend/`
+- Tests: `tests/`
+- Scripts: `scripts/`
+- Workflows: `.github/workflows/`
 
 ## Key Entry Points
-- Backend routes: `oriental/routes/data.py`, `oriental/routes/forecast.py`, `oriental/routes/tasks.py`
-- Supabase provider: `oriental/data/provider.py` (`/rest/v1/logs`)
+### Backend
+- `oriental/routes/data.py`（/api/range, /api/current）
+- `oriental/routes/forecast.py`（/api/forecast_*）
+- `oriental/routes/tasks.py`（/tasks/multi_collect, /tasks/tick など）
+- `oriental/data/provider.py`（Supabase logs）
+
+### Frontend
+- `/`: `frontend/src/app/page.tsx`
+- `/stores`: `frontend/src/app/stores/page.tsx`
+- `/store/[id]`: `frontend/src/app/store/[id]/page.tsx`
+- `/blog`: `frontend/src/app/blog/page.tsx`
+- `/blog/[slug]`: `frontend/src/app/blog/[slug]/page.tsx`
+- `/insights/weekly`: `frontend/src/app/insights/weekly/page.tsx`
+- `/insights/weekly/[store]`: `frontend/src/app/insights/weekly/[store]/page.tsx`
 - Night window: `frontend/src/app/hooks/useStorePreviewData.ts`
-- Blog page: `frontend/src/app/blog/[slug]/page.tsx` (draft/preview gate)
-- Facts generation: `frontend/scripts/generate-public-facts.mjs`
-- Facts index: `frontend/scripts/build-public-facts-index.mjs`
+- Second venues (map-link): `frontend/src/app/config/secondVenueMapLinks.ts`
 
-## Blog / Facts (契約・運用)
-- request schema: `plan/BLOG_REQUEST_SCHEMA.md`
-- pipeline: `plan/BLOG_PIPELINE.md`
-- content policy: `plan/BLOG_CONTENT.md`
+### Content / Batch
+- Weekly insights generator: `scripts/generate_weekly_insights.py`
+- Public facts generator: `frontend/scripts/generate-public-facts.mjs`
+- Insights data: `frontend/content/insights/weekly`
+- Facts data: `frontend/content/facts/public`
+- Blog content: `frontend/content/blog`
 
-## Constraints (短縮版)
-- Supabase `logs` が source of truth（Sheets/GAS は legacy fallback）。
-- `/api/range` は `store` + `limit` のみ（サーバ側時間フィルタ禁止）。
-- 夜窓(19:00-05:00)の絞り込みはフロント責務。
-- Second venues は map-link 方針（Places API 収集・保存型に戻さない）。
+## Constraints（短縮版）
+- Supabase `logs` が source of truth（Sheets/GAS は legacy fallback）
+- `/api/range` は `store` + `limit` のみ（クエリ追加・サーバ側時間フィルタ禁止）
+- 夜窓（19:00–05:00）の絞り込みはフロント専任
+- 二次会スポットは map-link が本流（Places API 依存に戻さない）

@@ -1,37 +1,54 @@
 # ARCHITECTURE
-Last updated: 2025-12-29 / commit: 4299ff1
+Last updated: 2025-12-23
+Target commit: 10e50d6
 
-## High-Level Overview
-- Stack: **Supabase → Flask API (Render) → Next.js 16 (Vercel)**.
-- Data source priority: Supabase `logs` is primary. Google Sheet/GAS is legacy fallback only.
-- Frontend uses Next.js API routes to proxy backend requests.
+## Overview
+- Stack: Supabase (logs/stores) -> Flask API (Render) -> Next.js 16 (Vercel)
+- Source of truth: Supabase `logs`（Google Sheet / GAS は legacy fallback）
+- Night window（19:00–05:00）はフロント責務（`frontend/src/app/hooks/useStorePreviewData.ts`）
+- Second venues は map-link 方式（frontend でリンク生成）
+- Insights / Facts は GitHub Actions で生成し、`frontend/content/*` にコミット
 
-## Data Flow (Metrics)
-1) `/tasks/multi_collect` collects ~38 stores and inserts into Supabase `logs`.
-2) Flask reads Supabase via REST (`/rest/v1/logs`) using `requests` (`SupabaseLogsProvider`).
-3) Frontend calls backend through Next.js API routes (`/api/range`, `/api/forecast_*`).
-4) Night window (19:00-05:00) filtering is done in frontend (no server-side filtering).
+## Data Flow
+1) 収集: `multi_collect.py` または `/tasks/multi_collect` が Supabase `logs` に書き込む
+   - `/tasks/tick` はレガシー（単店 + ローカル保存）
+2) Flask API が `/api/range` / `/api/current` / `/api/forecast_*` を提供
+   - `/api/current` はローカル保存（`data.json`）の最新値
+   - `/api/range` は Supabase を `ts.desc` で取得し `ts.asc` で返却
+3) Next.js は API routes を介して backend を呼ぶ
+   - 夜窓の判定・絞り込みはフロント側で実施
+4) GitHub Actions が Insights / Facts を生成し静的 JSON を更新
+   - `/insights/weekly` 系ページは fs から読み込む
 
-## Forecast (Optional)
-- `ENABLE_FORECAST=1` のとき `/api/forecast_today` / `/api/forecast_next_hour` が有効。
-- 予測の履歴データも Supabase `logs` から取得する。
+## Contracts / Constraints
+- `/api/range` の公開契約は `store` + `limit` のみ
+  - server-side の時間フィルタ禁止、night window はフロント責務
+- Secrets は環境変数のみ（`NEXT_PUBLIC_*` に秘密を入れない）
+- 既存エンドポイント互換性を維持（/healthz, /api/meta, /api/current, /api/range, /api/forecast_*, /tasks/*）
+- Second venues は map-link 方式を維持（Places API 依存に戻さない）
 
-## Blog / Facts Pipeline
-- Blog MDX: `frontend/content/blog/*.mdx`
-- Public facts JSON: `frontend/content/facts/public/<facts_id>.json`
-- `frontend/scripts/generate-public-facts.mjs` が blog frontmatter を読み、
-  `/api/range` / `/api/forecast_today` を使って public facts を生成。
-- `frontend/scripts/build-public-facts-index.mjs` が `index.json` を生成。
-- Public facts はリポジトリに commit する。フル版 facts は repo に保存しない。
+## Key Files
+### Backend
+- `oriental/routes/data.py`（/api/range, /api/current）
+- `oriental/routes/forecast.py`（/api/forecast_*）
+- `oriental/routes/tasks.py`（/tasks/multi_collect, /tasks/tick など）
+- `oriental/data/provider.py`（Supabase logs provider）
+- `multi_collect.py`（収集ロジック）
 
-## Responsibility Split
-- Night window filtering: frontend only (`useStorePreviewData.ts` / facts生成スクリプト)。
-- Draft preview gate: `BLOG_PREVIEW_TOKEN` 一致時のみ表示/metadata 生成。
-- Secrets: 環境変数のみ。`NEXT_PUBLIC_*` に秘密値禁止。
+### Frontend
+- `frontend/src/app/api/*/route.ts`（backend proxy）
+- `frontend/src/app/hooks/useStorePreviewData.ts`（夜窓ロジック）
+- `frontend/src/app/insights/weekly/**`（週次インサイトページ）
+- `frontend/src/app/blog/**`（ブログ）
+- `frontend/src/app/store/[id]/page.tsx`（店舗詳細）
 
-## Second Venues
-- UI は map-link 方針（Google Maps 検索リンクを生成）。
-- Backend `/api/second_venues` は互換/将来用として残置。
+### Content / Batch
+- `scripts/generate_weekly_insights.py`
+- `frontend/scripts/generate-public-facts.mjs`
+- `frontend/content/insights/weekly`
+- `frontend/content/facts/public`
 
-## Legacy
-- `/tasks/tick` は legacy（単店/ローカル/GAS向け）。主経路は `/tasks/multi_collect`。
+### Workflows
+- `.github/workflows/generate-weekly-insights.yml`
+- `.github/workflows/generate-public-facts.yml`
+- `.github/workflows/blog-ci.yml`
