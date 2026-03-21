@@ -11,14 +11,19 @@ export type DraftGeneratorInput = {
   topicHint?: string;
 };
 
-const DEFAULT_MODEL = "gemini-1.5-flash-latest";
+const DEFAULT_MODEL = "gemini-1.0-pro";
 
 function resolveGeminiModel(raw?: string): string {
   const model = raw?.trim();
   if (!model) return DEFAULT_MODEL;
-  // 過去設定との互換: 404 を避けるため latest 指定へ寄せる
-  if (model === "gemini-1.5-flash") return "gemini-1.5-flash-latest";
+  // 過去設定との互換: 現在の v1beta で 404 になりやすい指定は安定側に寄せる
+  if (model === "gemini-1.5-flash" || model === "gemini-1.5-flash-latest") return DEFAULT_MODEL;
   return model;
+}
+
+function isModelNotFoundError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return msg.includes("[404 Not Found]") && msg.includes("models/");
 }
 
 function buildSystemInstruction(): string {
@@ -68,13 +73,27 @@ export async function generateBlogDraftMdx(input: DraftGeneratorInput): Promise<
 
   const modelId = resolveGeminiModel(process.env.GEMINI_MODEL);
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({
-    model: modelId,
-    systemInstruction: buildSystemInstruction(),
-  });
-
-  const result = await model.generateContent(buildUserPrompt(input));
-  const text = result.response.text();
+  const prompt = buildUserPrompt(input);
+  let text = "";
+  try {
+    const model = genAI.getGenerativeModel({
+      model: modelId,
+      systemInstruction: buildSystemInstruction(),
+    });
+    const result = await model.generateContent(prompt);
+    text = result.response.text();
+  } catch (e) {
+    if (!isModelNotFoundError(e) || modelId === DEFAULT_MODEL) {
+      throw e;
+    }
+    console.warn("[gemini] model not found, fallback to default", { requested: modelId, fallback: DEFAULT_MODEL });
+    const fallbackModel = genAI.getGenerativeModel({
+      model: DEFAULT_MODEL,
+      systemInstruction: buildSystemInstruction(),
+    });
+    const fallbackResult = await fallbackModel.generateContent(prompt);
+    text = fallbackResult.response.text();
+  }
   if (!text?.trim()) {
     throw new Error("Gemini returned empty content");
   }
