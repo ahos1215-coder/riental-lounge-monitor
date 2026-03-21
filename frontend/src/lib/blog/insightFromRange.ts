@@ -162,10 +162,21 @@ export function computeInsight(points: Array<{ dt: Date; total: number }>): Insi
   };
 }
 
-async function fetchJson(url: string): Promise<unknown> {
-  const res = await fetch(url, { headers: { accept: "application/json" }, cache: "no-store" });
-  if (!res.ok) throw new Error(`fetch failed: ${res.status} ${res.statusText} (${url})`);
-  return res.json();
+async function fetchJson(url: string, timeoutMs = 12000): Promise<unknown> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      headers: { accept: "application/json" },
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`fetch failed: ${res.status} ${res.statusText} (${url})`);
+    return await res.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function pickArray(data: unknown): unknown[] {
@@ -181,15 +192,21 @@ function pickArray(data: unknown): unknown[] {
 export async function fetchRangeRows(backendBase: string, store: string, limit: number): Promise<unknown[]> {
   const base = backendBase.replace(/\/+$/, "");
   const url = `${base}/api/range?store=${encodeURIComponent(store)}&limit=${encodeURIComponent(String(limit))}`;
+  console.log("[insight] fetchRangeRows start", { store, limit });
   const data = await fetchJson(url);
-  return pickArray(data);
+  const rows = pickArray(data);
+  console.log("[insight] fetchRangeRows done", { rows: rows.length });
+  return rows;
 }
 
 export async function fetchForecastRows(backendBase: string, store: string): Promise<unknown[]> {
   const base = backendBase.replace(/\/+$/, "");
   const url = `${base}/api/forecast_today?store=${encodeURIComponent(store)}`;
+  console.log("[insight] fetchForecastRows start", { store });
   const data = await fetchJson(url);
-  return pickArray(data);
+  const rows = pickArray(data);
+  console.log("[insight] fetchForecastRows done", { rows: rows.length });
+  return rows;
 }
 
 function errorMessage(err: unknown): string {
@@ -214,12 +231,14 @@ export async function buildInsightFromBackend(
   let points: Array<{ dt: Date; total: number }> = [];
 
   try {
+    console.log("[insight] buildInsightFromBackend -> api/range");
     const rows = await fetchRangeRows(backendBase, storeSlug, limit);
     points = collectPoints(rows, from, to, {
       totalKeys: ["total"],
       menKeys: ["men", "male", "m"],
       womenKeys: ["women", "female", "f"],
     });
+    console.log("[insight] api/range -> points", { points: points.length });
   } catch (e) {
     notes.push(`api_range_error:${errorMessage(e)}`);
   }
@@ -228,6 +247,7 @@ export async function buildInsightFromBackend(
     source = "api/forecast_today";
     let forecastRows: unknown[] = [];
     try {
+      console.log("[insight] buildInsightFromBackend -> api/forecast_today");
       forecastRows = await fetchForecastRows(backendBase, storeSlug);
     } catch (e) {
       notes.push(`forecast_error:${errorMessage(e)}`);
