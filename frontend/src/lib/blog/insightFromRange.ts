@@ -162,7 +162,12 @@ export function computeInsight(points: Array<{ dt: Date; total: number }>): Insi
   };
 }
 
-async function fetchJson(url: string, timeoutMs = 12000): Promise<unknown> {
+function isAbortError(e: unknown): boolean {
+  const anyE = e as any;
+  return anyE?.name === "AbortError";
+}
+
+async function fetchJson(url: string, timeoutMs = 5000): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -229,6 +234,7 @@ export async function buildInsightFromBackend(
   let source: InsightBuildResult["source"] = "api/range";
   let shift: InsightBuildResult["shift"] = "none";
   let points: Array<{ dt: Date; total: number }> = [];
+  let skipForecastDueToTimeout = false;
 
   try {
     console.log("[insight] buildInsightFromBackend -> api/range");
@@ -240,17 +246,26 @@ export async function buildInsightFromBackend(
     });
     console.log("[insight] api/range -> points", { points: points.length });
   } catch (e) {
+    const abort = isAbortError(e);
     notes.push(`api_range_error:${errorMessage(e)}`);
+    if (abort) {
+      skipForecastDueToTimeout = true;
+      notes.push("api_range_timeout_skip_forecast");
+    }
   }
 
   if (points.length === 0) {
     source = "api/forecast_today";
     let forecastRows: unknown[] = [];
-    try {
-      console.log("[insight] buildInsightFromBackend -> api/forecast_today");
-      forecastRows = await fetchForecastRows(backendBase, storeSlug);
-    } catch (e) {
-      notes.push(`forecast_error:${errorMessage(e)}`);
+    if (!skipForecastDueToTimeout) {
+      try {
+        console.log("[insight] buildInsightFromBackend -> api/forecast_today");
+        forecastRows = await fetchForecastRows(backendBase, storeSlug);
+      } catch (e) {
+        notes.push(`forecast_error:${errorMessage(e)}`);
+      }
+    } else {
+      notes.push("skip_forecast_due_to_timeout");
     }
 
     if (forecastRows.length > 0) {

@@ -15,7 +15,7 @@ const BACKEND_URL =
   "http://127.0.0.1:5000";
 
 /** Range fetch limit (public contract: store + limit only). */
-const RANGE_LIMIT = 1000;
+const RANGE_LIMIT = 50;
 
 export const maxDuration = 60;
 
