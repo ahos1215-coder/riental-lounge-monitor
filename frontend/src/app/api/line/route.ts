@@ -8,7 +8,11 @@ import { generateBlogDraftMdx } from "@/lib/blog/draftGenerator";
 import { insertBlogDraft, isBlogDraftsConfigured } from "@/lib/supabase/blogDrafts";
 
 /** Flask backend base URL (same as other Next API proxies). */
-const BACKEND_URL = process.env.BACKEND_URL ?? "http://127.0.0.1:5000";
+// Vercel 側で `BACKEND-URL` として登録されてしまうケースがあるため、保険で別名も許容する。
+const BACKEND_URL =
+  process.env.BACKEND_URL ??
+  process.env["BACKEND-URL"] ??
+  "http://127.0.0.1:5000";
 
 /** Range fetch limit (public contract: store + limit only). */
 const RANGE_LIMIT = 1000;
@@ -100,6 +104,18 @@ async function processMessageEvent(ev: LineEvent): Promise<void> {
   }
 
   const intent = parseLineIntent(text);
+  console.log("[line] Intent kind:", intent.kind);
+  if (intent.kind === "draft") {
+    console.log("[line] Intent draft:", {
+      storeSlug: intent.store.slug,
+      storeLabel: intent.store.label,
+      dateYmd: intent.dateYmd,
+      factsId: intent.factsId,
+      topicHint: intent.topicHint,
+    });
+  } else if (intent.kind === "error") {
+    console.log("[line] Intent error:", intent.message);
+  }
   if (intent.kind === "help") {
     await replyLine(replyToken, helpText());
     return;
@@ -113,13 +129,22 @@ async function processMessageEvent(ev: LineEvent): Promise<void> {
   const lineUserId = ev.source?.userId ?? null;
 
   try {
+    console.log("[line] Calling backend insight builder");
     const insightResult = await buildInsightFromBackend(
       BACKEND_URL,
       draft.store.slug,
       draft.dateYmd,
       RANGE_LIMIT
     );
+    console.log("[line] Backend insight built", {
+      source: insightResult.source,
+      shift: insightResult.shift,
+      crowd_label: insightResult.insight.crowd_label,
+      peak_time: insightResult.insight.peak_time,
+      avoid_time: insightResult.insight.avoid_time,
+    });
 
+    console.log("[line] Calling Gemini draft generator");
     const mdx = await generateBlogDraftMdx({
       storeLabel: draft.store.label,
       storeSlug: draft.store.slug,
@@ -220,6 +245,16 @@ export async function POST(req: NextRequest) {
   const rawBody = await req.text();
 
   const secret = process.env.LINE_CHANNEL_SECRET?.trim();
+  console.log("[line] env presence", {
+    hasLINE_CHANNEL_SECRET: Boolean(secret),
+    hasLINE_CHANNEL_ACCESS_TOKEN: Boolean(process.env.LINE_CHANNEL_ACCESS_TOKEN?.trim()),
+    hasGEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY?.trim()),
+    hasSUPABASE_URL: Boolean(process.env.SUPABASE_URL?.trim()),
+    hasSUPABASE_SERVICE_ROLE_KEY: Boolean(
+      process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || process.env.SUPABASE_SERVICE_KEY?.trim()
+    ),
+    backendUrlIsFallback: BACKEND_URL === "http://127.0.0.1:5000",
+  });
   const forceSkip = process.env.SKIP_LINE_SIGNATURE_VERIFY === "1";
   const devWithoutSecret = process.env.NODE_ENV === "development" && !secret;
   const skipVerify = forceSkip || devWithoutSecret;
@@ -236,7 +271,7 @@ export async function POST(req: NextRequest) {
 
   after(() => {
     void handleWebhookBody(rawBody).catch((err) => {
-      console.error("[line] handleWebhookBody", err);
+      console.error("[line] after->handleWebhookBody failed", err);
     });
   });
 
