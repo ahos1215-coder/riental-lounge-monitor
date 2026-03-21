@@ -11,8 +11,15 @@ export type DraftGeneratorInput = {
   topicHint?: string;
 };
 
-/** v1beta + generateContent で一般的に使える現行モデル（プロジェクト・枠により異なる） */
-const DEFAULT_MODEL = "gemini-2.0-flash";
+/**
+ * 現行の安定版（公式: Model code `gemini-2.5-flash`）。
+ * @see https://ai.google.dev/gemini-api/docs/models/gemini-2.5-flash
+ * gemini-2.0-flash は同一ドキュメント上「Deprecated」扱いのため、既定は 2.5 系へ寄せる。
+ */
+const DEFAULT_MODEL = "gemini-2.5-flash";
+
+/** 404 時の第2候補（最もコスト効率が良い Flash-Lite） */
+const FALLBACK_MODEL_LITE = "gemini-2.5-flash-lite";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -21,15 +28,28 @@ function sleep(ms: number): Promise<void> {
 function resolveGeminiModel(raw?: string): string {
   const model = raw?.trim();
   if (!model) return DEFAULT_MODEL;
-  // 旧名・404 になりやすい指定は現行デフォルトへ寄せる（Vercel の古い GEMINI_MODEL 対策）
+  // 旧名・非推奨モデルは現行デフォルトへ寄せる（Vercel の古い GEMINI_MODEL 対策）
   const legacy = new Set([
     "gemini-1.0-pro",
     "gemini-1.5-flash",
     "gemini-1.5-flash-latest",
     "gemini-1.5-pro",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
   ]);
   if (legacy.has(model)) return DEFAULT_MODEL;
   return model;
+}
+
+function buildCandidateModels(resolved: string): string[] {
+  const out: string[] = [];
+  const push = (m: string) => {
+    if (!out.includes(m)) out.push(m);
+  };
+  push(resolved);
+  push(DEFAULT_MODEL);
+  push(FALLBACK_MODEL_LITE);
+  return out;
 }
 
 function errorMessage(e: unknown): string {
@@ -149,17 +169,10 @@ export async function generateBlogDraftMdx(input: DraftGeneratorInput): Promise<
   const genAI = new GoogleGenerativeAI(apiKey);
   const prompt = buildUserPrompt(input);
 
-  const candidates: string[] = [];
-  if (requested !== DEFAULT_MODEL) {
-    candidates.push(requested);
-  }
-  candidates.push(DEFAULT_MODEL);
-  const seen = new Set<string>();
+  const candidates = buildCandidateModels(requested);
 
   let lastError: unknown;
   for (const modelName of candidates) {
-    if (seen.has(modelName)) continue;
-    seen.add(modelName);
     try {
       const text = await generateWithRateLimitRetries(genAI, modelName, prompt);
       if (!text?.trim()) {

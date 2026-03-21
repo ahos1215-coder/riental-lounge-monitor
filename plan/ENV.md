@@ -20,7 +20,7 @@ LINE Webhook（`frontend/src/app/api/line/route.ts`）:
 - `LINE_CHANNEL_ACCESS_TOKEN`（返信メッセージ用）
 - `SKIP_LINE_SIGNATURE_VERIFY`（`"1"` のとき署名検証をスキップ。ローカル検証用のみ）
 - `GEMINI_API_KEY`（下書き生成）
-- `GEMINI_MODEL`（任意。既定 `gemini-2.0-flash`。古い `gemini-1.0-pro` / `gemini-1.5-flash` 等はコード側で `gemini-2.0-flash` に正規化）
+- `GEMINI_MODEL`（任意。既定 `gemini-2.5-flash`。404 時は `gemini-2.5-flash-lite` を試行。古い `gemini-1.x` / `gemini-2.0-flash` 等はコード側で `gemini-2.5-flash` に正規化）
 - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SERVICE_KEY`（`blog_drafts` への INSERT。未設定時は生成のみ・DB 保存なし）
 
 注意:
