@@ -11,19 +11,47 @@ export type DraftGeneratorInput = {
   topicHint?: string;
 };
 
-const DEFAULT_MODEL = "gemini-1.0-pro";
+/** v1beta + generateContent で一般的に使える現行モデル（プロジェクト・枠により異なる） */
+const DEFAULT_MODEL = "gemini-2.0-flash";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function resolveGeminiModel(raw?: string): string {
   const model = raw?.trim();
   if (!model) return DEFAULT_MODEL;
-  // 過去設定との互換: 現在の v1beta で 404 になりやすい指定は安定側に寄せる
-  if (model === "gemini-1.5-flash" || model === "gemini-1.5-flash-latest") return DEFAULT_MODEL;
+  // 旧名・404 になりやすい指定は現行デフォルトへ寄せる（Vercel の古い GEMINI_MODEL 対策）
+  const legacy = new Set([
+    "gemini-1.0-pro",
+    "gemini-1.5-flash",
+    "gemini-1.5-flash-latest",
+    "gemini-1.5-pro",
+  ]);
+  if (legacy.has(model)) return DEFAULT_MODEL;
   return model;
 }
 
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 function isModelNotFoundError(e: unknown): boolean {
-  const msg = e instanceof Error ? e.message : String(e);
+  const msg = errorMessage(e);
   return msg.includes("[404 Not Found]") && msg.includes("models/");
+}
+
+function isRateLimitError(e: unknown): boolean {
+  const msg = errorMessage(e);
+  return msg.includes("[429") || msg.includes("Too Many Requests") || msg.includes("RESOURCE_EXHAUSTED");
+}
+
+/** API エラー本文の "Please retry in 55s" などを拾う */
+function parseRetryAfterSeconds(e: unknown): number | null {
+  const msg = errorMessage(e);
+  const m = /retry in ([\d.]+)\s*s/i.exec(msg);
+  if (m) return Math.min(120, Math.ceil(parseFloat(m[1])) + 2);
+  return null;
 }
 
 function buildSystemInstruction(): string {
@@ -62,6 +90,52 @@ function buildUserPrompt(input: DraftGeneratorInput): string {
   ].join("\n");
 }
 
+async function generateContentOnce(
+  genAI: GoogleGenerativeAI,
+  modelName: string,
+  prompt: string
+): Promise<string> {
+  const model = genAI.getGenerativeModel({
+    model: modelName,
+    systemInstruction: buildSystemInstruction(),
+  });
+  const result = await model.generateContent(prompt);
+  return result.response.text();
+}
+
+/**
+ * 429 は短時間のクォータ超過で起きることが多い。指数バックオフ + API が示す待ち秒。
+ */
+async function generateWithRateLimitRetries(
+  genAI: GoogleGenerativeAI,
+  modelName: string,
+  prompt: string,
+  maxAttempts = 4
+): Promise<string> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const text = await generateContentOnce(genAI, modelName, prompt);
+      if (text?.trim()) return text;
+      throw new Error("Gemini returned empty content");
+    } catch (e) {
+      lastErr = e;
+      if (!isRateLimitError(e) || attempt >= maxAttempts - 1) {
+        throw e;
+      }
+      const fromApi = parseRetryAfterSeconds(e);
+      const backoffSec = fromApi ?? Math.min(90, 15 * 2 ** attempt);
+      console.warn("[gemini] rate limited, retrying", {
+        model: modelName,
+        attempt: attempt + 1,
+        waitSec: backoffSec,
+      });
+      await sleep(backoffSec * 1000);
+    }
+  }
+  throw lastErr;
+}
+
 /**
  * Generate MDX draft using Gemini. Requires GEMINI_API_KEY.
  */
@@ -71,37 +145,40 @@ export async function generateBlogDraftMdx(input: DraftGeneratorInput): Promise<
     throw new Error("GEMINI_API_KEY is not set");
   }
 
-  const modelId = resolveGeminiModel(process.env.GEMINI_MODEL);
+  const requested = resolveGeminiModel(process.env.GEMINI_MODEL);
   const genAI = new GoogleGenerativeAI(apiKey);
   const prompt = buildUserPrompt(input);
-  let text = "";
-  try {
-    const model = genAI.getGenerativeModel({
-      model: modelId,
-      systemInstruction: buildSystemInstruction(),
-    });
-    const result = await model.generateContent(prompt);
-    text = result.response.text();
-  } catch (e) {
-    if (!isModelNotFoundError(e) || modelId === DEFAULT_MODEL) {
+
+  const candidates: string[] = [];
+  if (requested !== DEFAULT_MODEL) {
+    candidates.push(requested);
+  }
+  candidates.push(DEFAULT_MODEL);
+  const seen = new Set<string>();
+
+  let lastError: unknown;
+  for (const modelName of candidates) {
+    if (seen.has(modelName)) continue;
+    seen.add(modelName);
+    try {
+      const text = await generateWithRateLimitRetries(genAI, modelName, prompt);
+      if (!text?.trim()) {
+        throw new Error("Gemini returned empty content");
+      }
+      let mdx = text.trim();
+      if (mdx.startsWith("```")) {
+        mdx = mdx.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n```\s*$/, "");
+      }
+      return mdx.trim();
+    } catch (e) {
+      lastError = e;
+      if (isModelNotFoundError(e)) {
+        console.warn("[gemini] model not found, trying next candidate", { model: modelName });
+        continue;
+      }
       throw e;
     }
-    console.warn("[gemini] model not found, fallback to default", { requested: modelId, fallback: DEFAULT_MODEL });
-    const fallbackModel = genAI.getGenerativeModel({
-      model: DEFAULT_MODEL,
-      systemInstruction: buildSystemInstruction(),
-    });
-    const fallbackResult = await fallbackModel.generateContent(prompt);
-    text = fallbackResult.response.text();
-  }
-  if (!text?.trim()) {
-    throw new Error("Gemini returned empty content");
   }
 
-  // Strip optional markdown code fence
-  let mdx = text.trim();
-  if (mdx.startsWith("```")) {
-    mdx = mdx.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n```\s*$/, "");
-  }
-  return mdx.trim();
+  throw lastError instanceof Error ? lastError : new Error(String(lastError));
 }
