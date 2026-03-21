@@ -93,6 +93,7 @@ async function processMessageEvent(ev: LineEvent): Promise<void> {
   if (!replyToken) return;
 
   const text = ev.message?.type === "text" ? ev.message.text?.trim() : "";
+  console.log("[line] Extracted text:", text);
   if (!text) {
     await replyLine(replyToken, "テキストメッセージのみ対応しています。");
     return;
@@ -205,6 +206,7 @@ async function handleWebhookBody(rawBody: string): Promise<void> {
 
   const events = body.events ?? [];
   for (const ev of events) {
+    console.log("[line] Received event:", JSON.stringify(ev, null, 2));
     if (ev.type !== "message") continue;
     await processMessageEvent(ev);
   }
