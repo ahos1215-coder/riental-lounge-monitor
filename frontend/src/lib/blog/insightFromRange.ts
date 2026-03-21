@@ -54,6 +54,15 @@ export function nightWindowIso(ymd: string): NightWindow {
   return { from, to, label: "Tonight" };
 }
 
+/** 同一カレンダー日（JST）0:00〜23:59:59.999。今夜の窓にまだサンプルが無い日中などに使う */
+export function dayWindowIso(ymd: string): NightWindow {
+  return {
+    from: `${ymd}T00:00:00+09:00`,
+    to: `${ymd}T23:59:59.999+09:00`,
+    label: "Day (JST)",
+  };
+}
+
 function normalizeIso(s: string): string {
   return s.replace(/\.(\d{3})\d+/, ".$1");
 }
@@ -229,22 +238,40 @@ export async function buildInsightFromBackend(
   dateYmd: string,
   limit = 1000
 ): Promise<InsightBuildResult> {
-  const { from, to, label } = nightWindowIso(dateYmd);
+  let range: NightWindow = nightWindowIso(dateYmd);
+  const { from, to } = range;
   const notes: string[] = [];
   let source: InsightBuildResult["source"] = "api/range";
   let shift: InsightBuildResult["shift"] = "none";
   let points: Array<{ dt: Date; total: number }> = [];
   let skipForecastDueToTimeout = false;
+  let rangeRows: unknown[] = [];
 
   try {
     console.log("[insight] buildInsightFromBackend -> api/range");
-    const rows = await fetchRangeRows(backendBase, storeSlug, limit);
-    points = collectPoints(rows, from, to, {
+    rangeRows = await fetchRangeRows(backendBase, storeSlug, limit);
+    points = collectPoints(rangeRows, from, to, {
       totalKeys: ["total"],
       menKeys: ["men", "male", "m"],
       womenKeys: ["women", "female", "f"],
     });
-    console.log("[insight] api/range -> points", { points: points.length });
+    console.log("[insight] api/range -> points", { points: points.length, window: "night" });
+
+    // 今夜の窓（19:00〜翌05:00）にまだ1件も無いが、日中のサンプルはある → 同一日の全日（JST）で再集計
+    if (points.length === 0 && rangeRows.length > 0) {
+      const dayRange = dayWindowIso(dateYmd);
+      const dayPts = collectPoints(rangeRows, dayRange.from, dayRange.to, {
+        totalKeys: ["total"],
+        menKeys: ["men", "male", "m"],
+        womenKeys: ["women", "female", "f"],
+      });
+      console.log("[insight] api/range -> points", { points: dayPts.length, window: "day_fallback" });
+      if (dayPts.length > 0) {
+        points = dayPts;
+        range = dayRange;
+        notes.push("night_window_empty_used_full_jst_day");
+      }
+    }
   } catch (e) {
     const abort = isAbortError(e);
     const msg = errorMessage(e);
@@ -298,7 +325,7 @@ export async function buildInsightFromBackend(
 
   return {
     insight,
-    range: { from, to, label },
+    range,
     quality_flags: {
       notes: [`generated_from:${source}`, `shift:${shift}`, ...notes],
     },
