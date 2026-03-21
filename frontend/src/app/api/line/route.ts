@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { after } from "next/server";
 import crypto from "node:crypto";
 
 import { parseLineIntent } from "@/lib/line/parseLineIntent";
@@ -15,7 +14,7 @@ const BACKEND_URL =
   "http://127.0.0.1:5000";
 
 /** Range fetch limit (public contract: store + limit only). */
-const RANGE_LIMIT = 50;
+const RANGE_LIMIT = 20;
 
 export const maxDuration = 60;
 
@@ -269,11 +268,13 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  after(() => {
-    void handleWebhookBody(rawBody).catch((err) => {
-      console.error("[line] after->handleWebhookBody failed", err);
-    });
-  });
+  // Vercel serverless 上で `after()` がサスペンドされ、返信処理まで完遂されないケースがあるため、
+  // ここでは webhook 完了まで同期的に待つ（LINE には 200 を返す）。
+  try {
+    await handleWebhookBody(rawBody);
+  } catch (err) {
+    console.error("[line] POST handleWebhookBody failed", err);
+  }
 
   return new NextResponse("OK", { status: 200 });
 }

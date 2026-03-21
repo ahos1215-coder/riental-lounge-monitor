@@ -167,7 +167,7 @@ function isAbortError(e: unknown): boolean {
   return anyE?.name === "AbortError";
 }
 
-async function fetchJson(url: string, timeoutMs = 5000): Promise<unknown> {
+async function fetchJson(url: string, timeoutMs = 10000): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -247,7 +247,9 @@ export async function buildInsightFromBackend(
     console.log("[insight] api/range -> points", { points: points.length });
   } catch (e) {
     const abort = isAbortError(e);
-    notes.push(`api_range_error:${errorMessage(e)}`);
+    const msg = errorMessage(e);
+    console.error("[insight] api/range failed", { abort, msg });
+    notes.push(`api_range_error:${msg}`);
     if (abort) {
       skipForecastDueToTimeout = true;
       notes.push("api_range_timeout_skip_forecast");
