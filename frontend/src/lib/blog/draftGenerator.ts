@@ -11,7 +11,15 @@ export type DraftGeneratorInput = {
   topicHint?: string;
 };
 
-const DEFAULT_MODEL = "gemini-1.5-flash";
+const DEFAULT_MODEL = "gemini-1.5-flash-latest";
+
+function resolveGeminiModel(raw?: string): string {
+  const model = raw?.trim();
+  if (!model) return DEFAULT_MODEL;
+  // 過去設定との互換: 404 を避けるため latest 指定へ寄せる
+  if (model === "gemini-1.5-flash") return "gemini-1.5-flash-latest";
+  return model;
+}
 
 function buildSystemInstruction(): string {
   return [
@@ -58,7 +66,7 @@ export async function generateBlogDraftMdx(input: DraftGeneratorInput): Promise<
     throw new Error("GEMINI_API_KEY is not set");
   }
 
-  const modelId = process.env.GEMINI_MODEL?.trim() || DEFAULT_MODEL;
+  const modelId = resolveGeminiModel(process.env.GEMINI_MODEL);
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({
     model: modelId,
