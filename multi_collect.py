@@ -10,9 +10,18 @@ import os
 import time
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+
+# Flask と同じリポジトリルートの .env / .env.local を読む（単体実行時も HAS_SUPABASE が揃う）
+_root = Path(__file__).resolve().parent
+if (_root / ".env").is_file():
+    load_dotenv(_root / ".env", override=False)
+if (_root / ".env.local").is_file():
+    load_dotenv(_root / ".env.local", override=True)
 
 # ---------- 環境変数 ----------
 

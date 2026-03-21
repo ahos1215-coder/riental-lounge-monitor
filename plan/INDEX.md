@@ -32,6 +32,7 @@ Target commit: 10e50d6
 - `oriental/data/provider.py`（Supabase logs）
 
 ### Frontend
+- LINE Webhook（下書き）: `frontend/src/app/api/line/route.ts`
 - `/`: `frontend/src/app/page.tsx`
 - `/stores`: `frontend/src/app/stores/page.tsx`
 - `/store/[id]`: `frontend/src/app/store/[id]/page.tsx`

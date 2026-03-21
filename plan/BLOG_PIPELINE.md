@@ -1,24 +1,27 @@
-# MEGRIBI Blog Pipeline（n8n / GitHub Actions / Supabase / GitHub）
-Last updated: 2025-12-29 / commit: 4299ff1
+# MEGRIBI Blog Pipeline（LINE / Next.js / GitHub Actions / Supabase / GitHub）
+
+最終更新: 2026-03-21
 
 ## 配管の全体像（結論）
-- 司令塔: n8n（セルフホスト）
+- 司令塔（下書き）: Next.js `POST /api/line`（LINE Messaging Webhook 直受け）
+- 司令塔（従来・任意）: n8n（セルフホスト）— 廃止または併用は運用次第
 - 工場: GitHub Actions（実行環境）
-- 資産: Supabase（Facts完全版） / GitHub（記事・画像・公開Facts）
+- 資産: Supabase（Facts完全版 / `blog_drafts`） / GitHub（記事・画像・公開Facts）
 - 承認: あなた（PRを見てマージ＝公開許可）
 
 ## 役割
 - あなた：最終承認（PRマージ）
 - LINE：指示UI（スマホ）
-- n8n：受付・分岐・通知・再実行・ジョブ状態管理
+- Next.js：Webhook 受信 → Flask `/api/range` 等で材料取得 → Gemini で MDX 下書き → Supabase `blog_drafts` 保存 → LINE 返信
+- n8n：（レガシー）受付・分岐・通知・再実行・ジョブ状態管理
 - GitHub Actions：集計/診断/文章化/成果物生成・PR作成
-- Supabase：元データ（logs）とFacts完全版、ジョブ状態
+- Supabase：元データ（logs）とFacts完全版、ジョブ状態、`blog_drafts`
 - GitHub：成果物置き場（MDX/画像/公開Facts）＋承認ゲート（PR）
 
 ## 推奨フロー（MVP）
 1) 指示（人が動かすのはここだけ）
-- LINE → n8n（Webhook）
-- n8n → Supabase に job 作成（queued）
+- LINE → Next.js `/api/line`（Webhook）
+- （任意・旧）LINE → n8n（Webhook）→ Supabase に job 作成（queued）
 
 2) 工場稼働（自動）
 - n8n → GitHub Actions 起動（job_id, store, topic, level）
@@ -46,7 +49,6 @@ C) 文章化（Render）＝LLM
 
 ## 公開Facts生成（ローカル）
 - MDX frontmatter の date/store/facts_id から夜窓（19:00-翌05:00 JST）を計算し、insight を自動生成する。
-- facts_id_public は facts_id の別名として扱う（互換用）。
 - 実行場所は repo root / `frontend` どちらでも可（`content/blog` を自動検出）。
 - `/api/range?store=...&limit=1000` を優先し、窓内が空なら `/api/forecast_today` を使う。forecast の日付ズレは +1日シフトで救済する。
 

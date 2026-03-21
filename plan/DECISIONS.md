@@ -12,6 +12,7 @@ Target commit: 10e50d6
 7) 収集の主系入口は `/tasks/multi_collect`（alias: `/api/tasks/collect_all_once`）。`/tasks/tick` と `/tasks/collect` はレガシー/ローカル用途。
 8) Weekly Insights / Public Facts は GitHub Actions で生成し `frontend/content/*` にコミットする（Next.js は fs で読む）。
 9) 秘密値は環境変数のみ。`NEXT_PUBLIC_*` に秘密を入れない。
+10) `blog_drafts` への保存は **Next.js API routes（サーバー）** からのみ行い、`SUPABASE_SERVICE_ROLE_KEY` はサーバー環境変数に限定する。ブラウザから Supabase を直接叩かない（従来のレイヤ方針と整合）。
 
 ## やらないこと（ハードルール）
 - `/api/range` にクエリ追加・サーバ側の夜窓フィルタ追加。

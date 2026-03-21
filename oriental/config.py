@@ -5,14 +5,18 @@ from dataclasses import dataclass
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env from project root if present (do not override existing env vars)
+# リポジトリルートの .env / .env.local を読み込む（Next 用の .env.local に SUPABASE_* を置ける）
+# 順序: 先に .env、次に .env.local で上書き（ローカル秘密を優先）
 try:
-    env_path = Path(__file__).resolve().parent.parent / ".env"
-    if env_path.is_file():
-        load_dotenv(env_path, override=False)
+    _root = Path(__file__).resolve().parent.parent
+    _env_base = _root / ".env"
+    _env_local = _root / ".env.local"
+    if _env_base.is_file():
+        load_dotenv(_env_base, override=False)
+    if _env_local.is_file():
+        load_dotenv(_env_local, override=True)
 except Exception as exc:  # pragma: no cover
-    # Fallback to a simple warning without breaking app startup
-    print(f"[config] failed to load .env from {env_path}: {exc}")
+    print(f"[config] failed to load .env / .env.local: {exc}")
 
 
 @dataclass(slots=True)

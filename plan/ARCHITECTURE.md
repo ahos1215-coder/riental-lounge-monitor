@@ -1,6 +1,6 @@
 # ARCHITECTURE
-Last updated: 2025-12-23
-Target commit: 10e50d6
+Last updated: 2026-03-21
+Target commit: (see git)
 
 ## Overview
 - Stack: Supabase (logs/stores) -> Flask API (Render) -> Next.js 16 (Vercel)
@@ -8,6 +8,7 @@ Target commit: 10e50d6
 - Night window（19:00–05:00）はフロント責務（`frontend/src/app/hooks/useStorePreviewData.ts`）
 - Second venues は map-link 方式（frontend でリンク生成）
 - Insights / Facts は GitHub Actions で生成し、`frontend/content/*` にコミット
+- LINE からのブログ下書き: Next.js `POST /api/line` が Webhook を受信し、`BACKEND_URL` 経由で `/api/range` と `/api/forecast_today` を取得し、夜窓 insight を計算したうえで Gemini により MDX 下書きを生成。Supabase `blog_drafts` に保存（server-only・service role）。
 
 ## Data Flow
 1) 収集: `multi_collect.py` または `/tasks/multi_collect` が Supabase `logs` に書き込む
@@ -19,6 +20,7 @@ Target commit: 10e50d6
    - 夜窓の判定・絞り込みはフロント側で実施
 4) GitHub Actions が Insights / Facts を生成し静的 JSON を更新
    - `/insights/weekly` 系ページは fs から読み込む
+5) （任意）LINE → `POST /api/line` → 下書きを `blog_drafts` に保存（閲覧ページは未接続の場合あり）
 
 ## Contracts / Constraints
 - `/api/range` の公開契約は `store` + `limit` のみ
@@ -37,6 +39,7 @@ Target commit: 10e50d6
 
 ### Frontend
 - `frontend/src/app/api/*/route.ts`（backend proxy）
+- `frontend/src/app/api/line/route.ts`（LINE Messaging webhook → 下書き生成）
 - `frontend/src/app/hooks/useStorePreviewData.ts`（夜窓ロジック）
 - `frontend/src/app/insights/weekly/**`（週次インサイトページ）
 - `frontend/src/app/blog/**`（ブログ）
