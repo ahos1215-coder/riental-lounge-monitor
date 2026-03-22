@@ -1,5 +1,9 @@
 import type { StoreMeta } from "@/app/config/stores";
-import { buildInsightFromBackend, type InsightBuildResult } from "./insightFromRange";
+import {
+  buildInsightFromBackend,
+  type BlogEdition,
+  type InsightBuildResult,
+} from "./insightFromRange";
 import { generateBlogDraftMdx } from "./draftGenerator";
 import { insertBlogDraft, isBlogDraftsConfigured } from "@/lib/supabase/blogDrafts";
 
@@ -8,7 +12,11 @@ function truncate(s: string, max: number): string {
   return `${s.slice(0, max - 20)}\n…(省略)`;
 }
 
-export type BlogDraftPipelineSource = "line_webhook" | "vercel_cron" | "manual_api";
+export type BlogDraftPipelineSource =
+  | "line_webhook"
+  | "vercel_cron"
+  | "github_actions_cron"
+  | "manual_api";
 
 export type RunBlogDraftPipelineInput = {
   backendUrl: string;
@@ -17,6 +25,8 @@ export type RunBlogDraftPipelineInput = {
   dateYmd: string;
   factsId: string;
   topicHint?: string;
+  /** 省略時は JST 現在時刻から推定（`buildInsightFromBackend` と同じ） */
+  edition?: BlogEdition;
   source: BlogDraftPipelineSource;
   lineUserId?: string | null;
 };
@@ -40,10 +50,13 @@ export type RunBlogDraftPipelineErr = {
 export async function runBlogDraftPipeline(
   input: RunBlogDraftPipelineInput
 ): Promise<RunBlogDraftPipelineOk | RunBlogDraftPipelineErr> {
-  const { backendUrl, rangeLimit, store, dateYmd, factsId, topicHint, source, lineUserId } = input;
+  const { backendUrl, rangeLimit, store, dateYmd, factsId, topicHint, edition, source, lineUserId } =
+    input;
 
   try {
-    const insightResult = await buildInsightFromBackend(backendUrl, store.slug, dateYmd, rangeLimit);
+    const insightResult = await buildInsightFromBackend(backendUrl, store.slug, dateYmd, rangeLimit, {
+      edition,
+    });
 
     const mdx = await generateBlogDraftMdx({
       storeLabel: store.label,

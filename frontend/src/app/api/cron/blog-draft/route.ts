@@ -4,7 +4,11 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { DEFAULT_STORE, getStoreMetaBySlugStrict } from "@/app/config/stores";
 import { buildFactsId } from "@/lib/line/parseLineIntent";
-import { runBlogDraftPipeline } from "@/lib/blog/runBlogDraftPipeline";
+import type { BlogEdition } from "@/lib/blog/insightFromRange";
+import {
+  runBlogDraftPipeline,
+  type BlogDraftPipelineSource,
+} from "@/lib/blog/runBlogDraftPipeline";
 
 // Turbopack の API ルートでは `next.config.ts` の loadEnvConfig が効かないケースがあるため、
 // リポジトリルート / frontend の `.env.local` をここでも読み込む（CRON_SECRET の照合用）。
@@ -44,7 +48,7 @@ function parseCronStoreSlugs(): string[] {
 }
 
 /**
- * Vercel Cron: `Authorization: Bearer <CRON_SECRET>`（プロジェクトに CRON_SECRET があるとき自動付与）
+ * 定時 Cron（本番は GitHub Actions から `GET` + `?edition=`）。`Authorization: Bearer <CRON_SECRET>`。
  * ローカル: `.env.local` に CRON_SECRET を入れて同じヘッダで叩くか、`SKIP_CRON_AUTH=1`（development のみ）
  */
 function isCronAuthorized(req: NextRequest): boolean {
@@ -76,6 +80,26 @@ async function handleCron(req: NextRequest) {
   const dateOverride = url.searchParams.get("date");
   const dateYmd = dateOverride && /^\d{4}-\d{2}-\d{2}$/.test(dateOverride) ? dateOverride : todayYmdJst();
 
+  const editionParam = url.searchParams.get("edition")?.trim().toLowerCase();
+  let edition: BlogEdition | undefined;
+  if (editionParam === "evening_preview" || editionParam === "late_update") {
+    edition = editionParam;
+  } else if (editionParam) {
+    return NextResponse.json(
+      { ok: false, error: "invalid edition (use evening_preview | late_update)" },
+      { status: 400 }
+    );
+  }
+
+  const sourceParam = url.searchParams.get("source")?.trim();
+  const pipelineSource: BlogDraftPipelineSource =
+    sourceParam === "line_webhook" ||
+    sourceParam === "vercel_cron" ||
+    sourceParam === "github_actions_cron" ||
+    sourceParam === "manual_api"
+      ? sourceParam
+      : "github_actions_cron";
+
   const slugs = parseCronStoreSlugs();
   const rangeLimit = cronRangeLimit();
 
@@ -103,7 +127,8 @@ async function handleCron(req: NextRequest) {
       dateYmd,
       factsId,
       topicHint: "",
-      source: "vercel_cron",
+      edition,
+      source: pipelineSource,
       lineUserId: null,
     });
 
@@ -128,7 +153,9 @@ async function handleCron(req: NextRequest) {
     service: "cron-blog-draft",
     dateYmd,
     rangeLimit,
+    edition_requested: edition ?? null,
     edition_inferred: results.find((r) => r.edition)?.edition,
+    source: pipelineSource,
     results,
   });
 }
