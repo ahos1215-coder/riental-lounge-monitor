@@ -68,7 +68,11 @@ ENABLE_WEATHER = os.environ.get("ENABLE_WEATHER", "1") == "1"
 WEATHER_CACHE_TTL_SEC = int(os.environ.get("WEATHER_CACHE_TTL_SEC", "3600"))
 # 実 HTTP の最小間隔（秒）。バースト緩和
 WEATHER_HTTP_MIN_INTERVAL_SEC = float(os.environ.get("WEATHER_HTTP_MIN_INTERVAL_SEC", "0.85"))
-WEATHER_HTTP_MAX_RETRIES = int(os.environ.get("WEATHER_HTTP_MAX_RETRIES", "4"))
+# 接続エラー等の再試行（429 とは別）
+WEATHER_HTTP_MAX_RETRIES = int(os.environ.get("WEATHER_HTTP_MAX_RETRIES", "3"))
+# 429: 長時間 sleep すると Gunicorn の worker timeout（既定30s）で落ちるため、短い待機＋最大1回だけ再試行
+WEATHER_429_RETRY_SLEEP_SEC = float(os.environ.get("WEATHER_429_RETRY_SLEEP_SEC", "2.5"))
+WEATHER_429_EXTRA_TRIES = int(os.environ.get("WEATHER_429_EXTRA_TRIES", "1"))
 _CACHE_DIR = _root / ".cache"
 _DEFAULT_WEATHER_CACHE_PATH = _CACHE_DIR / "open_meteo_weather_cache.json"
 WEATHER_CACHE_PATH = Path(os.environ.get("WEATHER_CACHE_PATH", str(_DEFAULT_WEATHER_CACHE_PATH)))
@@ -439,7 +443,8 @@ def fetch_current_weather(
 
     - 同一座標は WEATHER_CACHE_TTL_SEC の間ディスクキャッシュを使い、API を呼ばない。
     - キャッシュ期限切れ後の連続取得は WEATHER_HTTP_MIN_INTERVAL_SEC で間隔を空ける。
-    - 429 のときはバックオフして再試行。完全失敗時は期限切れキャッシュがあればそれを返す。
+    - 429 のときは短い待機後に最大1回だけ再試行（長い指数バックオフはしない／HTTP ワーカータイムアウト回避）。
+    - 完全失敗時は期限切れキャッシュがあればそれを返す。
     """
     if not ENABLE_WEATHER:
         return None, None, None, None
@@ -480,19 +485,31 @@ def fetch_current_weather(
     global _last_open_meteo_http_at
     out: tuple[int | None, str | None, float | None, float | None] | None = None
 
-    for attempt in range(max(1, WEATHER_HTTP_MAX_RETRIES)):
+    max_attempts = max(1, WEATHER_HTTP_MAX_RETRIES)
+    extra_429_tries = max(0, WEATHER_429_EXTRA_TRIES)
+    attempt = 0
+    while attempt < max_attempts:
         _enforce_open_meteo_spacing()
         try:
             resp = requests.get(url, params=params, timeout=15, headers=headers)
             _last_open_meteo_http_at = time.time()
             if resp.status_code == 429:
-                wait = min(90.0, 4.0 * (2**attempt))
                 print(
-                    f"[weather][429] Too Many Requests; sleep {wait:.1f}s "
-                    f"attempt={attempt + 1}/{WEATHER_HTTP_MAX_RETRIES}"
+                    f"[weather][429] Too Many Requests key={key} "
+                    f"http_try={attempt + 1}/{max_attempts} extra_429_left={extra_429_tries}"
                 )
-                time.sleep(wait)
-                continue
+                # 長い指数バックオフは Gunicorn の worker timeout（既定30s前後）を超えやすい
+                if extra_429_tries > 0:
+                    extra_429_tries -= 1
+                    wait = min(8.0, max(0.5, WEATHER_429_RETRY_SLEEP_SEC))
+                    print(
+                        f"[weather][429] short sleep {wait:.1f}s then one retry "
+                        f"(does not consume http_try budget)"
+                    )
+                    time.sleep(wait)
+                    continue
+                break
+
             resp.raise_for_status()
             data = resp.json()
             current = data.get("current", {})
@@ -520,8 +537,11 @@ def fetch_current_weather(
         except Exception as e:
             _last_open_meteo_http_at = time.time()
             print(f"[weather][error] failed to fetch weather: {e}")
-            if attempt < WEATHER_HTTP_MAX_RETRIES - 1:
-                time.sleep(min(30.0, 2.0 * (attempt + 1)))
+            attempt += 1
+            if attempt < max_attempts:
+                time.sleep(min(5.0, 1.5 * attempt))
+            else:
+                break
 
     if out is not None:
         return out

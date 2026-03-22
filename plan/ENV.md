@@ -83,7 +83,8 @@ Legacy / Optional:
 - `BETWEEN_STORES_SEC`
 - `ENABLE_WEATHER`
 - `WEATHER_LAT` / `WEATHER_LON`
-- **Open-Meteo（429 対策）**: `WEATHER_CACHE_TTL_SEC`（既定 **3600**。同一座標の再取得間隔・秒）、`WEATHER_HTTP_MIN_INTERVAL_SEC`（既定 **0.85**。実 HTTP の最小間隔）、`WEATHER_HTTP_MAX_RETRIES`（既定 4）、`WEATHER_CACHE_PATH`（省略時はリポジトリ直下 `.cache/open_meteo_weather_cache.json`）
+- **Open-Meteo（429 対策）**: `WEATHER_CACHE_TTL_SEC`（既定 **3600**）、`WEATHER_HTTP_MIN_INTERVAL_SEC`（既定 **0.85**）、`WEATHER_HTTP_MAX_RETRIES`（接続エラー等の再試行回数・既定 **3**）、`WEATHER_429_EXTRA_TRIES`（429 時の追加リトライ回数・既定 **1**、**短い sleep のみ**）、`WEATHER_429_RETRY_SLEEP_SEC`（既定 **2.5**）、`WEATHER_CACHE_PATH`（省略時 `.cache/open_meteo_weather_cache.json`）
+- **Gunicorn（Render）**: `Procfile` で `--timeout 300`。長い `tasks/multi_collect` の HTTP リクエストが worker timeout で落ちないようにする
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SERVICE_KEY`
 
