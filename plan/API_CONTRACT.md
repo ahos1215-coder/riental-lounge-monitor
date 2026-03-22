@@ -1,15 +1,28 @@
 # API_CONTRACT
-Last updated: 2025-12-23
-Target commit: 10e50d6
+Last updated: 2026-03-21
+Target commit: (see git)
 
-MEGRIBI backend の公開契約。互換性を壊さないこと。
+MEGRIBI の公開契約。**Flask（Render）** と **Next.js（Vercel）の LINE Webhook** を含む。互換性を壊さないこと。
 
 ## Global rules
 - Source of truth: Supabase `logs`（Google Sheet / GAS は legacy fallback）。
 - レイヤ構造: Supabase → Flask → Next.js（frontend は Next API routes 経由で backend を呼ぶ）。
 - `/api/range` の公開契約は **`store` / `limit` のみ**。サーバ側の時間フィルタは追加しない。
-- Night window（19:00–05:00）はフロント責務。
+- Night window（19:00–05:00）: **店舗 UI** はフロント（`useStorePreviewData.ts`）。**LINE 下書き**は **`insightFromRange.ts`** で取得済み行に対して集計。Flask は夜窓を採らない。
 - `MAX_RANGE_LIMIT` で `limit` を clamp（未指定時は `min(500, MAX_RANGE_LIMIT)`）。
+
+## Next.js (Vercel) — LINE Webhook
+
+### GET /api/line
+- ヘルスチェック用。
+- Response（例）: `{ "ok": true, "service": "line-webhook" }`
+
+### POST /api/line
+- LINE Messaging API の Webhook（`Content-Type: application/json`）。
+- 本番では `x-line-signature` と `LINE_CHANNEL_SECRET` による署名検証（ローカル検証用に `SKIP_LINE_SIGNATURE_VERIFY=1` が使える場合あり。`plan/ENV.md`）。
+- 処理内容（高レベル）: イベント解析 → `BACKEND_URL` 経由で Flask `GET /api/range`（および必要なら `GET /api/forecast_today`）→ インサイト → Gemini 下書き → Supabase `blog_drafts` → LINE 返信。
+- **Flask の `/api/range` 契約は変更しない**（追加クエリを付けない）。窓・集計は Next アプリ層（`insightFromRange.ts`）。
+- ブログ配管に **n8n は使わない**。
 
 ## Responses（共通）
 - 成功時は `{ ok: true, ... }` を返す。

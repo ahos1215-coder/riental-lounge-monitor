@@ -369,6 +369,13 @@ export function getStoreMetaBySlug(slug: string | null | undefined): StoreMeta {
   return STORES.find((s) => s.slug === normalized) ?? STORES[0];
 }
 
+/** 一致する店舗が無いときは null（cron 等でデフォルト店にフォールバックしない） */
+export function getStoreMetaBySlugStrict(slug: string | null | undefined): StoreMeta | null {
+  if (!slug?.trim()) return null;
+  const normalized = slug.trim().toLowerCase();
+  return STORES.find((s) => s.slug === normalized) ?? null;
+}
+
 export function getStoreMetaById(storeId: string | null | undefined): StoreMeta {
   if (!storeId) return STORES[0];
   return STORES.find((s) => s.storeId === storeId) ?? STORES[0];

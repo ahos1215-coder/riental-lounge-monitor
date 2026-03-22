@@ -1,11 +1,17 @@
 # MEGRIBI Blog Content 方針（最新版 / MVP）
-Last updated: 2025-12-29 / commit: 4299ff1
+Last updated: 2026-03-21
+Target commit: (see git)
 
 ## 目的
 - SEO流入を増やす（夜遊び・相席系の検索需要）
 - MEGRIBIの価値（店舗比較・混雑傾向・簡易予測）を読者向けに翻訳して伝える
 - 半自動で継続運用できる仕組みにする（人が最終責任）
 - 分析結果をブログ以外にも使い回せる形で資産化（二重管理しない）
+
+## LINE 下書き（現状）
+- **n8n は使わない。** スマホからの下書きは Next `POST /api/line` → Supabase `blog_drafts`（`plan/BLOG_PIPELINE.md`）。
+- インサイトの **`avoid_time`** は内部キー名のままだが、意味は「窓内で total が最も小さい＝**空きやすい狙い目**」。`draftGenerator.ts` のプロンプトで **読者向けはポジティブ表現**に寄せている。それでも違和感があれば人手で直す。
+- **Git 公開前**: `npm run drafts:export` で `blog_drafts` → ローカル `content/blog` + `content/facts/public`（`BLOG_PIPELINE.md` §3b）。
 
 ## 基本方針（合意）
 - AIは「自動投稿」ではなく「半自動編集」

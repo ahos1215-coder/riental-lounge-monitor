@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import type { InsightBuildResult } from "./insightFromRange";
+import type { BlogEdition, InsightBuildResult } from "./insightFromRange";
 
 export type DraftGeneratorInput = {
   storeLabel: string;
@@ -74,20 +74,79 @@ function parseRetryAfterSeconds(e: unknown): number | null {
   return null;
 }
 
-function buildSystemInstruction(): string {
+function buildEditionBlock(edition: BlogEdition): string {
+  if (edition === "late_update") {
+    return [
+      "■ 本稿のエディション: **21時半便（本日の修正予報・リアルタイム実況）**",
+      "- **役割**: 19:00〜21:25 前後までの**実測に近い動き**を踏まえた**軌道修正**と、「**今から行くか**」の**判断材料**（来店の最終判断は読者本人）。",
+      "- **トーン**: **現在のリアルタイム動向・実況・直近の熱量**。夜の街の噂話ではなく、**渡された JSON の事実**から読み取れる範囲で書く。",
+      "- **答え合わせ的な語感**（例・そのまま使う必要はない）: 「予想どおり二次会層の流入が見え始め、相席の時間帯に入りつつある」「今日は予想より早い立ち上がりがデータ上うかがえる」など。**手元に前回の予測テキストはない**ので、「**データ上、こう読める**」「**傾向として**」に留める。",
+      "- **切り口**: 流入・賑わいの変化がデータで読めるときは、**実況**として伝える。過度な煽り・断定的な「今すぐ必ず」は禁止。",
+    ].join("\n");
+  }
   return [
-    "あなたはキャバクラ・ラウンジ業界向けのブログ編集者です。",
-    "与えられた集計結果（ピーク時間・避けたい時間・混雑ラベル）のみを根拠に記事を書いてください。",
-    "数値や事実の捏造は禁止です。データが不足している場合はその旨を本文で明示してください。",
-    "出力は必ず MDX 形式で、YAML frontmatter を先頭に含めてください。",
-    "frontmatter のキー: title, description, date (YYYY-MM-DD), categoryId (guide|beginner|prediction|column|interview), level (easy|normal|pro), store, facts_id, facts_visibility (show)",
-    "本文は見出しを ## で始め、『10秒まとめ』『今日の一言』『理由はこれ』『初心者メモ』のようなセクションを含めてください。",
-    "文体はです・ます調、読みやすく簡潔に。",
+    "■ 本稿のエディション: **18時便（本日の事前予報・見通し）**",
+    "- **役割**: 今夜全体の**見通し**と、来店タイミングを考えるうえでの**作戦会議**（複数の選び方を並べる）。",
+    "- **トーン**: 「これから始まる夜の**予想**」「傾向の解説」。**ピーク時刻は予想**として書き、絶対視しない。",
+    "- **切り口の例**（ニュアンス・そのままコピー不要）: 「19時台は比較的スムーズに入店しやすい傾向が見える一方、お食事メインで落ち着いた雰囲気になりやすい時間帯でもある。賑わいや交流の熱量を重視するなら、**21時以降（二次会帯）に合わせて来店を調整する**、という考え方もデータ上はありうる」など、**未来の時間帯のイメージ**を提示する。",
+    "- **早い時間帯**は人数が少なく見えても、**ご飯目的・別の予定の待機・出勤前**など多様で、**来店目的まではデータからは読めない**。**「だから相席の質がいちばん高い」とは書かない。**",
+  ].join("\n");
+}
+
+function buildSystemInstruction(edition: BlogEdition): string {
+  return [
+    "■ あなたの役割（書き手の立ち位置）",
+    "- あなたは**夜の街の噂やステレオタイプ**に引っ張られない、**第三者のデータアナリスト（外部の分析・編集視点）**です。店舗スタッフ・運営者の代弁はしません。",
+    "- MEGRIBI が示す混雑傾向などの**事実ベース**で、読者が来店タイミングを考える**参考**になる説明を書いてください。**客観的・中立**を最優先。",
+    "- **禁止:** 「当店では〜」「お待ちしております」「ぜひご来店を（店舗として）」など**店側の一人称・接客口調**。「ナンパ」「夜の街の常識」など**根拠のない一般論・偏見**で埋めること。",
+    "- **推奨:** 「データでは〜」「傾向としては〜」「来店を検討する際の参考として〜」など、**分析者としての距離感**。",
+    "",
+    "■ 対象業態（最重要・誤解禁止）",
+    "- 記事の対象は**相席ラウンジ**です。**キャバクラ・クラブ（接客型ナイト）・キャスト指名型の店**ではありません。",
+    "- 来店した一般の男性客と女性客が**相席**し、会話・交流を楽しむ形式の店舗として書く。混雑は「店内の賑わい」「席に余裕があるか・待ちやすさ」の**来店者目線**で説明する。",
+    "",
+    "■ 使用してはいけない語（本文・title・description・箇条書きすべて）",
+    "- **厳禁:** キャバクラ、キャバ、キャスト、指名、同伴、セット、シャンパン、ホステス、クラブ（接客クラブの意味）など、**接客型ナイト業態**を想起させる表現。",
+    "- 根拠のない店舗の内部事情・客層の断定は禁止。",
+    "",
+    "■ 推奨する語彙の方向性",
+    "- 相席、店内の雰囲気、賑わい、落ち着いている時間帯、入店しやすさの目安、交流、来店の判断材料、など。",
+    "",
+    buildEditionBlock(edition),
+    "",
+    "■ `insight.avoid_time` の意味（「ねらい目」の再定義・必ず守る）",
+    "- これは分析窓内で total が**最も小さい**サンプル時刻です。**待ちにくく入店しやすい時間帯の目安**、**店内が比較的落ち着いている時間の目安**として使ってください。",
+    "- **禁止:** avoid_time を「ねらい目＝相席がいちばんうまくいく最高の時間」と**断定**すること。早い時間帯は人数が少なく見えても、**ご飯目的・別の用事の待ち・出勤前**など多様で、**来店目的や相席の質まではデータからは測れません**。",
+    "- **提案型で書く:** 例）**活気・賑わいを楽しみたい**読者にはピーク付近（`peak_time` 等）の傾向を、**スムーズに入店して落ち着いて席につきたい**読者には `avoid_time` 付近の目安を、など**一つの正解にしない**。",
+    "- 「避けたい時間」「混雑の罠」などのネガティブラベルは禁止。description にも使わない。",
+    "",
+    "■ 男女比（JSON の draft_context.gender_note を尊重）",
+    "- カウントが取れている場合のみ**客観的に軽く**触れる。推測で盛らない。取れない場合は無理に書かない。",
+    "",
+    "■ 二次会ウェーブ（draft_context.secondary_wave.detected が true のとき）",
+    "- `secondary_wave.note` にある観測メモを参照し、データ上、**21時〜22時台に客数が急増する傾向**が読み取れる場合に限り、次のような**紹介**が可能: 一次会が終わったあと**二次会で合流する層**が流れ込み、店内の賑わいが一段上がる時間帯として捉えられる、など。",
+    "- この文脈では、**『一次会終わりの二次会層が合流し、最も質の高い出会いが期待できるゴールデンタイム』**といった表現を**使ってよい**（データがその解釈を支えるとき）。",
+    "- ただし**個人の結果を保証する**ような表現（必ず成功する、など）は禁止。`secondary_wave.detected` が false / データが薄いときは**無理にゴールデンタイムを書かない**。",
+    "",
+    "■ データが薄い日・厳しい日（draft_context.data_health）",
+    "- level が sparse または concerning のときは、冒頭や「今日の一言」で**正直に**、サンプル不足・偏り・閑散など**データ上の限界**を伝える。",
+    "- **正直さ:** 人数が極端に少ない、男性に偏っている等がデータで読めるときは、**期待を過度に持たせない**書き方をする。「ダメ」と決めつけるのではなく、**判断材料としての弱さ**を明示。",
+    "",
+    "■ 執筆上の禁止",
+    "- 数値や事実の捏造は禁止。不足は本文で明示。",
+    "- JSON の範囲を超える断定はしない。",
+    "",
+    "■ 出力形式",
+    "- 必ず **MDX**。先頭に YAML frontmatter。",
+    "- frontmatter のキー: title, description, date (YYYY-MM-DD), categoryId (guide|beginner|prediction|column|interview), level (easy|normal|pro), store, facts_id, facts_visibility (show)",
+    "- 本文は ## 見出しで、少なくとも: 『10秒まとめ』『今日の一言』『理由はこれ』『初心者メモ』。",
+    "- 『10秒まとめ』のラベル例: 「ピーク時間（賑わいの目安）:」「入店しやすさの目安（待ちにくさ）:」など（「避けたい時間」「ねらい目＝最高」禁止）。",
+    "- 文体はです・ます調、読みやすく簡潔に。",
   ].join("\n");
 }
 
 function buildUserPrompt(input: DraftGeneratorInput): string {
-  const { insight, range, quality_flags, source, shift } = input.insightResult;
+  const { insight, range, quality_flags, source, shift, draft_context } = input.insightResult;
   const hint = input.topicHint?.trim();
 
   const payload = {
@@ -100,11 +159,20 @@ function buildUserPrompt(input: DraftGeneratorInput): string {
     data_source: source,
     forecast_shift: shift,
     quality_notes: quality_flags.notes,
+    draft_context,
+    hourly_hint_excerpt: draft_context.hourly_hint,
     user_topic_hint: hint || null,
   };
 
   return [
-    "次の JSON は分析結果です。これに基づきブログ記事の下書き（MDX 全文）を1つ生成してください。",
+    "次の JSON は混雑傾向の分析結果です。**相席ラウンジ**来店を検討する読者向けの、**第三者データ解説**記事（MDX 全文）を1つ生成してください。",
+    "",
+    "執筆前の再確認:",
+    "- 業態は**相席ラウンジ**。キャバクラ・**キャスト・指名**など接客クラブの語は**一切使わない**。",
+    "- **avoid_time** は「待ちにくい・落ち着いている時間の目安」であり、「相席が最高にうまくいくねらい目」とは**断定しない**。ピーク重視と入店しやすさ重視を**提案型**で並べる。",
+    "- **draft_context.edition**: `evening_preview` なら今夜の**見通し・作戦**（未来のピークは予想）、`late_update` なら**実測に近い実況・答え合わせ**（断定しすぎない）。",
+    "- **draft_context.secondary_wave.detected** が true なら、21〜22時台の急増を踏まえ**ゴールデンタイム**の紹介が可能（個人への結果保証はしない）。false なら無理に書かない。",
+    "- **data_health** が厳しければサンプル不足・偏りを**正直に**書く。",
     "",
     JSON.stringify(payload, null, 2),
   ].join("\n");
@@ -113,11 +181,12 @@ function buildUserPrompt(input: DraftGeneratorInput): string {
 async function generateContentOnce(
   genAI: GoogleGenerativeAI,
   modelName: string,
-  prompt: string
+  prompt: string,
+  systemInstruction: string
 ): Promise<string> {
   const model = genAI.getGenerativeModel({
     model: modelName,
-    systemInstruction: buildSystemInstruction(),
+    systemInstruction,
   });
   const result = await model.generateContent(prompt);
   return result.response.text();
@@ -130,12 +199,13 @@ async function generateWithRateLimitRetries(
   genAI: GoogleGenerativeAI,
   modelName: string,
   prompt: string,
+  systemInstruction: string,
   maxAttempts = 4
 ): Promise<string> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const text = await generateContentOnce(genAI, modelName, prompt);
+      const text = await generateContentOnce(genAI, modelName, prompt, systemInstruction);
       if (text?.trim()) return text;
       throw new Error("Gemini returned empty content");
     } catch (e) {
@@ -167,6 +237,8 @@ export async function generateBlogDraftMdx(input: DraftGeneratorInput): Promise<
 
   const requested = resolveGeminiModel(process.env.GEMINI_MODEL);
   const genAI = new GoogleGenerativeAI(apiKey);
+  const edition = input.insightResult.draft_context?.edition ?? "evening_preview";
+  const systemInstruction = buildSystemInstruction(edition);
   const prompt = buildUserPrompt(input);
 
   const candidates = buildCandidateModels(requested);
@@ -174,7 +246,7 @@ export async function generateBlogDraftMdx(input: DraftGeneratorInput): Promise<
   let lastError: unknown;
   for (const modelName of candidates) {
     try {
-      const text = await generateWithRateLimitRetries(genAI, modelName, prompt);
+      const text = await generateWithRateLimitRetries(genAI, modelName, prompt, systemInstruction);
       if (!text?.trim()) {
         throw new Error("Gemini returned empty content");
       }

@@ -1,5 +1,11 @@
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
+## ローカル開発（作業ディレクトリの注意）
+
+- **このフォルダ**（`next.config.ts` / `package.json` がある **`.../riental-lounge-monitor-main/frontend`**）で `npm run dev` してください。
+- すでに `frontend` にいる状態で **`cd frontend` をもう一度実行しない**でください。リポジトリ内に `frontend/frontend` という入れ子パスがあり、そこへ進むと **`cd frontend` が失敗**したり、別の場所で `npm run dev` してしまいます。
+- ターミナルのパスが `...\frontend\frontend` になっていたら、**一つ上へ** `cd ..` してから `npm run dev` し直してください。
+
 ## Getting Started
 
 First, run the development server:

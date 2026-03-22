@@ -13,6 +13,20 @@ export type Insight = {
   crowd_label: string;
 };
 
+/** 18時台便（事前の見通し） vs 21時半便（実測に基づく修正・実況） */
+export type BlogEdition = "evening_preview" | "late_update";
+
+export type DraftContext = {
+  edition: BlogEdition;
+  /** avoid_time は「待ち時間が短い」目安であり、相席の質の最高値とは限らない */
+  avoid_time_semantics: "entry_ease_not_social_peak";
+  gender_note: string;
+  secondary_wave: { detected: boolean; note: string };
+  data_health: { level: "ok" | "sparse" | "concerning"; notes: string[] };
+  /** AI 向け短い一行（時間帯別の傾き） */
+  hourly_hint: string;
+};
+
 export type InsightBuildResult = {
   insight: Insight;
   range: NightWindow;
@@ -21,6 +35,15 @@ export type InsightBuildResult = {
   source: "api/range" | "api/forecast_today";
   /** forecast date shift rescue */
   shift: "none" | "+1day";
+  /** 下書き生成向け: 男女比・ウェーブ検知・データ健全性・エディション */
+  draft_context: DraftContext;
+};
+
+export type PointWithGender = {
+  dt: Date;
+  total: number;
+  men: number | null;
+  women: number | null;
 };
 
 function fmtYmdTokyo(d: Date): string {
@@ -147,6 +170,148 @@ export function collectPoints(
   return points;
 }
 
+export function collectPointsWithGender(
+  rows: unknown[],
+  fromIso: string,
+  toIso: string,
+  options: CollectOptions
+): PointWithGender[] {
+  const from = new Date(fromIso);
+  const to = new Date(toIso);
+  const shiftMs = (options.shiftDays ?? 0) * MS_PER_DAY;
+  const points: PointWithGender[] = [];
+
+  for (const r of rows) {
+    if (!r || typeof r !== "object") continue;
+    const row = r as Record<string, unknown>;
+    const dt = parseTimestamp(row);
+    if (!dt) continue;
+    const shifted = shiftMs ? new Date(dt.getTime() + shiftMs) : dt;
+    if (shifted < from || shifted > to) continue;
+
+    const total = computeTotal(row, options.totalKeys, options.menKeys, options.womenKeys);
+    if (!Number.isFinite(total)) continue;
+
+    const men = pickNumber(row, options.menKeys);
+    const women = pickNumber(row, options.womenKeys);
+
+    points.push({
+      dt: shifted,
+      total: total as number,
+      men: men != null && Number.isFinite(men) ? men : null,
+      women: women != null && Number.isFinite(women) ? women : null,
+    });
+  }
+
+  points.sort((a, b) => a.dt.getTime() - b.dt.getTime());
+  return points;
+}
+
+function hourJST(d: Date): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Tokyo",
+    hour: "numeric",
+    hour12: false,
+  }).formatToParts(d);
+  const h = parts.find((p) => p.type === "hour")?.value;
+  return h != null ? parseInt(h, 10) : 12;
+}
+
+/** JST の現在時刻からエディション推定（LINE 手動テスト時も利用） */
+export function inferBlogEditionFromJstNow(date = new Date()): BlogEdition {
+  const h = hourJST(date);
+  if (h >= 21 || h <= 2) return "late_update";
+  return "evening_preview";
+}
+
+function sumHourlyTotals(points: PointWithGender[]): Map<number, number> {
+  const m = new Map<number, number>();
+  for (const p of points) {
+    const h = hourJST(p.dt);
+    m.set(h, (m.get(h) ?? 0) + p.total);
+  }
+  return m;
+}
+
+function computeDraftContext(
+  detailed: PointWithGender[],
+  insight: Insight,
+  edition: BlogEdition,
+  extraQualityNotes: string[]
+): DraftContext {
+  const notes: string[] = [...extraQualityNotes];
+  let gender_note =
+    "男女別のカウントが十分に取れないため、性別構成については断定しません（データに men/women が無い、または不足）。";
+
+  const withBoth = detailed.filter((p) => p.men != null && p.women != null && p.men! >= 0 && p.women! >= 0);
+  if (withBoth.length >= 3) {
+    const avgMen = withBoth.reduce((s, p) => s + (p.men as number), 0) / withBoth.length;
+    const avgWo = withBoth.reduce((s, p) => s + (p.women as number), 0) / withBoth.length;
+    if (avgWo > avgMen * 1.2) {
+      gender_note = `サンプル平均では女性のカウントが男性よりやや多めに見える傾向です（参考・推測過多は避けること）。`;
+    } else if (avgMen > avgWo * 1.2) {
+      gender_note = `サンプル平均では男性のカウントが女性よりやや多めに見える傾向です。相席の成立は人数バランスにも左右されるため、過度に楽観・悲観しない説明にしてください。`;
+    } else {
+      gender_note = `サンプル平均では男女のカウントのバランスはおおむね近い範囲に見えます（参考）。`;
+    }
+  }
+
+  const hourly = sumHourlyTotals(detailed);
+  const e19 = (hourly.get(19) ?? 0) + (hourly.get(20) ?? 0);
+  const e21 = (hourly.get(21) ?? 0) + (hourly.get(22) ?? 0);
+  let secondaryWave = { detected: false, note: "21〜22時台の急増パターンは検出できませんでした（サンプル数・時間粒度の制約あり）。" };
+  if (detailed.length >= 8 && e19 > 0 && e21 / e19 >= 1.25) {
+    secondaryWave = {
+      detected: true,
+      note:
+        "19〜20時台合計と比べて21〜22時台の合計が大きい傾向です。一次会後の合流・二次会層の流入が考えられる時間帯として、**控えめに**言及してよい（断定禁止）。",
+    };
+  } else if (detailed.length >= 8 && e21 > 0 && e19 === 0) {
+    secondaryWave = {
+      detected: true,
+      note: "21〜22時台にサンプルが集中しているため、深夜帯の盛り上がりが読み取れます（控えめに）。",
+    };
+  }
+
+  let level: "ok" | "sparse" | "concerning" = "ok";
+  if (detailed.length < 6) {
+    level = "sparse";
+    notes.push("sample_count_low");
+  }
+  const maxTotal = detailed.length ? Math.max(...detailed.map((p) => p.total)) : 0;
+  if (detailed.length > 0 && maxTotal < 25 && insight.crowd_label === "空き") {
+    level = "concerning";
+    notes.push("overall_low_activity");
+  }
+  if (withBoth.length >= 3) {
+    const avgMen = withBoth.reduce((s, p) => s + (p.men as number), 0) / withBoth.length;
+    const avgWo = withBoth.reduce((s, p) => s + (p.women as number), 0) / withBoth.length;
+    if (avgMen > avgWo * 1.6) {
+      if (level === "ok") level = "concerning";
+      notes.push("male_heavy_imbalance");
+    }
+  }
+
+  const hourlyParts: string[] = [];
+  for (const h of [18, 19, 20, 21, 22, 23]) {
+    const v = hourly.get(h);
+    if (v != null && v > 0) hourlyParts.push(`${h}時台計:${Math.round(v)}`);
+  }
+  const hourly_hint =
+    hourlyParts.length > 0
+      ? `時間帯別の合計（参考・粒度は元データ依存）: ${hourlyParts.join(", ")}`
+      : "時間帯別の十分な分解はできません。";
+
+  return {
+    edition,
+    avoid_time_semantics: "entry_ease_not_social_peak",
+    gender_note,
+    secondary_wave: secondaryWave,
+    data_health: { level, notes },
+    hourly_hint,
+  };
+}
+
 export function computeInsight(points: Array<{ dt: Date; total: number }>): Insight {
   if (points.length === 0) {
     return { peak_time: "", avoid_time: "", crowd_label: "" };
@@ -231,26 +396,28 @@ function errorMessage(err: unknown): string {
 
 /**
  * Build insight + quality notes for a store slug and calendar date (JST ymd).
+ * @param options.edition — 省略時は JST 現在時刻から 18時便 / 21時半便 を推定
  */
 export async function buildInsightFromBackend(
   backendBase: string,
   storeSlug: string,
   dateYmd: string,
-  limit = 1000
+  limit = 1000,
+  options?: { edition?: BlogEdition }
 ): Promise<InsightBuildResult> {
   let range: NightWindow = nightWindowIso(dateYmd);
-  const { from, to } = range;
   const notes: string[] = [];
   let source: InsightBuildResult["source"] = "api/range";
   let shift: InsightBuildResult["shift"] = "none";
   let points: Array<{ dt: Date; total: number }> = [];
   let skipForecastDueToTimeout = false;
   let rangeRows: unknown[] = [];
+  let forecastRows: unknown[] = [];
 
   try {
     console.log("[insight] buildInsightFromBackend -> api/range");
     rangeRows = await fetchRangeRows(backendBase, storeSlug, limit);
-    points = collectPoints(rangeRows, from, to, {
+    points = collectPoints(rangeRows, range.from, range.to, {
       totalKeys: ["total"],
       menKeys: ["men", "male", "m"],
       womenKeys: ["women", "female", "f"],
@@ -285,7 +452,6 @@ export async function buildInsightFromBackend(
 
   if (points.length === 0) {
     source = "api/forecast_today";
-    let forecastRows: unknown[] = [];
     if (!skipForecastDueToTimeout) {
       try {
         console.log("[insight] buildInsightFromBackend -> api/forecast_today");
@@ -298,14 +464,14 @@ export async function buildInsightFromBackend(
     }
 
     if (forecastRows.length > 0) {
-      points = collectPoints(forecastRows, from, to, {
+      points = collectPoints(forecastRows, range.from, range.to, {
         totalKeys: ["total_pred", "total"],
         menKeys: ["men_pred", "men", "male", "m"],
         womenKeys: ["women_pred", "women", "female", "f"],
       });
 
       if (points.length === 0) {
-        const shifted = collectPoints(forecastRows, from, to, {
+        const shifted = collectPoints(forecastRows, range.from, range.to, {
           totalKeys: ["total_pred", "total"],
           menKeys: ["men_pred", "men", "male", "m"],
           womenKeys: ["women_pred", "women", "female", "f"],
@@ -323,6 +489,21 @@ export async function buildInsightFromBackend(
 
   const insight = computeInsight(points);
 
+  const rowsForGender = source === "api/range" ? rangeRows : forecastRows;
+  const genderOpts: CollectOptions =
+    source === "api/range"
+      ? { totalKeys: ["total"], menKeys: ["men", "male", "m"], womenKeys: ["women", "female", "f"] }
+      : {
+          totalKeys: ["total_pred", "total"],
+          menKeys: ["men_pred", "men", "male", "m"],
+          womenKeys: ["women_pred", "women", "female", "f"],
+          shiftDays: shift === "+1day" ? 1 : undefined,
+        };
+  const detailed = collectPointsWithGender(rowsForGender, range.from, range.to, genderOpts);
+
+  const edition = options?.edition ?? inferBlogEditionFromJstNow();
+  const draft_context = computeDraftContext(detailed, insight, edition, notes);
+
   return {
     insight,
     range,
@@ -331,5 +512,6 @@ export async function buildInsightFromBackend(
     },
     source,
     shift,
+    draft_context,
   };
 }

@@ -1,6 +1,6 @@
 # SECOND_VENUES
-Last updated: 2025-12-23
-Target commit: 10e50d6
+Last updated: 2026-03-21
+Target commit: (see git)
 
 ## 方針
 - 二次会スポットは map-link 方式が本流（frontend で Google Maps 検索リンクを生成）。

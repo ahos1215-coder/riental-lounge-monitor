@@ -1,20 +1,10 @@
-# INDEX
-Last updated: 2025-12-23
-Target commit: 10e50d6
+# INDEX（クイック参照）
+Last updated: 2026-03-21  
+Target commit: (see git)
 
-このファイルは「全体の地図」「読む順番」「重要ファイル一覧」をまとめる入口です。
+**読む順・各ファイルの役割の一覧は [`README.md`](README.md) を正とする。**
 
-## Read Order（Start Here）
-1) `plan/CODEx_PROMPTS.md`（AI の作業ルール）
-2) `plan/STATUS.md`（現状の稼働状況）
-3) `plan/DECISIONS.md`（壊してはいけない判断）
-4) `plan/API_CONTRACT.md`（API 契約）
-5) `plan/ARCHITECTURE.md`（全体アーキテクチャ）
-6) `plan/RUNBOOK.md`（起動 / 運用）
-7) `plan/CRON.md`（定期処理）
-8) `plan/ENV.md`（環境変数）
-9) `plan/SECOND_VENUES.md`（二次会スポット方針）
-10) `plan/ROADMAP.md`（今後の計画）
+---
 
 ## Repo Map（主要ディレクトリ）
 - Backend（Flask）: `app.py`, `oriental/`
@@ -23,6 +13,7 @@ Target commit: 10e50d6
 - Tests: `tests/`
 - Scripts: `scripts/`
 - Workflows: `.github/workflows/`
+- Supabase migrations: `supabase/migrations/`
 
 ## Key Entry Points
 ### Backend
@@ -32,26 +23,24 @@ Target commit: 10e50d6
 - `oriental/data/provider.py`（Supabase logs）
 
 ### Frontend
-- LINE Webhook（下書き）: `frontend/src/app/api/line/route.ts`
-- `/`: `frontend/src/app/page.tsx`
-- `/stores`: `frontend/src/app/stores/page.tsx`
-- `/store/[id]`: `frontend/src/app/store/[id]/page.tsx`
-- `/blog`: `frontend/src/app/blog/page.tsx`
-- `/blog/[slug]`: `frontend/src/app/blog/[slug]/page.tsx`
-- `/insights/weekly`: `frontend/src/app/insights/weekly/page.tsx`
-- `/insights/weekly/[store]`: `frontend/src/app/insights/weekly/[store]/page.tsx`
-- Night window: `frontend/src/app/hooks/useStorePreviewData.ts`
-- Second venues (map-link): `frontend/src/app/config/secondVenueMapLinks.ts`
+- **LINE Webhook**: `frontend/src/app/api/line/route.ts`
+- **インサイト**: `frontend/src/lib/blog/insightFromRange.ts`
+- **Gemini 下書き**: `frontend/src/lib/blog/draftGenerator.ts`
+- **LINE 意図解析**: `frontend/src/lib/line/parseLineIntent.ts`
+- ページ: `frontend/src/app/page.tsx`, `stores/`, `store/[id]/`, `blog/`, `insights/weekly/`
+- 店舗夜窓: `frontend/src/app/hooks/useStorePreviewData.ts`
+- 二次会 map-link: `frontend/src/app/config/secondVenueMapLinks.ts`
 
 ### Content / Batch
-- Weekly insights generator: `scripts/generate_weekly_insights.py`
-- Public facts generator: `frontend/scripts/generate-public-facts.mjs`
-- Insights data: `frontend/content/insights/weekly`
-- Facts data: `frontend/content/facts/public`
-- Blog content: `frontend/content/blog`
+- Weekly insights: `scripts/generate_weekly_insights.py` → `frontend/content/insights/weekly`
+- Public facts: `frontend/scripts/generate-public-facts.mjs` → `frontend/content/facts/public`
+- Blog MDX: `frontend/content/blog`
 
 ## Constraints（短縮版）
 - Supabase `logs` が source of truth（Sheets/GAS は legacy fallback）
 - `/api/range` は `store` + `limit` のみ（クエリ追加・サーバ側時間フィルタ禁止）
-- 夜窓（19:00–05:00）の絞り込みはフロント専任
-- 二次会スポットは map-link が本流（Places API 依存に戻さない）
+- **Flask は夜窓を採らない**。店舗 UI は `useStorePreviewData.ts`。**LINE 下書き**は `insightFromRange.ts`（取得済み JSON の集計）
+- 二次会は map-link が本流
+- **ブログ下書きに n8n は使わない**
+
+用語: `GLOSSARY.md`

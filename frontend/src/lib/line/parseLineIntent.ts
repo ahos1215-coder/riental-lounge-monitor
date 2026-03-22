@@ -21,7 +21,8 @@ export type ParsedLineIntent =
   | { kind: "help" }
   | { kind: "error"; message: string };
 
-function buildFactsId(slug: string, dateYmd: string): string {
+/** 公開 facts / 下書き用の安定 ID（店舗 slug + 日付） */
+export function buildFactsId(slug: string, dateYmd: string): string {
   const compact = dateYmd.replace(/-/g, "");
   return `${slug}-tonight-${compact}`;
 }

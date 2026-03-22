@@ -1,21 +1,23 @@
 # MEGRIBI / Oriental Lounge Monitor
 
 このリポジトリは、MEGRIBI の混雑可視化を支える Flask API と Next.js 16（App Router）のフロントエンドを含むモノレポです。
-運用・制約・設計の正本は plan/ 配下にあります。
+運用・制約・設計の正本は **[`plan/README.md`](plan/README.md)**（ナビ）と `plan/*.md` にあります。
 
 ## Read First（読む順番）
-1. README.md
-2. [plan/INDEX.md](plan/INDEX.md)
-3. [plan/CODEx_PROMPTS.md](plan/CODEx_PROMPTS.md)
-4. [plan/STATUS.md](plan/STATUS.md)
-5. [plan/DECISIONS.md](plan/DECISIONS.md)
-6. [plan/API_CONTRACT.md](plan/API_CONTRACT.md)
-7. [plan/ARCHITECTURE.md](plan/ARCHITECTURE.md)
-8. [plan/RUNBOOK.md](plan/RUNBOOK.md)
-9. [plan/CRON.md](plan/CRON.md)
+1. README.md（本ファイル）
+2. **[plan/README.md](plan/README.md)**（`plan/` の目次・**Cursor/AI はここから**）
+3. [plan/INDEX.md](plan/INDEX.md)（主要パス・Constraints のクイック参照）
+4. [plan/CODEx_PROMPTS.md](plan/CODEx_PROMPTS.md)
+5. [plan/STATUS.md](plan/STATUS.md)
+6. [plan/DECISIONS.md](plan/DECISIONS.md)
+7. [plan/API_CONTRACT.md](plan/API_CONTRACT.md)
+8. [plan/ARCHITECTURE.md](plan/ARCHITECTURE.md)
+9. [plan/RUNBOOK.md](plan/RUNBOOK.md)（起動・定期ジョブ・オンボーディング）
 10. [plan/ENV.md](plan/ENV.md)
 11. [plan/SECOND_VENUES.md](plan/SECOND_VENUES.md)
-12. [plan/ROADMAP.md](plan/ROADMAP.md)
+12. [plan/VISION_AND_FUTURE.md](plan/VISION_AND_FUTURE.md)（構想・今後の実装段取り）
+13. [plan/ROADMAP.md](plan/ROADMAP.md)
+14. [plan/GLOSSARY.md](plan/GLOSSARY.md)（用語）
 
 ## Quick Start（ローカル起動）
 Backend（Flask）
@@ -37,7 +39,7 @@ npm run dev
 
 ## 重要な制約（必ず守る）
 - `/api/range` の引数は `store` / `limit` のみ（from/to などの追加は禁止）。
-- 夜窓（19:00–05:00）の判定・絞り込みはフロント責務。
+- 夜窓（19:00–05:00）の判定・絞り込みは **店舗 UI** とし、フロント（`useStorePreviewData.ts`）で行う。LINE 下書きは `insightFromRange.ts`（Next サーバー）で、**取得済み `/api/range` に対して**窓計算（Flask `/api/range` の契約は不変）。
 - データの正本は Supabase `logs`。Google Sheet / GAS はレガシー fallback。
 - レイヤ構造は Supabase → Flask → Next.js を維持（フロントから Supabase を直接叩かない）。
 - 二次会スポットは map-link 方式（Places API 依存に戻さない）。

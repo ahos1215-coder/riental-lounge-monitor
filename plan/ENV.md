@@ -23,8 +23,18 @@ LINE Webhook（`frontend/src/app/api/line/route.ts`）:
 - `GEMINI_MODEL`（任意。既定 `gemini-2.5-flash`。404 時は `gemini-2.5-flash-lite` を試行。古い `gemini-1.x` / `gemini-2.0-flash` 等はコード側で `gemini-2.5-flash` に正規化）
 - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SERVICE_KEY`（`blog_drafts` への INSERT。未設定時は生成のみ・DB 保存なし）
 
+定時ブログ（Vercel Cron → `frontend/src/app/api/cron/blog-draft/route.ts`）:
+- `CRON_SECRET`（Vercel プロジェクトに設定すると Cron リクエストに `Authorization: Bearer <CRON_SECRET>` が付与される。ルート側で検証）
+- `BLOG_CRON_STORE_SLUG` または `BLOG_CRON_STORE_SLUGS`（カンマ区切り。未設定時は `DEFAULT_STORE`＝先頭店舗）
+- `BLOG_CRON_RANGE_LIMIT`（任意。`/api/range` の limit。未設定時は 500）
+- `SKIP_CRON_AUTH`（**ローカル development のみ** `"1"` で認証スキップ。本番では使わない）
+
 注意:
 - `NEXT_PUBLIC_*` はブラウザに配布されるため秘密値を入れない。
+
+### ローカル CLI: `npm run drafts:export`（`frontend/scripts/export-blog-draft.mjs`）
+- `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SERVICE_KEY`（**service role**。`blog_drafts` を REST で読む）
+- 読み込み元: リポジトリルートの `.env.local`（`generate-public-facts.mjs` と同様）
 
 ## Backend (Flask / Render)
 置き場所:

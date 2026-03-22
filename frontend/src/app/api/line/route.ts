@@ -2,9 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 
 import { parseLineIntent } from "@/lib/line/parseLineIntent";
-import { buildInsightFromBackend } from "@/lib/blog/insightFromRange";
-import { generateBlogDraftMdx } from "@/lib/blog/draftGenerator";
-import { insertBlogDraft, isBlogDraftsConfigured } from "@/lib/supabase/blogDrafts";
+import { runBlogDraftPipeline } from "@/lib/blog/runBlogDraftPipeline";
 
 /** Flask backend base URL (same as other Next API proxies). */
 // Vercel 側で `BACKEND-URL` として登録されてしまうケースがあるため、保険で別名も許容する。
@@ -128,14 +126,25 @@ async function processMessageEvent(ev: LineEvent): Promise<void> {
   const lineUserId = ev.source?.userId ?? null;
 
   try {
-    console.log("[line] Calling backend insight builder");
-    const insightResult = await buildInsightFromBackend(
-      BACKEND_URL,
-      draft.store.slug,
-      draft.dateYmd,
-      RANGE_LIMIT
-    );
-    console.log("[line] Backend insight built", {
+    console.log("[line] Running blog draft pipeline");
+    const result = await runBlogDraftPipeline({
+      backendUrl: BACKEND_URL,
+      rangeLimit: RANGE_LIMIT,
+      store: draft.store,
+      dateYmd: draft.dateYmd,
+      factsId: draft.factsId,
+      topicHint: draft.topicHint,
+      source: "line_webhook",
+      lineUserId,
+    });
+
+    if (!result.ok) {
+      await replyLine(replyToken, `処理中にエラーが発生しました。\n${truncate(result.error, 800)}`);
+      return;
+    }
+
+    const { insightResult } = result;
+    console.log("[line] Pipeline ok", {
       source: insightResult.source,
       shift: insightResult.shift,
       crowd_label: insightResult.insight.crowd_label,
@@ -143,78 +152,10 @@ async function processMessageEvent(ev: LineEvent): Promise<void> {
       avoid_time: insightResult.insight.avoid_time,
     });
 
-    console.log("[line] Calling Gemini draft generator");
-    const mdx = await generateBlogDraftMdx({
-      storeLabel: draft.store.label,
-      storeSlug: draft.store.slug,
-      dateYmd: draft.dateYmd,
-      factsId: draft.factsId,
-      insightResult,
-      topicHint: draft.topicHint,
-    });
-
-    const insightPayload = {
-      facts_id: draft.factsId,
-      store: draft.store.slug,
-      range: insightResult.range,
-      insight: insightResult.insight,
-      quality_flags: insightResult.quality_flags,
-      source: insightResult.source,
-      shift: insightResult.shift,
-    };
-
-    let dbNote = "";
-    if (isBlogDraftsConfigured()) {
-      const ins = await insertBlogDraft({
-        store_id: draft.store.storeId,
-        store_slug: draft.store.slug,
-        target_date: draft.dateYmd,
-        facts_id: draft.factsId,
-        mdx_content: mdx,
-        insight_json: insightPayload as unknown as Record<string, unknown>,
-        source: "line_webhook",
-        line_user_id: lineUserId,
-        error_message: null,
-      });
-      if (ins.ok) {
-        dbNote = `\n保存ID: ${ins.id}`;
-      } else {
-        dbNote = `\n※DB保存スキップ: ${ins.error}`;
-      }
-    } else {
-      dbNote = "\n※Supabase未設定のためDBには保存していません（GEMINIのみ生成）。";
-    }
-
-    const summary = [
-      `下書きを生成しました（${draft.store.label} / ${draft.dateYmd}）`,
-      `facts_id: ${draft.factsId}`,
-      `混雑: ${insightResult.insight.crowd_label || "—"} / ピーク ${insightResult.insight.peak_time || "—"} / 避けたい ${insightResult.insight.avoid_time || "—"}`,
-      `データ: ${insightResult.source} shift=${insightResult.shift}`,
-      dbNote,
-      "",
-      "---- MDX（冒頭）----",
-      truncate(mdx, 3500),
-    ].join("\n");
-
-    await replyLine(replyToken, summary);
+    await replyLine(replyToken, result.summaryLines.join("\n"));
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[line] processMessageEvent", msg);
-
-    if (isBlogDraftsConfigured()) {
-      await insertBlogDraft({
-        store_id: draft.store.storeId,
-        store_slug: draft.store.slug,
-        target_date: draft.dateYmd,
-        facts_id: draft.factsId,
-        mdx_content: "",
-        insight_json: {},
-        source: "line_webhook",
-        line_user_id: lineUserId,
-        error_message: msg,
-      });
-    }
-
     await replyLine(replyToken, `処理中にエラーが発生しました。\n${truncate(msg, 800)}`);
   }
 }

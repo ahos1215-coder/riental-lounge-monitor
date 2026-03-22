@@ -1,8 +1,9 @@
 # BLOG_REQUEST_SCHEMA
-Last updated: 2025-12-29 / commit: 4299ff1
+Last updated: 2026-03-21
+Target commit: (see git)
 
-LINE 依頼 → n8n 受付 → Facts/MDX 生成の「最小入力」を固定するための SSOT。
-実装は次フェーズで行い、ここでは契約（スキーマと境界）だけを定義する。
+LINE 依頼 → **Next.js `parseLineIntent` 等** → 下書き / Facts / MDX 生成の「最小入力」を固定するための SSOT。
+実装の詳細は `frontend/src/lib/line/parseLineIntent.ts` と `frontend/src/app/api/line/route.ts` が正。ここでは契約（スキーマと境界）を定義する。
 
 ## 目的
 - LINE 依頼の最小入力を「壊れにくい形」で固定する。
@@ -93,3 +94,6 @@ LINE 依頼 → n8n 受付 → Facts/MDX 生成の「最小入力」を固定す
 - `target_date` は `YYYY-MM-DD`（JST）
 - `facts_id_public` / `slug` の命名規則（`{store_id}-{kind}-{yyyymmdd}`）
 - 公開 Facts / MDX の保存場所
+
+## 運用上の注意
+- **n8n は使わない**。LINE からの自然文は Next 側でパースし、上記に近い形に正規化する。
