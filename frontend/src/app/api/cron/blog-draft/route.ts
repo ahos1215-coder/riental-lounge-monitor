@@ -61,6 +61,7 @@ function isCronAuthorized(req: NextRequest): boolean {
   return auth === `Bearer ${secret}`;
 }
 
+/** Vercel Serverless の実行上限に合わせる（Hobby も max 60s まで設定可能。バックエンド大量取得＋Gemini に余裕を持たせる） */
 export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {

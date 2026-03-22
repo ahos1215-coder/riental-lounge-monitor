@@ -27,6 +27,7 @@ LINE Webhook（`frontend/src/app/api/line/route.ts`）:
 - `CRON_SECRET`（**Vercel の Environment Variables** に設定し、GHA の Repository Secret と**同じ値**にする。`Authorization: Bearer` で検証）
 - `BLOG_CRON_STORE_SLUG` または `BLOG_CRON_STORE_SLUGS`（カンマ区切り。未設定時は `DEFAULT_STORE`＝先頭店舗）
 - `BLOG_CRON_RANGE_LIMIT`（任意。`/api/range` の limit。未設定時は 500）
+- `BLOG_BACKEND_FETCH_TIMEOUT_MS`（任意。Next から Flask への `fetch` の打ち切り。**未設定時は 40000**（40秒）。夜間データが多い店舗で `api_range_error:This operation was aborted` が出る場合に増やす。5000〜120000 の範囲）
 - `SKIP_CRON_AUTH`（**ローカル development のみ** `"1"` で認証スキップ。本番では使わない）
 
 注意:

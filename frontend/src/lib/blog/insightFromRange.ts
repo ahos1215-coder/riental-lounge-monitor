@@ -341,9 +341,25 @@ function isAbortError(e: unknown): boolean {
   return anyE?.name === "AbortError";
 }
 
-async function fetchJson(url: string, timeoutMs = 10000): Promise<unknown> {
+/**
+ * Flask `/api/range` は店舗・limit により応答が数十秒になることがある。
+ * 既定 10s だと Abort され `api_range_error:This operation was aborted` になるため、
+ * Cron / LINE パイプラインでは 40s（Vercel 側 `maxDuration` 60s・Gemini 処理と整合）を既定とする。
+ */
+const DEFAULT_BACKEND_FETCH_TIMEOUT_MS = 40_000;
+
+function backendFetchTimeoutMs(): number {
+  const raw = process.env.BLOG_BACKEND_FETCH_TIMEOUT_MS?.trim();
+  if (!raw) return DEFAULT_BACKEND_FETCH_TIMEOUT_MS;
+  const n = Number.parseInt(raw, 10);
+  if (Number.isFinite(n) && n >= 5_000 && n <= 120_000) return n;
+  return DEFAULT_BACKEND_FETCH_TIMEOUT_MS;
+}
+
+async function fetchJson(url: string, timeoutMs?: number): Promise<unknown> {
+  const ms = timeoutMs ?? backendFetchTimeoutMs();
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), ms);
 
   try {
     const res = await fetch(url, {
