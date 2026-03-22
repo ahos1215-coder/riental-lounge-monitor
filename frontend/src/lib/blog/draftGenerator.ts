@@ -74,6 +74,49 @@ function parseRetryAfterSeconds(e: unknown): number | null {
   return null;
 }
 
+/**
+ * Gemini が frontmatter 前にリード文を付けたり、`---` や `title:` にインデントを付けるのを防ぐための後処理。
+ * Next.js / gray-matter 系でパースできるよう、先頭を `---` 始まり・メタ行は行頭スペースなしに揃える。
+ */
+function normalizeMdxForBlog(raw: string): string {
+  let s = raw.replace(/^\uFEFF/, "").trim();
+  if (s.startsWith("```")) {
+    s = s.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n```\s*$/, "");
+  }
+  const lines = s.split(/\r?\n/);
+  const startIdx = lines.findIndex((l) => l.trim() === "---");
+  if (startIdx < 0) {
+    return s.trim();
+  }
+
+  const rest = lines.slice(startIdx);
+  rest[0] = "---";
+
+  let endFm = -1;
+  for (let i = 1; i < rest.length; i++) {
+    if (rest[i].trim() === "---") {
+      endFm = i;
+      break;
+    }
+  }
+
+  if (endFm < 0) {
+    return rest.map((line, i) => (i === 0 ? "---" : line.trimStart())).join("\n").trim();
+  }
+
+  rest[endFm] = "---";
+  for (let i = 1; i < endFm; i++) {
+    rest[i] = rest[i].trimStart();
+  }
+
+  const bodyLines = rest.slice(endFm + 1);
+  while (bodyLines.length > 0 && bodyLines[0].trim() === "") {
+    bodyLines.shift();
+  }
+
+  return [...rest.slice(0, endFm + 1), ...bodyLines].join("\n").trim();
+}
+
 function buildEditionBlock(edition: BlogEdition): string {
   if (edition === "late_update") {
     return [
@@ -136,8 +179,11 @@ function buildSystemInstruction(edition: BlogEdition): string {
     "- 数値や事実の捏造は禁止。不足は本文で明示。",
     "- JSON の範囲を超える断定はしない。",
     "",
-    "■ 出力形式",
-    "- 必ず **MDX**。先頭に YAML frontmatter。",
+    "■ 出力形式（最優先・パース互換・破った場合は不合格）",
+    "- 生成する文字列の **先頭（1文字目）から** MDX を開始すること。**最初の行は必ず `---` のみ**（行頭にスペース・タブを付けない）。",
+    "- **`---` で始まる YAML frontmatter より前に、挨拶・リード文・「データによると…」など**一切のテキストを書かない。前置きゼロ。",
+    "- frontmatter 内の **すべての行**（最初と最後の `---` を含む）も **`title:` / `description:` など、行頭に空白・インデントを付けない**（スペースで字下げしない）。",
+    "- frontmatter 終了の `---` の直後から本文（## 見出し以降）。本文の通常の段落インデントは不要（Markdown の標準どおりでよい）。",
     "- frontmatter のキー: title, description, date (YYYY-MM-DD), categoryId (guide|beginner|prediction|column|interview), level (easy|normal|pro), store, facts_id, facts_visibility (show)",
     "- 本文は ## 見出しで、少なくとも: 『10秒まとめ』『今日の一言』『理由はこれ』『初心者メモ』。",
     "- 『10秒まとめ』のラベル例: 「ピーク時間（賑わいの目安）:」「入店しやすさの目安（待ちにくさ）:」など（「避けたい時間」「ねらい目＝最高」禁止）。",
@@ -168,6 +214,7 @@ function buildUserPrompt(input: DraftGeneratorInput): string {
     "次の JSON は混雑傾向の分析結果です。**相席ラウンジ**来店を検討する読者向けの、**第三者データ解説**記事（MDX 全文）を1つ生成してください。",
     "",
     "執筆前の再確認:",
+    "- **出力の先頭は必ず `---`（frontmatter 開始）から。** その前に1文字も書かない（挨拶・リード禁止）。**`---` と `title:` 等の行頭にスペースを入れない。**",
     "- 業態は**相席ラウンジ**。キャバクラ・**キャスト・指名**など接客クラブの語は**一切使わない**。",
     "- **avoid_time** は「待ちにくい・落ち着いている時間の目安」であり、「相席が最高にうまくいくねらい目」とは**断定しない**。ピーク重視と入店しやすさ重視を**提案型**で並べる。",
     "- **draft_context.edition**: `evening_preview` なら今夜の**見通し・作戦**（未来のピークは予想）、`late_update` なら**実測に近い実況・答え合わせ**（断定しすぎない）。",
@@ -254,6 +301,7 @@ export async function generateBlogDraftMdx(input: DraftGeneratorInput): Promise<
       if (mdx.startsWith("```")) {
         mdx = mdx.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n```\s*$/, "");
       }
+      mdx = normalizeMdxForBlog(mdx);
       return mdx.trim();
     } catch (e) {
       lastError = e;
