@@ -6,9 +6,10 @@
 #      全店舗のレコードに
 #      weather_code / weather_label / temp_c / precip_mm を付与する
 
+import json
 import os
-import time
 import re
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -61,6 +62,19 @@ GAS_MAX_RETRY = int(os.environ.get("GAS_MAX_RETRY", "3"))
 
 # 有効/無効フラグ（とりあえずデフォルト ON）
 ENABLE_WEATHER = os.environ.get("ENABLE_WEATHER", "1") == "1"
+
+# Open-Meteo は短時間に多数リクエストすると 429 になる。同一座標はディスクキャッシュで再取得しない。
+# 既定 1 時間（5 分おきの収集でも実質 1 回/時間/エリア）
+WEATHER_CACHE_TTL_SEC = int(os.environ.get("WEATHER_CACHE_TTL_SEC", "3600"))
+# 実 HTTP の最小間隔（秒）。バースト緩和
+WEATHER_HTTP_MIN_INTERVAL_SEC = float(os.environ.get("WEATHER_HTTP_MIN_INTERVAL_SEC", "0.85"))
+WEATHER_HTTP_MAX_RETRIES = int(os.environ.get("WEATHER_HTTP_MAX_RETRIES", "4"))
+_CACHE_DIR = _root / ".cache"
+_DEFAULT_WEATHER_CACHE_PATH = _CACHE_DIR / "open_meteo_weather_cache.json"
+WEATHER_CACHE_PATH = Path(os.environ.get("WEATHER_CACHE_PATH", str(_DEFAULT_WEATHER_CACHE_PATH)))
+
+# 同一プロセス内の連続 Open-Meteo 呼び出しの間隔制御
+_last_open_meteo_http_at: float = 0.0
 
 # 基準地点（とりあえず長崎市近辺）
 WEATHER_LAT = float(os.environ.get("WEATHER_LAT", "32.75"))
@@ -355,6 +369,64 @@ def _weather_code_to_label(code: int | None) -> str | None:
     return f"その他({code})"
 
 
+def _weather_location_key(lat: float, lon: float) -> str:
+    return f"{round(lat, 4)},{round(lon, 4)}"
+
+
+def _load_weather_disk_cache() -> dict[str, dict]:
+    try:
+        if WEATHER_CACHE_PATH.is_file():
+            with WEATHER_CACHE_PATH.open(encoding="utf-8") as f:
+                raw = json.load(f)
+            if isinstance(raw, dict):
+                return {str(k): v for k, v in raw.items() if isinstance(v, dict)}
+    except Exception as e:
+        print(f"[weather][cache] load failed: {e}")
+    return {}
+
+
+def _save_weather_disk_cache(cache: dict[str, dict]) -> None:
+    try:
+        WEATHER_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        # 古いエントリを削除（ファイル肥大化防止。7日より古いものは破棄）
+        max_age = 7 * 24 * 3600
+        pruned: dict[str, dict] = {}
+        for k, v in cache.items():
+            ts = float(v.get("ts", 0))
+            if now - ts <= max_age:
+                pruned[k] = v
+        tmp = WEATHER_CACHE_PATH.with_suffix(".json.tmp")
+        with tmp.open("w", encoding="utf-8") as f:
+            json.dump(pruned, f, ensure_ascii=False, indent=0)
+        tmp.replace(WEATHER_CACHE_PATH)
+    except Exception as e:
+        print(f"[weather][cache] save failed: {e}")
+
+
+def _enforce_open_meteo_spacing() -> None:
+    """同一プロセス内で Open-Meteo へのリクエストを短時間に連打しない。"""
+    global _last_open_meteo_http_at
+    if WEATHER_HTTP_MIN_INTERVAL_SEC <= 0:
+        return
+    gap = time.time() - _last_open_meteo_http_at
+    if gap < WEATHER_HTTP_MIN_INTERVAL_SEC:
+        time.sleep(WEATHER_HTTP_MIN_INTERVAL_SEC - gap)
+
+
+def _tuple_from_cache_entry(entry: dict) -> tuple[int | None, str | None, float | None, float | None]:
+    code = entry.get("code")
+    label = entry.get("label")
+    temp_c = entry.get("temp_c")
+    precip_mm = entry.get("precip_mm")
+    if code is not None and not isinstance(code, int):
+        try:
+            code = int(code)
+        except (TypeError, ValueError):
+            code = None
+    return code, label if isinstance(label, str) else None, temp_c, precip_mm
+
+
 def fetch_current_weather(
     lat: float | None = None, lon: float | None = None
 ) -> tuple[int | None, str | None, float | None, float | None]:
@@ -363,41 +435,105 @@ def fetch_current_weather(
       - weather_code
       - temperature_2m (気温, ℃)
       - precipitation (直近1時間の降水量, mm)
-    を1回だけ取得。失敗したら (None, None, None, None) を返す。
+    を取得。
+
+    - 同一座標は WEATHER_CACHE_TTL_SEC の間ディスクキャッシュを使い、API を呼ばない。
+    - キャッシュ期限切れ後の連続取得は WEATHER_HTTP_MIN_INTERVAL_SEC で間隔を空ける。
+    - 429 のときはバックオフして再試行。完全失敗時は期限切れキャッシュがあればそれを返す。
     """
     if not ENABLE_WEATHER:
         return None, None, None, None
 
-    url = "https://api.open-meteo.com/v1/forecast"
     latitude = WEATHER_LAT if lat is None else float(lat)
     longitude = WEATHER_LON if lon is None else float(lon)
+    key = _weather_location_key(latitude, longitude)
+    now = time.time()
+
+    disk = _load_weather_disk_cache()
+    entry = disk.get(key)
+    if entry:
+        age = now - float(entry.get("ts", 0))
+        if age >= 0 and age < WEATHER_CACHE_TTL_SEC:
+            t = _tuple_from_cache_entry(entry)
+            print(
+                f"[weather][disk-cache] hit key={key} age_sec={age:.0f} ttl={WEATHER_CACHE_TTL_SEC}s "
+                f"code={t[0]} label={t[1]}"
+            )
+            return t
+
+    stale: dict | None = entry if entry else None
+
+    url = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": latitude,
         "longitude": longitude,
         "current": "weather_code,temperature_2m,precipitation",
         "timezone": "Asia/Tokyo",
     }
+    headers = {
+        "User-Agent": (
+            "MEGRIBI-collector/1.0 (weather; respectful use; open-meteo)"
+        ),
+        "Accept": "application/json",
+    }
 
-    try:
-        resp = requests.get(url, params=params, timeout=8)
-        resp.raise_for_status()
-        data = resp.json()
-        current = data.get("current", {})
+    global _last_open_meteo_http_at
+    out: tuple[int | None, str | None, float | None, float | None] | None = None
 
-        code = current.get("weather_code")
-        temp_c = current.get("temperature_2m")
-        precip_mm = current.get("precipitation")
+    for attempt in range(max(1, WEATHER_HTTP_MAX_RETRIES)):
+        _enforce_open_meteo_spacing()
+        try:
+            resp = requests.get(url, params=params, timeout=15, headers=headers)
+            _last_open_meteo_http_at = time.time()
+            if resp.status_code == 429:
+                wait = min(90.0, 4.0 * (2**attempt))
+                print(
+                    f"[weather][429] Too Many Requests; sleep {wait:.1f}s "
+                    f"attempt={attempt + 1}/{WEATHER_HTTP_MAX_RETRIES}"
+                )
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            current = data.get("current", {})
 
-        label = _weather_code_to_label(code) if isinstance(code, int) else None
+            code = current.get("weather_code")
+            temp_c = current.get("temperature_2m")
+            precip_mm = current.get("precipitation")
 
+            label = _weather_code_to_label(code) if isinstance(code, int) else None
+
+            print(
+                f"[weather] lat={latitude} lon={longitude} code={code} label={label} "
+                f"temp_c={temp_c} precip_mm={precip_mm}"
+            )
+            disk[key] = {
+                "ts": time.time(),
+                "code": code,
+                "label": label,
+                "temp_c": temp_c,
+                "precip_mm": precip_mm,
+            }
+            _save_weather_disk_cache(disk)
+            out = (code, label, temp_c, precip_mm)
+            break
+        except Exception as e:
+            _last_open_meteo_http_at = time.time()
+            print(f"[weather][error] failed to fetch weather: {e}")
+            if attempt < WEATHER_HTTP_MAX_RETRIES - 1:
+                time.sleep(min(30.0, 2.0 * (attempt + 1)))
+
+    if out is not None:
+        return out
+
+    if stale:
+        t = _tuple_from_cache_entry(stale)
         print(
-            f"[weather] lat={latitude} lon={longitude} code={code} label={label} "
-            f"temp_c={temp_c} precip_mm={precip_mm}"
+            f"[weather][stale-cache] using expired cache after failure key={key} code={t[0]}"
         )
-        return code, label, temp_c, precip_mm
-    except Exception as e:
-        print(f"[weather][error] failed to fetch weather: {e}")
-        return None, None, None, None
+        return t
+
+    return None, None, None, None
 
 # ========= GAS への POST =========
 
