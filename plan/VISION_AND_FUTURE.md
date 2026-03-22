@@ -167,11 +167,11 @@ Target commit: (see git)
 - **方針**: 店舗・日付ごとに **同一 `facts_id` に対応する公開 URL を維持**し、更新時は **`drafts:export` 等での上書き（`--force`）** とする。
 - **狙い**: 類似タイトル・類似 URL が乱立する **カニバリゼーション**を避け、**情報の鮮度（Freshness）** を出しやすい運用に寄せる（検索エンジンが「同じページが更新された」と扱える前提）。
 
-### 9.2 Cron の制限と将来の移行案（Vercel Hobby）
+### 9.2 Cron とスケール（GitHub Actions 正本）
 
-- **現状**: 定時ブログは Vercel **Cron Jobs** が `GET /api/cron/blog-draft` を実行（`frontend/vercel.json`、`plan/BLOG_PIPELINE.md`）。
-- **課題**: **Hobby プラン**では Cron の **実行回数に上限**があり、**店舗数が増えると 1 店舗あたりの枠が足りなくなる**可能性がある。
-- **将来タスク（検討）**: スケール時は **GitHub Actions** を **毎日 JST 18:00 と 21:30** に動かし、そこから **Vercel の `/api/cron/blog-draft` を店舗ループで叩く**構成へ移行する案を検討する。シークレット運用・失敗通知・コストと **複雑さのトレードオフ**を評価し、**システムが複雑になりすぎない範囲**で採用する。
+- **現状**: 定時ブログは **GitHub Actions** が `GET /api/cron/blog-draft` を実行（`plan/BLOG_CRON_GHA.md`、`plan/BLOG_PIPELINE.md`）。**Vercel Hobby の Cron は使わない**（実行時刻のブレが大きいため）。
+- **課題**: 店舗数が増えると、**1 リクエスト内で全店舗を処理**する現行 API の **所要時間・`maxDuration`** や、**GHA の実行時間**がボトルネックになりうる。
+- **将来タスク（検討）**: ジョブ分割・バッチ API・キュー等。シークレット運用・失敗通知・コストと **複雑さのトレードオフ**を評価する。
 
 ### 9.3 X（Twitter）自動投稿のスコープ
 

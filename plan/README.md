@@ -41,6 +41,7 @@ Target commit: (see git)
 | `API_CONTRACT.md` | API 契約 |
 | `ARCHITECTURE.md` | アーキテクチャ |
 | `RUNBOOK.md` | 起動・運用・**GitHub Actions / 外部 cron**・トラブルシュート |
+| `BLOG_CRON_GHA.md` | 定時ブログの **GitHub Actions**（正本）・Secrets 一覧 |
 | `ENV.md` | 環境変数 |
 | `BLOG_PIPELINE.md` | LINE / Gemini / `blog_drafts` パイプライン |
 | `BLOG_CONTENT.md` | ブログ・Facts の編集方針 |

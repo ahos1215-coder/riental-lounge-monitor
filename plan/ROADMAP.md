@@ -36,8 +36,9 @@ Target commit: (see git)
 
 ## スケール・SEO・Cron（方針の要約・詳細は `VISION_AND_FUTURE.md` §9）
 - **SEO（全店・1日2本）**: 店舗ごとの記事 URL は **同一 `facts_id` パスへの上書き**（`npm run drafts:export -- --force` 等）とし、**カニバリゼーションを避け鮮度（Freshness）**を優先。
-- **Cron 制限（Vercel Hobby）**: 店舗数が増え Vercel の Cron 回数が足りなくなったら、**GitHub Actions から毎日 JST 18:00 / 21:30 に `GET /api/cron/blog-draft` を叩く**案へ移行を検討（複雑化しすぎない範囲で）。
+- **定時ブログの時計**: **GitHub Actions**（`.github/workflows/trigger-blog-cron.yml`）が正本。`vercel.json` の Cron は **使わない**（二重実行防止のため削除済み）。Secrets・スケジュールは **`plan/BLOG_CRON_GHA.md`**。
+- **Vercel Hobby の Cron**（参考）: 使わないが、各式は 1 日 1 回まで・実行時刻にブレがありやすい、などの制約は公式ドキュメント参照。
 - **X 自動投稿**: 全店舗一斉ポストは行わず、開始時は **人気トップ5＋長崎店**に限定（API・シャドウバンリスク回避）。
 
 ## 未実装メモ
-- 定時ブログは `GET /api/cron/blog-draft`（`frontend/vercel.json`）で実装済み。39 店舗スケール時は上記 §9・Cron 移行案を参照。
+- 定時ブログは `GET /api/cron/blog-draft`（**GHA** から `GET` + `edition` / `source`）で実装済み。39 店舗スケール時は上記 §9 を参照。

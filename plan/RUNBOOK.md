@@ -70,7 +70,7 @@ npm run dev
 - `/api/forecast_today?store=...`（`ENABLE_FORECAST=1` のとき）
 - `/insights/weekly` が `index.json` を読めること
 - LINE 下書き試験: `GET http://localhost:3000/api/line` がヘルス相当。`POST /api/line` は `SKIP_LINE_SIGNATURE_VERIFY=1` 等でローカル検証可能（`ENV.md`）
-- 定時ブログ試験: `GET /api/cron/blog-draft`（要 `CRON_SECRET` または development で `SKIP_CRON_AUTH=1`）。`frontend/vercel.json` で **JST 18:00 / 21:30** に相当する UTC スケジュール（`0 9 * * *` / `30 12 * * *`）を定義
+- 定時ブログ試験: `GET /api/cron/blog-draft?edition=evening_preview&source=github_actions_cron`（要 `CRON_SECRET` または development で `SKIP_CRON_AUTH=1`）。本番の定時は **GitHub Actions**（**`plan/BLOG_CRON_GHA.md`**）
 - 一括: `cd frontend` → `npm run smoke:blog-apis -- --quick` / `npm run smoke:blog-apis`（`frontend/scripts/smoke-blog-apis.mjs`）
 
 ---
@@ -83,14 +83,23 @@ npm run dev
 | Weekly Insights | `30 15 * * 0` (UTC) = JST 月曜 00:30 | `.github/workflows/generate-weekly-insights.yml` |
 | Public Facts | `30 0 * * *` (UTC) = JST 09:30 | `.github/workflows/generate-public-facts.yml` |
 | Blog CI | push / PR（schedule なし） | `.github/workflows/blog-ci.yml` |
+| **Blog cron（定時・本番）** | `0 9` / `30 12` UTC = JST 18:00 / 21:30 | `.github/workflows/trigger-blog-cron.yml` |
 
 - Weekly: 手動 `workflow_dispatch` で `stores` / threshold 等を指定可能。成果物 `frontend/content/insights/weekly`
 - Public Facts: 成果物 `frontend/content/facts/public`
 
 ### 外部 cron（運用側）
 - **`/tasks/multi_collect`** を一定間隔で叩く想定。定義は **Render / 外部 scheduler**（リポジトリ内に crontab はない）。
-- **ブログ下書き（1日2本・JST）**: Vercel の **Cron Jobs** が `GET /api/cron/blog-draft` を叩く（`frontend/vercel.json`）。18時便＝事前予報・21時半便＝修正予報のトーンは **`inferBlogEditionFromJstNow()`**（実行時刻の JST）で切替。
+- **ブログ下書き（1日2本・JST）**: **GitHub Actions**（`.github/workflows/trigger-blog-cron.yml`）が `GET /api/cron/blog-draft` を叩く。`?edition=evening_preview` / `late_update` と `source=github_actions_cron` を付与。**Secrets** は **`plan/BLOG_CRON_GHA.md`**。
 - 追加の定期処理が必要なら `ROADMAP.md` に追記してから仕様化。
+
+### 定時ブログ（GitHub Actions）のトラブルシュート
+
+1. **Secrets**: GitHub → Repository → **Settings → Secrets and variables → Actions** に **`CRON_SECRET`** と **`VERCEL_BLOG_CRON_BASE_URL`**（本番の `https://...vercel.app`、末尾スラッシュなし）があるか。
+2. **Actions の実行ログ**: 失敗時は `curl` の HTTP ステータス・Vercel 関数ログ（401 なら `CRON_SECRET` 不一致）。
+3. **Vercel の古い Cron**: 過去に Vercel Cron を有効にしていた場合、ダッシュボード **Settings → Cron Jobs** に古いジョブが残っていれば **削除**（コード側は `vercel.json` なし）。
+
+**正本**の手順・Secrets は **`plan/BLOG_CRON_GHA.md`**。
 
 ---
 

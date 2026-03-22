@@ -31,11 +31,11 @@
 - Supabase `blog_drafts` に保存（`SUPABASE_SERVICE_ROLE_KEY` 等）
 - LINE に短い返信
 
-### 2b) 定時ブログ（Vercel Cron・任意）
-- **Vercel** の Cron が `GET /api/cron/blog-draft` を実行（`frontend/vercel.json`）。認証は **`CRON_SECRET`**（`Authorization: Bearer`）。
+### 2b) 定時ブログ（GitHub Actions — 正本）
+- **`.github/workflows/trigger-blog-cron.yml`** が `GET /api/cron/blog-draft` を実行（JST 18:00 / 21:30 に相当する UTC cron）。クエリで **`edition`**（`evening_preview` / `late_update`）と **`source=github_actions_cron`** を付与。詳細 **`plan/BLOG_CRON_GHA.md`**。認証は **`CRON_SECRET`**（`Authorization: Bearer`）。
 - 店舗は **`BLOG_CRON_STORE_SLUG(S)`**、当日日付は JST の「今日」（`?date=YYYY-MM-DD` で上書き可）。
-- データ取得の `limit` は **`BLOG_CRON_RANGE_LIMIT`**（既定 500）。保存先・MDX 生成は LINE と同じ（`blog_drafts.source` は `vercel_cron`）。
-- **18:00 JST** 前後の実行 → `evening_preview`（事前予報）、**21:30 JST** 前後 → `late_update`（実況）を意図（実際の edition はサーバの JST 現在時刻で決定）。
+- データ取得の `limit` は **`BLOG_CRON_RANGE_LIMIT`**（既定 500）。保存先・MDX 生成は LINE と同じ。`blog_drafts.source` は **`github_actions_cron`**。
+- **18:00 JST** 便 → `evening_preview`（事前予報）、**21:30 JST** 便 → `late_update`（実況）。GHA から **`?edition=`** で明示するため、サーバ時刻のズレに依存しない。
 
 ### 3) 公開（GitHub 経由・運用タスク）
 - 下書きを MDX に昇格し PR する、などは **人手・別タスク**（`plan/BLOG_CONTENT.md` / `plan/BLOG_REQUEST_SCHEMA.md` の命名・ID ルールを参照）。
