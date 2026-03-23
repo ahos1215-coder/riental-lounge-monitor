@@ -10,18 +10,22 @@ FEATURE_COLUMNS = [
     "month",
     "hour",
     "minute",
+    "minutes_to_midnight",
     "day_of_week",
     "dow",
     "is_weekend",
     "is_holiday",
     "is_pre_holiday",
     "holiday_pos",
-    "is_payday_week",
+    "days_from_25th",
     "is_rainy",
+    "precip_mm",
     "next_morning_rain",
     "temp_diff_yesterday",
     "gender_diff",
-    "is_last_train_window",
+    "feat_payday_night_peak",
+    "feat_rain_night_exit",
+    "feat_pre_holiday_surge",
     "sin_time",
     "cos_time",
     "men_lag_12",
@@ -87,8 +91,9 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     pos_map = _holiday_position_map(holiday_like_dates["date"].tolist(), holiday_like_dates["flag"].tolist())
     df["holiday_pos"] = row_dates.map(lambda d: pos_map.get(d, 0)).astype(int)
 
-    df["is_payday_week"] = row_dates.map(_is_payday_week).astype(int)
+    df["days_from_25th"] = row_dates.map(_days_from_25th_clipped).astype(float)
     df["is_rainy"] = (df["weather_code"].fillna(-1) >= 51).astype(int)
+    df["precip_mm"] = pd.to_numeric(df["precip_mm"], errors="coerce").fillna(0.0).astype(float)
 
     # 翌朝（06:00-09:59）の降雨予報/実測が1件でもあればフラグ化
     if group_keys:
@@ -145,7 +150,17 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
         df["women_ma_4"] = df["women"].rolling(4, min_periods=1).mean()
 
     df["gender_diff"] = (df["men"] - df["women"]).astype(float)
-    df["is_last_train_window"] = ((df["hour"] == 23) & (df["minute"] <= 45)).astype(int)
+    df["minutes_to_midnight"] = (24 * 60 - (df["hour"] * 60 + df["minute"])).astype(float)
+    df["feat_payday_night_peak"] = (
+        (df["days_from_25th"] >= -1)
+        & (df["days_from_25th"] <= 2)
+        & (df["dow"].isin([4, 5]))
+        & (df["hour"].isin([21, 22, 23, 0]))
+    ).astype(int)
+    df["feat_rain_night_exit"] = ((df["is_rainy"] == 1) & (df["hour"] >= 22)).astype(int)
+    df["feat_pre_holiday_surge"] = (
+        (df["is_pre_holiday"] == 1) & (df["hour"] >= 20) & (df["hour"] <= 23)
+    ).astype(int)
     minutes = df["hour"] * 60 + df["minute"]
     df["sin_time"] = np.sin(2 * np.pi * minutes / 1440)
     df["cos_time"] = np.cos(2 * np.pi * minutes / 1440)
@@ -194,6 +209,12 @@ def _holiday_position_map(dates: list[date], flags: list[bool]) -> dict[date, in
 
 def _is_payday_week(d: date) -> int:
     return int(_in_payday_window_for_month(d, d.year, d.month) or _in_prev_month_window(d))
+
+
+def _days_from_25th_clipped(d: date) -> int:
+    # 日付の周期性を保ちつつ、25日付近(-5..+5)を強調する連続特徴量
+    diff = d.day - 25
+    return int(max(-5, min(5, diff)))
 
 
 def _in_prev_month_window(d: date) -> bool:

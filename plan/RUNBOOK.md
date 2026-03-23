@@ -80,6 +80,16 @@ npm run dev
 
 ---
 
+## ML 2.0 Operational Notes
+
+- **モデル方針**: 予測は `Delta`（増減量）の検証知見を採用し、学習時は「激戦区（`金・土・祝前日の20:00-25:00`）」および「雨天」を重み付けして学習する。
+- **重み付け学習**: `scripts/train_ml_model.py` は `sample_weight` を使い、`ML_TRAIN_WEIGHT_PEAK` / `ML_TRAIN_WEIGHT_RAIN`（既定 1.8、上限 2.0）を適用する。
+- **正式特徴量**: アナログ特徴量 `days_from_25th`, `minutes_to_midnight`, `precip_mm` と、交互作用特徴量 `feat_payday_night_peak`, `feat_rain_night_exit`, `feat_pre_holiday_surge` を本番 `FEATURE_COLUMNS` として固定。
+- **学習ログ**: 学習完了時は店舗ごとに `overall` と `weekend_night_segment` の `MAE/RMSE` を出力し、精度劣化を監視する。
+- **実験スクリプト配置**: 検証用スクリプトは `scripts/experiments/` に集約（例: `ablation_*`, `delta_*`）。`scripts/` 直下は本番運用用を優先。
+
+---
+
 ## 定期処理・GitHub Actions（旧 CRON.md）
 
 ### GitHub Actions（リポジトリ管理）
@@ -130,6 +140,7 @@ npm run dev
 - DNS エラー: URL を安易に変えず、ログで確認
 - `/insights/weekly` が読めない: `index.json` の有無・JSON 破損
 - **ブラウザで `/api/range` が 502**: Flask（`BACKEND_URL`、通常 `http://127.0.0.1:5000`）が起動していない、または URL が間違い。Flask を起動してから再読み込み。
+- **予測が直近値に引きずられる（秘伝のタレ）**: ラグ/MAへの依存が強すぎる可能性。`scripts/experiments/delta_target_nagasaki.py` と `scripts/experiments/ablation_signal_extraction.py` で Delta モデルを再検証し、AUC/Gain を確認してから本番ハイパラ・重みを調整する。
 
 ### Next.js `npm run dev`（よくあるエラー）
 
