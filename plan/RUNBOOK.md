@@ -82,7 +82,7 @@ npm run dev
 
 ## ML 2.0 Operational Notes
 
-- **モデル方針**: 予測は `Delta`（増減量）の検証知見を採用し、学習時は「激戦区（`金・土・祝前日の20:00-25:00`）」および「雨天」を重み付けして学習する。
+- **モデル方針**: 本番学習（`scripts/train_ml_model.py`）は `men/women` 回帰モデルを維持しつつ、学習時に「激戦区（`金・土・祝前日の20:00-25:00`）」および「雨天」を重み付けして学習する。`Delta`（増減量）は `scripts/experiments/` で継続検証する。
 - **重み付け学習**: `scripts/train_ml_model.py` は `sample_weight` を使い、`ML_TRAIN_WEIGHT_PEAK` / `ML_TRAIN_WEIGHT_RAIN`（既定 1.8、上限 2.0）を適用する。
 - **正式特徴量**: アナログ特徴量 `days_from_25th`, `minutes_to_midnight`, `precip_mm` と、交互作用特徴量 `feat_payday_night_peak`, `feat_rain_night_exit`, `feat_pre_holiday_surge` を本番 `FEATURE_COLUMNS` として固定。
 - **学習ログ**: 学習完了時は店舗ごとに `overall` と `weekend_night_segment` の `MAE/RMSE` を出力し、精度劣化を監視する。
