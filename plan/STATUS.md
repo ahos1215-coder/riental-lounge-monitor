@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-03-21
+Last updated: 2026-03-23
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -18,12 +18,16 @@ Target commit: (see git)
 
 ### Frontend (Next.js 16 / Vercel)
 - `/`, `/stores`, `/store/[id]`, `/blog`, `/blog/[slug]`, `/insights/weekly`, `/insights/weekly/[store]`, `/mypage`
-- `/stores/<id>` は存在しない（404 が正常）
+- **Web UI（2026-03 以降の磨き込み）**: トップ `/` は `stores.ts` ベースの `StoreCard`＋ブログ新着は `getAllPostMetas` の実記事（`home-client.tsx` / サーバー `page.tsx`）。店舗 `/store/[id]` は他店カードの `stats` 省略＋`Suspense` スケルトン＋お気に入りトグル。`/stores` はダミー統計をやめ、リージョン数・エリア例など掲載データに基づく表示。**`/mypage`**: お気に入り・閲覧履歴（`meguribiStorage.ts` / `localStorage`）・主要ページへのショートカット。
+- **補足**: 店舗詳細の正規パスは **`/store/[id]`（単数）**。`/stores/[id]`（複数）は意図的に未提供で、404 が正常。
 - **店舗プレビュー UI** の夜窓（19:00–05:00）判定: `frontend/src/app/hooks/useStorePreviewData.ts`
 - 二次会スポットは map-link 方式（`frontend/src/app/config/secondVenueMapLinks.ts`）
 - **LINE Webhook（本番パス）**
-  - `POST /api/line`（`frontend/src/app/api/line/route.ts`）: 署名検証 → テキスト解析 → `BACKEND_URL` 経由で `/api/range` / `/api/forecast_today` → **`insightFromRange.ts`** でインサイト化 → **Gemini** で MDX 下書き → Supabase **`blog_drafts`** 保存 → LINE 返信
+  - `POST /api/line`（`frontend/src/app/api/line/route.ts`）: 署名検証 → **レート制限**（グローバル／分＋ユーザーあたり下書き／時、`lineWebhookLimits.ts`）→ テキスト解析 → `BACKEND_URL` 経由で `/api/range` / `/api/forecast_today` → **`insightFromRange.ts`** でインサイト化 → **Gemini** で MDX 下書き → Supabase **`blog_drafts`** 保存 → LINE 返信
   - `GET /api/line`: ヘルス `{"ok":true,"service":"line-webhook"}`
+- **OGP / メタデータ**: ルート `metadataBase`（`NEXT_PUBLIC_SITE_URL` 等）、動的 OG 画像 `opengraph-image.tsx`、主要ページの `openGraph` / `twitter`（ブログ記事は canonical 付き）
+- **週次 Insights UI**: `/insights/weekly/[store]` に Recharts 可視化（`WeeklyStoreCharts.tsx`）。JSON の **`series_compact`**（`scripts/generate_weekly_insights.py` が出力、最大約240点）で時系列。旧 JSON はプレースホルダ表示。
+- **ブログ frontmatter**: Zod 形状検証＋日付形式チェック（`blogFrontmatter.ts` / `content.ts` の `gateBlogFrontmatter`）。`BLOG_STRICT_FRONTMATTER` / `BLOG_LOG_FRONTMATTER` は `plan/ENV.md`。
 - その他 Next API routes: `/api/range` 等は Flask へのプロキシ（既存）
 
 ### LINE 下書きパイプライン（要点）
@@ -35,6 +39,7 @@ Target commit: (see git)
 
 ### Content / Batch
 - Weekly Insights: GitHub Actions → `frontend/content/insights/weekly` + `index.json`
+- **GHA 失敗通知**（任意）: `OPS_NOTIFY_WEBHOOK_URL` 設定時、週次 Insights・定時ブログトリガ・Public Facts・Blog Request の失敗で Slack/Discord に POST（`.github/workflows/notify-on-failure.yml`）
 - Public Facts: GitHub Actions → `frontend/content/facts/public`
 - Facts の debug notes は `NEXT_PUBLIC_SHOW_FACTS_DEBUG=1` のときのみ表示
 
@@ -45,6 +50,6 @@ Target commit: (see git)
 
 ## 既知の制限 / 注意
 - 週次インサイト生成は `/api/range` の可用性に依存（Actions はタイムアウト/リトライあり）
-- `/api/current` はローカル保存の最新値のため、Supabase の最新とは一致しない場合がある
-- `/api/range` の **`limit` が小さい**（例: 20）と、その日の夜以外のサンプルしか取れずインサイトが偏ることがある → `frontend/src/app/api/line/route.ts` の `RANGE_LIMIT` で調整可能
-- インサイトの **`avoid_time`** は実装上「窓内で total が最小の時刻」（＝空きやすいサンプル）。日本語の「避けたい」表現とズレる場合は記事ルール側で補足予定（`ROADMAP.md` 参照）
+- `/api/current` はローカル保存の最新値のため、Supabase の最新とは一致しない場合がある（**方針メモ**: `plan/API_CURRENT.md`）
+- `/api/range` の **`limit` が小さい**（過去例: 20）と、その日の夜以外のサンプルしか取れずインサイトが偏ることがある。**現行既定は 500**（`LINE_RANGE_LIMIT` / `BLOG_CRON_RANGE_LIMIT`）で、必要時は運用で調整。
+- インサイトの **`avoid_time`** は実装上「窓内で total が最小の時刻」（= **混雑が落ち着いている目安**）。「避けるべき時刻」と誤読されないよう、記事文言では提案型の表現を優先（`ROADMAP.md` 参照）。

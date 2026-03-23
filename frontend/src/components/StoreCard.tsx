@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
+import { recordStoreVisit } from "@/lib/browser/meguribiStorage";
 
 type StoreCardProps = {
   slug: string;
@@ -59,11 +60,7 @@ export function StoreCard({
     : "flex cursor-pointer flex-col rounded-2xl border border-white/10 bg-black/60 p-4 text-sm transition hover:border-white/30 hover:bg-black/70";
 
   const handleClick = () => {
-    try {
-      window.localStorage.setItem("meguribi:lastStoreSlug", slug);
-    } catch {
-      // ignore
-    }
+    recordStoreVisit(slug);
   };
 
   return (

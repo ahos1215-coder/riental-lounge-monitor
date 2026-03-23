@@ -81,3 +81,11 @@ jobs:
           fi
           git commit -m "chore(insights): generate weekly insights"
           git push
+
+  notify-on-failure:
+    needs: [generate]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "Generate Weekly Insights"

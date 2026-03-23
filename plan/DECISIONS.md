@@ -1,5 +1,5 @@
 # DECISIONS
-Last updated: 2026-03-21
+Last updated: 2026-03-23
 Target commit: (see git)
 
 ## Core decisions (keep)
@@ -17,7 +17,8 @@ Target commit: (see git)
 10) `blog_drafts` への保存は **Next.js API routes（サーバー）** からのみ行い、`SUPABASE_SERVICE_ROLE_KEY` はサーバー環境変数に限定する。ブラウザから Supabase を直接叩かない（従来のレイヤ方針と整合）。
 11) **ブログ / LINE 配管に n8n は使わない**。Webhook 司令塔は Next.js（`POST /api/line`）のみ。
 12) **LINE 下書き**が Flask `/api/range` を呼ぶときの `limit` は **`LINE_RANGE_LIMIT`**（既定 **500**、上限 50000）。旧 20 行固定はインサイトが偏るため廃止。**定時 Cron** は **`BLOG_CRON_RANGE_LIMIT`**（既定 500）で別管理。必要なら両方同じ値に揃える。
-13) **`/api/current`** は当面、**Flask 実装どおり（ローカルキャッシュの最新など）**を維持する。Supabase 直取得へ寄せる場合は **別タスク**（契約・キャッシュ・メタ API の整合が必要）。
+13) **`/api/current`** は当面、**Flask 実装どおり（ローカルキャッシュの最新など）**を維持する。Supabase 直取得へ寄せる場合は **別タスク**（契約・キャッシュ・メタ API の整合が必要）。**補足の全文**は **`plan/API_CURRENT.md`**。
+14) **`POST /api/line` のレート制限**: Webhook は **エンドユーザー IP ではなく LINE サーバー経由**のため、**クライアント IP を正本の制限キーにしない**。署名検証成功後に **グローバル（分あたり）** と、高コストな `runBlogDraftPipeline` を **LINE `userId` あたり（時間あたり）**で制限する。分散環境では **Upstash Redis**（`UPSTASH_REDIS_REST_*`）を推奨。全体超過時は **200 OK で処理スキップ**（再送増とコスト抑制）、ユーザー超過時は **返信文で案内**。
 
 ## やらないこと（ハードルール）
 - `/api/range` にクエリ追加・サーバ側の夜窓フィルタ追加。

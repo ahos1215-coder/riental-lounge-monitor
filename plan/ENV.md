@@ -1,5 +1,5 @@
 # ENV
-Last updated: 2026-03-21
+Last updated: 2026-03-23
 Target commit: (see git)
 
 値そのものは書かず、環境変数名のみ記載。
@@ -13,10 +13,20 @@ Target commit: (see git)
 主な変数:
 - `BACKEND_URL`（Next API routes が backend を呼ぶための base URL）
 - `NEXT_PUBLIC_BASE_URL`（任意。絶対 URL が必要な場面やスクリプトで利用）
+- `NEXT_PUBLIC_SITE_URL`（任意。**OGP・canonical の正本**に使う推奨。末尾スラッシュなし。未設定時は `NEXT_PUBLIC_BASE_URL` → Vercel の `VERCEL_URL` → `localhost`）
 - `NEXT_PUBLIC_SHOW_FACTS_DEBUG`（`"1"` のとき Facts の debug notes を表示）
+
+ブログ MDX frontmatter（`frontend/src/lib/blog/blogFrontmatter.ts` / `content.ts`）:
+- `BLOG_STRICT_FRONTMATTER`（`"1"` のとき Zod 形状検証または date 形式警告で **`next build` を失敗**させる。CI 用）
+- `BLOG_LOG_FRONTMATTER`（`"1"` のとき本番でも frontmatter 警告を **console に出す**）
 
 LINE Webhook（`frontend/src/app/api/line/route.ts`）:
 - `LINE_RANGE_LIMIT`（任意。`/api/range` の `limit`。**未設定時は 500**（定時の `BLOG_CRON_RANGE_LIMIT` 既定と整合）。旧 20 は偏りやすい）
+- **レート制限**（`frontend/src/lib/rateLimit/lineWebhookLimits.ts`）: Webhook は LINE サーバー経由のため **IP ではなく**（1）署名成功後の **全体スループット**（2）**ユーザー ID あたりの下書きパイプライン**を制限する。
+  - `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`（**本番必須推奨**。Upstash Redis。未設定時はプロセス内メモリのみでサーバレスでは揮発しやすく、実運用のレート制限は弱い）
+  - `LINE_WEBHOOK_GLOBAL_PER_MINUTE`（任意。全体上限／分。**既定 200**）
+  - `LINE_WEBHOOK_DRAFT_PER_USER_HOUR`（任意。同一 LINE ユーザーあたり下書き生成／時。**既定 20**）
+  - `LINE_RATE_LIMIT_DISABLED`（`"1"` のとき制限オフ。ローカル検証のみ推奨）
 - `LINE_CHANNEL_SECRET`（`x-line-signature` 検証。本番では必須）
 - `LINE_CHANNEL_ACCESS_TOKEN`（返信メッセージ用）
 - `SKIP_LINE_SIGNATURE_VERIFY`（`"1"` のとき署名検証をスキップ。ローカル検証用のみ）
@@ -33,6 +43,10 @@ LINE Webhook（`frontend/src/app/api/line/route.ts`）:
 
 注意:
 - `NEXT_PUBLIC_*` はブラウザに配布されるため秘密値を入れない。
+
+### GitHub Actions（Repository — Vercel ではない）
+- `OPS_NOTIFY_WEBHOOK_URL`（任意。**Secret**。週次 Insights・定時ブログ・Public Facts・Blog Request の失敗時に Webhook POST。未設定なら通知ジョブのみスキップ）
+- `OPS_NOTIFY_WEBHOOK_TYPE`（任意。**Variables** 推奨。`slack` または `discord`。未設定・空なら Slack 形式 `{"text":"..."}`）
 
 ### ローカル CLI: `npm run drafts:export`（`frontend/scripts/export-blog-draft.mjs`）
 - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SERVICE_KEY`（**service role**。`blog_drafts` を REST で読む）

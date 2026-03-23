@@ -2,10 +2,25 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { getMetadataBaseUrl } from "@/lib/siteUrl";
+
+const weeklyBase = getMetadataBaseUrl();
 
 export const metadata: Metadata = {
-  title: "週間Insights | めぐりび",
-  description: "週次のGood Window Insightsを表示します。",
+  title: "週次Insights",
+  description: "週次の Good Window Insights を一覧表示します。",
+  openGraph: {
+    title: "週次Insights | めぐりび",
+    description: "店舗別の週次サマリー（Good Window）を一覧します。",
+    url: new URL("/insights/weekly", weeklyBase),
+    type: "website",
+    locale: "ja_JP",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "週次Insights | めぐりび",
+    description: "店舗別の週次サマリー（Good Window）を一覧します。",
+  },
 };
 
 type StoreEntry = {

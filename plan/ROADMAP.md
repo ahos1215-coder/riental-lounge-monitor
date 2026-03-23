@@ -1,5 +1,5 @@
 # ROADMAP
-Last updated: 2026-03-21
+Last updated: 2026-03-23
 Target commit: (see git)
 
 > **構想・フェーズ順・備忘の全文**は **`plan/VISION_AND_FUTURE.md`**。本ファイルは短いタスク一覧と「当面やらないこと」に絞る。
@@ -7,19 +7,21 @@ Target commit: (see git)
 ---
 
 ## P0（次に着手しやすい項目）
-- **`avoid_time` / プロンプト**: `draftGenerator.ts` で「入店しやすさの目安」「提案型」を固定（**2026-03 10秒まとめ用ラベル追記済み**）。ズレる場合は人手修正または微調整（`plan/VISION_AND_FUTURE.md` §9 も参照）。
+- **`avoid_time` / プロンプト**: `draftGenerator.ts` で「混雑が落ち着いている目安」「提案型」の表現を固定（**2026-03 10秒まとめ用ラベル追記済み**）。ズレる場合は人手修正または微調整（`plan/VISION_AND_FUTURE.md` §9 も参照）。
 - **`LINE_RANGE_LIMIT` / `BLOG_CRON_RANGE_LIMIT`**: LINE は既定 **500**（`LINE_RANGE_LIMIT` で上書き可）。定時は **`BLOG_CRON_RANGE_LIMIT`**（既定 500）。運用で偏りがあれば両方を揃えて調整。
-- **Web フロント**: 新規の「土台作り」より **既存画面の改善・見せ方・コンテンツ拡充**（`VISION_AND_FUTURE.md` フェーズ A）
+- **39店舗スケール検証（実行時間 / 失敗率）**: `GET /api/cron/blog-draft` の全店舗処理が Vercel 実行上限内に収まるかを計測。必要なら GHA マトリクス分割またはジョブキュー化を検討。
+- **Web フロント**: 新規の「土台作り」より **既存画面の改善・見せ方・コンテンツ拡充**（`VISION_AND_FUTURE.md` フェーズ A）。**進捗メモ**: `/`・`/store/[id]`・`/stores`・**`/mypage`（お気に入り・閲覧履歴・localStorage、`meguribiStorage.ts`）**・店舗ページのお気に入りトグル。残りはブログ周りの文言・細かな UI 等。
 - 主要ドキュメントの継続同期（`plan/*` と README の整合）
-- Weekly Insights の品質改善（score 閾値・最小継続時間の運用調整）
-- `/api/current` の位置づけ見直し（Supabase 直取得に寄せるか、現状維持かを決定）
+- Weekly Insights の品質改善（score 閾値・最小継続時間の**運用調整**は引き続き。可視化は下記 P1 で実装済み）
+- **`/api/current`**: **方針メモを `plan/API_CURRENT.md` に追記済み**（当面は Flask 実装維持）。Supabase 直取得へ寄せるかは別タスクで決定
 
 ## P1
-- 週次 Insights の可視化強化（series_compact の導入や説明文の追加）
-- ブログ / Facts の運用負荷削減（テンプレ整理、入力バリデーション）
+- 週次 Insights の可視化強化（**実装済み**: `series_compact`＋`WeeklyStoreCharts.tsx`／`plan/WEEKLY_INSIGHTS_TUNING.md`。追加の系列や説明文は任意）
+- ブログ / Facts の運用負荷削減（**frontmatter Zod 検証は実装済み** `blogFrontmatter.ts`。残り: テンプレ整理・Facts 側など）
 - 監視・運用の可視化（ログの整理、Render/Vercel 運用の整理）
-- **GitHub Actions の失敗通知**（週次 Insights 等は `/api/range` 依存。Render スリープ・タイムアウトで黙って失敗しうる → メール/Slack 等で検知）
-- **`POST /api/line` の防衛**: 署名検証の徹底、**レート制限**（Edge Middleware 等）の検討 — **Gemini コスト・悪用対策**（`plan/ADVISORY_SYNTHESIS.md`）
+- **GitHub Actions の失敗通知**（**実装済み**: Secret `OPS_NOTIFY_WEBHOOK_URL` + 任意 Variable `OPS_NOTIFY_WEBHOOK_TYPE`。`plan/RUNBOOK.md` 参照。`blog-ci` は対象外）
+- **`POST /api/line` の防衛**: 署名検証に加え **レート制限を実装済み**（グローバル＋ユーザー単位、Upstash 推奨。`plan/DECISIONS.md` 14 / `plan/ENV.md`）。追加で IP ベース Middleware 等が必要なら別検討（Webhook は LINE 経由のため IP は補助）
+- **Gemini 出力の構造化**: frontmatter と本文の分離（JSON + text）を検証し、プロンプト変更時の MDX 破損耐性を強化。
 - **X（Twitter）API 連携・OGP・投稿ルート**（`VISION_AND_FUTURE.md` フェーズ B）— **未実装。構想段階**。自動投稿のスコープは **人気トップ5店＋長崎店のみ**から開始する方針（§9）。
 
 ## P2

@@ -1,5 +1,5 @@
 # plan/ フォルダ案内（Cursor / AI 向け）
-Last updated: 2026-03-21  
+Last updated: 2026-03-23  
 Target commit: (see git)
 
 **迷ったら最初にこのファイルを読む。** 各 `.md` の役割と読了順を固定する。
@@ -13,16 +13,17 @@ Target commit: (see git)
 3. **`STATUS.md`** — **いま動いている機能**（事実の正）
 4. **`DECISIONS.md`** — 壊してはいけない判断
 5. **`API_CONTRACT.md`** — Flask + Next `/api/line` の契約
-6. **`ARCHITECTURE.md`** — データフロー
-7. **`RUNBOOK.md`** — ローカル起動・本番メモ・**定期ジョブ**・トラブルシュート（旧 ONBOARDING / CRON を統合）
-8. **`ENV.md`** — 環境変数
-9. **`BLOG_PIPELINE.md`** — LINE → 下書き（技術）
-10. **`BLOG_CONTENT.md`** — ブログ編集方針
-11. **`BLOG_REQUEST_SCHEMA.md`** — 依頼 JSON のスキーマ（任意・契約）
-12. **`SECOND_VENUES.md`** — 二次会 map-link 方針
-13. **`VISION_AND_FUTURE.md`** — 構想・フェーズ・備忘
-14. **`ROADMAP.md`** — 短いタスク一覧・当面やらないこと
-15. **`CHECKLISTS.md`** — デプロイ前チェック
+6. **`API_CURRENT.md`** — `/api/current` の位置づけ（補足）
+7. **`ARCHITECTURE.md`** — データフロー
+8. **`RUNBOOK.md`** — ローカル起動・本番メモ・**定期ジョブ**・トラブルシュート（旧 ONBOARDING / CRON を統合）
+9. **`ENV.md`** — 環境変数
+10. **`BLOG_PIPELINE.md`** — LINE → 下書き（技術）
+11. **`BLOG_CONTENT.md`** — ブログ編集方針
+12. **`BLOG_REQUEST_SCHEMA.md`** — 依頼 JSON のスキーマ（任意・契約）
+13. **`SECOND_VENUES.md`** — 二次会 map-link 方針
+14. **`VISION_AND_FUTURE.md`** — 構想・フェーズ・備忘
+15. **`ROADMAP.md`** — 短いタスク一覧・当面やらないこと
+16. **`CHECKLISTS.md`** — デプロイ前チェック
 
 **用語が曖昧なとき**: `GLOSSARY.md`
 
@@ -39,6 +40,7 @@ Target commit: (see git)
 | `STATUS.md` | 稼働中機能の一覧 |
 | `DECISIONS.md` | 不変の意思決定 |
 | `API_CONTRACT.md` | API 契約 |
+| `API_CURRENT.md` | `/api/current` の位置づけ・当面方針 |
 | `ARCHITECTURE.md` | アーキテクチャ |
 | `RUNBOOK.md` | 起動・運用・**GitHub Actions / 外部 cron**・トラブルシュート |
 | `BLOG_CRON_GHA.md` | 定時ブログの **GitHub Actions**（正本）・Secrets 一覧 |
@@ -49,6 +51,7 @@ Target commit: (see git)
 | `SECOND_VENUES.md` | 二次会スポット |
 | `VISION_AND_FUTURE.md` | 展望・実装フェーズ |
 | `ROADMAP.md` | P0/P1・やらないこと |
+| `WEEKLY_INSIGHTS_TUNING.md` | 週次 Insights の閾値・GHA 環境変数・調整タイミング |
 | `CHECKLISTS.md` | チェックリスト |
 | `BRIEFING_FOR_ADVISOR.md` | 外部 AI 向け要約（相談用） |
 | `ADVISORY_SYNTHESIS.md` | 外部アドバイス（Gemini 等）の整理・要約 |

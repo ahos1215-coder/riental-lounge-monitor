@@ -2,6 +2,28 @@ import fs from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
 
+import { validateBlogDateFormat, validateBlogFrontmatterShape } from "./blogFrontmatter";
+
+function gateBlogFrontmatter(data: unknown, label: string): void {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return;
+  const o = data as Record<string, unknown>;
+  const shapeIssues = validateBlogFrontmatterShape(o, label);
+  const issues = [...shapeIssues];
+  const rawDate = o.date;
+  if (rawDate !== undefined && rawDate !== null && String(rawDate).trim() !== "") {
+    const di = validateBlogDateFormat(String(rawDate), label);
+    if (di) issues.push(di);
+  }
+  if (issues.length === 0) return;
+  const strict = process.env.BLOG_STRICT_FRONTMATTER === "1";
+  if (strict) {
+    throw new Error(`[blog] frontmatter (${label}): ${issues.join(" | ")}`);
+  }
+  if (process.env.NODE_ENV === "development" || process.env.BLOG_LOG_FRONTMATTER === "1") {
+    console.warn("[blog frontmatter]", issues.join(" | "));
+  }
+}
+
 export type BlogCategoryId = "guide" | "beginner" | "prediction" | "column" | "interview";
 export type BlogLevel = "easy" | "normal" | "pro";
 export type BlogPeriod = "tonight" | "this_week" | "generic";
@@ -140,6 +162,7 @@ export function getAllPostMetas(opts?: { includeDraft?: boolean }): Array<BlogPo
     // BOM耐性
     const raw = fs.readFileSync(fp, "utf8").replace(/^\uFEFF/, "");
     const parsed = matter(raw);
+    gateBlogFrontmatter(parsed.data, fp);
 
     const slug = fileSlug(fp);
     const title = safeString(parsed.data.title, slug);
@@ -218,6 +241,7 @@ export function getPostBySlug(slug: string, opts?: { includeDraft?: boolean }): 
   // BOM耐性
   const raw = fs.readFileSync(fp, "utf8").replace(/^\uFEFF/, "");
   const parsed = matter(raw);
+  gateBlogFrontmatter(parsed.data, fp);
 
   const title = safeString(parsed.data.title, slug);
   const description = safeString(parsed.data.description, "");

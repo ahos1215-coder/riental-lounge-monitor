@@ -11,13 +11,14 @@
 5. [plan/STATUS.md](plan/STATUS.md)
 6. [plan/DECISIONS.md](plan/DECISIONS.md)
 7. [plan/API_CONTRACT.md](plan/API_CONTRACT.md)
-8. [plan/ARCHITECTURE.md](plan/ARCHITECTURE.md)
-9. [plan/RUNBOOK.md](plan/RUNBOOK.md)（起動・定期ジョブ・オンボーディング）
-10. [plan/ENV.md](plan/ENV.md)
-11. [plan/SECOND_VENUES.md](plan/SECOND_VENUES.md)
-12. [plan/VISION_AND_FUTURE.md](plan/VISION_AND_FUTURE.md)（構想・今後の実装段取り）
-13. [plan/ROADMAP.md](plan/ROADMAP.md)
-14. [plan/GLOSSARY.md](plan/GLOSSARY.md)（用語）
+8. [plan/API_CURRENT.md](plan/API_CURRENT.md)（`/api/current` の位置づけ・補足）
+9. [plan/ARCHITECTURE.md](plan/ARCHITECTURE.md)
+10. [plan/RUNBOOK.md](plan/RUNBOOK.md)（起動・定期ジョブ・オンボーディング）
+11. [plan/ENV.md](plan/ENV.md)
+12. [plan/SECOND_VENUES.md](plan/SECOND_VENUES.md)
+13. [plan/VISION_AND_FUTURE.md](plan/VISION_AND_FUTURE.md)（構想・今後の実装段取り）
+14. [plan/ROADMAP.md](plan/ROADMAP.md)
+15. [plan/GLOSSARY.md](plan/GLOSSARY.md)（用語）
 
 ## Quick Start（ローカル起動）
 Backend（Flask）

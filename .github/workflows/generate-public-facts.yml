@@ -50,3 +50,11 @@ jobs:
           git commit -m "chore(facts): update public facts"
           git push
 
+  notify-on-failure:
+    needs: [generate]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "Generate Public Facts"
+

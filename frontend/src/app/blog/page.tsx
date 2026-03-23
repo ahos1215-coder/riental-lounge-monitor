@@ -8,11 +8,28 @@ import {
   isCategoryId,
   type BlogCategoryId,
 } from "@/lib/blog/content";
+import { getMetadataBaseUrl } from "@/lib/siteUrl";
+
+const blogBase = getMetadataBaseUrl();
 
 export const metadata: Metadata = {
-  title: "ブログ | めぐりび",
+  title: "ブログ",
   description:
     "相席系ラウンジ・バーの攻略や夜の楽しみ方、混雑傾向の読み方をわかりやすく解説します。",
+  openGraph: {
+    title: "ブログ | めぐりび",
+    description:
+      "相席系ラウンジ・バーの攻略や夜の楽しみ方、混雑傾向の読み方をわかりやすく解説します。",
+    url: new URL("/blog", blogBase),
+    type: "website",
+    locale: "ja_JP",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "ブログ | めぐりび",
+    description:
+      "相席系ラウンジ・バーの攻略や夜の楽しみ方、混雑傾向の読み方をわかりやすく解説します。",
+  },
 };
 
 type SearchParams = Record<string, string | string[] | undefined>;

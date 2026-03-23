@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import WeeklyStoreCharts from "../WeeklyStoreCharts";
 
 export const dynamicParams = false;
 
@@ -22,6 +24,12 @@ type WindowEntry = {
   avg_score?: number;
 };
 
+type SeriesCompactEntry = {
+  t?: string;
+  occupancy?: number;
+  female_ratio?: number;
+};
+
 type InsightPayload = {
   generated_at?: string;
   period?: { start?: string; end?: string };
@@ -32,6 +40,8 @@ type InsightPayload = {
   };
   params?: { threshold?: number; min_duration_minutes?: number };
   top_windows?: WindowEntry[];
+  /** 週次生成スクリプトが出力する時系列（最大約240点） */
+  series_compact?: SeriesCompactEntry[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -85,9 +95,24 @@ export async function generateMetadata({
   params: Promise<{ store: string }>;
 }): Promise<Metadata> {
   const { store } = await params;
+  const base = getMetadataBaseUrl();
+  const title = `${store} 週次Insights`;
+  const description = `${store} の週次 Good Window サマリー（めぐりび）。`;
   return {
-    title: `${store} 週次Insights | めぐりび`,
-    description: "Good Window Explorer（最小版）の週次サマリー。",
+    title,
+    description,
+    openGraph: {
+      title: `${title} | めぐりび`,
+      description,
+      url: new URL(`/insights/weekly/${encodeURIComponent(store)}`, base),
+      type: "website",
+      locale: "ja_JP",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: `${title} | めぐりび`,
+      description,
+    },
   };
 }
 
@@ -143,6 +168,19 @@ export default async function WeeklyInsightsStorePage({
   const topWindows = Array.isArray(data.top_windows) ? data.top_windows : [];
   const threshold = data.params?.threshold ?? 0.8;
   const minDuration = data.params?.min_duration_minutes ?? 120;
+  const reliability = typeof metrics.reliability_score === "number" ? metrics.reliability_score : 0;
+
+  const rawSeries = Array.isArray(data.series_compact) ? data.series_compact : [];
+  const seriesCompact = rawSeries
+    .filter(
+      (p): p is { t: string; occupancy: number; female_ratio: number } =>
+        typeof p?.t === "string" &&
+        typeof p?.occupancy === "number" &&
+        Number.isFinite(p.occupancy) &&
+        typeof p?.female_ratio === "number" &&
+        Number.isFinite(p.female_ratio),
+    )
+    .map((p) => ({ t: p.t, occupancy: p.occupancy, female_ratio: p.female_ratio }));
 
   return (
     <main className="relative min-h-[calc(100vh-80px)] bg-black text-white">
@@ -167,19 +205,43 @@ export default async function WeeklyInsightsStorePage({
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
             <p className="text-xs text-white/50">points_used</p>
             <p className="mt-2 text-2xl font-black">{metrics.points_used ?? 0}</p>
+            <p className="mt-1 text-[11px] text-white/40">分析に使ったサンプル数</p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
             <p className="text-xs text-white/50">baseline_p95_total</p>
             <p className="mt-2 text-2xl font-black">{formatNumber(metrics.baseline_p95_total, 1)}</p>
+            <p className="mt-1 text-[11px] text-white/40">混雑目安のベースライン（p95）</p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
             <p className="text-xs text-white/50">reliability_score</p>
             <p className="mt-2 text-2xl font-black">{formatNumber(metrics.reliability_score, 2)}</p>
+            <p className="mt-1 text-[11px] text-white/40">200点以上で 1.0（参考）</p>
+            <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-white/10">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-emerald-400 transition-all"
+                style={{ width: `${Math.min(100, Math.max(0, reliability * 100))}%` }}
+              />
+            </div>
           </div>
         </div>
 
         <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 text-sm text-white/70">
-          period: {data.period?.start ?? "-"} → {data.period?.end ?? "-"}
+          <p>
+            <span className="text-white/45">period:</span> {data.period?.start ?? "-"} → {data.period?.end ?? "-"}
+          </p>
+          <p className="mt-2 text-xs text-white/45">
+            Good Window はスコアが {threshold} 以上が {minDuration} 分続く区間として検出しています（詳細は{" "}
+            <code className="rounded bg-black/40 px-1">scripts/generate_weekly_insights.py</code>）。
+          </p>
+        </div>
+
+        <div className="mt-8">
+          <WeeklyStoreCharts
+            store={store}
+            series={seriesCompact}
+            topWindows={topWindows}
+            scoreThreshold={threshold}
+          />
         </div>
 
         <section className="mt-8">

@@ -1,4 +1,5 @@
 import path from "node:path";
+import crypto from "node:crypto";
 import { loadEnvConfig } from "@next/env";
 import { NextRequest, NextResponse } from "next/server";
 
@@ -58,7 +59,11 @@ function isCronAuthorized(req: NextRequest): boolean {
   const secret = process.env.CRON_SECRET?.trim();
   if (!secret) return false;
   const auth = req.headers.get("authorization");
-  return auth === `Bearer ${secret}`;
+  if (!auth) return false;
+  const expected = Buffer.from(`Bearer ${secret}`);
+  const received = Buffer.from(auth);
+  if (expected.length !== received.length) return false;
+  return crypto.timingSafeEqual(expected, received);
 }
 
 /** Vercel Serverless の実行上限に合わせる（Hobby も max 60s まで設定可能。バックエンド大量取得＋Gemini に余裕を持たせる） */

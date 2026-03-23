@@ -8,6 +8,7 @@ import remarkGfm from "remark-gfm";
 import { FactsSummaryCard } from "@/components/blog/FactsSummaryCard";
 import { readPublicFacts } from "@/lib/blog/publicFacts";
 import { getAllPostMetas, getPostBySlug } from "@/lib/blog/content";
+import { getMetadataBaseUrl } from "@/lib/siteUrl";
 
 export const dynamicParams = true;
 
@@ -65,7 +66,26 @@ export async function generateMetadata({
 
   const title = String((post as any).title ?? (post as any).name ?? slug ?? "Blog");
   const description = (post as any).description ? String((post as any).description) : "";
-  return { title, description };
+  const base = getMetadataBaseUrl();
+  const url = new URL(`/blog/${encodeURIComponent(slug)}`, base);
+
+  return {
+    title,
+    description,
+    alternates: { canonical: url.href },
+    openGraph: {
+      title,
+      description,
+      url,
+      type: "article",
+      locale: "ja_JP",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title,
+      description: description || title,
+    },
+  };
 }
 
 export default async function BlogPostPage({ params, searchParams }: Props) {

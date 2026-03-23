@@ -43,11 +43,15 @@ export default function StoresPage() {
     brandFilter === "jis" || brandFilter === "aisekiya";
 
   const registeredCount = STORES.length;
-  const openNowCount = STORES.length; // 現状は全店舗を営業中扱いで表示
-  const recommendedAreas =
+  /** 大エリア（regionLabel）のユニーク数 — 営業状況とは未連携 */
+  const regionCount = useMemo(
+    () => new Set(STORES.map((s) => s.regionLabel)).size,
+    [],
+  );
+  const areaExamples =
     STORES.slice(0, 3)
       .map((s) => s.areaLabel)
-      .join(" / ") || "準備中";
+      .join(" / ") || "—";
 
   return (
     <div className="relative min-h-screen w-full overflow-x-hidden bg-[#050505] font-display text-white">
@@ -119,11 +123,6 @@ export default function StoresPage() {
                     brandLabel="ORIENTAL LOUNGE"
                     areaLabel={store.areaLabel}
                     isHighlight={idx === 0}
-                    stats={{
-                      genderRatio: "準備中",
-                      crowdLevel: "準備中",
-                      recommendLabel: "準備中",
-                    }}
                   />
                 ))}
               </div>
@@ -139,18 +138,21 @@ export default function StoresPage() {
             </div>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-3 text-xs">
               <p className="text-[11px] text-slate-400">
-                現在営業中の店舗数（ダミー表示）
+                カバーする大エリア数（region）
               </p>
               <p className="mt-1 text-2xl font-semibold text-slate-50">
-                {openNowCount}
+                {regionCount}
+              </p>
+              <p className="mt-1 text-[10px] text-slate-500">
+                営業中かどうかのリアルタイム表示は未連携です。
               </p>
             </div>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-3 text-xs">
               <p className="text-[11px] text-slate-400">
-                今夜おすすめエリア（ダミー表示）
+                掲載エリアの例（先頭3店）
               </p>
-              <p className="mt-1 text-base font-semibold text-slate-50">
-                {recommendedAreas}
+              <p className="mt-1 text-base font-semibold leading-snug text-slate-50">
+                {areaExamples}
               </p>
             </div>
           </section>

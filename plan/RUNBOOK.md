@@ -1,5 +1,5 @@
 # RUNBOOK
-Last updated: 2026-03-21
+Last updated: 2026-03-23
 Target commit: (see git)
 
 ローカル起動・本番メモ・**初回オンボーディング**・**定期処理（cron）**・トラブルシュート。  
@@ -22,6 +22,11 @@ Target commit: (see git)
 ### LINE 下書き（本番）
 - Messaging API の Webhook を **Vercel の `POST /api/line`** に。**n8n は使わない。**
 - `LINE_CHANNEL_SECRET` / `LINE_CHANNEL_ACCESS_TOKEN` / `GEMINI_API_KEY` / Supabase service role（`blog_drafts`）等は `plan/ENV.md`。
+- **レート制限**: 悪用・誤爆で Gemini／バックエンド負荷が跳ねないよう、`UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`（Upstash）を本番で設定することを推奨。**未設定時はメモリ内フォールバックとなり、サーバレス環境では実効性が弱くなる**。詳細は `plan/ENV.md` の LINE 節。
+
+### OGP・シェア用 URL（本番）
+- `metadataBase` と SNS 用メタデータは **`NEXT_PUBLIC_SITE_URL`**（または `NEXT_PUBLIC_BASE_URL`）が揃っていると正しい canonical / `og:url` になる。未設定だとビルド時の `VERCEL_URL` や `localhost` に寄る。
+- 既定の共有用画像は `frontend/src/app/opengraph-image.tsx`（動的 OG 画像）。
 
 ### Night window / 二次会 / Supabase
 - 店舗 UI の夜 19:00–05:00 は **`useStorePreviewData.ts`**。LINE 下書きの窓は **`insightFromRange.ts`**。
@@ -87,6 +92,12 @@ npm run dev
 
 - Weekly: 手動 `workflow_dispatch` で `stores` / threshold 等を指定可能。成果物 `frontend/content/insights/weekly`
 - Public Facts: 成果物 `frontend/content/facts/public`
+
+### Actions 失敗通知（任意・2026-03 追加）
+- **Secret**: `OPS_NOTIFY_WEBHOOK_URL`（Slack Incoming Webhook の URL 等）。**未設定のときは通知のみスキップ**し、ワークフロー自体は従来どおり。
+- **Variable**（任意）: `OPS_NOTIFY_WEBHOOK_TYPE` — `slack`（既定・`{"text":"..."}`）または `discord`（`{"content":"..."}`）。未設定または空なら Slack 形式。
+- **呼び出し元**: `generate-weekly-insights.yml` / `trigger-blog-cron.yml` / `generate-public-facts.yml` / `blog-request.yml` が失敗時に再利用ワークフロー `.github/workflows/notify-on-failure.yml` を実行。
+- PR 用の `blog-ci.yml` には付けていない（失敗が多く通知が煩いため）。
 
 ### 外部 cron（運用側）
 - **`/tasks/multi_collect`** を一定間隔で叩く想定。定義は **Render / 外部 scheduler**（リポジトリ内に crontab はない）。

@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 
 import { parseLineIntent } from "@/lib/line/parseLineIntent";
 import { runBlogDraftPipeline } from "@/lib/blog/runBlogDraftPipeline";
+import { limitLineUserDraft, limitLineWebhookGlobal } from "@/lib/rateLimit/lineWebhookLimits";
 
 /** Flask backend base URL (same as other Next API proxies). */
 // Vercel 側で `BACKEND-URL` として登録されてしまうケースがあるため、保険で別名も許容する。
@@ -134,6 +135,15 @@ async function processMessageEvent(ev: LineEvent): Promise<void> {
   const draft = intent;
   const lineUserId = ev.source?.userId ?? null;
 
+  const userLimit = await limitLineUserDraft(lineUserId);
+  if (!userLimit.success) {
+    await replyLine(
+      replyToken,
+      "下書き生成は短時間の上限に達しました。しばらく（目安: 1時間）してから再度お試しください。",
+    );
+    return;
+  }
+
   try {
     console.log("[line] Running blog draft pipeline");
     const result = await runBlogDraftPipeline({
@@ -216,6 +226,12 @@ export async function POST(req: NextRequest) {
     if (!verifyLineSignature(rawBody, sig, secret)) {
       return NextResponse.json({ ok: false, error: "invalid-signature" }, { status: 401 });
     }
+  }
+
+  const globalLimit = await limitLineWebhookGlobal();
+  if (!globalLimit.success) {
+    console.warn("[line] global rate limit exceeded; skip processing (200 OK for LINE)");
+    return new NextResponse("OK", { status: 200 });
   }
 
   // Vercel serverless 上で `after()` がサスペンドされ、返信処理まで完遂されないケースがあるため、

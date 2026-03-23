@@ -126,3 +126,11 @@ jobs:
           add-paths: |
             frontend/content/blog/${{ steps.meta.outputs.slug }}.mdx
             frontend/content/facts/public/**
+
+  notify-on-failure:
+    needs: [generate]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "Blog Request (Draft + Public Facts)"

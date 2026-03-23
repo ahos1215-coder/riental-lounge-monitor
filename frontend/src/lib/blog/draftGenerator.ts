@@ -230,6 +230,81 @@ function buildUserPrompt(input: DraftGeneratorInput): string {
   ].join("\n");
 }
 
+type StructuredDraft = {
+  frontmatter: {
+    title: string;
+    description: string;
+    date: string;
+    categoryId: "guide" | "beginner" | "prediction" | "column" | "interview";
+    level: "easy" | "normal" | "pro";
+    store: string;
+    facts_id: string;
+    facts_visibility: "show";
+  };
+  body: string;
+};
+
+function toYamlScalar(v: string): string {
+  return JSON.stringify(String(v ?? ""));
+}
+
+function toMdxFromStructuredDraft(draft: StructuredDraft): string {
+  const fm = draft.frontmatter;
+  const body = (draft.body ?? "").trim();
+  return [
+    "---",
+    `title: ${toYamlScalar(fm.title)}`,
+    `description: ${toYamlScalar(fm.description)}`,
+    `date: ${toYamlScalar(fm.date)}`,
+    `categoryId: ${toYamlScalar(fm.categoryId)}`,
+    `level: ${toYamlScalar(fm.level)}`,
+    `store: ${toYamlScalar(fm.store)}`,
+    `facts_id: ${toYamlScalar(fm.facts_id)}`,
+    `facts_visibility: ${toYamlScalar(fm.facts_visibility)}`,
+    "---",
+    "",
+    body,
+  ].join("\n");
+}
+
+function parseStructuredDraft(raw: string): StructuredDraft | null {
+  try {
+    const parsed = JSON.parse(raw) as Partial<StructuredDraft>;
+    if (!parsed || typeof parsed !== "object") return null;
+    if (!parsed.frontmatter || typeof parsed.frontmatter !== "object") return null;
+    if (typeof parsed.body !== "string") return null;
+    const fm = parsed.frontmatter as Record<string, unknown>;
+    const required = [
+      "title",
+      "description",
+      "date",
+      "categoryId",
+      "level",
+      "store",
+      "facts_id",
+      "facts_visibility",
+    ] as const;
+    for (const key of required) {
+      if (typeof fm[key] !== "string" || !String(fm[key]).trim()) return null;
+    }
+    return {
+      frontmatter: {
+        title: String(fm.title),
+        description: String(fm.description),
+        date: String(fm.date),
+        categoryId: fm.categoryId as StructuredDraft["frontmatter"]["categoryId"],
+        level: fm.level as StructuredDraft["frontmatter"]["level"],
+        store: String(fm.store),
+        facts_id: String(fm.facts_id),
+        facts_visibility: "show",
+      },
+      body: parsed.body.trim(),
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function generateContentOnce(
   genAI: GoogleGenerativeAI,
   modelName: string,
@@ -241,6 +316,55 @@ async function generateContentOnce(
     systemInstruction,
   });
   const result = await model.generateContent(prompt);
+  return result.response.text();
+}
+
+async function generateStructuredContentOnce(
+  genAI: GoogleGenerativeAI,
+  modelName: string,
+  prompt: string,
+  systemInstruction: string
+): Promise<string> {
+  const model = genAI.getGenerativeModel({
+    model: modelName,
+    systemInstruction,
+  });
+  const result = await model.generateContent({
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: "OBJECT",
+        properties: {
+          frontmatter: {
+            type: "OBJECT",
+            properties: {
+              title: { type: "STRING" },
+              description: { type: "STRING" },
+              date: { type: "STRING" },
+              categoryId: { type: "STRING", enum: ["guide", "beginner", "prediction", "column", "interview"] },
+              level: { type: "STRING", enum: ["easy", "normal", "pro"] },
+              store: { type: "STRING" },
+              facts_id: { type: "STRING" },
+              facts_visibility: { type: "STRING", enum: ["show"] },
+            },
+            required: [
+              "title",
+              "description",
+              "date",
+              "categoryId",
+              "level",
+              "store",
+              "facts_id",
+              "facts_visibility",
+            ],
+          },
+          body: { type: "STRING" },
+        },
+        required: ["frontmatter", "body"],
+      } as unknown as object,
+    },
+  });
   return result.response.text();
 }
 
@@ -278,6 +402,32 @@ async function generateWithRateLimitRetries(
   throw lastErr;
 }
 
+async function generateStructuredWithRateLimitRetries(
+  genAI: GoogleGenerativeAI,
+  modelName: string,
+  prompt: string,
+  systemInstruction: string,
+  maxAttempts = 3
+): Promise<string> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const text = await generateStructuredContentOnce(genAI, modelName, prompt, systemInstruction);
+      if (text?.trim()) return text;
+      throw new Error("Gemini structured response was empty");
+    } catch (e) {
+      lastErr = e;
+      if (!isRateLimitError(e) || attempt >= maxAttempts - 1) {
+        throw e;
+      }
+      const fromApi = parseRetryAfterSeconds(e);
+      const backoffSec = fromApi ?? Math.min(60, 10 * 2 ** attempt);
+      await sleep(backoffSec * 1000);
+    }
+  }
+  throw lastErr;
+}
+
 /**
  * Generate MDX draft using Gemini. Requires GEMINI_API_KEY.
  */
@@ -298,6 +448,25 @@ export async function generateBlogDraftMdx(input: DraftGeneratorInput): Promise<
   let lastError: unknown;
   for (const modelName of candidates) {
     try {
+      // 1) まず JSON 構造化出力を試す（失敗時は従来の生MDX生成へフォールバック）
+      try {
+        const structuredText = await generateStructuredWithRateLimitRetries(
+          genAI,
+          modelName,
+          `${prompt}\n\n出力は JSON のみ。frontmatter と body を分離して返してください。`,
+          systemInstruction
+        );
+        const parsed = parseStructuredDraft(structuredText);
+        if (parsed) {
+          return normalizeMdxForBlog(toMdxFromStructuredDraft(parsed));
+        }
+      } catch (structuredErr) {
+        console.warn("[gemini] structured output failed, fallback to mdx text", {
+          model: modelName,
+          error: errorMessage(structuredErr),
+        });
+      }
+
       const text = await generateWithRateLimitRetries(genAI, modelName, prompt, systemInstruction);
       if (!text?.trim()) {
         throw new Error("Gemini returned empty content");

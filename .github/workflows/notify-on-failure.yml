@@ -1,0 +1,35 @@
+# 他ワークフローから workflow_call で呼び出す（単体では実行しない）
+name: Notify on failure (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      workflow_label:
+        description: "通知に表示するワークフロー名"
+        required: true
+        type: string
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post webhook (Slack or Discord)
+        env:
+          WEBHOOK_URL: ${{ secrets.OPS_NOTIFY_WEBHOOK_URL }}
+          WEBHOOK_TYPE: ${{ vars.OPS_NOTIFY_WEBHOOK_TYPE }}
+          LABEL: ${{ inputs.workflow_label }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WEBHOOK_URL:-}" ]; then
+            echo "OPS_NOTIFY_WEBHOOK_URL が未設定のため通知をスキップします。"
+            exit 0
+          fi
+          TYPE="${WEBHOOK_TYPE:-slack}"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          MSG="GitHub Actions 失敗: ${LABEL}"$'\n'"repo: ${GITHUB_REPOSITORY}"$'\n'"ref: ${GITHUB_REF}"$'\n'"run: ${RUN_URL}"
+          if [ "$TYPE" = "discord" ]; then
+            PAYLOAD=$(jq -n --arg c "$MSG" '{content: $c}')
+          else
+            PAYLOAD=$(jq -n --arg t "$MSG" '{text: $t}')
+          fi
+          curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"
