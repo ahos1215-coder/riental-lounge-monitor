@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 from flask import Blueprint, current_app, jsonify, request
@@ -16,13 +16,20 @@ def _service() -> ForecastService:
 
 
 def _guard():
-    if os.getenv("ENABLE_FORECAST", "0") != "1":
+    if not _config().enable_forecast:
         return jsonify({"ok": False, "error": "forecast-disabled"}), 503
     return None
 
 
 def _config() -> AppConfig:
     return current_app.config["APP_CONFIG"]
+
+
+def _error_status(raw: dict) -> int:
+    err = raw.get("error")
+    if err in {"model_schema_mismatch", "model_unavailable"}:
+        return 503
+    return 200
 
 
 def _resolve_store_id(cfg: AppConfig) -> str:
@@ -80,7 +87,7 @@ def forecast_next_hour():
     raw = _service().forecast_next_hour(store_id=store, freq_min=freq)
     if not raw.get("ok", True):
         current_app.logger.warning("api_forecast.error store=%s detail=%s", store, raw.get("detail"))
-        return jsonify(raw)
+        return jsonify(raw), _error_status(raw)
     points = _normalize_points(raw)
     current_app.logger.info(
         "api_forecast.success store=%s points=%d", store, len(points)
@@ -109,7 +116,7 @@ def forecast_today():
     )
     if not raw.get("ok", True):
         current_app.logger.warning("api_forecast.error store=%s detail=%s", store, raw.get("detail"))
-        return jsonify(raw)
+        return jsonify(raw), _error_status(raw)
     points = _normalize_points(raw)
     current_app.logger.info(
         "api_forecast.success store=%s points=%d", store, len(points)

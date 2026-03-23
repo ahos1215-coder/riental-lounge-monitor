@@ -47,6 +47,11 @@ LINE Webhook（`frontend/src/app/api/line/route.ts`）:
 ### GitHub Actions（Repository — Vercel ではない）
 - `OPS_NOTIFY_WEBHOOK_URL`（任意。**Secret**。週次 Insights・定時ブログ・Public Facts・Blog Request の失敗時に Webhook POST。未設定なら通知ジョブのみスキップ）
 - `OPS_NOTIFY_WEBHOOK_TYPE`（任意。**Variables** 推奨。`slack` または `discord`。未設定・空なら Slack 形式 `{"text":"..."}`）
+- `SUPABASE_URL`（**Secret**。`train-ml-model.yml` 用）
+- `SUPABASE_SERVICE_ROLE_KEY`（**Secret**。`train-ml-model.yml` 用）
+- `FORECAST_MODEL_BUCKET`（**Variables** 推奨。学習済みモデルの Storage バケット）
+- `FORECAST_MODEL_PREFIX`（**Variables** 推奨。`forecast/latest` など）
+- `FORECAST_MODEL_SCHEMA_VERSION`（**Variables** 推奨。`metadata.json` と推論側の一致チェック用）
 
 ### ローカル CLI: `npm run drafts:export`（`frontend/scripts/export-blog-draft.mjs`）
 - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SERVICE_KEY`（**service role**。`blog_drafts` を REST で読む）
@@ -85,6 +90,16 @@ Forecast:
 - `ENABLE_FORECAST`
 - `FORECAST_FREQ_MIN`
 - `NIGHT_START_H` / `NIGHT_END_H`
+- `FORECAST_MODEL_BUCKET`（Supabase Storage のモデル配置バケット名。例: `ml-models`）
+- `FORECAST_MODEL_PREFIX`（バケット内のモデル配置 prefix。例: `forecast/latest`）
+- `FORECAST_MODEL_SCHEMA_VERSION`（`metadata.json` の `schema_version` と一致必須。不一致時は 503）
+- `FORECAST_MODEL_REFRESH_SEC`（モデル再取得の TTL 秒。既定 900）
+- `FORECAST_MODEL_CACHE_DIR`（Render ローカルキャッシュ先。既定 `data/ml_models`）
+
+推奨モデル配置（`FORECAST_MODEL_PREFIX` 配下）:
+- `metadata.json`（`schema_version`, `feature_columns`, `model_men`, `model_women` を含む）
+- `model_men.json`（XGBoost Native）
+- `model_women.json`（XGBoost Native）
 
 Legacy / Optional:
 - `GS_WEBHOOK_URL`

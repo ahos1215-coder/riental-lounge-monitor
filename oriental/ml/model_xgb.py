@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 from xgboost import XGBRegressor
 
@@ -7,12 +9,11 @@ from .preprocess import FEATURE_COLUMNS
 
 
 class ForecastModel:
-    def __init__(self) -> None:
-        self.model_men = self._build_model()
-        self.model_women = self._build_model()
-        self.is_trained = False
-        self.fallback_men = 0.0
-        self.fallback_women = 0.0
+    """Inference-only forecast model loaded from pre-trained artifacts."""
+
+    def __init__(self, model_men: XGBRegressor, model_women: XGBRegressor) -> None:
+        self.model_men = model_men
+        self.model_women = model_women
 
     @staticmethod
     def _build_model() -> XGBRegressor:
@@ -24,23 +25,20 @@ class ForecastModel:
             objective="reg:squarederror",
         )
 
-    def fit(self, features, men, women) -> None:
-        if len(features) < 20:
-            self.fallback_men = float(np.mean(men)) if len(men) else 0.0
-            self.fallback_women = float(np.mean(women)) if len(women) else 0.0
-            self.is_trained = False
-            return
-        self.model_men.fit(features[FEATURE_COLUMNS], men)
-        self.model_women.fit(features[FEATURE_COLUMNS], women)
-        self.is_trained = True
+    @classmethod
+    def from_files(cls, model_men_path: Path, model_women_path: Path) -> "ForecastModel":
+        model_men = cls._build_model()
+        model_women = cls._build_model()
+        model_men.load_model(str(model_men_path))
+        model_women.load_model(str(model_women_path))
+        return cls(model_men=model_men, model_women=model_women)
 
     def predict(self, features):
-        if not self.is_trained:
-            men_pred = np.full(len(features), self.fallback_men)
-            women_pred = np.full(len(features), self.fallback_women)
-        else:
-            men_pred = self.model_men.predict(features[FEATURE_COLUMNS])
-            women_pred = self.model_women.predict(features[FEATURE_COLUMNS])
+        missing = [c for c in FEATURE_COLUMNS if c not in features.columns]
+        if missing:
+            raise ValueError(f"missing feature columns: {missing}")
+        men_pred = self.model_men.predict(features[FEATURE_COLUMNS])
+        women_pred = self.model_women.predict(features[FEATURE_COLUMNS])
         men_pred = np.maximum(men_pred, 0)
         women_pred = np.maximum(women_pred, 0)
         return men_pred, women_pred

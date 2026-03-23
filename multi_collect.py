@@ -10,7 +10,8 @@ import json
 import os
 import re
 import time
-from datetime import datetime, timezone
+import argparse
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -73,6 +74,7 @@ WEATHER_HTTP_MAX_RETRIES = int(os.environ.get("WEATHER_HTTP_MAX_RETRIES", "3"))
 # 429: 長時間 sleep すると Gunicorn の worker timeout（既定30s）で落ちるため、短い待機＋最大1回だけ再試行
 WEATHER_429_RETRY_SLEEP_SEC = float(os.environ.get("WEATHER_429_RETRY_SLEEP_SEC", "2.5"))
 WEATHER_429_EXTRA_TRIES = int(os.environ.get("WEATHER_429_EXTRA_TRIES", "1"))
+WEATHER_FETCH_WINDOW_MINUTES = int(os.environ.get("WEATHER_FETCH_WINDOW_MINUTES", "10"))
 _CACHE_DIR = _root / ".cache"
 _DEFAULT_WEATHER_CACHE_PATH = _CACHE_DIR / "open_meteo_weather_cache.json"
 WEATHER_CACHE_PATH = Path(os.environ.get("WEATHER_CACHE_PATH", str(_DEFAULT_WEATHER_CACHE_PATH)))
@@ -633,6 +635,41 @@ def insert_supabase_log(
     except Exception as e:
         print(f"[supabase][error] store_id={store_id} err={e}")
 
+
+def _current_hour_window_jst() -> tuple[datetime, datetime]:
+    jst = timezone(timedelta(hours=9))
+    now = datetime.now(timezone.utc).astimezone(jst)
+    hour_start = now.replace(minute=0, second=0, microsecond=0)
+    return hour_start, hour_start + timedelta(hours=1)
+
+
+def _store_has_weather_this_hour(store_id: str) -> bool:
+    if not HAS_SUPABASE:
+        return False
+    hour_start, hour_end = _current_hour_window_jst()
+    endpoint = SUPABASE_URL.rstrip("/") + "/rest/v1/logs"
+    params = [
+        ("select", "id"),
+        ("store_id", f"eq.{store_id}"),
+        ("ts", f"gte.{hour_start.isoformat()}"),
+        ("ts", f"lt.{hour_end.isoformat()}"),
+        ("weather_code", "not.is.null"),
+        ("limit", "1"),
+    ]
+    headers = {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Accept": "application/json",
+    }
+    try:
+        resp = requests.get(endpoint, params=params, headers=headers, timeout=8)
+        if not resp.ok:
+            return False
+        payload = resp.json()
+        return isinstance(payload, list) and len(payload) > 0
+    except Exception:
+        return False
+
 # ========= スクレイピング部 =========
 
 def _extract_count(
@@ -724,13 +761,16 @@ def scrape_store(url: str) -> tuple[int | None, int | None]:
 
 # ========= 38店舗ぶんを一気に送る =========
 
-def collect_all_once() -> None:
+def collect_all_once(*, target_store_id: str | None = None) -> None:
     print("collect_all_once.start")
 
     # 県ごとに天気を1回だけ取り、prefキャッシュで使い回す
     weather_by_pref: dict[
         str, tuple[int | None, str | None, float | None, float | None]
     ] = {}
+    checked_hourly_weather_store: dict[str, bool] = {}
+    now_minute = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=9))).minute
+    hourly_window = 0 <= now_minute <= max(0, WEATHER_FETCH_WINDOW_MINUTES)
 
     def resolve_weather_key_and_coords(entry: dict) -> tuple[str, tuple[float, float]]:
         pref = entry.get("pref")
@@ -750,7 +790,14 @@ def collect_all_once() -> None:
             return "_default", (float(lat), float(lon))
         return "_default", (WEATHER_LAT, WEATHER_LON)
 
-    for entry in STORES:
+    stores = STORES
+    if target_store_id:
+        stores = [s for s in STORES if s.get("store_id") == target_store_id]
+        if not stores:
+            print(f"[error] store_id not found: {target_store_id}")
+            return
+
+    for entry in stores:
         store_name = entry["store"]
         store_id = entry["store_id"]
         url = entry["url"]
@@ -760,15 +807,27 @@ def collect_all_once() -> None:
         temp_c: float | None = None
         precip_mm: float | None = None
         if ENABLE_WEATHER:
-            weather_key, (lat, lon) = resolve_weather_key_and_coords(entry)
-            if weather_key not in weather_by_pref:
-                weather_by_pref[weather_key] = fetch_current_weather(lat, lon)
+            has_weather_this_hour = checked_hourly_weather_store.get(store_id)
+            if has_weather_this_hour is None:
+                has_weather_this_hour = _store_has_weather_this_hour(store_id)
+                checked_hourly_weather_store[store_id] = has_weather_this_hour
+
+            should_fetch_hourly = hourly_window and (not has_weather_this_hour)
+            if should_fetch_hourly:
+                weather_key, (lat, lon) = resolve_weather_key_and_coords(entry)
+                if weather_key not in weather_by_pref:
+                    weather_by_pref[weather_key] = fetch_current_weather(lat, lon)
+                    print(
+                        f"[weather][pref-cache] key={weather_key} lat={lat} lon={lon} fetched"
+                    )
+                weather_code, weather_label, temp_c, precip_mm = weather_by_pref[weather_key]
+                if weather_code is not None:
+                    checked_hourly_weather_store[store_id] = True
+            else:
                 print(
-                    f"[weather][pref-cache] key={weather_key} lat={lat} lon={lon} fetched"
+                    f"[weather] skip fetch store_id={store_id} minute={now_minute} "
+                    f"window={hourly_window} has_hourly={has_weather_this_hour}"
                 )
-            weather_code, weather_label, temp_c, precip_mm = weather_by_pref[
-                weather_key
-            ]
 
         try:
             men, women = scrape_store(url)
@@ -808,4 +867,7 @@ def collect_all_once() -> None:
 
 
 if __name__ == "__main__":
-    collect_all_once()
+    parser = argparse.ArgumentParser(description="Collect lounge counts and optional weather data")
+    parser.add_argument("--store-id", help="process only one store_id (e.g. ol_nagasaki)")
+    args = parser.parse_args()
+    collect_all_once(target_store_id=args.store_id)

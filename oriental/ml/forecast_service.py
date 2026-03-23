@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 from ..data.provider import GoogleSheetProvider, SupabaseError, SupabaseLogsProvider
-from .model_xgb import ForecastModel
+from .model_registry import ModelRegistryError, ModelSchemaMismatchError
 from .preprocess import FEATURE_COLUMNS, add_time_features, prepare_dataframe
 
 FutureBuilder = Callable[[pd.DataFrame], pd.DatetimeIndex]
@@ -23,6 +23,7 @@ class ForecastService:
         history_days: int = 7,
         history_limit: int | None = None,
         fallback_provider=None,
+        model_registry=None,
         backend: str = "legacy",
     ):
         self.provider = provider
@@ -32,11 +33,14 @@ class ForecastService:
         self.history_days = history_days
         self.history_limit = history_limit
         self.fallback_provider = fallback_provider
+        self.model_registry = model_registry
         self.backend = backend
 
     @classmethod
     def from_app(cls, app):
         cfg = app.config["APP_CONFIG"]
+        from .model_registry import ForecastModelRegistry
+
         legacy_provider = GoogleSheetProvider(cfg.gs_read_url, cfg.data_file, logger=app.logger)
 
         backend = (cfg.data_backend or "legacy").lower()
@@ -53,6 +57,7 @@ class ForecastService:
             fallback_provider = legacy_provider
 
         history_limit = min(cfg.max_range_limit, 2000)
+        model_registry = ForecastModelRegistry.from_app(app)
 
         return cls(
             provider=provider,
@@ -60,6 +65,7 @@ class ForecastService:
             history_days=7,
             history_limit=history_limit,
             fallback_provider=fallback_provider,
+            model_registry=model_registry,
             backend=backend,
         )
 
@@ -122,6 +128,18 @@ class ForecastService:
             if extra_meta:
                 result.update(extra_meta)
             return result
+        except ModelSchemaMismatchError as exc:
+            self.logger.error("forecast.service.model_schema_mismatch store=%s", store_id, exc_info=exc)
+            result = {"ok": False, "error": "model_schema_mismatch", "detail": str(exc), "store": store_id, "freq_min": freq_min, "data": []}
+            if extra_meta:
+                result.update(extra_meta)
+            return result
+        except ModelRegistryError as exc:
+            self.logger.error("forecast.service.model_unavailable store=%s", store_id, exc_info=exc)
+            result = {"ok": False, "error": "model_unavailable", "detail": str(exc), "store": store_id, "freq_min": freq_min, "data": []}
+            if extra_meta:
+                result.update(extra_meta)
+            return result
         except Exception as exc:  # noqa: BLE001
             self.logger.error("forecast.service.error store=%s", store_id, exc_info=exc)
             result = {"ok": True, "store": store_id, "freq_min": freq_min, "data": []}
@@ -139,10 +157,10 @@ class ForecastService:
             raise
 
     def _predict_with_history(self, history: pd.DataFrame, future_times: pd.DatetimeIndex) -> list[dict]:
-        model = ForecastModel()
-        history_features = add_time_features(history.copy())
-        model.fit(history_features, history["men"], history["women"])
-
+        if self.model_registry is None:
+            raise ModelRegistryError("model_registry is not configured")
+        bundle = self.model_registry.get_bundle()
+        model = bundle.model
         future_features = self._build_future_features(history, future_times)
         men_pred, women_pred = model.predict(future_features)
         total_pred = np.maximum(men_pred, 0) + np.maximum(women_pred, 0)
@@ -157,7 +175,10 @@ class ForecastService:
         ]
 
     def _build_future_features(self, history: pd.DataFrame, future_times: pd.DatetimeIndex) -> pd.DataFrame:
-        base_cols = ["ts", "men", "women", "total"]
+        base_cols = ["ts", "men", "women", "total", "weather_code", "temp_c", "store_id"]
+        for col in base_cols:
+            if col not in history.columns:
+                history[col] = np.nan
         hist_base = history[base_cols]
         future_df = pd.DataFrame(
             {
@@ -165,6 +186,9 @@ class ForecastService:
                 "men": np.nan,
                 "women": np.nan,
                 "total": np.nan,
+                "weather_code": np.nan,
+                "temp_c": np.nan,
+                "store_id": history["store_id"].iloc[-1] if "store_id" in history.columns and not history.empty else np.nan,
             }
         )
         combined = pd.concat([hist_base, future_df], ignore_index=True)

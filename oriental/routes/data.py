@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
@@ -149,7 +149,9 @@ def api_range():
 @bp.get("/api/meta")
 def api_meta():
     cfg = _config()
-    return jsonify({"ok": True, "data": cfg.summary()})
+    data = cfg.summary()
+    data["forecast_model"] = _forecast_model_status()
+    return jsonify({"ok": True, "data": data})
 
 
 @bp.get("/api/heatmap")
@@ -283,4 +285,18 @@ def _resolve_store_id(cfg: AppConfig) -> str:
     store_arg = request.args.get("store_id") or request.args.get("store")
     store_id, _ = resolve_store_identifier(store_arg, cfg.store_id)
     return store_id
+
+
+def _forecast_model_status() -> dict:
+    service = current_app.config.get("FORECAST_SERVICE")
+    if service is None or getattr(service, "model_registry", None) is None:
+        return {
+            "loaded": False,
+            "schema_version": None,
+            "trained_at": None,
+            "loaded_at_unix": None,
+            "age_sec": None,
+            "note": "forecast_service_not_initialized",
+        }
+    return service.model_registry.current_status()
 

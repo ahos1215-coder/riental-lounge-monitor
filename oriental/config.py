@@ -42,6 +42,12 @@ class AppConfig:
     data_file: Path
     log_file: Path
     max_range_limit: int  # FIX: configurable /api/range upper bound
+    forecast_model_bucket: str
+    forecast_model_prefix: str
+    forecast_model_cache_dir: Path
+    forecast_model_refresh_sec: int
+    forecast_model_schema_version: str
+    enable_forecast: bool
 
     @classmethod
     def from_env(cls) -> "AppConfig":
@@ -51,10 +57,13 @@ class AppConfig:
         http_timeout = float(os.getenv("HTTP_TIMEOUT_S", "12"))
         http_retry = _as_int(os.getenv("HTTP_RETRY", "3"), fallback=3)
         max_range_limit = _as_int(os.getenv("MAX_RANGE_LIMIT", "50000"), fallback=50000)  # FIX
+        forecast_model_refresh_sec = _as_int(os.getenv("FORECAST_MODEL_REFRESH_SEC", "900"), fallback=900)
+        enable_forecast = os.getenv("ENABLE_FORECAST", "0").strip() == "1"
         supabase_url = os.getenv("SUPABASE_URL", "")
         supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY", "")
         data_backend = os.getenv("DATA_BACKEND", "supabase").lower().strip() or "supabase"
         store_id = os.getenv("STORE_ID") or os.getenv("SUPABASE_STORE_ID") or "ol_nagasaki"
+        forecast_model_cache_dir = Path(os.getenv("FORECAST_MODEL_CACHE_DIR", str(data_dir / "ml_models")))
         data_file_env = os.getenv("DATA_FILE")
         data_file = Path(data_file_env) if data_file_env else data_dir / "data.json"
         if not data_file.exists():
@@ -84,6 +93,12 @@ class AppConfig:
             data_file=data_file,
             log_file=data_dir / "log.jsonl",
             max_range_limit=max_range_limit,
+            forecast_model_bucket=os.getenv("FORECAST_MODEL_BUCKET", "ml-models"),
+            forecast_model_prefix=os.getenv("FORECAST_MODEL_PREFIX", "forecast/latest"),
+            forecast_model_cache_dir=forecast_model_cache_dir,
+            forecast_model_refresh_sec=forecast_model_refresh_sec,
+            forecast_model_schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v1"),
+            enable_forecast=enable_forecast,
         )
 
     def health_summary(self) -> dict[str, object]:
@@ -103,6 +118,13 @@ class AppConfig:
             "http_timeout": self.http_timeout,
             "http_retry": self.http_retry,
             "max_range_limit": self.max_range_limit,  # FIX
+            "forecast_model": {
+                "bucket": self.forecast_model_bucket,
+                "prefix": self.forecast_model_prefix,
+                "refresh_sec": self.forecast_model_refresh_sec,
+                "schema_version": self.forecast_model_schema_version,
+            },
+            "forecast_enabled": self.enable_forecast,
         }
 
     def summary(self) -> dict[str, object]:
@@ -121,6 +143,13 @@ class AppConfig:
             "http_timeout": self.http_timeout,
             "http_retry": self.http_retry,
             "max_range_limit": self.max_range_limit,
+            "forecast_model": {
+                "bucket": self.forecast_model_bucket,
+                "prefix": self.forecast_model_prefix,
+                "refresh_sec": self.forecast_model_refresh_sec,
+                "schema_version": self.forecast_model_schema_version,
+            },
+            "forecast_enabled": self.enable_forecast,
         }
 
 

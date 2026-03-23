@@ -1,0 +1,70 @@
+name: Train ML model
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "学習対象日数（例: 180）"
+        required: false
+      limit:
+        description: "取得上限件数（例: 120000）"
+        required: false
+      store_id:
+        description: "対象店舗ID（空なら全店舗）"
+        required: false
+  schedule:
+    # UTC 20:30 = JST 05:30
+    - cron: "30 20 * * *"
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Train and upload model artifacts
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FORECAST_MODEL_BUCKET: ${{ vars.FORECAST_MODEL_BUCKET }}
+          FORECAST_MODEL_PREFIX: ${{ vars.FORECAST_MODEL_PREFIX }}
+          FORECAST_MODEL_SCHEMA_VERSION: ${{ vars.FORECAST_MODEL_SCHEMA_VERSION }}
+          TIMEZONE: Asia/Tokyo
+          ML_TRAIN_DAYS: "180"
+          ML_TRAIN_LIMIT: "120000"
+          ML_TRAIN_STORE_ID: ""
+        run: |
+          set -euo pipefail
+          export FORECAST_MODEL_BUCKET="${FORECAST_MODEL_BUCKET:-ml-models}"
+          export FORECAST_MODEL_PREFIX="${FORECAST_MODEL_PREFIX:-forecast/latest}"
+          export FORECAST_MODEL_SCHEMA_VERSION="${FORECAST_MODEL_SCHEMA_VERSION:-v1}"
+          EXTRA_ARGS=""
+          if [ -n "${{ github.event.inputs.days }}" ]; then
+            EXTRA_ARGS="${EXTRA_ARGS} --days ${{ github.event.inputs.days }}"
+          fi
+          if [ -n "${{ github.event.inputs.limit }}" ]; then
+            EXTRA_ARGS="${EXTRA_ARGS} --limit ${{ github.event.inputs.limit }}"
+          fi
+          if [ -n "${{ github.event.inputs.store_id }}" ]; then
+            EXTRA_ARGS="${EXTRA_ARGS} --store-id ${{ github.event.inputs.store_id }}"
+          fi
+          python scripts/train_ml_model.py ${EXTRA_ARGS}
+
+  notify-on-failure:
+    needs: [train]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "Train ML model"

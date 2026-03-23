@@ -1,23 +1,35 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
+
+import jpholiday
 import numpy as np
 import pandas as pd
 
 FEATURE_COLUMNS = [
+    "month",
     "hour",
     "minute",
+    "day_of_week",
     "dow",
     "is_weekend",
+    "is_holiday",
+    "is_pre_holiday",
+    "holiday_pos",
+    "is_payday_week",
+    "is_rainy",
+    "next_morning_rain",
+    "temp_diff_yesterday",
+    "gender_diff",
+    "is_last_train_window",
     "sin_time",
     "cos_time",
-    "men_lag_1",
-    "men_lag_2",
-    "men_lag_4",
+    "men_lag_12",
+    "men_lag_24",
     "men_ma_2",
     "men_ma_4",
-    "women_lag_1",
-    "women_lag_2",
-    "women_lag_4",
+    "women_lag_12",
+    "women_lag_24",
     "women_ma_2",
     "women_ma_4",
 ]
@@ -32,6 +44,22 @@ def prepare_dataframe(records: list[dict], tz: str) -> pd.DataFrame:
     df["men"] = df["men"].fillna(0)
     df["women"] = df["women"].fillna(0)
     df["total"] = df["total"].fillna(df["men"] + df["women"])
+    if "weather_code" not in df.columns:
+        df["weather_code"] = np.nan
+    if "temp_c" not in df.columns:
+        df["temp_c"] = np.nan
+    if "precip_mm" not in df.columns:
+        df["precip_mm"] = np.nan
+    df["weather_code"] = pd.to_numeric(df["weather_code"], errors="coerce")
+    df["temp_c"] = pd.to_numeric(df["temp_c"], errors="coerce")
+    df["precip_mm"] = pd.to_numeric(df["precip_mm"], errors="coerce")
+
+    # 1時間おき取得の天候値を5分粒度へ引き継ぐ（店舗単位）
+    weather_cols = ["weather_code", "temp_c", "precip_mm"]
+    if "store_id" in df.columns:
+        df[weather_cols] = df.groupby("store_id", dropna=False)[weather_cols].ffill()
+    else:
+        df[weather_cols] = df[weather_cols].ffill()
     return add_time_features(df)
 
 
@@ -39,21 +67,154 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     df = df.copy()
+    group_keys = ["store_id"] if "store_id" in df.columns else []
+    ts_local = pd.to_datetime(df["ts"], errors="coerce")
+    row_dates = ts_local.dt.date
+
+    df["month"] = ts_local.dt.month
     df["hour"] = df["ts"].dt.hour
     df["minute"] = df["ts"].dt.minute
+    df["day_of_week"] = df["ts"].dt.dayofweek
     df["dow"] = df["ts"].dt.dayofweek
     df["is_weekend"] = df["dow"].isin([4, 5]).astype(int)
+    df["is_holiday"] = row_dates.map(lambda d: 1 if jpholiday.is_holiday(d) else 0).astype(int)
+    tomorrow = row_dates.map(lambda d: d + timedelta(days=1))
+    is_tomorrow_holiday = tomorrow.map(lambda d: 1 if jpholiday.is_holiday(d) else 0).astype(int)
+    df["is_pre_holiday"] = ((df["dow"] == 4) | (is_tomorrow_holiday == 1)).astype(int)
+
+    holiday_like_dates = pd.DataFrame({"date": row_dates, "flag": (df["is_holiday"] == 1) | (df["is_weekend"] == 1)})
+    holiday_like_dates = holiday_like_dates.drop_duplicates(subset=["date"]).sort_values("date")
+    pos_map = _holiday_position_map(holiday_like_dates["date"].tolist(), holiday_like_dates["flag"].tolist())
+    df["holiday_pos"] = row_dates.map(lambda d: pos_map.get(d, 0)).astype(int)
+
+    df["is_payday_week"] = row_dates.map(_is_payday_week).astype(int)
+    df["is_rainy"] = (df["weather_code"].fillna(-1) >= 51).astype(int)
+
+    # 翌朝（06:00-09:59）の降雨予報/実測が1件でもあればフラグ化
+    if group_keys:
+        rain_map = (
+            df.assign(date_key=row_dates, rainy=(df["weather_code"].fillna(-1) >= 51))
+            .loc[(df["hour"] >= 6) & (df["hour"] <= 9)]
+            .groupby(group_keys + ["date_key"], dropna=False)["rainy"]
+            .max()
+            .rename("has_rain")
+            .reset_index()
+        )
+        df["date_key"] = tomorrow
+        df = df.merge(rain_map, on=group_keys + ["date_key"], how="left")
+        df["next_morning_rain"] = pd.to_numeric(df["has_rain"], errors="coerce").fillna(0).clip(0, 1).astype(int)
+        df = df.drop(columns=["has_rain", "date_key"])
+    else:
+        rain_map_simple = (
+            df.assign(date_key=row_dates, rainy=(df["weather_code"].fillna(-1) >= 51))
+            .loc[(df["hour"] >= 6) & (df["hour"] <= 9)]
+            .groupby("date_key")["rainy"]
+            .max()
+            .to_dict()
+        )
+        df["next_morning_rain"] = tomorrow.map(lambda d: 1 if rain_map_simple.get(d, False) else 0).astype(int)
+
+    # 同時刻の前日比（店舗ごと）
+    temp_ref = df.copy()
+    temp_ref["date_key"] = row_dates
+    temp_ref = temp_ref[group_keys + ["date_key", "hour", "minute", "temp_c"]].rename(columns={"temp_c": "temp_prev"})
+    current_temp = df.copy()
+    current_temp["date_key"] = row_dates.map(lambda d: d - timedelta(days=1))
+    merge_cols = group_keys + ["date_key", "hour", "minute"]
+    merged = current_temp.merge(temp_ref, on=merge_cols, how="left")
+    df["temp_diff_yesterday"] = (df["temp_c"] - merged["temp_prev"]).astype(float)
+
+    if group_keys:
+        grouped = df.groupby(group_keys, dropna=False)
+        df["men_lag_12"] = grouped["men"].shift(12)
+        df["men_lag_24"] = grouped["men"].shift(24)
+        df["women_lag_12"] = grouped["women"].shift(12)
+        df["women_lag_24"] = grouped["women"].shift(24)
+        df["men_ma_2"] = grouped["men"].transform(lambda s: s.rolling(2, min_periods=1).mean())
+        df["men_ma_4"] = grouped["men"].transform(lambda s: s.rolling(4, min_periods=1).mean())
+        df["women_ma_2"] = grouped["women"].transform(lambda s: s.rolling(2, min_periods=1).mean())
+        df["women_ma_4"] = grouped["women"].transform(lambda s: s.rolling(4, min_periods=1).mean())
+    else:
+        df["men_lag_12"] = df["men"].shift(12)
+        df["men_lag_24"] = df["men"].shift(24)
+        df["women_lag_12"] = df["women"].shift(12)
+        df["women_lag_24"] = df["women"].shift(24)
+        df["men_ma_2"] = df["men"].rolling(2, min_periods=1).mean()
+        df["men_ma_4"] = df["men"].rolling(4, min_periods=1).mean()
+        df["women_ma_2"] = df["women"].rolling(2, min_periods=1).mean()
+        df["women_ma_4"] = df["women"].rolling(4, min_periods=1).mean()
+
+    df["gender_diff"] = (df["men"] - df["women"]).astype(float)
+    df["is_last_train_window"] = ((df["hour"] == 23) & (df["minute"] <= 45)).astype(int)
     minutes = df["hour"] * 60 + df["minute"]
     df["sin_time"] = np.sin(2 * np.pi * minutes / 1440)
     df["cos_time"] = np.cos(2 * np.pi * minutes / 1440)
-    for lag in (1, 2, 4):
-        df[f"men_lag_{lag}"] = df["men"].shift(lag)
-        df[f"women_lag_{lag}"] = df["women"].shift(lag)
-    for win in (2, 4):
-        df[f"men_ma_{win}"] = df["men"].rolling(win, min_periods=1).mean()
-        df[f"women_ma_{win}"] = df["women"].rolling(win, min_periods=1).mean()
-    df = df.fillna(method="bfill").fillna(method="ffill")
+
+    numeric_cols = [c for c in FEATURE_COLUMNS if c in df.columns]
+    for col in numeric_cols:
+        median_val = pd.to_numeric(df[col], errors="coerce").median()
+        fill_val = float(median_val) if not np.isnan(median_val) else 0.0
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(fill_val)
+
+    for col in FEATURE_COLUMNS:
+        if col not in df.columns:
+            df[col] = 0.0
+
+    df = df.bfill().ffill()
     return df
+
+
+def _holiday_position_map(dates: list[date], flags: list[bool]) -> dict[date, int]:
+    result: dict[date, int] = {}
+    if not dates:
+        return result
+    i = 0
+    n = len(dates)
+    while i < n:
+        if not flags[i]:
+            result[dates[i]] = 0
+            i += 1
+            continue
+        j = i
+        while j + 1 < n and flags[j + 1] and (dates[j + 1] - dates[j]).days == 1:
+            j += 1
+        if i == j:
+            result[dates[i]] = 0
+        else:
+            for k in range(i, j + 1):
+                if k == i:
+                    result[dates[k]] = 1
+                elif k == j:
+                    result[dates[k]] = 3
+                else:
+                    result[dates[k]] = 2
+        i = j + 1
+    return result
+
+
+def _is_payday_week(d: date) -> int:
+    return int(_in_payday_window_for_month(d, d.year, d.month) or _in_prev_month_window(d))
+
+
+def _in_prev_month_window(d: date) -> bool:
+    if d.month == 1:
+        y, m = d.year - 1, 12
+    else:
+        y, m = d.year, d.month - 1
+    return _in_payday_window_for_month(d, y, m)
+
+
+def _in_payday_window_for_month(d: date, year: int, month: int) -> bool:
+    try:
+        payday = date(year, month, 25)
+    except ValueError:
+        return False
+    # 25日から直後の日曜日まで
+    days_to_sunday = (6 - payday.weekday()) % 7
+    window_end = payday + timedelta(days=days_to_sunday)
+    return payday <= d <= window_end
+
+
 def build_features(df: pd.DataFrame, tz: str) -> pd.DataFrame:
     """
     学習/推論で共通の特徴量生成。
@@ -67,7 +228,6 @@ def build_features(df: pd.DataFrame, tz: str) -> pd.DataFrame:
         return df
     out = df.copy()
     out["ts"] = pd.to_datetime(out["ts"], utc=True, errors="coerce").dt.tz_convert(tz)
-    # 将来の pandas で fillna(method=...) が非推奨なので obj.ffill/bfill と同義
-    out = out.fillna(method="bfill").fillna(method="ffill")
+    out = out.bfill().ffill()
     out = add_time_features(out)
     return out
