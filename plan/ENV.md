@@ -16,6 +16,7 @@ Target commit: (see git)
 - `NEXT_PUBLIC_SHOW_FACTS_DEBUG`（`"1"` のとき Facts の debug notes を表示）
 
 LINE Webhook（`frontend/src/app/api/line/route.ts`）:
+- `LINE_RANGE_LIMIT`（任意。`/api/range` の `limit`。**未設定時は 500**（定時の `BLOG_CRON_RANGE_LIMIT` 既定と整合）。旧 20 は偏りやすい）
 - `LINE_CHANNEL_SECRET`（`x-line-signature` 検証。本番では必須）
 - `LINE_CHANNEL_ACCESS_TOKEN`（返信メッセージ用）
 - `SKIP_LINE_SIGNATURE_VERIFY`（`"1"` のとき署名検証をスキップ。ローカル検証用のみ）

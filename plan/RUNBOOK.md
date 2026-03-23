@@ -93,6 +93,9 @@ npm run dev
 - **ブログ下書き（1日2本・JST）**: **GitHub Actions**（`.github/workflows/trigger-blog-cron.yml`）が `GET /api/cron/blog-draft` を叩く。`?edition=evening_preview` / `late_update` と `source=github_actions_cron` を付与。**Secrets** は **`plan/BLOG_CRON_GHA.md`**。
 - 追加の定期処理が必要なら `ROADMAP.md` に追記してから仕様化。
 
+### LINE 下書きの `/api/range` limit
+- 本番では **`LINE_RANGE_LIMIT`**（未設定時 **500**）。小さすぎるとインサイトが偏る。定時は **`BLOG_CRON_RANGE_LIMIT`**（既定 500）。`plan/ENV.md` / `plan/DECISIONS.md` 12。
+
 ### 定時ブログ（GitHub Actions）のトラブルシュート
 
 1. **Secrets**: GitHub → Repository → **Settings → Secrets and variables → Actions** に **`CRON_SECRET`** と **`VERCEL_BLOG_CRON_BASE_URL`**（本番の `https://...vercel.app`、末尾スラッシュなし）があるか。

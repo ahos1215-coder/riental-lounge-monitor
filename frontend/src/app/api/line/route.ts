@@ -11,8 +11,17 @@ const BACKEND_URL =
   process.env["BACKEND-URL"] ??
   "http://127.0.0.1:5000";
 
-/** Range fetch limit (public contract: store + limit only). */
-const RANGE_LIMIT = 20;
+/**
+ * Range fetch limit（`/api/range` は `store` + `limit` のみ）。
+ * 旧 20 行では夜窓内サンプルが極端に少なくインサイトが偏るため、既定は定時 Cron（`BLOG_CRON_RANGE_LIMIT`）と揃え 500。
+ * 負荷試験時のみ `LINE_RANGE_LIMIT` で下げる。
+ */
+function lineRangeLimit(): number {
+  const raw = process.env.LINE_RANGE_LIMIT?.trim();
+  const n = raw ? Number.parseInt(raw, 10) : NaN;
+  if (Number.isFinite(n) && n > 0) return Math.min(n, 50_000);
+  return 500;
+}
 
 export const maxDuration = 60;
 
@@ -129,7 +138,7 @@ async function processMessageEvent(ev: LineEvent): Promise<void> {
     console.log("[line] Running blog draft pipeline");
     const result = await runBlogDraftPipeline({
       backendUrl: BACKEND_URL,
-      rangeLimit: RANGE_LIMIT,
+      rangeLimit: lineRangeLimit(),
       store: draft.store,
       dateYmd: draft.dateYmd,
       factsId: draft.factsId,

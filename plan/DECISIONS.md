@@ -16,6 +16,8 @@ Target commit: (see git)
 9) 秘密値は環境変数のみ。`NEXT_PUBLIC_*` に秘密を入れない。
 10) `blog_drafts` への保存は **Next.js API routes（サーバー）** からのみ行い、`SUPABASE_SERVICE_ROLE_KEY` はサーバー環境変数に限定する。ブラウザから Supabase を直接叩かない（従来のレイヤ方針と整合）。
 11) **ブログ / LINE 配管に n8n は使わない**。Webhook 司令塔は Next.js（`POST /api/line`）のみ。
+12) **LINE 下書き**が Flask `/api/range` を呼ぶときの `limit` は **`LINE_RANGE_LIMIT`**（既定 **500**、上限 50000）。旧 20 行固定はインサイトが偏るため廃止。**定時 Cron** は **`BLOG_CRON_RANGE_LIMIT`**（既定 500）で別管理。必要なら両方同じ値に揃える。
+13) **`/api/current`** は当面、**Flask 実装どおり（ローカルキャッシュの最新など）**を維持する。Supabase 直取得へ寄せる場合は **別タスク**（契約・キャッシュ・メタ API の整合が必要）。
 
 ## やらないこと（ハードルール）
 - `/api/range` にクエリ追加・サーバ側の夜窓フィルタ追加。

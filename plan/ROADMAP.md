@@ -7,8 +7,8 @@ Target commit: (see git)
 ---
 
 ## P0（次に着手しやすい項目）
-- **`avoid_time` / プロンプト**: `draftGenerator.ts` で「入店しやすさの目安」「提案型」を固定。ズレる場合は人手修正または微調整（`plan/VISION_AND_FUTURE.md` §9 も参照）。
-- **`RANGE_LIMIT`**（`frontend/src/app/api/line/route.ts`）と **`BLOG_CRON_RANGE_LIMIT`**（定時 Cron）の妥当性（`limit` が小さいとインサイトが偏る）
+- **`avoid_time` / プロンプト**: `draftGenerator.ts` で「入店しやすさの目安」「提案型」を固定（**2026-03 10秒まとめ用ラベル追記済み**）。ズレる場合は人手修正または微調整（`plan/VISION_AND_FUTURE.md` §9 も参照）。
+- **`LINE_RANGE_LIMIT` / `BLOG_CRON_RANGE_LIMIT`**: LINE は既定 **500**（`LINE_RANGE_LIMIT` で上書き可）。定時は **`BLOG_CRON_RANGE_LIMIT`**（既定 500）。運用で偏りがあれば両方を揃えて調整。
 - **Web フロント**: 新規の「土台作り」より **既存画面の改善・見せ方・コンテンツ拡充**（`VISION_AND_FUTURE.md` フェーズ A）
 - 主要ドキュメントの継続同期（`plan/*` と README の整合）
 - Weekly Insights の品質改善（score 閾値・最小継続時間の運用調整）

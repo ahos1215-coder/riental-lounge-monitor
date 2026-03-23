@@ -24,7 +24,7 @@
 ### 2) Next.js 内処理（自動）
 - 署名検証（本番は `LINE_CHANNEL_SECRET`）
 - `parseLineIntent`（`frontend/src/lib/line/parseLineIntent.ts`）で店舗・日付・レベル等を解釈
-- `BACKEND_URL` + `GET /api/range?store=...&limit=...`（`limit` は `frontend/src/app/api/line/route.ts` 内の **`RANGE_LIMIT`** で調整）
+- `BACKEND_URL` + `GET /api/range?store=...&limit=...`（`limit` は **`LINE_RANGE_LIMIT`**（既定 500）。`frontend/src/app/api/line/route.ts`）
 - 必要に応じ `GET /api/forecast_today`
 - `insightFromRange.ts`：**今夜窓**（JST 当日 19:00〜翌 05:00）。窓内が空なら **同一日の全日（JST）** にフォールバック
 - `draftGenerator.ts`：既定 Gemini モデル **`gemini-2.5-flash`**（404 時は `gemini-2.5-flash-lite` 等。429 はリトライ）
