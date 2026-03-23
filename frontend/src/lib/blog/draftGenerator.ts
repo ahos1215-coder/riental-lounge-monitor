@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import type { Schema } from "@google/generative-ai";
 import type { BlogEdition, InsightBuildResult } from "./insightFromRange";
 
 export type DraftGeneratorInput = {
@@ -333,7 +334,7 @@ async function generateStructuredContentOnce(
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     generationConfig: {
       responseMimeType: "application/json",
-      responseSchema: {
+      responseSchema: ({
         type: "OBJECT",
         properties: {
           frontmatter: {
@@ -362,7 +363,7 @@ async function generateStructuredContentOnce(
           body: { type: "STRING" },
         },
         required: ["frontmatter", "body"],
-      } as unknown as object,
+      } as unknown as Schema),
     },
   });
   return result.response.text();
