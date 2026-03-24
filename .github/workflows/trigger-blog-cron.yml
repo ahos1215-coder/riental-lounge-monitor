@@ -75,10 +75,22 @@ jobs:
           # edition と source を明示（本番は github_actions_cron）
           URL="${BASE}/api/cron/blog-draft?edition=${EDITION}&source=github_actions_cron"
           echo "Triggering: ${URL%%\?*}?edition=***&source=github_actions_cron"
-          curl -sS -f -X GET \
+          RESP="$(curl -sS -f -X GET \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             -H "User-Agent: GitHub-Actions-blog-draft-cron" \
-            "$URL"
+            "$URL")"
+          echo "$RESP"
+          if command -v jq >/dev/null 2>&1; then
+            TOTAL_MS="$(echo "$RESP" | jq -r '.duration_ms // 0')"
+            NEAR_TIMEOUT="$(echo "$RESP" | jq -r '.near_timeout // false')"
+            echo "duration_ms=${TOTAL_MS}"
+            echo "near_timeout=${NEAR_TIMEOUT}"
+            echo "store_durations:"
+            echo "$RESP" | jq -r '.results[]? | "- \(.slug): \(.duration_ms // 0)ms (ok=\(.ok))"'
+            if [ "$NEAR_TIMEOUT" = "true" ]; then
+              echo "::warning::blog-draft cron duration is close to Vercel maxDuration. Consider sharding stores."
+            fi
+          fi
 
   notify-on-failure:
     needs: [trigger]

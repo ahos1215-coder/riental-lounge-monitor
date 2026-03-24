@@ -177,3 +177,7 @@ Target commit: (see git)
 
 - **方針**: **全店舗の自動ポストは行わない**（API 制限・シャドウバン含むリスク分散）。
 - **運用開始時**: **人気トップ5店舗＋長崎店**のみに絞って自動投稿を試す。効果・クレーム・API 負荷を見てから段階的に拡大する。
+- **実装準備（スケルトン）**: `frontend/src/app/api/sns/post/route.ts`
+  - `POST /api/sns/post` は当面 dry-run 中心（`SNS_POST_SECRET` 認証必須）。
+  - 許可店舗は `SNS_POST_ALLOWED_STORE_SLUGS`（CSV）と `nagasaki` を対象に制御。
+  - 本番投稿統合（X APIキー運用・監査ログ）は次フェーズ。

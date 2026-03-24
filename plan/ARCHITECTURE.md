@@ -29,6 +29,17 @@ Target commit: (see git)
 - 既存エンドポイント互換性を維持（/healthz, /api/meta, /api/current, /api/range, /api/forecast_*, /tasks/*）
 - Second venues は map-link 方式を維持（Places API 依存に戻さない）
 
+## Blog Cron Scale Strategy (39 stores)
+- 現行 `/api/cron/blog-draft` は `duration_ms` / `near_timeout` / `results[].duration_ms` を返し、1回の実行時間を計測できる。
+- しきい値の目安: `near_timeout=true`（約50秒超）または Vercel 側で 504 が見えたら分割実行へ移行。
+- 分割案（推奨順）:
+  1) **GitHub Actions で店舗シャーディング**: 店舗CSVを複数バッチに分割して `edition` 固定で複数回叩く。
+  2) **並列数制限つき実行**: matrix `max-parallel` で同時呼び出しを制御（API負荷とX/Gemini制限を両立）。
+  3) **後段キュー**: 必要時のみ（複雑化コストが高いため最終手段）。
+- SNS 自動投稿のリトライ方針（Free/Basic想定）:
+  - 429/5xx のみ再試行、`2s -> 5s -> 10s` の指数寄りバックオフ
+  - 日次上限に近い場合は投稿スキップして翌便へ繰り越し（失敗扱いにしない）
+
 ## Key Files
 ### Backend
 - `oriental/routes/data.py`（/api/range, /api/current）

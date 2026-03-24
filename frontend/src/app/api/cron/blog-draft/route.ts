@@ -78,6 +78,7 @@ export async function POST(req: NextRequest) {
 }
 
 async function handleCron(req: NextRequest) {
+  const startedAt = Date.now();
   if (!isCronAuthorized(req)) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
@@ -112,6 +113,7 @@ async function handleCron(req: NextRequest) {
   const results: Array<{
     slug: string;
     ok: boolean;
+    duration_ms?: number;
     facts_id?: string;
     edition?: string;
     db?: { saved: boolean; id?: string; error?: string; skippedReason?: string };
@@ -119,9 +121,10 @@ async function handleCron(req: NextRequest) {
   }> = [];
 
   for (const slug of slugs) {
+    const perStoreStartedAt = Date.now();
     const store = getStoreMetaBySlugStrict(slug);
     if (!store) {
-      results.push({ slug, ok: false, error: `unknown store slug: ${slug}` });
+      results.push({ slug, ok: false, duration_ms: Date.now() - perStoreStartedAt, error: `unknown store slug: ${slug}` });
       continue;
     }
 
@@ -139,13 +142,20 @@ async function handleCron(req: NextRequest) {
     });
 
     if (!out.ok) {
-      results.push({ slug, ok: false, facts_id: out.factsId, error: out.error });
+      results.push({
+        slug,
+        ok: false,
+        duration_ms: Date.now() - perStoreStartedAt,
+        facts_id: out.factsId,
+        error: out.error,
+      });
       continue;
     }
 
     results.push({
       slug,
       ok: true,
+      duration_ms: Date.now() - perStoreStartedAt,
       facts_id: out.factsId,
       edition: out.insightResult.draft_context.edition,
       db: out.db,
@@ -153,10 +163,14 @@ async function handleCron(req: NextRequest) {
   }
 
   const allOk = results.every((r) => r.ok);
+  const durationMs = Date.now() - startedAt;
+  const nearTimeout = durationMs >= 50_000;
   /** Cron は 200 のみにし、失敗は JSON の `ok` で判別（Vercel の再試行を避ける） */
   return NextResponse.json({
     ok: allOk,
     service: "cron-blog-draft",
+    duration_ms: durationMs,
+    near_timeout: nearTimeout,
     dateYmd,
     rangeLimit,
     edition_requested: edition ?? null,

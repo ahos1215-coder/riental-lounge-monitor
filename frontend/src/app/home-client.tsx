@@ -10,6 +10,7 @@ import {
 } from "./config/stores";
 import { StoreCard } from "@/components/StoreCard";
 import { LAST_STORE_KEY } from "@/lib/browser/meguribiStorage";
+import ForecastSummaryBar from "./components/ForecastSummaryBar";
 
 export type HomeBlogTeaser = {
   slug: string;
@@ -20,6 +21,23 @@ export type HomeBlogTeaser = {
 
 type HomePageProps = {
   latestBlogPosts: HomeBlogTeaser[];
+};
+
+type ForecastPoint = { ts: string; men_pred?: number; women_pred?: number; total_pred?: number };
+type RangePoint = { men?: number; women?: number; total?: number };
+type StoreRealtimeCard = {
+  slug: string;
+  stats: {
+    genderRatio: string;
+    crowdLevel: string;
+    recommendLabel: string;
+  };
+  sparkline: number[];
+  calmLabel: string;
+  peakLabel: string;
+  nowTotal: number;
+  maxPred: number;
+  hasSignal: boolean;
 };
 
 // 履歴がないときのサンプル（数値ダミーは出さない）
@@ -68,12 +86,28 @@ function getAreaLabelFromSlug(slug: string): string {
   return getStoreMetaBySlug(slug || DEFAULT_STORE).areaLabel || "エリア未設定";
 }
 
+function toHmJst(iso: string): string {
+  return new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(iso));
+}
+
+function crowdLabelFromPred(maxPred: number): string {
+  if (maxPred >= 120) return "混雑";
+  if (maxPred >= 80) return "ほどよい";
+  return "空いている";
+}
+
 // --------------------------------------
 // メインコンポーネント
 // --------------------------------------
 
 export default function HomePage({ latestBlogPosts }: HomePageProps) {
   const [lastStore, setLastStore] = useState<StoreMeta | null>(null);
+  const [storeRealtime, setStoreRealtime] = useState<Record<string, StoreRealtimeCard>>({});
 
   useEffect(() => {
     try {
@@ -86,8 +120,111 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
     }
   }, []);
 
-  /** 掲載店舗ダイジェスト（stores.ts ベース、stats は省略で「準備中」） */
+  /** 掲載店舗ダイジェスト */
   const digestStores = useMemo(() => STORES.slice(0, 6), []);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const results = await Promise.all(
+        digestStores.map(async (store) => {
+          try {
+            const [forecastRes, rangeRes] = await Promise.all([
+              fetch(`/api/forecast_today?store=${encodeURIComponent(store.slug)}`, { cache: "no-store" }),
+              fetch(`/api/range?store=${encodeURIComponent(store.slug)}&limit=1`, { cache: "no-store" }),
+            ]);
+            const forecastBody = (await forecastRes.json()) as { data?: ForecastPoint[] };
+            const rangeBody = (await rangeRes.json()) as RangePoint[] | { data?: RangePoint[]; rows?: RangePoint[] };
+            const forecastRows = Array.isArray(forecastBody?.data) ? forecastBody.data : [];
+            const rangeRows = Array.isArray(rangeBody)
+              ? rangeBody
+              : Array.isArray(rangeBody?.data)
+                ? rangeBody.data
+                : Array.isArray(rangeBody?.rows)
+                  ? rangeBody.rows
+                  : [];
+            const current = rangeRows[0] ?? {};
+            const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
+            const womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
+            const nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
+
+            const totals = forecastRows
+              .map((r) => Math.max(0, Math.round(Number(r.total_pred ?? 0))))
+              .filter((n) => Number.isFinite(n));
+            const maxPred = totals.length ? Math.round(Math.max(...totals)) : 0;
+            let calm = forecastRows[0];
+            for (const r of forecastRows) {
+              if (Number(r.total_pred ?? 0) < Number(calm?.total_pred ?? Number.POSITIVE_INFINITY)) calm = r;
+            }
+            const calmLabel = calm?.ts ? toHmJst(calm.ts) : "--:--";
+
+            const stats = {
+              genderRatio: `${menNow}:${womenNow}`,
+              crowdLevel: crowdLabelFromPred(maxPred),
+              recommendLabel: calm?.ts ? `${calmLabel}ごろ` : "データ不足",
+            };
+            let peak = forecastRows[0];
+            for (const r of forecastRows) {
+              if (Number(r.total_pred ?? 0) > Number(peak?.total_pred ?? Number.NEGATIVE_INFINITY)) peak = r;
+            }
+            const peakLabel = peak?.ts ? toHmJst(peak.ts) : "--:--";
+            const sparkline = totals.slice(0, 10);
+            const card: StoreRealtimeCard = {
+              slug: store.slug,
+              stats,
+              sparkline,
+              calmLabel,
+              peakLabel,
+              nowTotal,
+              maxPred,
+              hasSignal: maxPred >= 80,
+            };
+            return card;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      if (!mounted) return;
+      const mapped: Record<string, StoreRealtimeCard> = {};
+      for (const r of results) {
+        if (r) mapped[r.slug] = r;
+      }
+      setStoreRealtime(mapped);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [digestStores]);
+
+  const featuredStore = useMemo(() => {
+    const cards = Object.values(storeRealtime);
+    if (!cards.length) return null;
+    return cards.sort((a, b) => a.nowTotal - b.nowTotal)[0];
+  }, [storeRealtime]);
+
+  const summary = useMemo(() => {
+    const cards = Object.values(storeRealtime);
+    if (!cards.length) {
+      return {
+        loading: true,
+        peakSummary: "確認中",
+        calmSummary: "確認中",
+        signalText: "確認中",
+      };
+    }
+    const peakCard = [...cards].sort((a, b) => b.maxPred - a.maxPred)[0];
+    const calmCard = [...cards].sort((a, b) => a.nowTotal - b.nowTotal)[0];
+    const signalCount = cards.filter((c) => c.hasSignal).length;
+    const signalText =
+      signalCount > 0 ? `注目シグナル ${signalCount}店舗` : "通常コンディション";
+    return {
+      loading: false,
+      peakSummary: `${getStoreMetaBySlug(peakCard.slug).label} ${peakCard.maxPred}名（${peakCard.peakLabel}）`,
+      calmSummary: `${getStoreMetaBySlug(calmCard.slug).label} ${calmCard.nowTotal}名（現在）`,
+      signalText,
+    };
+  }, [storeRealtime]);
 
   return (
     <div className="relative min-h-screen bg-black font-display text-slate-50">
@@ -111,23 +248,39 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                   オリエンタルラウンジを中心に、各店舗の男女比・混雑・予測をまとめてチェック。
                   「いま行くならどこ？」を、感覚ではなくデータで選べるようにします。
                 </p>
+                {featuredStore && (
+                  <p className="mt-3 max-w-xl text-sm text-emerald-200">
+                    いまのおすすめ: {getStoreMetaBySlug(featuredStore.slug).label}（落ち着き目安 {featuredStore.calmLabel}）
+                  </p>
+                )}
                 <div className="mt-5 flex flex-wrap gap-3 text-sm">
                   <Link
-                    href="/stores"
+                    href={
+                      featuredStore
+                        ? `/store/${featuredStore.slug}?store=${featuredStore.slug}`
+                        : "/stores"
+                    }
                     className="inline-flex items-center justify-center rounded-md bg-indigo-500 px-4 py-2 font-semibold text-white shadow-sm shadow-black/40 hover:bg-indigo-400"
                   >
-                    店舗一覧を見る
+                    今夜の予測を見る
                   </Link>
                   <Link
-                    href={`/store/${DEFAULT_STORE}?store=${DEFAULT_STORE}`}
+                    href="/stores"
                     className="inline-flex items-center justify-center rounded-md border border-slate-500/60 bg-black/40 px-4 py-2 text-slate-100/80 hover:border-amber-300/80 hover:bg-slate-900"
                   >
-                    今夜の長崎店をチェック
+                    店舗一覧を見る
                   </Link>
                 </div>
               </div>
             </div>
           </section>
+
+          <ForecastSummaryBar
+            loading={summary.loading}
+            peakSummary={summary.peakSummary}
+            calmSummary={summary.calmSummary}
+            signalText={summary.signalText}
+          />
 
           <section className="space-y-3">
             <h2 className="text-sm font-semibold text-slate-100">Last visited store</h2>
@@ -215,6 +368,8 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                   brandLabel="ORIENTAL LOUNGE"
                   areaLabel={store.areaLabel}
                   isHighlight={idx === 0}
+                  stats={storeRealtime[store.slug]?.stats}
+                  sparklinePoints={storeRealtime[store.slug]?.sparkline}
                 />
               ))}
             </div>
@@ -246,6 +401,9 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                     <div className="flex h-24 items-center justify-center border-b border-slate-800 bg-gradient-to-br from-indigo-900/40 to-slate-900/80">
                       <span className="text-[11px] font-medium text-indigo-200/90">
                         {article.categoryLabel}
+                      </span>
+                      <span className="ml-2 rounded-full border border-emerald-400/50 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">
+                        AI予測更新
                       </span>
                     </div>
                     <div className="flex flex-1 flex-col p-3">

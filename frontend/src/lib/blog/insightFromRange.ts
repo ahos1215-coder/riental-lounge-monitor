@@ -20,6 +20,10 @@ export type DraftContext = {
   edition: BlogEdition;
   /** avoid_time は「待ち時間が短い」目安であり、相席の質の最高値とは限らない */
   avoid_time_semantics: "entry_ease_not_social_peak";
+  /** ML 2.0 の店舗別推論が使えたかを人間向けに表示 */
+  ml_inference_mode: "store_specific_or_forecast" | "range_only";
+  /** forecast API reasoning.notes の要約（存在時） */
+  ml_signal_notes: string[];
   gender_note: string;
   secondary_wave: { detected: boolean; note: string };
   data_health: { level: "ok" | "sparse" | "concerning"; notes: string[] };
@@ -237,7 +241,8 @@ function computeDraftContext(
   detailed: PointWithGender[],
   insight: Insight,
   edition: BlogEdition,
-  extraQualityNotes: string[]
+  extraQualityNotes: string[],
+  options?: { mlInferenceMode?: DraftContext["ml_inference_mode"]; mlSignalNotes?: string[] }
 ): DraftContext {
   const notes: string[] = [...extraQualityNotes];
   let gender_note =
@@ -305,6 +310,8 @@ function computeDraftContext(
   return {
     edition,
     avoid_time_semantics: "entry_ease_not_social_peak",
+    ml_inference_mode: options?.mlInferenceMode ?? "range_only",
+    ml_signal_notes: options?.mlSignalNotes ?? [],
     gender_note,
     secondary_wave: secondaryWave,
     data_health: { level, notes },
@@ -394,14 +401,27 @@ export async function fetchRangeRows(backendBase: string, store: string, limit: 
   return rows;
 }
 
-export async function fetchForecastRows(backendBase: string, store: string): Promise<unknown[]> {
+export async function fetchForecastRows(
+  backendBase: string,
+  store: string
+): Promise<{ rows: unknown[]; reasoningNotes: string[] }> {
   const base = backendBase.replace(/\/+$/, "");
   const url = `${base}/api/forecast_today?store=${encodeURIComponent(store)}`;
   console.log("[insight] fetchForecastRows start", { store });
   const data = await fetchJson(url);
   const rows = pickArray(data);
-  console.log("[insight] fetchForecastRows done", { rows: rows.length });
-  return rows;
+  const reasoning =
+    data && typeof data === "object" && "reasoning" in (data as Record<string, unknown>)
+      ? (data as Record<string, unknown>).reasoning
+      : null;
+  const notes =
+    reasoning && typeof reasoning === "object" && Array.isArray((reasoning as Record<string, unknown>).notes)
+      ? ((reasoning as Record<string, unknown>).notes as unknown[]).filter(
+          (v): v is string => typeof v === "string" && v.trim().length > 0
+        )
+      : [];
+  console.log("[insight] fetchForecastRows done", { rows: rows.length, reasoningNotes: notes.length });
+  return { rows, reasoningNotes: notes };
 }
 
 function errorMessage(err: unknown): string {
@@ -429,6 +449,7 @@ export async function buildInsightFromBackend(
   let skipForecastDueToTimeout = false;
   let rangeRows: unknown[] = [];
   let forecastRows: unknown[] = [];
+  let forecastReasoningNotes: string[] = [];
 
   try {
     console.log("[insight] buildInsightFromBackend -> api/range");
@@ -471,7 +492,9 @@ export async function buildInsightFromBackend(
     if (!skipForecastDueToTimeout) {
       try {
         console.log("[insight] buildInsightFromBackend -> api/forecast_today");
-        forecastRows = await fetchForecastRows(backendBase, storeSlug);
+        const fetched = await fetchForecastRows(backendBase, storeSlug);
+        forecastRows = fetched.rows;
+        forecastReasoningNotes = fetched.reasoningNotes;
       } catch (e) {
         notes.push(`forecast_error:${errorMessage(e)}`);
       }
@@ -518,7 +541,10 @@ export async function buildInsightFromBackend(
   const detailed = collectPointsWithGender(rowsForGender, range.from, range.to, genderOpts);
 
   const edition = options?.edition ?? inferBlogEditionFromJstNow();
-  const draft_context = computeDraftContext(detailed, insight, edition, notes);
+  const draft_context = computeDraftContext(detailed, insight, edition, notes, {
+    mlInferenceMode: source === "api/forecast_today" ? "store_specific_or_forecast" : "range_only",
+    mlSignalNotes: forecastReasoningNotes,
+  });
 
   return {
     insight,

@@ -18,6 +18,9 @@ function slugToMeta(slug: string): StoreMeta {
 export default function MyPageClient() {
   const [historySlugs, setHistorySlugs] = useState<string[]>([]);
   const [favoriteSlugs, setFavoriteSlugs] = useState<string[]>([]);
+  const [quickForecast, setQuickForecast] = useState<
+    Array<{ slug: string; peak: string; calm: string; maxPred: number }>
+  >([]);
 
   const refresh = useCallback(() => {
     setHistorySlugs(getStoreHistorySlugs());
@@ -27,6 +30,55 @@ export default function MyPageClient() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    let mounted = true;
+    const targets = favoriteSlugs.slice(0, 6);
+    if (!targets.length) {
+      setQuickForecast([]);
+      return;
+    }
+    (async () => {
+      const fmt = (iso: string) =>
+        new Intl.DateTimeFormat("ja-JP", {
+          timeZone: "Asia/Tokyo",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).format(new Date(iso));
+      const rows = await Promise.all(
+        targets.map(async (slug) => {
+          try {
+            const res = await fetch(`/api/forecast_today?store=${encodeURIComponent(slug)}`, {
+              cache: "no-store",
+            });
+            const body = (await res.json()) as { data?: Array<{ ts: string; total_pred?: number }> };
+            const data = Array.isArray(body?.data) ? body.data : [];
+            if (!data.length) return { slug, peak: "--:--", calm: "--:--", maxPred: 0 };
+            let peak = data[0];
+            let calm = data[0];
+            for (const p of data) {
+              const v = Number(p.total_pred ?? 0);
+              if (v > Number(peak.total_pred ?? 0)) peak = p;
+              if (v < Number(calm.total_pred ?? 0)) calm = p;
+            }
+            return {
+              slug,
+              peak: fmt(peak.ts),
+              calm: fmt(calm.ts),
+              maxPred: Math.round(Number(peak.total_pred ?? 0)),
+            };
+          } catch {
+            return { slug, peak: "--:--", calm: "--:--", maxPred: 0 };
+          }
+        }),
+      );
+      if (mounted) setQuickForecast(rows);
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [favoriteSlugs]);
 
   return (
     <main className="relative min-h-[calc(100vh-80px)] bg-[#050505] font-display text-white">
@@ -120,6 +172,29 @@ export default function MyPageClient() {
             </ul>
           )}
         </section>
+
+        {favoriteSlugs.length > 0 && (
+          <section className="mt-10 space-y-3">
+            <h2 className="text-sm font-semibold text-emerald-100/90">お気に入り店舗の今日の予測（ML 2.0）</h2>
+            <div className="grid gap-2">
+              {quickForecast.map((f) => {
+                const m = slugToMeta(f.slug);
+                return (
+                  <Link
+                    key={`quick-${f.slug}`}
+                    href={`/store/${m.slug}?store=${m.slug}`}
+                    className="grid grid-cols-1 gap-2 rounded-2xl border border-emerald-400/20 bg-emerald-500/5 px-4 py-3 text-sm text-white/90 md:grid-cols-4"
+                  >
+                    <span className="font-semibold">Oriental Lounge {m.label}</span>
+                    <span className="text-xs text-white/65">ピーク目安: {f.peak}</span>
+                    <span className="text-xs text-white/65">落ち着き目安: {f.calm}</span>
+                    <span className="text-xs text-white/65">最大予測: {f.maxPred}人</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         <section className="mt-10 space-y-3">
           <div className="flex items-center justify-between gap-2">

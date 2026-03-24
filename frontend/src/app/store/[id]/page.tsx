@@ -11,6 +11,83 @@ import {
 } from "@/lib/browser/meguribiStorage";
 import { DEFAULT_STORE, STORES, getStoreMetaBySlug } from "../../config/stores";
 
+type ForecastPoint = { ts: string; total_pred?: number };
+
+function ForecastQuickPanel({ slug }: { slug: string }) {
+  const [state, setState] = useState<{
+    loading: boolean;
+    peak: string;
+    calm: string;
+    maxPred: number;
+  }>({ loading: true, peak: "--:--", calm: "--:--", maxPred: 0 });
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch(`/api/forecast_today?store=${encodeURIComponent(slug)}`, {
+          cache: "no-store",
+        });
+        const data = (await res.json()) as { data?: ForecastPoint[] };
+        const rows = Array.isArray(data?.data) ? data.data : [];
+        if (!rows.length) {
+          if (mounted) setState({ loading: false, peak: "--:--", calm: "--:--", maxPred: 0 });
+          return;
+        }
+        let peak = rows[0];
+        let calm = rows[0];
+        for (const r of rows) {
+          const v = Number(r.total_pred ?? 0);
+          if (v > Number(peak.total_pred ?? 0)) peak = r;
+          if (v < Number(calm.total_pred ?? 0)) calm = r;
+        }
+        const fmt = (iso: string) =>
+          new Intl.DateTimeFormat("ja-JP", {
+            timeZone: "Asia/Tokyo",
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: false,
+          }).format(new Date(iso));
+        if (mounted) {
+          setState({
+            loading: false,
+            peak: fmt(peak.ts),
+            calm: fmt(calm.ts),
+            maxPred: Math.round(Number(peak.total_pred ?? 0)),
+          });
+        }
+      } catch {
+        if (mounted) setState({ loading: false, peak: "--:--", calm: "--:--", maxPred: 0 });
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, [slug]);
+
+  return (
+    <section className="mx-auto w-full max-w-6xl px-4">
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+        <p className="text-[11px] font-semibold text-emerald-200">ML 2.0 今日の予測ハイライト</p>
+        <div className="mt-2 grid gap-2 md:grid-cols-3">
+          <div className="rounded-xl border border-white/10 bg-black/20 p-2.5">
+            <p className="text-[10px] text-white/60">賑わいピークの目安</p>
+            <p className="mt-1 text-xl font-bold leading-none text-white">{state.loading ? "..." : state.peak}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/20 p-2.5">
+            <p className="text-[10px] text-white/60">落ち着いて過ごしやすい目安</p>
+            <p className="mt-1 text-xl font-bold leading-none text-white">{state.loading ? "..." : state.calm}</p>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/20 p-2.5">
+            <p className="text-[10px] text-white/60">予測最大人数（参考）</p>
+            <p className="mt-1 text-xl font-bold leading-none text-white">{state.loading ? "..." : `${Math.round(state.maxPred)}人`}</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function StorePageFallback() {
   return (
     <div className="mx-auto w-full max-w-6xl space-y-8 px-4 py-8">
@@ -96,6 +173,7 @@ function StorePageInner() {
       </div>
 
       <MeguribiDashboardPreview />
+      <ForecastQuickPanel slug={slug} />
 
       <section className="mx-auto w-full max-w-6xl space-y-3 px-4">
         <h2 className="text-sm font-semibold text-slate-100">Check other stores</h2>
