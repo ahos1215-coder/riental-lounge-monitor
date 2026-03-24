@@ -12,11 +12,16 @@ type StoreCardProps = {
   href?: string;
   isHighlight?: boolean;
   stats?: {
+    menCount?: number;
+    womenCount?: number;
+    nowTotal?: number;
+    peakPredTotal?: number;
     genderRatio?: string;
     crowdLevel?: string;
     recommendLabel?: string;
   };
   sparklinePoints?: number[];
+  isLoading?: boolean;
 };
 
 function SimpleLineChart({ points }: { points?: number[] }) {
@@ -60,6 +65,7 @@ export function StoreCard({
   isHighlight = false,
   stats,
   sparklinePoints,
+  isLoading = false,
 }: StoreCardProps) {
   const resolvedHref = useMemo(
     () => href ?? `/store/${slug}?store=${slug}`,
@@ -67,6 +73,10 @@ export function StoreCard({
   );
 
   const hasStats = Boolean(stats);
+  const menCount = Math.max(0, Math.round(Number(stats?.menCount ?? 0)));
+  const womenCount = Math.max(0, Math.round(Number(stats?.womenCount ?? 0)));
+  const nowTotal = Math.max(0, Math.round(Number(stats?.nowTotal ?? menCount + womenCount)));
+  const peakPredTotal = Math.max(0, Math.round(Number(stats?.peakPredTotal ?? 0)));
   const gender = (() => {
     const raw = stats?.genderRatio;
     if (!raw) return "-";
@@ -75,7 +85,7 @@ export function StoreCard({
     return `${Math.round(Number(m[1]))}:${Math.round(Number(m[2]))}`;
   })();
   const crowd = stats?.crowdLevel ?? "-";
-  const recommend = stats?.recommendLabel ?? "-";
+  const recommend = stats?.recommendLabel ?? "確認中";
   const crowdClass =
     crowd === "混雑"
       ? "text-rose-300"
@@ -84,6 +94,7 @@ export function StoreCard({
       : crowd === "空いている"
       ? "text-sky-200"
       : "text-white";
+  const crowdIcon = crowd === "混雑" ? "▲" : crowd === "ほどよい" ? "●" : crowd === "空いている" ? "○" : "・";
 
   const cardClass = isHighlight
     ? "flex cursor-pointer flex-col rounded-2xl border border-indigo-500/70 bg-indigo-500/10 p-3 text-sm transition hover:bg-indigo-500/20"
@@ -95,6 +106,19 @@ export function StoreCard({
 
   return (
     <Link href={resolvedHref} className={cardClass} onClick={handleClick}>
+      {isLoading ? (
+        <div className="space-y-2">
+          <div className="h-3 w-24 animate-pulse rounded bg-slate-700/70" />
+          <div className="h-5 w-40 animate-pulse rounded bg-slate-700/70" />
+          <div className="h-3 w-28 animate-pulse rounded bg-slate-800/70" />
+          <div className="flex gap-2">
+            <div className="h-6 w-20 animate-pulse rounded-full bg-sky-900/40" />
+            <div className="h-6 w-20 animate-pulse rounded-full bg-rose-900/40" />
+          </div>
+          <div className="h-14 w-full animate-pulse rounded-md border border-slate-800 bg-slate-950/70" />
+        </div>
+      ) : (
+        <>
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-[11px] font-medium text-white/60">{brandLabel}</p>
@@ -102,19 +126,41 @@ export function StoreCard({
             {label}
           </h2>
           <p className="mt-0.5 text-[11px] text-white/50">{areaLabel}</p>
+          {hasStats && (
+            <div className="mt-1.5 flex items-center gap-2 text-[11px]">
+              <span className="rounded-full border border-sky-400/40 bg-sky-500/10 px-2 py-0.5 font-semibold text-sky-300">
+                男性 {menCount}人
+              </span>
+              <span className="rounded-full border border-rose-400/40 bg-rose-500/10 px-2 py-0.5 font-semibold text-rose-300">
+                女性 {womenCount}人
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex flex-col items-end gap-0.5 text-[11px] text-white/70">
+          {hasStats && (
+            <div className="flex items-center gap-1">
+              <span className="text-white/50">現在</span>
+              <span className="font-semibold text-white">{nowTotal}人</span>
+            </div>
+          )}
+          {hasStats && (
+            <div className="flex items-center gap-1">
+              <span className="text-white/50">今夜ピーク予測</span>
+              <span className="font-semibold text-indigo-200">{peakPredTotal}人</span>
+            </div>
+          )}
           <div className="flex items-center gap-1">
             <span className="text-white/50">男女比</span>
             <span className="font-semibold text-white">{gender}</span>
           </div>
           <div className="flex items-center gap-1">
             <span className="text-white/50">混雑度</span>
-            <span className={`font-semibold ${crowdClass}`}>{crowd}</span>
+            <span className={`font-semibold ${crowdClass}`}>{crowdIcon} {crowd}</span>
           </div>
           {hasStats && (
             <div className="flex items-center gap-1">
-              <span className="text-white/50">おすすめ</span>
+              <span className="text-white/50">狙い目</span>
               <span className="font-semibold text-white">{recommend}</span>
             </div>
           )}
@@ -132,6 +178,8 @@ export function StoreCard({
       <p className="mt-2 text-[11px] font-medium text-indigo-300">
         ダッシュボードを開く ←
       </p>
+        </>
+      )}
     </Link>
   );
 }

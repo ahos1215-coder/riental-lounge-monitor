@@ -12,6 +12,17 @@ import {
 import { DEFAULT_STORE, STORES, getStoreMetaBySlug } from "../../config/stores";
 
 type ForecastPoint = { ts: string; total_pred?: number };
+type ForecastCardPoint = { ts: string; total_pred?: number };
+type RangePoint = { men?: number; women?: number; total?: number };
+type RealtimeCardStats = {
+  menCount: number;
+  womenCount: number;
+  nowTotal: number;
+  peakPredTotal: number;
+  genderRatio: string;
+  crowdLevel: string;
+  recommendLabel: string;
+};
 
 function ForecastQuickPanel({ slug }: { slug: string }) {
   const [state, setState] = useState<{
@@ -152,9 +163,95 @@ function StorePageInner() {
   );
 
   const [favorite, setFavorite] = useState(false);
+  const [relatedRealtime, setRelatedRealtime] = useState<Record<string, { stats: RealtimeCardStats; sparkline: number[] }>>({});
+  const [relatedLoading, setRelatedLoading] = useState(false);
   useEffect(() => {
     setFavorite(isFavoriteStore(slug));
   }, [slug]);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const toHmJst = (iso: string): string =>
+      new Intl.DateTimeFormat("ja-JP", {
+        timeZone: "Asia/Tokyo",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).format(new Date(iso));
+
+    const crowdLabelFromPred = (maxPred: number): string => {
+      if (maxPred >= 120) return "混雑";
+      if (maxPred >= 80) return "ほどよい";
+      return "空いている";
+    };
+
+    (async () => {
+      setRelatedLoading(true);
+      const results = await Promise.all(
+        digestStores.map(async (store) => {
+          try {
+            const [forecastRes, rangeRes] = await Promise.all([
+              fetch(`/api/forecast_today?store=${encodeURIComponent(store.slug)}`, { cache: "no-store" }),
+              fetch(`/api/range?store=${encodeURIComponent(store.slug)}&limit=1`, { cache: "no-store" }),
+            ]);
+            const forecastBody = (await forecastRes.json()) as { data?: ForecastCardPoint[] };
+            const rangeBody = (await rangeRes.json()) as RangePoint[] | { data?: RangePoint[]; rows?: RangePoint[] };
+            const forecastRows = Array.isArray(forecastBody?.data) ? forecastBody.data : [];
+            const rangeRows = Array.isArray(rangeBody)
+              ? rangeBody
+              : Array.isArray(rangeBody?.data)
+                ? rangeBody.data
+                : Array.isArray(rangeBody?.rows)
+                  ? rangeBody.rows
+                  : [];
+            const current = rangeRows[0] ?? {};
+            const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
+            const womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
+            const nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
+            const totals = forecastRows
+              .map((r) => Math.max(0, Math.round(Number(r.total_pred ?? 0))))
+              .filter((n) => Number.isFinite(n));
+            const maxPred = totals.length ? Math.round(Math.max(...totals)) : 0;
+            let calm = forecastRows[0];
+            for (const r of forecastRows) {
+              if (Number(r.total_pred ?? 0) < Number(calm?.total_pred ?? Number.POSITIVE_INFINITY)) {
+                calm = r;
+              }
+            }
+            const calmLabel = calm?.ts ? toHmJst(calm.ts) : "--:--";
+            return {
+              slug: store.slug,
+              stats: {
+                menCount: menNow,
+                womenCount: womenNow,
+                nowTotal,
+                peakPredTotal: maxPred,
+                genderRatio: `${menNow}:${womenNow}`,
+                crowdLevel: crowdLabelFromPred(maxPred),
+                recommendLabel: calm?.ts ? `${calmLabel}ごろ` : "確認中",
+              },
+              sparkline: totals.slice(0, 10),
+            };
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      if (!mounted) return;
+      const mapped: Record<string, { stats: RealtimeCardStats; sparkline: number[] }> = {};
+      for (const row of results) {
+        if (row) mapped[row.slug] = { stats: row.stats, sparkline: row.sparkline };
+      }
+      setRelatedRealtime(mapped);
+      setRelatedLoading(false);
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [digestStores]);
 
   return (
     <div className="space-y-8">
@@ -186,6 +283,9 @@ function StorePageInner() {
               brandLabel="ORIENTAL LOUNGE"
               areaLabel={store.areaLabel}
               isHighlight={idx === 0}
+              stats={relatedRealtime[store.slug]?.stats}
+              sparklinePoints={relatedRealtime[store.slug]?.sparkline}
+              isLoading={relatedLoading && !relatedRealtime[store.slug]}
             />
           ))}
         </div>

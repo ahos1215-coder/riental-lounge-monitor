@@ -9,6 +9,8 @@ import {
   type BlogCategoryId,
 } from "@/lib/blog/content";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { fetchLatestAutoBlogDrafts } from "@/lib/supabase/blogDrafts";
+import { getStoreMetaBySlug } from "../config/stores";
 
 const blogBase = getMetadataBaseUrl();
 
@@ -90,6 +92,32 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
     .sort((a, b) => b.views - a.views)
     .slice(0, 5);
 
+  const autoDraftRows = await fetchLatestAutoBlogDrafts(8);
+  const autoCards = autoDraftRows.map((row) => {
+    const meta = getStoreMetaBySlug(row.store_slug);
+    const updated = row.updated_at ?? row.created_at ?? "";
+    const updatedLabel = updated
+      ? new Intl.DateTimeFormat("ja-JP", {
+          timeZone: "Asia/Tokyo",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).format(new Date(updated))
+      : row.target_date;
+    const title = `【自動更新】${meta.label}の最新予測と混雑ヒント`;
+    const description = `ML 2.0の最新推論を反映（更新: ${updatedLabel}）`;
+    return {
+      href: `/blog/auto-${row.store_slug}-${row.facts_id.split("_").slice(-1)[0] ?? "nightly"}`,
+      title,
+      description,
+      updatedLabel,
+      storeLabel: meta.label,
+    };
+  });
+
   return (
     <main className="relative min-h-[calc(100vh-80px)] bg-black text-white">
       <div className="pointer-events-none absolute inset-0">
@@ -161,6 +189,29 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
 
         <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
           <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {autoCards.map((card) => (
+              <Link
+                key={card.href}
+                href={card.href}
+                className="group overflow-hidden rounded-2xl border border-emerald-500/30 bg-emerald-500/5 hover:border-emerald-400/60"
+              >
+                <div className="relative aspect-[16/9]">
+                  <div className="absolute inset-0 bg-gradient-to-br from-emerald-700/40 to-slate-900/80" />
+                  <div className="absolute inset-0 bg-black/30" />
+                </div>
+                <div className="p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="inline-flex items-center rounded-md bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-200">
+                      自動更新
+                    </span>
+                    <span className="text-xs text-white/50">{card.updatedLabel}</span>
+                  </div>
+                  <p className="mt-3 text-sm font-black leading-snug text-white">{card.title}</p>
+                  <p className="mt-2 text-xs text-white/70">{card.description}</p>
+                  <p className="mt-1 text-[11px] text-white/40">店舗: {card.storeLabel}</p>
+                </div>
+              </Link>
+            ))}
             {rows.map((post) => (
               <Link
                 key={post.slug}

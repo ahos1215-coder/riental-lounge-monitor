@@ -108,6 +108,7 @@ function crowdLabelFromPred(maxPred: number): string {
 export default function HomePage({ latestBlogPosts }: HomePageProps) {
   const [lastStore, setLastStore] = useState<StoreMeta | null>(null);
   const [storeRealtime, setStoreRealtime] = useState<Record<string, StoreRealtimeCard>>({});
+  const [realtimeLoading, setRealtimeLoading] = useState(true);
 
   useEffect(() => {
     try {
@@ -120,14 +121,15 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
     }
   }, []);
 
-  /** 掲載店舗ダイジェスト */
-  const digestStores = useMemo(() => STORES.slice(0, 6), []);
+  /** 取得対象（軽さ重視で12店舗） */
+  const sourceStoresForRealtime = useMemo(() => STORES.slice(0, 12), []);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
+      setRealtimeLoading(true);
       const results = await Promise.all(
-        digestStores.map(async (store) => {
+        sourceStoresForRealtime.map(async (store) => {
           try {
             const [forecastRes, rangeRes] = await Promise.all([
               fetch(`/api/forecast_today?store=${encodeURIComponent(store.slug)}`, { cache: "no-store" }),
@@ -159,6 +161,10 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
             const calmLabel = calm?.ts ? toHmJst(calm.ts) : "--:--";
 
             const stats = {
+              menCount: menNow,
+              womenCount: womenNow,
+              nowTotal,
+              peakPredTotal: maxPred,
               genderRatio: `${menNow}:${womenNow}`,
               crowdLevel: crowdLabelFromPred(maxPred),
               recommendLabel: calm?.ts ? `${calmLabel}ごろ` : "データ不足",
@@ -191,11 +197,31 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
         if (r) mapped[r.slug] = r;
       }
       setStoreRealtime(mapped);
+      setRealtimeLoading(false);
     })();
     return () => {
       mounted = false;
     };
-  }, [digestStores]);
+  }, [sourceStoresForRealtime]);
+
+  /** 時間帯に応じて表示店舗を自動優先（夜ピークは賑わい重視、深夜は落ち着き重視） */
+  const digestStores = useMemo(() => {
+    const hour = new Date().getHours();
+    const cards = Object.values(storeRealtime);
+    const bySlug = new Map(cards.map((c) => [c.slug, c]));
+    const ranked = [...cards].sort((a, b) => {
+      if (hour >= 20 || hour <= 1) return b.maxPred - a.maxPred;
+      return a.nowTotal - b.nowTotal;
+    });
+    const picked = ranked.slice(0, 6).map((c) => getStoreMetaBySlug(c.slug));
+    if (picked.length >= 6) return picked;
+    const exists = new Set(picked.map((s) => s.slug));
+    for (const s of STORES) {
+      if (exists.has(s.slug)) continue;
+      if (!bySlug.has(s.slug) && picked.length < 6) picked.push(s);
+    }
+    return picked.slice(0, 6);
+  }, [storeRealtime]);
 
   const featuredStore = useMemo(() => {
     const cards = Object.values(storeRealtime);
@@ -349,7 +375,7 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
               <div>
                 <h2 className="text-sm font-semibold text-slate-100">掲載中の店舗</h2>
                 <p className="mt-0.5 text-[11px] text-slate-500">
-                  オリエンタルラウンジ（config の店舗一覧ベース）。詳細は各店舗ページへ。
+                  男女人数（青/赤）・現在人数・混雑度・狙い目をカードで比較できます（時間帯で自動並び替え）。
                 </p>
               </div>
               <Link
@@ -370,6 +396,7 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                   isHighlight={idx === 0}
                   stats={storeRealtime[store.slug]?.stats}
                   sparklinePoints={storeRealtime[store.slug]?.sparkline}
+                  isLoading={realtimeLoading && !storeRealtime[store.slug]}
                 />
               ))}
             </div>

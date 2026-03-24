@@ -9,6 +9,7 @@ import {
 export type PreviewRangeMode = "today" | "yesterday" | "lastWeek" | "custom";
 
 export type TimeSeriesPoint = {
+  ts?: string;
   label: string;
   menActual: number | null;
   womenActual: number | null;
@@ -64,8 +65,11 @@ export type StorePreviewControls = {
   selectedBaseDate: string; // yyyy-mm-dd
 };
 
+const FORECAST_REFRESH_MS = 15 * 60 * 1000;
+
 const RANGE_LIMIT_BY_MODE: Record<PreviewRangeMode, number> = {
-  today: 400,
+  // today は初速重視で軽めにして表示開始を早める
+  today: 240,
   yesterday: 1600,
   lastWeek: 5200,
   custom: 5200,
@@ -80,6 +84,7 @@ function buildEmptySeries(): TimeSeriesPoint[] {
     labels.push(`${(h - 24).toString().padStart(2, "0")}:00`);
   }
   return labels.map((label) => ({
+    ts: undefined,
     label,
     menActual: null,
     womenActual: null,
@@ -233,6 +238,9 @@ function buildSeries(
   actuals: RangePoint[],
   forecasts: ForecastPoint[],
 ): TimeSeriesPoint[] {
+  const toRoundedOrNull = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null;
+
   const sortedActuals = [...actuals].sort((a, b) => {
     const ta = new Date(a.ts ?? 0).getTime();
     const tb = new Date(b.ts ?? 0).getTime();
@@ -255,9 +263,10 @@ function buildSeries(
   for (const p of sortedActuals) {
     if (!p.ts) continue;
     map.set(p.ts, {
+      ts: p.ts,
       label: formatLabel(p.ts),
-      menActual: typeof p.men === "number" ? p.men : null,
-      womenActual: typeof p.women === "number" ? p.women : null,
+      menActual: toRoundedOrNull(p.men),
+      womenActual: toRoundedOrNull(p.women),
       menForecast: null,
       womenForecast: null,
     });
@@ -269,21 +278,19 @@ function buildSeries(
     const isFutureOnly = lastActualTime > 0 && t > lastActualTime;
 
     const existing = map.get(p.ts);
-    const menForecast =
-      typeof p.men_pred === "number" ? p.men_pred : existing?.menForecast ?? null;
-    const womenForecast =
-      typeof p.women_pred === "number"
-        ? p.women_pred
-        : existing?.womenForecast ?? null;
+    const menForecast = toRoundedOrNull(p.men_pred) ?? existing?.menForecast ?? null;
+    const womenForecast = toRoundedOrNull(p.women_pred) ?? existing?.womenForecast ?? null;
 
     if (existing) {
       map.set(p.ts, {
         ...existing,
+        ts: p.ts,
         menForecast: isFutureOnly ? menForecast : null,
         womenForecast: isFutureOnly ? womenForecast : null,
       });
     } else {
       map.set(p.ts, {
+        ts: p.ts,
         label: formatLabel(p.ts),
         menActual: null,
         womenActual: null,
@@ -310,8 +317,8 @@ function pickCurrentActual(series: TimeSeriesPoint[]) {
     );
   if (!last) return { nowMen: 0, nowWomen: 0 };
   return {
-    nowMen: last.menActual ?? last.menForecast ?? 0,
-    nowWomen: last.womenActual ?? last.womenForecast ?? 0,
+    nowMen: Math.round(last.menActual ?? last.menForecast ?? 0),
+    nowWomen: Math.round(last.womenActual ?? last.womenForecast ?? 0),
   };
 }
 
@@ -340,6 +347,22 @@ function hasSeriesData(series: TimeSeriesPoint[]) {
       p.menForecast !== null ||
       p.womenForecast !== null,
   );
+}
+
+function pickLatestActualPoint(points: RangePoint[]) {
+  const sorted = [...points].sort((a, b) => {
+    const ta = new Date(a.ts ?? 0).getTime();
+    const tb = new Date(b.ts ?? 0).getTime();
+    return tb - ta;
+  });
+  const latest = sorted.find(
+    (p) => typeof p.men === "number" || typeof p.women === "number",
+  );
+  if (!latest) return null;
+  return {
+    nowMen: typeof latest.men === "number" ? Math.round(latest.men) : 0,
+    nowWomen: typeof latest.women === "number" ? Math.round(latest.women) : 0,
+  };
 }
 
 /**
@@ -387,51 +410,74 @@ export function useStorePreviewData(
         const rangeUrl = `/api/range?store=${encodeURIComponent(meta.slug)}&limit=${rangeLimit}`;
 
         const forecastUrl = `/api/forecast_today?store=${encodeURIComponent(meta.slug)}`;
-
-        const [rangeRes, forecastRes] = await Promise.all([
-          fetch(rangeUrl),
-          rangeMode === "today" ? fetch(forecastUrl) : Promise.resolve(null),
-        ]);
-
+        // 初期表示高速化: まず実測(/api/range)だけで描画し、予測は後追いで合流
+        const rangeRes = await fetch(rangeUrl, { cache: "no-store" });
         const rangeJson = await rangeRes.json().catch(() => ({}));
-        const forecastJson =
-          forecastRes === null
-            ? { data: [] }
-            : await forecastRes.json().catch(() => ({}));
 
         const allRangePoints = parseRangePoints(rangeJson);
-        const allForecastPoints = parseForecastPoints(forecastJson);
-
         const rangePoints = allRangePoints.filter((p) =>
           isWithinNight(p.ts, nightWindow),
         );
-        const forecastPoints = allForecastPoints.filter((p) =>
-          isWithinNight(p.ts, nightWindow),
-        );
+        const actualOnlySeries = buildSeries(rangePoints, []);
+        const effectiveActualSeries =
+          actualOnlySeries.length > 0 ? actualOnlySeries : baseSnapshot.series;
+        const latestActual = pickLatestActualPoint(allRangePoints);
+        const hasData = hasSeriesData(actualOnlySeries) || latestActual !== null;
 
-        const series = buildSeries(rangePoints, forecastPoints);
-        const effectiveSeries =
-          series.length > 0 ? series : baseSnapshot.series;
-        const hasData = hasSeriesData(series);
+        // 夜窓フィルタで空になっても、最新の実測値があればカードは0固定にしない。
+        const current = pickCurrentActual(effectiveActualSeries);
+        const nowMen = latestActual?.nowMen ?? current.nowMen;
+        const nowWomen = latestActual?.nowWomen ?? current.nowWomen;
+        const { peakTotal, peakTimeLabel } = pickPeak(effectiveActualSeries);
 
-        const { nowMen, nowWomen } = pickCurrentActual(effectiveSeries);
-        const { peakTotal, peakTimeLabel } = pickPeak(effectiveSeries);
-
-        const snapshot: StoreSnapshot = {
+        const baseSnapshotResolved: StoreSnapshot = {
           ...baseSnapshot,
           level: hasData ? "データ取得済み" : "データなし",
           recommendation: hasData ? "データ取得済み" : "データなし",
-          nowMen,
-          nowWomen,
-          nowTotal: nowMen + nowWomen,
-          peakTotal,
+          nowMen: Math.round(nowMen),
+          nowWomen: Math.round(nowWomen),
+          nowTotal: Math.round(nowMen + nowWomen),
+          peakTotal: Math.round(peakTotal),
           peakTimeLabel,
-          series: effectiveSeries,
+          series: effectiveActualSeries,
           hasData,
         };
 
         if (!cancelled) {
-          setState({ loading: false, error: null, snapshot });
+          setState({ loading: false, error: null, snapshot: baseSnapshotResolved });
+        }
+
+        if (rangeMode !== "today") {
+          return;
+        }
+
+        const forecastRes = await fetch(forecastUrl, { cache: "no-store" });
+        const forecastJson = await forecastRes.json().catch(() => ({}));
+        const allForecastPoints = parseForecastPoints(forecastJson);
+        const forecastPoints = allForecastPoints.filter((p) =>
+          isWithinNight(p.ts, nightWindow),
+        );
+        const mergedSeries = buildSeries(rangePoints, forecastPoints);
+        const effectiveMergedSeries =
+          mergedSeries.length > 0 ? mergedSeries : baseSnapshotResolved.series;
+        const mergedCurrent = pickCurrentActual(effectiveMergedSeries);
+        const mergedNowMen = latestActual?.nowMen ?? mergedCurrent.nowMen;
+        const mergedNowWomen = latestActual?.nowWomen ?? mergedCurrent.nowWomen;
+        const mergedPeak = pickPeak(effectiveMergedSeries);
+        const mergedSnapshot: StoreSnapshot = {
+          ...baseSnapshotResolved,
+          nowMen: Math.round(mergedNowMen),
+          nowWomen: Math.round(mergedNowWomen),
+          nowTotal: Math.round(mergedNowMen + mergedNowWomen),
+          peakTotal: Math.round(mergedPeak.peakTotal),
+          peakTimeLabel: mergedPeak.peakTimeLabel,
+          series: effectiveMergedSeries,
+          hasData:
+            hasSeriesData(mergedSeries) ||
+            baseSnapshotResolved.hasData,
+        };
+        if (!cancelled) {
+          setState({ loading: false, error: null, snapshot: mergedSnapshot });
         }
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
@@ -449,8 +495,17 @@ export function useStorePreviewData(
 
     run();
 
+    let timer: ReturnType<typeof setInterval> | null = null;
+    // 今日モードは実測/予測が動くので15分ごとに再取得して予測線を更新する。
+    if (rangeMode === "today") {
+      timer = setInterval(() => {
+        run();
+      }, FORECAST_REFRESH_MS);
+    }
+
     return () => {
       cancelled = true;
+      if (timer) clearInterval(timer);
     };
   }, [meta, baseSnapshot, rangeMode, customDate]);
 

@@ -7,10 +7,13 @@ import {
   ComposedChart,
   Legend,
   Line,
+  ReferenceArea,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
+  type LegendProps,
   type TooltipProps,
 } from "recharts";
 
@@ -40,6 +43,30 @@ type TimelineTooltipProps = TooltipProps<number, string> & {
   payload?: TimelinePayloadEntry[];
 };
 
+type TimelineLegendProps = LegendProps;
+
+function TimelineLegend({ payload }: TimelineLegendProps) {
+  const items = Array.isArray(payload) ? payload : [];
+  if (!items.length) return null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] text-slate-300">
+      {items.map((entry, idx) => {
+        const value = (entry?.value ?? "").toString().replace("：", " · ");
+        const color = entry?.color ?? "#cbd5e1";
+        return (
+          <span key={`${value}-${idx}`} className="inline-flex items-center gap-1">
+            <span
+              className="inline-block h-[2px] w-3 rounded"
+              style={{ backgroundColor: color }}
+            />
+            <span>{value}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function TimelineTooltip({ active, payload, label = "" }: TimelineTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
 
@@ -68,9 +95,7 @@ function TimelineTooltip({ active, payload, label = "" }: TimelineTooltipProps) 
 
         let valueText = "-";
         if (typeof raw === "number") {
-          valueText = name.includes("予測")
-            ? raw.toFixed(1)
-            : Math.round(raw).toString();
+          valueText = Math.round(raw).toString();
         }
 
         const color = entry.color ?? "#e5e7eb";
@@ -113,6 +138,20 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
   const hasData = snapshot.hasData;
   const activeRangeMode = rangeMode ?? "today";
   const canControlRange = typeof onChangeRangeMode === "function";
+  const roundedNowMen = Math.round(Number(snapshot.nowMen || 0));
+  const roundedNowWomen = Math.round(Number(snapshot.nowWomen || 0));
+  const forecastStartLabel =
+    snapshot.series.find(
+      (p) =>
+        (p.menForecast !== null || p.womenForecast !== null) &&
+        p.menActual === null &&
+        p.womenActual === null,
+    )?.label ?? null;
+  const forecastEndLabel = snapshot.series[snapshot.series.length - 1]?.label ?? null;
+  const currentLabel =
+    [...snapshot.series]
+      .reverse()
+      .find((p) => p.menActual !== null || p.womenActual !== null)?.label ?? null;
 
   
   const dateInputRef = useRef<HTMLInputElement | null>(null);
@@ -209,11 +248,11 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
         )}
 
         <div className="grid gap-2 text-xs md:grid-cols-5">
-          <MetricBox label="♂ 男性人数" value={`${snapshot.nowMen} 人`} tone="male" />
-          <MetricBox label="♀ 女性人数" value={`${snapshot.nowWomen} 人`} tone="female" />
+          <MetricBox label="♂ 男性人数" value={`${roundedNowMen} 人`} tone="male" />
+          <MetricBox label="♀ 女性人数" value={`${roundedNowWomen} 人`} tone="female" />
           <MetricBox
             label="男女比（男:女）"
-            value={`${snapshot.nowMen}:${snapshot.nowWomen}`}
+            value={`${roundedNowMen}:${roundedNowWomen}`}
           />
           <MetricBox label="混雑度" value={snapshot.level} />
           <MetricBox label="おすすめ度" value={snapshot.recommendation || "データなし"} />
@@ -242,6 +281,8 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
                   dataKey="label"
                   tick={{ fontSize: 10, fill: "#9ca3af" }}
                   stroke="#4b5563"
+                  minTickGap={22}
+                  interval="preserveStartEnd"
                 />
                 <YAxis
                   tick={{ fontSize: 10, fill: "#9ca3af" }}
@@ -249,10 +290,31 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
                   allowDecimals={false}
                 />
                 <Tooltip content={<TimelineTooltip />} />
-                <Legend
-                  wrapperStyle={{ fontSize: 10, color: "#9ca3af" }}
-                  iconSize={8}
-                />
+                <Legend content={<TimelineLegend />} />
+
+                {forecastStartLabel && forecastEndLabel && (
+                  <ReferenceArea
+                    x1={forecastStartLabel}
+                    x2={forecastEndLabel}
+                    fill="#334155"
+                    fillOpacity={0.14}
+                    ifOverflow="extendDomain"
+                  />
+                )}
+                {currentLabel && (
+                  <ReferenceLine
+                    x={currentLabel}
+                    stroke="#94a3b8"
+                    strokeDasharray="3 3"
+                    strokeOpacity={0.8}
+                    label={{
+                      value: "現在",
+                      position: "top",
+                      fill: "#94a3b8",
+                      fontSize: 10,
+                    }}
+                  />
+                )}
 
                 <Area
                   type="monotone"
@@ -297,7 +359,7 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
                   dataKey="menForecast"
                   name="男性：予測"
                   stroke="#38bdf8"
-                  strokeWidth={2}
+                  strokeWidth={2.5}
                   dot={false}
                   strokeDasharray="5 4"
                   connectNulls
@@ -307,7 +369,7 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
                   dataKey="womenForecast"
                   name="女性：予測"
                   stroke="#f472b6"
-                  strokeWidth={2}
+                  strokeWidth={2.5}
                   dot={false}
                   strokeDasharray="5 4"
                   connectNulls

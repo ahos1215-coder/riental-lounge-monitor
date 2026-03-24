@@ -48,6 +48,20 @@ function parseCronStoreSlugs(): string[] {
     .filter(Boolean);
 }
 
+function buildStableFactsId(
+  storeSlug: string,
+  dateYmd: string,
+  edition: BlogEdition | undefined,
+  source: BlogDraftPipelineSource,
+): string {
+  // SEO 用: 定時自動投稿は固定IDで上書き運用（URL固定を想定）
+  if (source === "github_actions_cron" || source === "vercel_cron") {
+    const slot = edition ?? "nightly";
+    return `auto_${storeSlug}_${slot}`;
+  }
+  return buildFactsId(storeSlug, dateYmd);
+}
+
 /**
  * 定時 Cron（本番は GitHub Actions から `GET` + `?edition=`）。`Authorization: Bearer <CRON_SECRET>`。
  * ローカル: `.env.local` に CRON_SECRET を入れて同じヘッダで叩くか、`SKIP_CRON_AUTH=1`（development のみ）
@@ -128,7 +142,7 @@ async function handleCron(req: NextRequest) {
       continue;
     }
 
-    const factsId = buildFactsId(store.slug, dateYmd);
+    const factsId = buildStableFactsId(store.slug, dateYmd, edition, pipelineSource);
     const out = await runBlogDraftPipeline({
       backendUrl: BACKEND_URL,
       rangeLimit,

@@ -3,8 +3,24 @@
 import { useMemo, useState } from "react";
 import { StoreCard } from "@/components/StoreCard";
 import { STORES, type StoreMeta } from "../config/stores";
+import { useEffect } from "react";
 
 type BrandFilter = "all" | "oriental" | "jis" | "aisekiya";
+type ForecastPoint = { ts: string; total_pred?: number };
+type RangePoint = { men?: number; women?: number; total?: number };
+type StoreRealtimeCard = {
+  slug: string;
+  stats: {
+    menCount: number;
+    womenCount: number;
+    nowTotal: number;
+    peakPredTotal: number;
+    genderRatio: string;
+    crowdLevel: string;
+    recommendLabel: string;
+  };
+  sparkline: number[];
+};
 
 const BRAND_TABS: { id: BrandFilter; label: string }[] = [
   { id: "all", label: "すべて" },
@@ -16,6 +32,8 @@ const BRAND_TABS: { id: BrandFilter; label: string }[] = [
 export default function StoresPage() {
   const [brandFilter, setBrandFilter] = useState<BrandFilter>("all");
   const [query, setQuery] = useState("");
+  const [storeRealtime, setStoreRealtime] = useState<Record<string, StoreRealtimeCard>>({});
+  const [realtimeLoading, setRealtimeLoading] = useState(false);
 
   const filteredStores: StoreMeta[] = useMemo(() => {
     let list = [...STORES];
@@ -38,6 +56,98 @@ export default function StoresPage() {
 
     return list;
   }, [brandFilter, query]);
+
+  const toHmJst = (iso: string): string =>
+    new Intl.DateTimeFormat("ja-JP", {
+      timeZone: "Asia/Tokyo",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(new Date(iso));
+
+  const crowdLabelFromPred = (maxPred: number): string => {
+    if (maxPred >= 120) return "混雑";
+    if (maxPred >= 80) return "ほどよい";
+    return "空いている";
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      setRealtimeLoading(true);
+      const targets = filteredStores.slice(0, 24);
+      const results = await Promise.all(
+        targets.map(async (store) => {
+          try {
+            const [forecastRes, rangeRes] = await Promise.all([
+              fetch(`/api/forecast_today?store=${encodeURIComponent(store.slug)}`, {
+                cache: "no-store",
+              }),
+              fetch(`/api/range?store=${encodeURIComponent(store.slug)}&limit=1`, {
+                cache: "no-store",
+              }),
+            ]);
+            const forecastBody = (await forecastRes.json()) as { data?: ForecastPoint[] };
+            const rangeBody = (await rangeRes.json()) as RangePoint[] | { data?: RangePoint[]; rows?: RangePoint[] };
+            const forecastRows = Array.isArray(forecastBody?.data) ? forecastBody.data : [];
+            const rangeRows = Array.isArray(rangeBody)
+              ? rangeBody
+              : Array.isArray(rangeBody?.data)
+                ? rangeBody.data
+                : Array.isArray(rangeBody?.rows)
+                  ? rangeBody.rows
+                  : [];
+            const current = rangeRows[0] ?? {};
+            const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
+            const womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
+            const nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
+
+            const totals = forecastRows
+              .map((r) => Math.max(0, Math.round(Number(r.total_pred ?? 0))))
+              .filter((n) => Number.isFinite(n));
+            const maxPred = totals.length ? Math.round(Math.max(...totals)) : 0;
+
+            let calm = forecastRows[0];
+            for (const r of forecastRows) {
+              if (Number(r.total_pred ?? 0) < Number(calm?.total_pred ?? Number.POSITIVE_INFINITY)) {
+                calm = r;
+              }
+            }
+            const calmLabel = calm?.ts ? toHmJst(calm.ts) : "--:--";
+
+            const card: StoreRealtimeCard = {
+              slug: store.slug,
+              stats: {
+                menCount: menNow,
+                womenCount: womenNow,
+                nowTotal,
+                peakPredTotal: maxPred,
+                genderRatio: `${menNow}:${womenNow}`,
+                crowdLevel: crowdLabelFromPred(maxPred),
+                recommendLabel: calm?.ts ? `${calmLabel}ごろ` : "確認中",
+              },
+              sparkline: totals.slice(0, 10),
+            };
+            return card;
+          } catch {
+            return null;
+          }
+        }),
+      );
+
+      if (!mounted) return;
+      const mapped: Record<string, StoreRealtimeCard> = {};
+      for (const row of results) {
+        if (row) mapped[row.slug] = row;
+      }
+      setStoreRealtime(mapped);
+      setRealtimeLoading(false);
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [filteredStores]);
 
   const isComingSoonBrand =
     brandFilter === "jis" || brandFilter === "aisekiya";
@@ -123,6 +233,9 @@ export default function StoresPage() {
                     brandLabel="ORIENTAL LOUNGE"
                     areaLabel={store.areaLabel}
                     isHighlight={idx === 0}
+                    stats={storeRealtime[store.slug]?.stats}
+                    sparklinePoints={storeRealtime[store.slug]?.sparkline}
+                    isLoading={realtimeLoading && !storeRealtime[store.slug]}
                   />
                 ))}
               </div>

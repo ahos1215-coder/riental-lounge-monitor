@@ -42,6 +42,8 @@ class ForecastModelRegistry:
         cache_dir: Path,
         refresh_sec: int,
         schema_version: str,
+        request_timeout_sec: float,
+        download_retry: int,
         logger,
     ) -> None:
         self.supabase_url = supabase_url.rstrip("/")
@@ -51,6 +53,8 @@ class ForecastModelRegistry:
         self.cache_dir = cache_dir
         self.refresh_sec = max(30, int(refresh_sec))
         self.schema_version = schema_version.strip()
+        self.request_timeout_sec = max(3.0, float(request_timeout_sec))
+        self.download_retry = max(1, int(download_retry))
         self.logger = logger
 
         self._lock = threading.Lock()
@@ -72,6 +76,8 @@ class ForecastModelRegistry:
             cache_dir=cfg.forecast_model_cache_dir,
             refresh_sec=cfg.forecast_model_refresh_sec,
             schema_version=cfg.forecast_model_schema_version,
+            request_timeout_sec=cfg.http_timeout,
+            download_retry=cfg.http_retry,
             logger=app.logger,
         )
 
@@ -228,16 +234,46 @@ class ForecastModelRegistry:
             "apikey": self.service_role_key,
             "Authorization": f"Bearer {self.service_role_key}",
         }
-        try:
-            response = self._session.get(url, headers=headers, timeout=20)
-        except Exception as exc:  # noqa: BLE001
-            raise ModelRegistryError(f"model download failed: object={object_name} url={url}") from exc
-        if not response.ok:
-            raise ModelRegistryError(
-                f"model download failed: object={object_name} url={url} status={response.status_code}"
-            )
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_bytes(response.content)
+        last_exc: Exception | None = None
+        for attempt in range(1, self.download_retry + 1):
+            try:
+                response = self._session.get(url, headers=headers, timeout=self.request_timeout_sec)
+                if response.ok:
+                    dst.parent.mkdir(parents=True, exist_ok=True)
+                    dst.write_bytes(response.content)
+                    return
+
+                # 5xx / 429 は一時障害としてリトライ
+                if response.status_code in {429, 500, 502, 503, 504} and attempt < self.download_retry:
+                    self.logger.warning(
+                        "model download transient failure: object=%s status=%s attempt=%d/%d",
+                        object_name,
+                        response.status_code,
+                        attempt,
+                        self.download_retry,
+                    )
+                    time.sleep(min(1.5 * attempt, 5.0))
+                    continue
+
+                raise ModelRegistryError(
+                    f"model download failed: object={object_name} url={url} status={response.status_code}"
+                )
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if attempt < self.download_retry:
+                    self.logger.warning(
+                        "model download exception: object=%s attempt=%d/%d detail=%s",
+                        object_name,
+                        attempt,
+                        self.download_retry,
+                        exc,
+                    )
+                    time.sleep(min(1.5 * attempt, 5.0))
+                    continue
+                raise ModelRegistryError(f"model download failed: object={object_name} url={url}") from exc
+
+        # Defensive: 通常到達しないが、型安全のため明示
+        raise ModelRegistryError(f"model download failed: object={object_name} url={url}") from last_exc
 
     def _load_metadata(self, path: Path) -> dict[str, Any]:
         try:
