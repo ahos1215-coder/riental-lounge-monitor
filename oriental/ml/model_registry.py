@@ -61,6 +61,9 @@ class ForecastModelRegistry:
         self._bundles: dict[str, LoadedModelBundle] = {}
         self._next_refresh_unix = 0.0
         self._metadata: dict[str, Any] | None = None
+        self._last_error: str | None = None
+        self._last_error_at_unix: float | None = None
+        self._last_refresh_ok_unix: float | None = None
         self._session = requests.Session()
 
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -89,9 +92,17 @@ class ForecastModelRegistry:
         with self._lock:
             if store_key in self._bundles and now < self._next_refresh_unix:
                 return self._bundles[store_key]
-            bundle = self._refresh_locked(store_key)
+            try:
+                bundle = self._refresh_locked(store_key)
+            except Exception as exc:  # noqa: BLE001
+                self._last_error = str(exc)
+                self._last_error_at_unix = time.time()
+                raise
             self._bundles[store_key] = bundle
             self._next_refresh_unix = now + self.refresh_sec
+            self._last_error = None
+            self._last_error_at_unix = None
+            self._last_refresh_ok_unix = now
             return bundle
 
     def current_status(self) -> dict[str, Any]:
@@ -106,6 +117,9 @@ class ForecastModelRegistry:
                     "trained_at": None,
                     "loaded_at_unix": None,
                     "age_sec": None,
+                    "last_refresh_ok_unix": self._last_refresh_ok_unix,
+                    "last_error": self._last_error,
+                    "last_error_at_unix": self._last_error_at_unix,
                 }
             sample_store = sorted(self._bundles.keys())[0]
             sample_bundle = self._bundles[sample_store]
@@ -118,6 +132,9 @@ class ForecastModelRegistry:
                 "trained_at": sample_bundle.metadata.get("trained_at"),
                 "loaded_at_unix": sample_bundle.loaded_at_unix,
                 "age_sec": round(max(0.0, now - sample_bundle.loaded_at_unix), 3),
+                "last_refresh_ok_unix": self._last_refresh_ok_unix,
+                "last_error": self._last_error,
+                "last_error_at_unix": self._last_error_at_unix,
             }
 
     def _refresh_locked(self, store_id: str) -> LoadedModelBundle:
