@@ -33,12 +33,16 @@ jobs:
         shard:
           - name: shard-1
             stores: "nagasaki,fukuoka,kokura,oita,kumamoto,miyazaki,kagoshima,okinawa_ag,gangnam,sapporo_ag"
+            delay_sec: 0
           - name: shard-2
             stores: "sendai_ag,shibuya,ebisu,shibuya_ag,shinjuku,ueno,ueno_ag,kashiwa,machida,yokohama"
+            delay_sec: 8
           - name: shard-3
             stores: "omiya,utsunomiya,takasaki,nagoya_ag,nagoya_nishiki,nagoya_sakae,shizuoka,hamamatsu,kanazawa_ag,osaka_ekimae"
+            delay_sec: 16
           - name: shard-4
             stores: "umeda_ag,tenma,shinsaibashi,namba,kyoto,kobe,okayama,hiroshima_ag"
+            delay_sec: 24
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
@@ -79,17 +83,27 @@ jobs:
           EDITION: ${{ steps.meta.outputs.edition }}
           STORES: ${{ matrix.shard.stores }}
           SHARD_NAME: ${{ matrix.shard.name }}
+          SHARD_DELAY_SEC: ${{ matrix.shard.delay_sec }}
         run: |
           set -euo pipefail
           if [ -z "${CRON_SECRET:-}" ] || [ -z "${BASE_URL:-}" ]; then
             echo "::error::Repository Secrets に CRON_SECRET と VERCEL_BLOG_CRON_BASE_URL を設定してください。"
             exit 1
           fi
+          if [ "${SHARD_DELAY_SEC:-0}" != "0" ]; then
+            echo "Stagger start: shard=${SHARD_NAME}, sleep=${SHARD_DELAY_SEC}s"
+            sleep "${SHARD_DELAY_SEC}"
+          fi
           BASE="${BASE_URL%/}"
           # edition / source / stores(shard) を明示（本番は github_actions_cron）
           URL="${BASE}/api/cron/blog-draft?edition=${EDITION}&source=github_actions_cron&stores=${STORES}"
           echo "Triggering shard=${SHARD_NAME}: ${URL%%\?*}?edition=***&source=github_actions_cron&stores=***"
           RESP="$(curl -sS -f -X GET \
+            --retry 3 \
+            --retry-delay 5 \
+            --retry-all-errors \
+            --connect-timeout 20 \
+            --max-time 170 \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             -H "User-Agent: GitHub-Actions-blog-draft-cron" \
             "$URL")"
