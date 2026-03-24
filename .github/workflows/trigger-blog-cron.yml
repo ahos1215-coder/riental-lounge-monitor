@@ -27,6 +27,18 @@ on:
 jobs:
   trigger:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - name: shard-1
+            stores: "nagasaki,fukuoka,kokura,oita,kumamoto,miyazaki,kagoshima,okinawa_ag,gangnam,sapporo_ag"
+          - name: shard-2
+            stores: "sendai_ag,shibuya,ebisu,shibuya_ag,shinjuku,ueno,ueno_ag,kashiwa,machida,yokohama"
+          - name: shard-3
+            stores: "omiya,utsunomiya,takasaki,nagoya_ag,nagoya_nishiki,nagoya_sakae,shizuoka,hamamatsu,kanazawa_ag,osaka_ekimae"
+          - name: shard-4
+            stores: "umeda_ag,tenma,shinsaibashi,namba,kyoto,kobe,okayama,hiroshima_ag"
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
@@ -65,6 +77,8 @@ jobs:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           BASE_URL: ${{ secrets.VERCEL_BLOG_CRON_BASE_URL }}
           EDITION: ${{ steps.meta.outputs.edition }}
+          STORES: ${{ matrix.shard.stores }}
+          SHARD_NAME: ${{ matrix.shard.name }}
         run: |
           set -euo pipefail
           if [ -z "${CRON_SECRET:-}" ] || [ -z "${BASE_URL:-}" ]; then
@@ -72,9 +86,9 @@ jobs:
             exit 1
           fi
           BASE="${BASE_URL%/}"
-          # edition と source を明示（本番は github_actions_cron）
-          URL="${BASE}/api/cron/blog-draft?edition=${EDITION}&source=github_actions_cron"
-          echo "Triggering: ${URL%%\?*}?edition=***&source=github_actions_cron"
+          # edition / source / stores(shard) を明示（本番は github_actions_cron）
+          URL="${BASE}/api/cron/blog-draft?edition=${EDITION}&source=github_actions_cron&stores=${STORES}"
+          echo "Triggering shard=${SHARD_NAME}: ${URL%%\?*}?edition=***&source=github_actions_cron&stores=***"
           RESP="$(curl -sS -f -X GET \
             -H "Authorization: Bearer ${CRON_SECRET}" \
             -H "User-Agent: GitHub-Actions-blog-draft-cron" \
@@ -85,10 +99,10 @@ jobs:
             NEAR_TIMEOUT="$(echo "$RESP" | jq -r '.near_timeout // false')"
             echo "duration_ms=${TOTAL_MS}"
             echo "near_timeout=${NEAR_TIMEOUT}"
-            echo "store_durations:"
+            echo "store_durations (${SHARD_NAME}):"
             echo "$RESP" | jq -r '.results[]? | "- \(.slug): \(.duration_ms // 0)ms (ok=\(.ok))"'
             if [ "$NEAR_TIMEOUT" = "true" ]; then
-              echo "::warning::blog-draft cron duration is close to Vercel maxDuration. Consider sharding stores."
+              echo "::warning::blog-draft cron duration is close to Vercel maxDuration. shard=${SHARD_NAME}"
             fi
           fi
 

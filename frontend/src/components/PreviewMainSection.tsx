@@ -271,9 +271,14 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
           <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
             timeline
           </p>
-          <p className="text-[11px] text-slate-500">
-            実線=実測 / 点線=予測（データなしの時間帯は空欄）
-          </p>
+          <div className="text-right">
+            <p className="text-[11px] text-slate-500">
+              実線=実測 / 点線=予測（データなしの時間帯は空欄）
+            </p>
+            <p className="text-[10px] text-slate-500">
+              予測更新: {snapshot.forecastUpdatedLabel}
+            </p>
+          </div>
         </div>
 
         <div className="mt-3 h-72 w-full min-w-0 rounded-2xl bg-gradient-to-b from-slate-950 via-black to-black p-3">

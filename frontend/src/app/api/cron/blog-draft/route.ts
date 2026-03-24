@@ -48,6 +48,15 @@ function parseCronStoreSlugs(): string[] {
     .filter(Boolean);
 }
 
+function parseRequestedStoreSlugs(url: URL): string[] {
+  const raw = url.searchParams.get("stores")?.trim();
+  if (!raw) return parseCronStoreSlugs();
+  return raw
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 function buildStableFactsId(
   storeSlug: string,
   dateYmd: string,
@@ -121,7 +130,7 @@ async function handleCron(req: NextRequest) {
       ? sourceParam
       : "github_actions_cron";
 
-  const slugs = parseCronStoreSlugs();
+  const slugs = parseRequestedStoreSlugs(url);
   const rangeLimit = cronRangeLimit();
 
   const results: Array<{

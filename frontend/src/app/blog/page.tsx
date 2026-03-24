@@ -117,6 +117,7 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
       storeLabel: meta.label,
     };
   });
+  const autoQuickLinks = autoCards.slice(0, 6);
 
   return (
     <main className="relative min-h-[calc(100vh-80px)] bg-black text-white">
@@ -189,6 +190,25 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
 
         <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
           <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {autoQuickLinks.length > 0 && (
+              <div className="sm:col-span-2 lg:col-span-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <h2 className="text-sm font-bold text-emerald-200">AI自動更新（固定URL）</h2>
+                  <span className="text-[11px] text-emerald-100/70">SEO向け上書き運用</span>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {autoQuickLinks.map((card) => (
+                    <Link
+                      key={`quick-${card.href}`}
+                      href={card.href}
+                      className="rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/20"
+                    >
+                      {card.storeLabel} 最新予測
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
             {autoCards.map((card) => (
               <Link
                 key={card.href}
@@ -250,6 +270,23 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
           </section>
 
           <aside className="space-y-4">
+            {autoQuickLinks.length > 0 && (
+              <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-5">
+                <h2 className="text-sm font-bold text-emerald-100">自動更新リンク</h2>
+                <div className="mt-3 space-y-2">
+                  {autoQuickLinks.map((card) => (
+                    <Link
+                      key={`aside-${card.href}`}
+                      href={card.href}
+                      className="block rounded-lg border border-emerald-400/25 bg-black/20 px-3 py-2 text-xs text-emerald-100 hover:bg-emerald-500/10"
+                    >
+                      <span className="font-semibold">{card.storeLabel}</span>
+                      <span className="ml-2 text-emerald-200/80">{card.updatedLabel}</span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
               <h2 className="text-sm font-bold">人気記事ランキング</h2>
               <div className="mt-4 space-y-3">

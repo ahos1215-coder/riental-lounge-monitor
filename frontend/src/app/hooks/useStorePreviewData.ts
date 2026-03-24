@@ -28,6 +28,7 @@ export type StoreSnapshot = {
   peakTimeLabel: string;
   peakTotal: number;
   recommendation: string;
+  forecastUpdatedLabel: string;
   series: TimeSeriesPoint[];
   hasData: boolean;
 };
@@ -105,6 +106,7 @@ function buildBaseSnapshot(meta: StoreMeta): StoreSnapshot {
     peakTimeLabel: "--:--",
     peakTotal: 0,
     recommendation: "データなし",
+    forecastUpdatedLabel: "--:--",
     series: buildEmptySeries(),
     hasData: false,
   };
@@ -238,6 +240,15 @@ function formatLabel(ts: string): string {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return ts;
   return d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+}
+
+function formatNowHmJst(date: Date): string {
+  return new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
 }
 
 function buildSeries(
@@ -453,6 +464,7 @@ export function useStorePreviewData(
           nowTotal: Math.round(nowMen + nowWomen),
           peakTotal: Math.round(peakTotal),
           peakTimeLabel,
+          forecastUpdatedLabel: "--:--",
           series: effectiveActualSeries,
           hasData,
         };
@@ -485,6 +497,7 @@ export function useStorePreviewData(
           nowTotal: Math.round(mergedNowMen + mergedNowWomen),
           peakTotal: Math.round(mergedPeak.peakTotal),
           peakTimeLabel: mergedPeak.peakTimeLabel,
+          forecastUpdatedLabel: formatNowHmJst(new Date()),
           series: effectiveMergedSeries,
           hasData:
             hasSeriesData(mergedSeries) ||
