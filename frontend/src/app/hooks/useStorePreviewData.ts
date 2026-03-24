@@ -70,9 +70,9 @@ const FORECAST_REFRESH_MS = 15 * 60 * 1000;
 const RANGE_LIMIT_BY_MODE: Record<PreviewRangeMode, number> = {
   // today は初速重視で軽めにして表示開始を早める
   today: 240,
-  yesterday: 1600,
-  lastWeek: 5200,
-  custom: 5200,
+  yesterday: 1200,
+  lastWeek: 1200,
+  custom: 1200,
 };
 
 function buildEmptySeries(): TimeSeriesPoint[] {
@@ -139,6 +139,12 @@ function formatYMD(date: Date): string {
   const m = (date.getMonth() + 1).toString().padStart(2, "0");
   const d = date.getDate().toString().padStart(2, "0");
   return `${y}-${m}-${d}`;
+}
+
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
 }
 
 function parseYMD(value: string): Date | null {
@@ -398,6 +404,8 @@ export function useStorePreviewData(
 
   useEffect(() => {
     let cancelled = false;
+    const controller = new AbortController();
+    const signal = controller.signal;
 
     async function run() {
       setState({ loading: true, error: null, snapshot: baseSnapshot });
@@ -407,11 +415,17 @@ export function useStorePreviewData(
         const nightWindow = computeNightWindowFromBaseDate(baseDate);
 
         const rangeLimit = RANGE_LIMIT_BY_MODE[rangeMode] ?? 400;
-        const rangeUrl = `/api/range?store=${encodeURIComponent(meta.slug)}&limit=${rangeLimit}`;
+        const fromYmd = formatYMD(baseDate);
+        const toYmd = formatYMD(addDays(baseDate, 1));
+        const rangeUrl =
+          `/api/range?store=${encodeURIComponent(meta.slug)}` +
+          `&from=${encodeURIComponent(fromYmd)}` +
+          `&to=${encodeURIComponent(toYmd)}` +
+          `&limit=${rangeLimit}`;
 
         const forecastUrl = `/api/forecast_today?store=${encodeURIComponent(meta.slug)}`;
         // 初期表示高速化: まず実測(/api/range)だけで描画し、予測は後追いで合流
-        const rangeRes = await fetch(rangeUrl, { cache: "no-store" });
+        const rangeRes = await fetch(rangeUrl, { cache: "no-store", signal });
         const rangeJson = await rangeRes.json().catch(() => ({}));
 
         const allRangePoints = parseRangePoints(rangeJson);
@@ -451,7 +465,7 @@ export function useStorePreviewData(
           return;
         }
 
-        const forecastRes = await fetch(forecastUrl, { cache: "no-store" });
+        const forecastRes = await fetch(forecastUrl, { cache: "no-store", signal });
         const forecastJson = await forecastRes.json().catch(() => ({}));
         const allForecastPoints = parseForecastPoints(forecastJson);
         const forecastPoints = allForecastPoints.filter((p) =>
@@ -480,6 +494,7 @@ export function useStorePreviewData(
           setState({ loading: false, error: null, snapshot: mergedSnapshot });
         }
       } catch (err) {
+        if (signal.aborted) return;
         const detail = err instanceof Error ? err.message : String(err);
         if (!cancelled) {
           setState({
@@ -505,6 +520,7 @@ export function useStorePreviewData(
 
     return () => {
       cancelled = true;
+      controller.abort();
       if (timer) clearInterval(timer);
     };
   }, [meta, baseSnapshot, rangeMode, customDate]);
