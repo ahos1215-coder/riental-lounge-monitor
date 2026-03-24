@@ -93,8 +93,8 @@ def forecast_next_hour():
         "api_forecast.success store=%s points=%d", store, len(points)
     )
 
-    # 必要最低限だけ返す（ok + data）
-    return jsonify({"ok": True, "data": points})
+    # 既存契約を維持しつつ、推論根拠を追加で返す
+    return jsonify({"ok": True, "data": points, "reasoning": raw.get("reasoning", {})})
 
 
 @bp.get("/forecast_today")
@@ -122,5 +122,5 @@ def forecast_today():
         "api_forecast.success store=%s points=%d", store, len(points)
     )
 
-    # ここも ok + data で統一
-    return jsonify({"ok": True, "data": points})
+    # 既存契約を維持しつつ、推論根拠を追加で返す
+    return jsonify({"ok": True, "data": points, "reasoning": raw.get("reasoning", {})})

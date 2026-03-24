@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Callable, Dict
 
 import numpy as np
@@ -114,11 +115,13 @@ class ForecastService:
 
             if df.empty:
                 data = _zero_payload(future_times)
+                reasoning = {"signals": {}, "notes": ["履歴データ不足のため根拠情報なし"]}
             else:
                 data = self._predict_with_history(df, future_times)
+                reasoning = self._build_reasoning(df)
             self.logger.info("forecast.service.predicted size=%d", len(data))
 
-            result = {"ok": True, "store": store_id, "freq_min": freq_min, "data": data}
+            result = {"ok": True, "store": store_id, "freq_min": freq_min, "data": data, "reasoning": reasoning}
             if extra_meta:
                 result.update(extra_meta)
             return result
@@ -195,6 +198,35 @@ class ForecastService:
         combined = add_time_features(combined)
         return combined.tail(len(future_times))[FEATURE_COLUMNS]
 
+    def _build_reasoning(self, history: pd.DataFrame) -> dict:
+        latest = history.iloc[-1]
+        signals = {
+            "is_rainy": _to_int(latest.get("is_rainy")),
+            "is_pre_holiday": _to_int(latest.get("is_pre_holiday")),
+            "is_holiday": _to_int(latest.get("is_holiday")),
+            "days_from_25th": _to_float(latest.get("days_from_25th")),
+            "minutes_to_midnight": _to_float(latest.get("minutes_to_midnight")),
+            "precip_mm": _to_float(latest.get("precip_mm")),
+            "feat_payday_night_peak": _to_int(latest.get("feat_payday_night_peak")),
+            "feat_rain_night_exit": _to_int(latest.get("feat_rain_night_exit")),
+            "feat_pre_holiday_surge": _to_int(latest.get("feat_pre_holiday_surge")),
+        }
+        notes: list[str] = []
+
+        if signals["is_rainy"] == 1:
+            rain_weight = os.getenv("ML_TRAIN_WEIGHT_RAIN", "1.8")
+            notes.append(f"雨天重み付け（{rain_weight}x）適用条件")
+        if signals["feat_payday_night_peak"] == 1:
+            notes.append("給料日前後×週末夜ピーク条件")
+        if signals["feat_rain_night_exit"] == 1:
+            notes.append("雨天×深夜帯の離脱シグナル条件")
+        if signals["feat_pre_holiday_surge"] == 1:
+            notes.append("祝前日サージ条件")
+        if not notes:
+            notes.append("通常条件で推論")
+
+        return {"signals": signals, "notes": notes}
+
 
 def _future_range(start_dt, freq_min: int, periods: int, tz: str):
     ref = pd.Timestamp(start_dt) if start_dt is not None else pd.Timestamp.now(tz=tz)
@@ -211,3 +243,17 @@ def _zero_payload(future_times):
         {"ts": ts.isoformat(), "men_pred": 0.0, "women_pred": 0.0, "total_pred": 0.0}
         for ts in future_times
     ]
+
+
+def _to_int(v) -> int:
+    try:
+        return int(float(v))
+    except Exception:  # noqa: BLE001
+        return 0
+
+
+def _to_float(v) -> float | None:
+    try:
+        return float(v)
+    except Exception:  # noqa: BLE001
+        return None

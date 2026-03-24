@@ -45,6 +45,16 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 def _build_xgb_model() -> XGBRegressor:
     return XGBRegressor(
         n_estimators=100,
@@ -86,8 +96,8 @@ class TrainingConfig:
             train_days=_env_int("ML_TRAIN_DAYS", 180),
             train_limit=_env_int("ML_TRAIN_LIMIT", 120000),
             store_id=os.getenv("ML_TRAIN_STORE_ID", "").strip() or None,
-            sample_weight_peak=float(os.getenv("ML_TRAIN_WEIGHT_PEAK", "1.8")),
-            sample_weight_rain=float(os.getenv("ML_TRAIN_WEIGHT_RAIN", "1.8")),
+            sample_weight_peak=_env_float("ML_TRAIN_WEIGHT_PEAK", 1.8),
+            sample_weight_rain=_env_float("ML_TRAIN_WEIGHT_RAIN", 1.8),
         )
 
     def validate(self) -> None:
