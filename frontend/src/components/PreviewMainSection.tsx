@@ -43,9 +43,16 @@ type TimelineTooltipProps = TooltipProps<number, string> & {
   payload?: TimelinePayloadEntry[];
 };
 
-type TimelineLegendProps = LegendProps;
+type TimelineLegendPayloadItem = {
+  value?: string | number;
+  color?: string;
+};
+type TimelineLegendProps = LegendProps & {
+  payload?: TimelineLegendPayloadItem[];
+};
 
-function TimelineLegend({ payload }: TimelineLegendProps) {
+function TimelineLegend(props: TimelineLegendProps) {
+  const payload = props.payload;
   const items = Array.isArray(payload) ? payload : [];
   if (!items.length) return null;
   return (
