@@ -3,13 +3,14 @@ import crypto from "node:crypto";
 import { loadEnvConfig } from "@next/env";
 import { NextRequest, NextResponse } from "next/server";
 
-import { DEFAULT_STORE, getStoreMetaBySlugStrict } from "@/app/config/stores";
+import { getStoreMetaBySlugStrict } from "@/app/config/stores";
 import { buildFactsId } from "@/lib/line/parseLineIntent";
 import type { BlogEdition } from "@/lib/blog/insightFromRange";
 import {
   runBlogDraftPipeline,
   type BlogDraftPipelineSource,
 } from "@/lib/blog/runBlogDraftPipeline";
+import { insertBlogDraft, isBlogDraftsConfigured } from "@/lib/supabase/blogDrafts";
 
 // Turbopack の API ルートでは `next.config.ts` の loadEnvConfig が効かないケースがあるため、
 // リポジトリルート / frontend の `.env.local` をここでも読み込む（CRON_SECRET の照合用）。
@@ -37,24 +38,13 @@ function todayYmdJst(): string {
   }).format(new Date());
 }
 
-function parseCronStoreSlugs(): string[] {
-  const raw =
-    process.env.BLOG_CRON_STORE_SLUGS?.trim() ||
-    process.env.BLOG_CRON_STORE_SLUG?.trim() ||
-    DEFAULT_STORE;
-  return raw
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-}
+const REQUEST_BUDGET_MS = 45_000;
 
-function parseRequestedStoreSlugs(url: URL): string[] {
-  const raw = url.searchParams.get("stores")?.trim();
-  if (!raw) return parseCronStoreSlugs();
-  return raw
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
+function parseRequestedStoreSlug(url: URL): string | null {
+  const raw = url.searchParams.get("store")?.trim().toLowerCase();
+  if (raw) return raw;
+  const fallback = process.env.BLOG_CRON_STORE_SLUG?.trim().toLowerCase();
+  return fallback || null;
 }
 
 function buildStableFactsId(
@@ -130,7 +120,13 @@ async function handleCron(req: NextRequest) {
       ? sourceParam
       : "github_actions_cron";
 
-  const slugs = parseRequestedStoreSlugs(url);
+  const slug = parseRequestedStoreSlug(url);
+  if (!slug) {
+    return NextResponse.json(
+      { ok: false, error: "missing required query param: store" },
+      { status: 400 }
+    );
+  }
   const rangeLimit = cronRangeLimit();
 
   const results: Array<{
@@ -143,53 +139,112 @@ async function handleCron(req: NextRequest) {
     error?: string;
   }> = [];
 
-  for (const slug of slugs) {
-    const perStoreStartedAt = Date.now();
-    const store = getStoreMetaBySlugStrict(slug);
-    if (!store) {
-      results.push({ slug, ok: false, duration_ms: Date.now() - perStoreStartedAt, error: `unknown store slug: ${slug}` });
-      continue;
-    }
-
-    const factsId = buildStableFactsId(store.slug, dateYmd, edition, pipelineSource);
-    const out = await runBlogDraftPipeline({
-      backendUrl: BACKEND_URL,
-      rangeLimit,
-      store,
-      dateYmd,
-      factsId,
-      topicHint: "",
-      edition,
-      source: pipelineSource,
-      lineUserId: null,
+  const perStoreStartedAt = Date.now();
+  const store = getStoreMetaBySlugStrict(slug);
+  if (!store) {
+    results.push({
+      slug,
+      ok: false,
+      duration_ms: Date.now() - perStoreStartedAt,
+      error: `unknown store slug: ${slug}`,
     });
-
-    if (!out.ok) {
+  } else {
+    const factsId = buildStableFactsId(store.slug, dateYmd, edition, pipelineSource);
+    const elapsedMs = Date.now() - startedAt;
+    const remainingMs = REQUEST_BUDGET_MS - elapsedMs;
+    if (remainingMs <= 0) {
+      const timeoutMsg = `timeout risk before start (${elapsedMs}ms >= ${REQUEST_BUDGET_MS}ms budget)`;
+      if (isBlogDraftsConfigured()) {
+        await insertBlogDraft({
+          store_id: store.storeId,
+          store_slug: store.slug,
+          target_date: dateYmd,
+          facts_id: factsId,
+          mdx_content: "",
+          insight_json: {},
+          source: pipelineSource,
+          line_user_id: null,
+          error_message: timeoutMsg,
+        });
+      }
       results.push({
         slug,
         ok: false,
         duration_ms: Date.now() - perStoreStartedAt,
-        facts_id: out.factsId,
-        error: out.error,
+        facts_id: factsId,
+        error: timeoutMsg,
       });
-      continue;
+    } else {
+      let out: Awaited<ReturnType<typeof runBlogDraftPipeline>> | null = null;
+      try {
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error(`timeout risk (${REQUEST_BUDGET_MS}ms budget exceeded)`)), remainingMs);
+        });
+        out = (await Promise.race([
+          runBlogDraftPipeline({
+            backendUrl: BACKEND_URL,
+            rangeLimit,
+            store,
+            dateYmd,
+            factsId,
+            topicHint: "",
+            edition,
+            source: pipelineSource,
+            lineUserId: null,
+          }),
+          timeoutPromise,
+        ])) as Awaited<ReturnType<typeof runBlogDraftPipeline>>;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (isBlogDraftsConfigured()) {
+          await insertBlogDraft({
+            store_id: store.storeId,
+            store_slug: store.slug,
+            target_date: dateYmd,
+            facts_id: factsId,
+            mdx_content: "",
+            insight_json: {},
+            source: pipelineSource,
+            line_user_id: null,
+            error_message: msg,
+          });
+        }
+        results.push({
+          slug,
+          ok: false,
+          duration_ms: Date.now() - perStoreStartedAt,
+          facts_id: factsId,
+          error: msg,
+        });
+        out = null;
+      }
+      if (!out) {
+        // timeout/error path already recorded above
+      } else if (!out.ok) {
+        results.push({
+          slug,
+          ok: false,
+          duration_ms: Date.now() - perStoreStartedAt,
+          facts_id: out.factsId,
+          error: out.error,
+        });
+      } else {
+        results.push({
+          slug,
+          ok: true,
+          duration_ms: Date.now() - perStoreStartedAt,
+          facts_id: out.factsId,
+          edition: out.insightResult.draft_context.edition,
+          db: out.db,
+        });
+      }
     }
-
-    results.push({
-      slug,
-      ok: true,
-      duration_ms: Date.now() - perStoreStartedAt,
-      facts_id: out.factsId,
-      edition: out.insightResult.draft_context.edition,
-      db: out.db,
-    });
   }
 
   const allOk = results.every((r) => r.ok);
   const durationMs = Date.now() - startedAt;
   const nearTimeout = durationMs >= 50_000;
-  /** Cron は 200 のみにし、失敗は JSON の `ok` で判別（Vercel の再試行を避ける） */
-  return NextResponse.json({
+  const payload = {
     ok: allOk,
     service: "cron-blog-draft",
     duration_ms: durationMs,
@@ -200,5 +255,8 @@ async function handleCron(req: NextRequest) {
     edition_inferred: results.find((r) => r.edition)?.edition,
     source: pipelineSource,
     results,
-  });
+  };
+  if (allOk) return NextResponse.json(payload);
+  const isTimeout = results.some((r) => (r.error ?? "").toLowerCase().includes("timeout"));
+  return NextResponse.json(payload, { status: isTimeout ? 504 : 500 });
 }
