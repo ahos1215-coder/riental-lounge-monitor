@@ -195,7 +195,8 @@ def _predict_error(df: pd.DataFrame, cfg: Cfg) -> pd.DataFrame:
         schema_version=cfg.schema_version,
         logger=logging.getLogger("validate-features"),
     )
-    bundle = registry.get_bundle()
+    target_store = os.getenv("ML_TRAIN_STORE_ID", "").strip() or os.getenv("STORE_ID", "ol_nagasaki").strip()
+    bundle = registry.get_bundle(store_id=target_store)
     x = df[FEATURE_COLUMNS]
     men_pred, women_pred = bundle.model.predict(x)
     out = df.copy()
@@ -263,7 +264,8 @@ def _low_importance_features(cfg: Cfg) -> dict[str, Any]:
         schema_version=cfg.schema_version,
         logger=logging.getLogger("validate-features"),
     )
-    bundle = registry.get_bundle()
+    target_store = os.getenv("ML_TRAIN_STORE_ID", "").strip() or os.getenv("STORE_ID", "ol_nagasaki").strip()
+    bundle = registry.get_bundle(store_id=target_store)
     men = bundle.model.model_men.get_booster().get_score(importance_type="gain")
     women = bundle.model.model_women.get_booster().get_score(importance_type="gain")
     fmap = {f"f{i}": col for i, col in enumerate(FEATURE_COLUMNS)}

@@ -35,7 +35,8 @@ def main() -> int:
         schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v1").strip(),
         logger=logging.getLogger("feature-importance"),
     )
-    bundle = registry.get_bundle()
+    target_store = os.getenv("ML_TRAIN_STORE_ID", "").strip() or os.getenv("STORE_ID", "ol_nagasaki").strip()
+    bundle = registry.get_bundle(store_id=target_store)
 
     men_score = bundle.model.model_men.get_booster().get_score(importance_type="gain")
     women_score = bundle.model.model_women.get_booster().get_score(importance_type="gain")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -53,8 +54,9 @@ class ForecastModelRegistry:
         self.logger = logger
 
         self._lock = threading.Lock()
-        self._bundle: LoadedModelBundle | None = None
+        self._bundles: dict[str, LoadedModelBundle] = {}
         self._next_refresh_unix = 0.0
+        self._metadata: dict[str, Any] | None = None
         self._session = requests.Session()
 
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -73,21 +75,23 @@ class ForecastModelRegistry:
             logger=app.logger,
         )
 
-    def get_bundle(self) -> LoadedModelBundle:
+    def get_bundle(self, store_id: str) -> LoadedModelBundle:
+        store_key = (store_id or "").strip()
+        if not store_key:
+            raise ModelRegistryError("store_id is required for model lookup")
         now = time.time()
         with self._lock:
-            if self._bundle is not None and now < self._next_refresh_unix:
-                return self._bundle
-            bundle = self._refresh_locked()
-            self._bundle = bundle
+            if store_key in self._bundles and now < self._next_refresh_unix:
+                return self._bundles[store_key]
+            bundle = self._refresh_locked(store_key)
+            self._bundles[store_key] = bundle
             self._next_refresh_unix = now + self.refresh_sec
             return bundle
 
     def current_status(self) -> dict[str, Any]:
         now = time.time()
         with self._lock:
-            bundle = self._bundle
-            if bundle is None:
+            if not self._bundles:
                 return {
                     "loaded": False,
                     "refresh_sec": self.refresh_sec,
@@ -97,26 +101,29 @@ class ForecastModelRegistry:
                     "loaded_at_unix": None,
                     "age_sec": None,
                 }
+            sample_store = sorted(self._bundles.keys())[0]
+            sample_bundle = self._bundles[sample_store]
             return {
                 "loaded": True,
+                "stores_loaded": sorted(self._bundles.keys()),
                 "refresh_sec": self.refresh_sec,
                 "next_refresh_in_sec": max(0, int(self._next_refresh_unix - now)),
-                "schema_version": bundle.metadata.get("schema_version"),
-                "trained_at": bundle.metadata.get("trained_at"),
-                "loaded_at_unix": bundle.loaded_at_unix,
-                "age_sec": round(max(0.0, now - bundle.loaded_at_unix), 3),
+                "schema_version": sample_bundle.metadata.get("schema_version"),
+                "trained_at": sample_bundle.metadata.get("trained_at"),
+                "loaded_at_unix": sample_bundle.loaded_at_unix,
+                "age_sec": round(max(0.0, now - sample_bundle.loaded_at_unix), 3),
             }
 
-    def _refresh_locked(self) -> LoadedModelBundle:
+    def _refresh_locked(self, store_id: str) -> LoadedModelBundle:
         self._validate_basic_config()
 
         metadata_path = self.cache_dir / "metadata.json"
         self._download_to_cache("metadata.json", metadata_path)
         metadata = self._load_metadata(metadata_path)
         self._validate_metadata(metadata)
+        self._metadata = metadata
 
-        model_men_name = str(metadata.get("model_men", "model_men.json"))
-        model_women_name = str(metadata.get("model_women", "model_women.json"))
+        model_men_name, model_women_name = self._resolve_model_names(metadata, store_id)
 
         model_men_path = self.cache_dir / Path(model_men_name).name
         model_women_path = self.cache_dir / Path(model_women_name).name
@@ -125,11 +132,58 @@ class ForecastModelRegistry:
 
         model = ForecastModel.from_files(model_men_path=model_men_path, model_women_path=model_women_path)
         self.logger.info(
-            "forecast.model_registry.loaded schema=%s cache_dir=%s",
+            "forecast.model_registry.loaded schema=%s store_id=%s model_men=%s model_women=%s cache_dir=%s",
             metadata.get("schema_version"),
+            store_id,
+            model_men_name,
+            model_women_name,
             self.cache_dir,
         )
         return LoadedModelBundle(model=model, metadata=metadata, loaded_at_unix=time.time())
+
+    def _resolve_model_names(self, metadata: dict[str, Any], store_id: str) -> tuple[str, str]:
+        store_models = metadata.get("store_models")
+        if isinstance(store_models, dict):
+            entry = store_models.get(store_id)
+            if isinstance(entry, dict):
+                men_name = self._pick_latest_model_name(
+                    [
+                        str(entry.get("dated_model_men", "")).strip(),
+                        str(entry.get("model_men", "")).strip(),
+                    ]
+                )
+                women_name = self._pick_latest_model_name(
+                    [
+                        str(entry.get("dated_model_women", "")).strip(),
+                        str(entry.get("model_women", "")).strip(),
+                    ]
+                )
+                if men_name and women_name:
+                    return men_name, women_name
+
+            # store_id mismatchのときは詳細を残して即エラー
+            available = sorted(k for k in store_models.keys() if isinstance(k, str))
+            raise ModelRegistryError(
+                f"store model not found for store_id={store_id}; available={available[:20]}"
+            )
+
+        # backward compatibility
+        model_men_name = str(metadata.get("model_men", "model_men.json"))
+        model_women_name = str(metadata.get("model_women", "model_women.json"))
+        return model_men_name, model_women_name
+
+    @staticmethod
+    def _pick_latest_model_name(candidates: list[str]) -> str:
+        cleaned = [c for c in candidates if c]
+        if not cleaned:
+            return ""
+
+        def _score(name: str) -> tuple[int, str]:
+            match = re.search(r"(20\d{6})", name)
+            date_score = int(match.group(1)) if match else 0
+            return (date_score, name)
+
+        return max(cleaned, key=_score)
 
     def _validate_basic_config(self) -> None:
         if not self.supabase_url:
@@ -154,9 +208,11 @@ class ForecastModelRegistry:
         try:
             response = self._session.get(url, headers=headers, timeout=20)
         except Exception as exc:  # noqa: BLE001
-            raise ModelRegistryError(f"model download failed: {object_name}") from exc
+            raise ModelRegistryError(f"model download failed: object={object_name} url={url}") from exc
         if not response.ok:
-            raise ModelRegistryError(f"model download failed: {object_name} status={response.status_code}")
+            raise ModelRegistryError(
+                f"model download failed: object={object_name} url={url} status={response.status_code}"
+            )
         dst.parent.mkdir(parents=True, exist_ok=True)
         dst.write_bytes(response.content)
 

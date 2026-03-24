@@ -175,7 +175,7 @@ def _sample_weights(df: pd.DataFrame, cfg: TrainingConfig) -> np.ndarray:
     return weights
 
 
-def _train_models(df: pd.DataFrame, work_dir: Path, cfg: TrainingConfig) -> tuple[Path, Path, XGBRegressor, XGBRegressor]:
+def _train_models(df: pd.DataFrame, work_dir: Path, cfg: TrainingConfig, store_id: str, date_tag: str) -> tuple[Path, Path, XGBRegressor, XGBRegressor]:
     x = df[FEATURE_COLUMNS]
     y_men = df["men"].astype(float)
     y_women = df["women"].astype(float)
@@ -186,8 +186,8 @@ def _train_models(df: pd.DataFrame, work_dir: Path, cfg: TrainingConfig) -> tupl
     model_men.fit(x, y_men, sample_weight=weights)
     model_women.fit(x, y_women, sample_weight=weights)
 
-    model_men_path = work_dir / "model_men.json"
-    model_women_path = work_dir / "model_women.json"
+    model_men_path = work_dir / f"model_{store_id}_{date_tag}_men.json"
+    model_women_path = work_dir / f"model_{store_id}_{date_tag}_women.json"
     model_men.save_model(str(model_men_path))
     model_women.save_model(str(model_women_path))
     return model_men_path, model_women_path, model_men, model_women
@@ -256,18 +256,27 @@ def _log_metrics_by_store(df: pd.DataFrame, model_men: XGBRegressor, model_women
         )
 
 
-def _build_metadata(cfg: TrainingConfig, df: pd.DataFrame) -> dict[str, Any]:
+def _build_metadata(
+    cfg: TrainingConfig,
+    df: pd.DataFrame,
+    *,
+    trained_at: str,
+    date_tag: str,
+    store_models: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
     return {
         "schema_version": cfg.schema_version,
         "feature_columns": FEATURE_COLUMNS,
-        "model_men": "model_men.json",
-        "model_women": "model_women.json",
-        "trained_at": datetime.now(timezone.utc).isoformat(),
+        "model_men": "model_men.json",  # backward compatibility
+        "model_women": "model_women.json",  # backward compatibility
+        "trained_at": trained_at,
+        "artifacts_date": date_tag,
         "timezone": cfg.timezone,
         "train_days": cfg.train_days,
         "train_limit": cfg.train_limit,
         "train_store_id": cfg.store_id,
         "row_count": int(len(df)),
+        "store_models": store_models,
         "sample_weight_peak": cfg.sample_weight_peak,
         "sample_weight_rain": cfg.sample_weight_rain,
         "python_version": platform.python_version(),
@@ -325,26 +334,80 @@ def main() -> int:
     if missing:
         raise SystemExit(f"preprocess output missing FEATURE_COLUMNS: {missing}")
 
+    trained_at = datetime.now(timezone.utc).isoformat()
+    date_tag = datetime.now(timezone.utc).strftime("%Y%m%d")
+    store_models: dict[str, dict[str, Any]] = {}
+
     with tempfile.TemporaryDirectory(prefix="train-ml-") as tmp:
         work_dir = Path(tmp)
-        model_men_path, model_women_path, model_men, model_women = _train_models(df, work_dir, cfg)
-        _log_metrics_by_store(df, model_men, model_women)
-        metadata = _build_metadata(cfg, df)
+        stores = [cfg.store_id] if cfg.store_id else sorted(df["store_id"].dropna().unique().tolist())
+        if not stores:
+            raise SystemExit("no store_id available for per-store training")
+
+        for store_id in stores:
+            sdf = df[df["store_id"] == store_id].copy().reset_index(drop=True)
+            if len(sdf) < 200:
+                print(f"[train-ml][skip] store_id={store_id} rows={len(sdf)} (<200)")
+                continue
+            model_men_path, model_women_path, model_men, model_women = _train_models(sdf, work_dir, cfg, store_id, date_tag)
+            _log_metrics_by_store(sdf, model_men, model_women)
+
+            # Latest alias for simpler rollback/fallback
+            alias_men_path = work_dir / f"model_{store_id}_men.json"
+            alias_women_path = work_dir / f"model_{store_id}_women.json"
+            alias_men_path.write_bytes(model_men_path.read_bytes())
+            alias_women_path.write_bytes(model_women_path.read_bytes())
+
+            for p in (model_men_path, model_women_path, alias_men_path, alias_women_path):
+                _upload_file(
+                    cfg=cfg,
+                    session=session,
+                    local_path=p,
+                    remote_name=p.name,
+                    content_type="application/json",
+                )
+            store_models[store_id] = {
+                "model_men": alias_men_path.name,
+                "model_women": alias_women_path.name,
+                "dated_model_men": model_men_path.name,
+                "dated_model_women": model_women_path.name,
+                "row_count": int(len(sdf)),
+                "trained_at": trained_at,
+            }
+
+        if not store_models:
+            raise SystemExit("no per-store models were trained (all stores skipped)")
+
+        metadata = _build_metadata(
+            cfg,
+            df,
+            trained_at=trained_at,
+            date_tag=date_tag,
+            store_models=store_models,
+        )
         metadata_path = work_dir / "metadata.json"
         metadata_path.write_text(json.dumps(metadata, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
+        # backward compatibility global aliases (default store or first available store)
+        default_store = cfg.store_id if cfg.store_id in store_models else sorted(store_models.keys())[0]
+        default_men = work_dir / store_models[default_store]["model_men"]
+        default_women = work_dir / store_models[default_store]["model_women"]
+        global_men = work_dir / "model_men.json"
+        global_women = work_dir / "model_women.json"
+        global_men.write_bytes(default_men.read_bytes())
+        global_women.write_bytes(default_women.read_bytes())
         _upload_file(
             cfg=cfg,
             session=session,
-            local_path=model_men_path,
-            remote_name="model_men.json",
+            local_path=global_men,
+            remote_name=global_men.name,
             content_type="application/json",
         )
         _upload_file(
             cfg=cfg,
             session=session,
-            local_path=model_women_path,
-            remote_name="model_women.json",
+            local_path=global_women,
+            remote_name=global_women.name,
             content_type="application/json",
         )
         _upload_file(
@@ -363,6 +426,7 @@ def main() -> int:
                 "prefix": cfg.prefix,
                 "schema_version": cfg.schema_version,
                 "row_count": len(df),
+                "stores_trained": sorted(store_models.keys()),
             },
             ensure_ascii=True,
         ),

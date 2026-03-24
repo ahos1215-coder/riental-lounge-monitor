@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from oriental.ml.preprocess import FEATURE_COLUMNS
 
 WATCH_FEATURES = {
     "feat_payday_night_peak",
@@ -17,11 +24,13 @@ WATCH_FEATURES = {
 }
 
 
-def _latest_artifact_json(artifacts_dir: Path) -> Path:
+def _latest_artifact_json(artifacts_dir: Path, *, preferred_date: str = "20260324") -> Path:
     files = [p for p in artifacts_dir.glob("*.json") if p.is_file()]
     if not files:
         raise SystemExit(f"artifacts json not found: {artifacts_dir}")
-    return max(files, key=lambda p: p.stat().st_mtime)
+    preferred = [p for p in files if preferred_date in p.stem]
+    pool = preferred if preferred else files
+    return max(pool, key=lambda p: p.stat().st_mtime)
 
 
 def _read_json(path: Path) -> dict[str, Any]:
@@ -120,8 +129,7 @@ def _as_float(v: Any) -> float | None:
 
 
 def main() -> int:
-    repo_root = Path(__file__).resolve().parents[1]
-    artifacts_dir = repo_root / "artifacts"
+    artifacts_dir = REPO_ROOT / "artifacts"
     latest = _latest_artifact_json(artifacts_dir)
     payload = _read_json(latest)
 
@@ -131,18 +139,29 @@ def main() -> int:
 
     overall_mae, segment_mae = _extract_metrics(payload)
     gains = _extract_gain(payload)
-    positive = {k: v for k, v in gains.items() if k in WATCH_FEATURES and v > 0.0}
-    top5 = sorted(positive.items(), key=lambda x: x[1], reverse=True)[:5]
+    all_feature_gains = {name: float(gains.get(name, 0.0)) for name in FEATURE_COLUMNS}
+    top_n = 20
+    ranked = sorted(all_feature_gains.items(), key=lambda x: x[1], reverse=True)[:top_n]
+    watch_positive = {k: v for k, v in gains.items() if k in WATCH_FEATURES and v > 0.0}
 
     print(f"[analyze] artifact: {latest.name}")
     print(f"[analyze] store_id: {store_id}")
     print(f"[analyze] overall_mae: {overall_mae if overall_mae is not None else 'n/a'}")
     print(f"[analyze] weekend_night_segment_mae: {segment_mae if segment_mae is not None else 'n/a'}")
-    print("[analyze] positive gain top5 (watch features):")
-    if not top5:
+    print(f"[analyze] feature gain ranking top{top_n}:")
+    if not ranked:
         print("  (none)")
-    for name, gain in top5:
-        print(f"  - {name}: {gain:.6f}")
+    else:
+        name_w = max(len(name) for name, _ in ranked)
+        for i, (name, gain) in enumerate(ranked, start=1):
+            print(f"  {i:>2}. {name:<{name_w}}  {gain:>10.6f}")
+
+    print("[analyze] positive watch-feature gains:")
+    if not watch_positive:
+        print("  (none)")
+    else:
+        for name, gain in sorted(watch_positive.items(), key=lambda x: x[1], reverse=True):
+            print(f"  - {name}: {gain:.6f}")
 
     return 0
 

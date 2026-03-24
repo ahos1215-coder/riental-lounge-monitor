@@ -81,10 +81,14 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     df["day_of_week"] = df["ts"].dt.dayofweek
     df["dow"] = df["ts"].dt.dayofweek
     df["is_weekend"] = df["dow"].isin([4, 5]).astype(int)
-    df["is_holiday"] = row_dates.map(lambda d: 1 if jpholiday.is_holiday(d) else 0).astype(int)
+    # 休日は「日曜 or 祝日当日」で定義
+    is_sunday = df["dow"] == 6
+    is_jp_holiday = row_dates.map(lambda d: 1 if jpholiday.is_holiday(d) else 0).astype(int)
+    df["is_holiday"] = (is_sunday | (is_jp_holiday == 1)).astype(int)
     tomorrow = row_dates.map(lambda d: d + timedelta(days=1))
     is_tomorrow_holiday = tomorrow.map(lambda d: 1 if jpholiday.is_holiday(d) else 0).astype(int)
-    df["is_pre_holiday"] = ((df["dow"] == 4) | (is_tomorrow_holiday == 1)).astype(int)
+    # 祝前日は「金曜 or 土曜 or 翌日が祝日」で定義
+    df["is_pre_holiday"] = ((df["dow"].isin([4, 5])) | (is_tomorrow_holiday == 1)).astype(int)
 
     holiday_like_dates = pd.DataFrame({"date": row_dates, "flag": (df["is_holiday"] == 1) | (df["is_weekend"] == 1)})
     holiday_like_dates = holiday_like_dates.drop_duplicates(subset=["date"]).sort_values("date")

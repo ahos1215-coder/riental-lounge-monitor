@@ -117,8 +117,8 @@ class ForecastService:
                 data = _zero_payload(future_times)
                 reasoning = {"signals": {}, "notes": ["履歴データ不足のため根拠情報なし"]}
             else:
-                data = self._predict_with_history(df, future_times)
-                reasoning = self._build_reasoning(df)
+                data = self._predict_with_history(df, future_times, store_id=store_id)
+                reasoning = self._build_reasoning(df, store_id=store_id)
             self.logger.info("forecast.service.predicted size=%d", len(data))
 
             result = {"ok": True, "store": store_id, "freq_min": freq_min, "data": data, "reasoning": reasoning}
@@ -159,10 +159,10 @@ class ForecastService:
                 return self.fallback_provider.get_records(store_id)
             raise
 
-    def _predict_with_history(self, history: pd.DataFrame, future_times: pd.DatetimeIndex) -> list[dict]:
+    def _predict_with_history(self, history: pd.DataFrame, future_times: pd.DatetimeIndex, *, store_id: str) -> list[dict]:
         if self.model_registry is None:
             raise ModelRegistryError("model_registry is not configured")
-        bundle = self.model_registry.get_bundle()
+        bundle = self.model_registry.get_bundle(store_id=store_id)
         model = bundle.model
         future_features = self._build_future_features(history, future_times)
         men_pred, women_pred = model.predict(future_features)
@@ -198,7 +198,7 @@ class ForecastService:
         combined = add_time_features(combined)
         return combined.tail(len(future_times))[FEATURE_COLUMNS]
 
-    def _build_reasoning(self, history: pd.DataFrame) -> dict:
+    def _build_reasoning(self, history: pd.DataFrame, *, store_id: str) -> dict:
         latest = history.iloc[-1]
         signals = {
             "is_rainy": _to_int(latest.get("is_rainy")),
@@ -215,9 +215,9 @@ class ForecastService:
 
         if signals["is_rainy"] == 1:
             rain_weight = os.getenv("ML_TRAIN_WEIGHT_RAIN", "1.8")
-            notes.append(f"雨天重み付け（{rain_weight}x）適用条件")
+            notes.append(f"{store_id}：雨天重み付け（{rain_weight}x）適用中")
         if signals["feat_payday_night_peak"] == 1:
-            notes.append("給料日前後×週末夜ピーク条件")
+            notes.append(f"{store_id}：給料日ピーク補正あり")
         if signals["feat_rain_night_exit"] == 1:
             notes.append("雨天×深夜帯の離脱シグナル条件")
         if signals["feat_pre_holiday_surge"] == 1:
