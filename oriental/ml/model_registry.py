@@ -123,10 +123,17 @@ class ForecastModelRegistry:
         self._validate_metadata(metadata)
         self._metadata = metadata
 
-        model_men_name, model_women_name = self._resolve_model_names(metadata, store_id)
+        model_men_name, model_women_name, source = self._resolve_model_names(metadata, store_id)
 
         model_men_path = self.cache_dir / Path(model_men_name).name
         model_women_path = self.cache_dir / Path(model_women_name).name
+        self.logger.info(
+            "Loading %s model: %s, %s (store_id=%s)",
+            source,
+            model_men_name,
+            model_women_name,
+            store_id,
+        )
         self._download_to_cache(model_men_name, model_men_path)
         self._download_to_cache(model_women_name, model_women_path)
 
@@ -141,9 +148,14 @@ class ForecastModelRegistry:
         )
         return LoadedModelBundle(model=model, metadata=metadata, loaded_at_unix=time.time())
 
-    def _resolve_model_names(self, metadata: dict[str, Any], store_id: str) -> tuple[str, str]:
+    def _resolve_model_names(self, metadata: dict[str, Any], store_id: str) -> tuple[str, str, str]:
+        has_store_models = bool(metadata.get("has_store_models", False))
         store_models = metadata.get("store_models")
         if isinstance(store_models, dict):
+            if not has_store_models:
+                self.logger.warning(
+                    "metadata inconsistency: has_store_models=false but store_models map exists; store-specific resolution will still be attempted"
+                )
             entry = store_models.get(store_id)
             if isinstance(entry, dict):
                 men_name = self._pick_latest_model_name(
@@ -159,7 +171,7 @@ class ForecastModelRegistry:
                     ]
                 )
                 if men_name and women_name:
-                    return men_name, women_name
+                    return men_name, women_name, "store-specific"
 
             # store_id mismatchのときは詳細を残して即エラー
             available = sorted(k for k in store_models.keys() if isinstance(k, str))
@@ -167,10 +179,21 @@ class ForecastModelRegistry:
                 f"store model not found for store_id={store_id}; available={available[:20]}"
             )
 
+        if has_store_models:
+            raise ModelRegistryError(
+                "metadata indicates has_store_models=true but store_models map is missing/invalid"
+            )
+
         # backward compatibility
         model_men_name = str(metadata.get("model_men", "model_men.json"))
         model_women_name = str(metadata.get("model_women", "model_women.json"))
-        return model_men_name, model_women_name
+        self.logger.warning(
+            "store_models is unavailable; fallback to global models store_id=%s model_men=%s model_women=%s",
+            store_id,
+            model_men_name,
+            model_women_name,
+        )
+        return model_men_name, model_women_name, "global fallback"
 
     @staticmethod
     def _pick_latest_model_name(candidates: list[str]) -> str:

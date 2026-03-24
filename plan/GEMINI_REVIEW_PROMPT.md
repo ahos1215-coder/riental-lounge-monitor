@@ -1,61 +1,80 @@
-# Gemini 向け：現状共有・方針レビュー・不具合リスク確認
+# Gemini 向け：ML 2.0 最終接続レビュー（店舗別モデル）
 
-## アップロード推奨（最大10件・この順がおすすめ）
+## いまの論点（2026-03-24 時点）
 
-リポジトリルートからの相対パスです。Gemini に **この10ファイルを添付**し、下の「コピペ用プロンプト」を送ってください。
+- 推論APIは稼働し、`/api/forecast_today` は 200 を返す
+- `ModelRegistry` は店舗別優先ロジック実装済み（`store_models` があれば店舗別を読む）
+- ただし現行Storage上の `metadata.json` が `has_store_models=false` / `store_models` 空で、実際には `model_men.json` / `model_women.json` のグローバルフォールバックが使われている
+- 目的は「店舗別モデルが本当に読まれている状態」を最終証明すること
 
-| # | ファイル | 理由（短く） |
-|---|----------|----------------|
-| 1 | `README.md` | プロジェクト概要・Read First・技術スタック |
-| 2 | `plan/STATUS.md` | **現状どこまで動いているか**の正本 |
-| 3 | `plan/ROADMAP.md` | 優先度付きタスク・当面やらないこと |
-| 4 | `plan/VISION_AND_FUTURE.md` | 中長期構想・フェーズ（方針アイデアの文脈） |
-| 5 | `plan/ARCHITECTURE.md` | データフロー・Next/Flask の役割 |
-| 6 | `plan/API_CONTRACT.md` | Flask / Next API の契約 |
-| 7 | `plan/API_CURRENT.md` | `/api/current` の制限・既知のズレ |
-| 8 | `plan/DECISIONS.md` | 意思決定（レート制限・cron 等） |
-| 9 | `plan/ENV.md` | 環境変数（設定ミス＝不具合の温床） |
-| 10 | `plan/RUNBOOK.md` | 起動・定期ジョブ・GHA・トラブルシュート |
+## アップロード推奨（最大10件）
 
-### 11件目以降を足すなら（任意・差し替え用）
+Geminiに「ドキュメント＋実装の両方」を渡して、机上レビューでなく実装整合まで見てもらう構成です。
 
-- 週次 JSON・チャート: `plan/WEEKLY_INSIGHTS_TUNING.md`（`series_compact` 等）
-- LINE→下書きの技術詳細: `plan/BLOG_PIPELINE.md`
-- 定時ブログ Cron: `plan/BLOG_CRON_GHA.md`
-- ファイル索引: `plan/INDEX.md`
+| # | ファイル | 目的 |
+|---|----------|------|
+| 1 | `plan/STATUS.md` | 現在の進捗・既知課題の正本 |
+| 2 | `plan/ARCHITECTURE.md` | 3層分離（Web推論 / 収集 / GHA学習）の文脈 |
+| 3 | `plan/API_CONTRACT.md` | API契約を壊していないか確認 |
+| 4 | `plan/ENV.md` | ML環境変数・重み設定の前提 |
+| 5 | `plan/RUNBOOK.md` | 運用手順と検証手順 |
+| 6 | `scripts/train_ml_model.py` | `metadata.json` / `store_models` 生成元 |
+| 7 | `oriental/ml/model_registry.py` | 店舗別モデル解決・フォールバック実装 |
+| 8 | `oriental/ml/forecast_service.py` | 推論・reasoning返却・空配列化ポイント |
+| 9 | `oriental/ml/preprocess.py` | 学習/推論の特徴量一致確認 |
+| 10 | `tests/verify_store_model_connection.py` | 最終接続テスト（店舗間比較） |
+
+### 差し替え候補（任意）
+
+- `oriental/routes/forecast.py`（HTTP層の正規化/503ハンドリング確認）
+- `.github/workflows/train-ml-model.yml`（GHA実行条件とenv受け渡し確認）
+- `tests/debug_nagasaki_api.py`（空配列原因の再調査用）
 
 ---
 
-## コピペ用プロンプト（日本語）
+## Gemini へのコピペ用プロンプト（日本語）
 
-以下をそのまま Gemini に貼り付け、上表の **10個の .md を添付**してください。
+以下をそのまま Gemini に貼り付け、上表の10ファイルを添付してください。
 
 ```
-あなたはシニアソフトウェアアーキテクト兼プロダクトレビュアーです。
-添付の Markdown は「リエンタル系ラウンジ混雑モニター」プロジェクトの公式ドキュメントです（Next.js 16 フロント / Vercel、Flask バックエンド / Render、Supabase、LINE Webhook、週次 Insights の GitHub Actions、ブログ MDX パイプライン等）。
+あなたは Next.js + Python/ML 運用に強いシニアアーキテクトです。
+以下の添付ファイルを前提に、「店舗別モデル最終接続フェーズ」をレビューしてください。
 
-## 依頼1：現状の要約
-- ドキュメントに書かれている範囲で、**本番で動いている機能**と**未実装・構想段階**を短く整理してください。
-- **ドキュメント同士の矛盾**（例: ROADMAP と STATUS、API の説明の食い違い）があれば指摘してください。
+## 背景
+- 目的: `ol_nagasaki` / `ol_shibuya` など店舗別モデルを本番推論で使うこと
+- 現状: APIは200で返るが、Storage上のmetadata次第でグローバルモデルへフォールバックしている
+- 実装: ModelRegistry側には店舗別優先 + フォールバック維持 + ログ強化を実装済み
 
-## 依頼2：今後の方針・アイデア
-- ROADMAP / VISION に基づき、**次の3〜6ヶ月で効果が大きい施策**を 5 個程度、優先度つきで提案してください。
-- **技術的負債になりやすい点**（設計・運用・スケール）があれば列挙してください。
-- すでにドキュメントに書いてある内容の繰り返しは避け、**追加の視点**（リスク、代替案、計測指標）を入れてください。
+## 依頼1（最優先）
+`model_registry.py` と `train_ml_model.py` の整合を確認し、
+「metadata.json に store_models がある場合は必ず店舗別モデルを読む」ことを保証できているか判定してください。
 
-## 依頼3：実装・運用上の不具合・リスク
-- ドキュメント上の **既知の制限**（例: `/api/current` と Supabase の不一致、`/api/range` の limit・夜窓の挙動、旧週次 JSON に series_compact が無い等）から、**ユーザー体験やデータ解釈で誤解が起きる箇所**を挙げてください。
-- **設定ミスで壊れやすい環境変数やデプロイ順**（ENV / RUNBOOK ベース）をチェックリスト形式で出してください。
-- **セキュリティ・レート制限・Webhook** について、ドキュメント記載を踏まえた **追加で検討すべき防御**があれば簡潔に。
+## 依頼2
+以下の故障モードを列挙し、優先度順に対策案を出してください。
+- metadataの has_store_models / store_models の不整合
+- store_id名寄せ不一致（例: `ol_shibuya_honten` と `ol_shibuya`）
+- datedモデル名の選択ミス（YYYYMMDDパース）
+- feature_columns不一致による503
+- APIは200だが実質グローバルモデル利用のまま気づけない運用事故
+
+## 依頼3
+`tests/verify_store_model_connection.py` をベースに、
+「店舗別モデル接続成功を判定する最小テスト仕様（合格条件/失格条件）」を提案してください。
+特に以下を含めてください。
+- 成功ログ文言（store-specific load）
+- metadata検証条件
+- 店舗間予測差の比較条件
+- reasoning の最低検証条件
 
 ## 出力形式
 - 見出しは日本語で。
-- 重要度は 🔴高 🟡中 🟢低 のようなラベルで付けてください。
-- 推測は「推測:」と明記し、ドキュメントに根拠がない場合は断定しないでください。
+- 重要度は 🔴高 / 🟡中 / 🟢低 を付与
+- 「今すぐ直すべき項目（3つ）」を最後に箇条書きで提示
+- 根拠のない断定は禁止。推測は「推測:」と明記
 
-コードリポジトリ本体は添付していません。ドキュメントから読み取れる範囲でのレビューに限定してください。
+最終的に、私が今夜やるべき作業を「手順書（5ステップ以内）」で締めてください。
 ```
 
 ---
 
-Last updated: 2026-03-23
+Last updated: 2026-03-24

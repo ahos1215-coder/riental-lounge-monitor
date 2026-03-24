@@ -269,6 +269,7 @@ def _build_metadata(
         "feature_columns": FEATURE_COLUMNS,
         "model_men": "model_men.json",  # backward compatibility
         "model_women": "model_women.json",  # backward compatibility
+        "has_store_models": True,
         "trained_at": trained_at,
         "artifacts_date": date_tag,
         "timezone": cfg.timezone,

@@ -178,7 +178,7 @@ class ForecastService:
         ]
 
     def _build_future_features(self, history: pd.DataFrame, future_times: pd.DatetimeIndex) -> pd.DataFrame:
-        base_cols = ["ts", "men", "women", "total", "weather_code", "temp_c", "store_id"]
+        base_cols = ["ts", "men", "women", "total", "weather_code", "temp_c", "precip_mm", "store_id"]
         for col in base_cols:
             if col not in history.columns:
                 history[col] = np.nan
@@ -191,6 +191,7 @@ class ForecastService:
                 "total": np.nan,
                 "weather_code": np.nan,
                 "temp_c": np.nan,
+                "precip_mm": np.nan,
                 "store_id": history["store_id"].iloc[-1] if "store_id" in history.columns and not history.empty else np.nan,
             }
         )
