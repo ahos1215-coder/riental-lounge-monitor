@@ -11,7 +11,6 @@ import {
 } from "@/lib/browser/meguribiStorage";
 import { DEFAULT_STORE, STORES, getStoreMetaBySlug } from "../../config/stores";
 
-type ForecastPoint = { ts: string; total_pred?: number };
 type ForecastCardPoint = { ts: string; total_pred?: number };
 type RangePoint = { men?: number; women?: number; total?: number };
 type RealtimeCardStats = {
@@ -24,80 +23,19 @@ type RealtimeCardStats = {
   recommendLabel: string;
 };
 
-function ForecastQuickPanel({ slug }: { slug: string }) {
-  const [state, setState] = useState<{
-    loading: boolean;
-    peak: string;
-    calm: string;
-    maxPred: number;
-  }>({ loading: true, peak: "--:--", calm: "--:--", maxPred: 0 });
+function toHmJstStore(iso: string): string {
+  return new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(iso));
+}
 
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const res = await fetch(`/api/forecast_today?store=${encodeURIComponent(slug)}`, {
-          cache: "no-store",
-        });
-        const data = (await res.json()) as { data?: ForecastPoint[] };
-        const rows = Array.isArray(data?.data) ? data.data : [];
-        if (!rows.length) {
-          if (mounted) setState({ loading: false, peak: "--:--", calm: "--:--", maxPred: 0 });
-          return;
-        }
-        let peak = rows[0];
-        let calm = rows[0];
-        for (const r of rows) {
-          const v = Number(r.total_pred ?? 0);
-          if (v > Number(peak.total_pred ?? 0)) peak = r;
-          if (v < Number(calm.total_pred ?? 0)) calm = r;
-        }
-        const fmt = (iso: string) =>
-          new Intl.DateTimeFormat("ja-JP", {
-            timeZone: "Asia/Tokyo",
-            hour: "2-digit",
-            minute: "2-digit",
-            hour12: false,
-          }).format(new Date(iso));
-        if (mounted) {
-          setState({
-            loading: false,
-            peak: fmt(peak.ts),
-            calm: fmt(calm.ts),
-            maxPred: Math.round(Number(peak.total_pred ?? 0)),
-          });
-        }
-      } catch {
-        if (mounted) setState({ loading: false, peak: "--:--", calm: "--:--", maxPred: 0 });
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [slug]);
-
-  return (
-    <section className="mx-auto w-full max-w-6xl px-4">
-      <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-        <p className="text-[11px] font-semibold text-emerald-200">ML 2.0 · 今日の予測ハイライト</p>
-        <p className="mt-1 text-[10px] text-white/45">数値は参考目安です。実際の混雑は店舗の状況により変わります。</p>
-        <div className="mt-2 grid gap-2 md:grid-cols-3">
-          <div className="rounded-xl border border-white/10 bg-black/20 p-2.5">
-            <p className="text-[10px] text-white/60">賑わいピークの目安</p>
-            <p className="mt-1 text-xl font-bold leading-none text-white">{state.loading ? "..." : state.peak}</p>
-          </div>
-          <div className="rounded-xl border border-white/10 bg-black/20 p-2.5">
-            <p className="text-[10px] text-white/60">落ち着いて過ごしやすい目安</p>
-            <p className="mt-1 text-xl font-bold leading-none text-white">{state.loading ? "..." : state.calm}</p>
-          </div>
-          <div className="rounded-xl border border-white/10 bg-black/20 p-2.5">
-            <p className="text-[10px] text-white/60">予測最大人数（参考）</p>
-            <p className="mt-1 text-xl font-bold leading-none text-white">{state.loading ? "..." : `${Math.round(state.maxPred)}人`}</p>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
+function crowdLabelFromPredStore(maxPred: number): string {
+  if (maxPred >= 120) return "混雑";
+  if (maxPred >= 80) return "ほどよい";
+  return "空いている";
 }
 
 function StorePageFallback() {
@@ -105,6 +43,7 @@ function StorePageFallback() {
     <div className="mx-auto w-full max-w-6xl space-y-8 px-4 py-8">
       <div className="space-y-3">
         <div className="h-5 w-48 animate-pulse rounded bg-slate-700/80" />
+        <div className="h-40 w-full animate-pulse rounded-2xl bg-slate-800/80" />
         <div className="h-72 w-full animate-pulse rounded-2xl bg-slate-800/80" />
       </div>
       <div className="space-y-3">
@@ -132,8 +71,8 @@ function StorePageInner() {
     typeof slugRaw === "string"
       ? slugRaw
       : Array.isArray(slugRaw)
-      ? slugRaw[0]
-      : "";
+        ? slugRaw[0]
+        : "";
 
   const meta = getStoreMetaBySlug(slugFromPath || searchParams.get("store") || DEFAULT_STORE);
   const slug = meta.slug;
@@ -164,28 +103,17 @@ function StorePageInner() {
   );
 
   const [favorite, setFavorite] = useState(false);
-  const [relatedRealtime, setRelatedRealtime] = useState<Record<string, { stats: RealtimeCardStats; sparkline: number[] }>>({});
+  const [relatedRealtime, setRelatedRealtime] = useState<
+    Record<string, { stats: RealtimeCardStats; sparkline: number[] }>
+  >({});
   const [relatedLoading, setRelatedLoading] = useState(false);
+
   useEffect(() => {
     setFavorite(isFavoriteStore(slug));
   }, [slug]);
 
   useEffect(() => {
     let mounted = true;
-
-    const toHmJst = (iso: string): string =>
-      new Intl.DateTimeFormat("ja-JP", {
-        timeZone: "Asia/Tokyo",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }).format(new Date(iso));
-
-    const crowdLabelFromPred = (maxPred: number): string => {
-      if (maxPred >= 120) return "混雑";
-      if (maxPred >= 80) return "ほどよい";
-      return "空いている";
-    };
 
     (async () => {
       setRelatedLoading(true);
@@ -220,7 +148,7 @@ function StorePageInner() {
                 calm = r;
               }
             }
-            const calmLabel = calm?.ts ? toHmJst(calm.ts) : "--:--";
+            const calmLabel = calm?.ts ? toHmJstStore(calm.ts) : "--:--";
             return {
               slug: store.slug,
               stats: {
@@ -229,7 +157,7 @@ function StorePageInner() {
                 nowTotal,
                 peakPredTotal: maxPred,
                 genderRatio: `${menNow}:${womenNow}`,
-                crowdLevel: crowdLabelFromPred(maxPred),
+                crowdLevel: crowdLabelFromPredStore(maxPred),
                 recommendLabel: calm?.ts ? `${calmLabel}ごろ` : "確認中",
               },
               sparkline: totals.slice(0, 10),
@@ -254,25 +182,24 @@ function StorePageInner() {
     };
   }, [digestStores]);
 
+  const favoriteButton = (
+    <button
+      type="button"
+      onClick={() => {
+        const next = toggleFavoriteStore(slug);
+        setFavorite(next);
+      }}
+      className="rounded-full border border-amber-400/35 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-100 transition hover:border-amber-300/60 hover:bg-amber-500/20"
+      aria-pressed={favorite}
+      aria-label={favorite ? "お気に入りから外す" : "お気に入りに追加"}
+    >
+      {favorite ? "★ お気に入り済み" : "☆ お気に入りに追加"}
+    </button>
+  );
+
   return (
     <div className="space-y-8">
-      <div className="mx-auto flex w-full max-w-6xl justify-end px-4 pt-2">
-        <button
-          type="button"
-          onClick={() => {
-            const next = toggleFavoriteStore(slug);
-            setFavorite(next);
-          }}
-          className="rounded-full border border-amber-400/35 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-100 transition hover:border-amber-300/60 hover:bg-amber-500/20"
-          aria-pressed={favorite}
-          aria-label={favorite ? "お気に入りから外す" : "お気に入りに追加"}
-        >
-          {favorite ? "★ お気に入り済み" : "☆ お気に入りに追加"}
-        </button>
-      </div>
-
-      <MeguribiDashboardPreview />
-      <ForecastQuickPanel slug={slug} />
+      <MeguribiDashboardPreview headerActions={favoriteButton} />
 
       <section className="mx-auto w-full max-w-6xl space-y-3 px-4">
         <h2 className="text-sm font-semibold text-slate-100">ほかの店舗を見る</h2>

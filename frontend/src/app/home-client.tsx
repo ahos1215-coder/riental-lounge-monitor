@@ -28,6 +28,10 @@ type RangePoint = { men?: number; women?: number; total?: number };
 type StoreRealtimeCard = {
   slug: string;
   stats: {
+    menCount: number;
+    womenCount: number;
+    nowTotal: number;
+    peakPredTotal: number;
     genderRatio: string;
     crowdLevel: string;
     recommendLabel: string;
@@ -40,15 +44,10 @@ type StoreRealtimeCard = {
   hasSignal: boolean;
 };
 
-// 履歴がないときのサンプル（数値ダミーは出さない）
 const FALLBACK_LAST_STORE = {
   name: `オリエンタルラウンジ ${getStoreMetaBySlug(DEFAULT_STORE).label}`,
   slug: getStoreMetaBySlug(DEFAULT_STORE).slug,
 };
-
-// --------------------------------------
-// 簡易折れ線グラフ（SVG）
-// --------------------------------------
 
 function SimpleLineChart() {
   return (
@@ -78,10 +77,6 @@ function SimpleLineChart() {
   );
 }
 
-// --------------------------------------
-// ヘルパー
-// --------------------------------------
-
 function getAreaLabelFromSlug(slug: string): string {
   return getStoreMetaBySlug(slug || DEFAULT_STORE).areaLabel || "エリア未設定";
 }
@@ -101,10 +96,6 @@ function crowdLabelFromPred(maxPred: number): string {
   return "空いている";
 }
 
-// --------------------------------------
-// メインコンポーネント
-// --------------------------------------
-
 export default function HomePage({ latestBlogPosts }: HomePageProps) {
   const [lastStore, setLastStore] = useState<StoreMeta | null>(null);
   const [storeRealtime, setStoreRealtime] = useState<Record<string, StoreRealtimeCard>>({});
@@ -121,7 +112,6 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
     }
   }, []);
 
-  /** 取得対象（軽さ重視で12店舗） */
   const sourceStoresForRealtime = useMemo(() => STORES.slice(0, 12), []);
 
   useEffect(() => {
@@ -204,7 +194,6 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
     };
   }, [sourceStoresForRealtime]);
 
-  /** 時間帯に応じて表示店舗を自動優先（夜ピークは賑わい重視、深夜は落ち着き重視） */
   const digestStores = useMemo(() => {
     const hour = new Date().getHours();
     const cards = Object.values(storeRealtime);
@@ -246,7 +235,7 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
       signalCount > 0 ? `注目シグナル ${signalCount}店舗` : "通常コンディション";
     return {
       loading: false,
-      peakSummary: `${getStoreMetaBySlug(peakCard.slug).label} ${peakCard.maxPred}名（${peakCard.peakLabel}）`,
+      peakSummary: `${getStoreMetaBySlug(peakCard.slug).label} ${peakCard.maxPred}名・${peakCard.peakLabel}頃`,
       calmSummary: `${getStoreMetaBySlug(calmCard.slug).label} ${calmCard.nowTotal}名（現在）`,
       signalText,
     };
@@ -266,18 +255,17 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                   NIGHT MAP FOR ORIENTAL LOUNGE
                 </p>
                 <h1 className="mt-3 text-3xl font-bold leading-tight tracking-[-0.04em] md:text-4xl">
-                  今夜の目的地を、
+                  今夜の一軒を、
                   <br />
                   やさしく照らす案内灯。
                 </h1>
-                <p className="mt-4 max-w-xl text-sm leading-relaxed text-slate-100/80">
-                  オリエンタルラウンジ各店の男女比・混雑の目安・予測を一覧で比較できます。
-                  「いま行くならどこ？」を、感覚だけでなくデータを手がかりに選べます。
+                <p className="mt-4 max-w-xl text-sm text-slate-100/80">
+                  オリエンタルラウンジを中心に、各店舗の男女比や混雑の予測をまとめてチェック。
+                  「いま行くならどこ？」を、感覚ではなくデータで選べるようにします。
                 </p>
                 {featuredStore && (
-                  <p className="mt-3 max-w-xl text-sm text-emerald-200/95">
-                    いまの目安: {getStoreMetaBySlug(featuredStore.slug).label}（落ち着きやすい時間帯の目安{" "}
-                    {featuredStore.calmLabel}）
+                  <p className="mt-3 max-w-xl text-sm text-emerald-200">
+                    いまのおすすめ: {getStoreMetaBySlug(featuredStore.slug).label}・落ち着き目安 {featuredStore.calmLabel}頃
                   </p>
                 )}
                 <div className="mt-5 flex flex-wrap gap-3 text-sm">
@@ -310,13 +298,13 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
           />
 
           <section className="space-y-3">
-            <h2 className="text-sm font-semibold text-slate-100">最近見た店舗</h2>
+            <h2 className="text-sm font-semibold text-slate-100">Last visited store</h2>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/80 px-4 py-4">
               <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] md:items-center">
                 <div>
                   {lastStore ? (
                     <>
-                      <p className="text-[11px] text-slate-400">前回閲覧</p>
+                      <p className="text-[11px] text-slate-400">Last visited</p>
                       <p className="mt-1 text-lg font-semibold text-slate-50">
                         Oriental Lounge {lastStore.label}
                       </p>
@@ -324,10 +312,10 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                         {lastStore.areaLabel}
                       </p>
                       <p className="mt-1 text-[11px] text-slate-400">
-                        男女比・混雑の目安・狙い目は店舗ページでご確認ください。
+                        男女比・混雑・おすすめは店舗ページでご確認ください。
                       </p>
                       <p className="mt-2 text-[11px] text-slate-500">
-                        店舗ページを開くと、次回はここからすぐに戻れます。
+                        店舗ページを開くと、あとからここへワンタップで戻れます。
                       </p>
                       <div className="mt-3">
                         <Link
@@ -351,7 +339,7 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                         店舗を開くと、男女比・混雑などをまとめて表示します。
                       </p>
                       <p className="mt-2 text-[11px] text-slate-500">
-                        店舗を開くと、次回はここからすぐに戻れます。
+                        店舗ページを開くと、あとからここへワンタップで戻れます。
                       </p>
                       <div className="mt-3">
                         <Link
@@ -376,7 +364,7 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
               <div>
                 <h2 className="text-sm font-semibold text-slate-100">掲載中の店舗</h2>
                 <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
-                  男女人数・現在の人数・混雑の目安・狙い目をカードで比較（時間帯により並び順が変わります）。
+                  男女比・人数・ピーク予測を一覧（時間帯で並びが変わります）。
                 </p>
               </div>
               <Link

@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   Area,
@@ -18,6 +19,8 @@ import {
 } from "recharts";
 
 import SecondVenuesList from "./SecondVenuesList";
+import { MlForecastBadges } from "./store/MlForecastBadges";
+import { StoreRealtimeStatusCard } from "./store/StoreRealtimeStatusCard";
 import type {
   PreviewRangeMode,
   StoreSnapshot,
@@ -128,6 +131,7 @@ type PreviewMainSectionProps = {
   customDate?: string;
   onChangeCustomDate?: (value: string) => void;
   selectedBaseDate?: string;
+  storeHeaderActions?: ReactNode;
 };
 
 export default function PreviewMainSection(props: PreviewMainSectionProps) {
@@ -141,12 +145,11 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
     customDate = "",
     onChangeCustomDate,
     selectedBaseDate,
+    storeHeaderActions,
   } = props;
   const hasData = snapshot.hasData;
   const activeRangeMode = rangeMode ?? "today";
   const canControlRange = typeof onChangeRangeMode === "function";
-  const roundedNowMen = Math.round(Number(snapshot.nowMen || 0));
-  const roundedNowWomen = Math.round(Number(snapshot.nowWomen || 0));
   const forecastStartLabel =
     snapshot.series.find(
       (p) =>
@@ -175,36 +178,40 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
   useEffect(() => setIsClient(true), []);
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-6">
+    <div className="flex w-full min-w-0 flex-col gap-5">
+      {/* ① 今どうなの？ — 統合リアルタイム */}
       <section className="space-y-3">
         <div className="flex flex-wrap items-start justify-between gap-2">
-          <div className="flex flex-col gap-0.5 text-xs">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-xs">
             <p className="text-[11px] text-slate-400">今見ている店舗</p>
             <p className="text-sm font-semibold text-slate-100">
               {snapshot.area} / {snapshot.name}
             </p>
-            <p className="text-[11px] text-slate-500">
-              19:00-05:00 の推移（実測 &amp; 予測 / 男性・女性）
-            </p>
           </div>
-
-          {loading && (
-            <p className="text-[10px] text-slate-500">データ取得中…</p>
-          )}
-          {error && (
-            <p className="text-[10px] text-rose-400">
-              データ取得に失敗しました（ベース表示中）
-            </p>
-          )}
-          {!loading && !error && !hasData && (
-            <p className="text-[10px] text-amber-300">
-              データがまだありません。計測待ちか、閉店時間帯の可能性があります。
-            </p>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {storeHeaderActions}
+            {loading && <p className="text-[10px] text-slate-500">データ取得中…</p>}
+            {error && (
+              <p className="max-w-[14rem] text-[10px] text-rose-400">
+                データ取得に失敗しました（ベース表示中）
+              </p>
+            )}
+            {!loading && !error && !hasData && (
+              <p className="max-w-[14rem] text-[10px] text-amber-300">
+                データがまだありません。計測待ちか、閉店時間帯の可能性があります。
+              </p>
+            )}
+          </div>
         </div>
 
+        <StoreRealtimeStatusCard snapshot={snapshot} loading={!!loading} />
+      </section>
+
+      {/* ② この後どうなる？ — 日付切替 + タイムライン（キラーコンテンツ） */}
+      <section className="space-y-3">
         {canControlRange && (
           <div className="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-950/60 px-3 py-2">
+            <p className="text-[10px] font-medium text-slate-500">表示する日の夜（19:00–05:00）</p>
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex flex-wrap items-center gap-1">
                 {RANGE_MODE_OPTIONS.map((opt) => {
@@ -254,34 +261,22 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
           </div>
         )}
 
-        <div className="grid gap-2 text-xs md:grid-cols-5">
-          <MetricBox label="♂ 男性人数" value={`${roundedNowMen} 人`} tone="male" />
-          <MetricBox label="♀ 女性人数" value={`${roundedNowWomen} 人`} tone="female" />
-          <MetricBox
-            label="男女比（男:女）"
-            value={`${roundedNowMen}:${roundedNowWomen}`}
-          />
-          <MetricBox label="混雑度" value={snapshot.level} />
-          <MetricBox label="おすすめ度" value={snapshot.recommendation || "データなし"} />
-        </div>
-      </section>
-
-      <section className="rounded-3xl border border-slate-800 bg-black p-3 shadow-[0_18px_60px_rgba(0,0,0,0.85)]">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">
-            timeline
-          </p>
+        <div className="rounded-3xl border border-slate-800 bg-black p-3 shadow-[0_18px_60px_rgba(0,0,0,0.85)]">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">timeline</p>
+            <p className="mt-0.5 text-[11px] text-slate-400">
+              19:00-05:00 の推移（実測 &amp; 予測 / 男性・女性）
+            </p>
+          </div>
           <div className="text-right">
             <p className="text-[11px] text-slate-500">
               実線=実測 / 点線=予測（データなしの時間帯は空欄）
             </p>
-            <p className="text-[10px] text-slate-500">
-              予測更新: {snapshot.forecastUpdatedLabel}
-            </p>
           </div>
-        </div>
+          </div>
 
-        <div className="mt-3 h-72 w-full min-w-0 rounded-2xl bg-gradient-to-b from-slate-950 via-black to-black p-3">
+          <div className="mt-3 h-72 w-full min-w-0 rounded-2xl bg-gradient-to-b from-slate-950 via-black to-black p-3">
           {isClient && (
             <ResponsiveContainer width="100%" height="100%">
               <ComposedChart
@@ -389,9 +384,16 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
               </ComposedChart>
             </ResponsiveContainer>
           )}
+          </div>
         </div>
       </section>
 
+      {/* ③ AI の結論 — バッジ中心 */}
+      <section>
+        <MlForecastBadges snapshot={snapshot} loading={!!loading} />
+      </section>
+
+      {/* ④ フィードバック・二次会（下位） */}
       <section className={`${cardClass} p-3 text-xs`}>
         <FeedbackPoll storeSlug={storeSlug} />
       </section>
@@ -410,30 +412,6 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
           と接続して表示します。
         </p>
       </footer>
-    </div>
-  );
-}
-
-type MetricBoxProps = {
-  label: string;
-  value: string;
-  sub?: string;
-  tone?: "male" | "female" | "default";
-};
-
-function MetricBox({ label, value, sub, tone = "default" }: MetricBoxProps) {
-  const valueColorClass =
-    tone === "male"
-      ? "text-sky-400"
-      : tone === "female"
-      ? "text-pink-400"
-      : "text-slate-50";
-
-  return (
-    <div className="rounded-xl bg-slate-950/90 p-2 ring-1 ring-slate-800">
-      <p className="text-[10px] text-slate-400">{label}</p>
-      <p className={`mt-1 text-sm font-semibold ${valueColorClass}`}>{value}</p>
-      {sub && <p className="mt-0.5 text-[10px] text-slate-500">{sub}</p>}
     </div>
   );
 }

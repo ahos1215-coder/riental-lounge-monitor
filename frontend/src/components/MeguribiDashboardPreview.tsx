@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import PreviewMainSection from "./PreviewMainSection";
 import { useStorePreviewData } from "../app/hooks/useStorePreviewData";
@@ -8,7 +9,12 @@ import {
   getStoreMetaBySlug,
 } from "../app/config/stores";
 
-export default function MeguribiDashboardPreview() {
+type MeguribiDashboardPreviewProps = {
+  /** 店舗名横にお気に入りボタンなど */
+  headerActions?: ReactNode;
+};
+
+export default function MeguribiDashboardPreview({ headerActions }: MeguribiDashboardPreviewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -52,6 +58,7 @@ export default function MeguribiDashboardPreview() {
         customDate={customDate}
         onChangeCustomDate={setCustomDate}
         selectedBaseDate={selectedBaseDate}
+        storeHeaderActions={headerActions}
       />
     </main>
   );

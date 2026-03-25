@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useMemo } from "react";
+import { GenderRatioBar } from "@/components/home/GenderRatioBar";
 import { recordStoreVisit } from "@/lib/browser/meguribiStorage";
 
 type StoreCardProps = {
@@ -127,41 +128,39 @@ export function StoreCard({
           </h2>
           <p className="mt-0.5 text-[11px] text-white/50">{areaLabel}</p>
           {hasStats && (
-            <div className="mt-1.5 flex items-center gap-2 text-[11px]">
-              <span className="rounded-full border border-sky-400/40 bg-sky-500/10 px-2 py-0.5 font-semibold text-sky-300">
-                男性 {menCount}人
-              </span>
-              <span className="rounded-full border border-rose-400/40 bg-rose-500/10 px-2 py-0.5 font-semibold text-rose-300">
-                女性 {womenCount}人
-              </span>
+            <div className="mt-2 space-y-2">
+              <div className="flex items-center gap-2 text-[11px]">
+                <span className="rounded-full border border-cyan-400/35 bg-cyan-500/10 px-2 py-0.5 font-semibold text-cyan-200">
+                  男性 {menCount}
+                </span>
+                <span className="rounded-full border border-pink-400/35 bg-pink-500/10 px-2 py-0.5 font-semibold text-pink-200">
+                  女性 {womenCount}
+                </span>
+                <span className="text-white/45">計 {nowTotal}</span>
+              </div>
+              <GenderRatioBar men={menCount} women={womenCount} compact />
             </div>
           )}
         </div>
         <div className="flex flex-col items-end gap-0.5 text-[11px] text-white/70">
           {hasStats && (
             <div className="flex items-center gap-1">
-              <span className="text-white/50">現在</span>
-              <span className="font-semibold text-white">{nowTotal}人</span>
-            </div>
-          )}
-          {hasStats && (
-            <div className="flex items-center gap-1">
-              <span className="text-white/50">今夜ピーク予測</span>
+              <span className="text-white/50">ピーク予測</span>
               <span className="font-semibold text-indigo-200">{peakPredTotal}人</span>
             </div>
           )}
           <div className="flex items-center gap-1">
-            <span className="text-white/50">男女比</span>
+            <span className="text-white/50">比</span>
             <span className="font-semibold text-white">{gender}</span>
           </div>
           <div className="flex items-center gap-1">
-            <span className="text-white/50">混雑度</span>
+            <span className="text-white/50">混雑</span>
             <span className={`font-semibold ${crowdClass}`}>{crowdIcon} {crowd}</span>
           </div>
           {hasStats && (
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1 text-right">
               <span className="text-white/50">狙い目</span>
-              <span className="font-semibold text-white">{recommend}</span>
+              <span className="max-w-[7rem] truncate font-semibold text-white">{recommend}</span>
             </div>
           )}
         </div>
