@@ -176,7 +176,7 @@ export function StoreCard({
       </div>
 
       <p className="mt-2 text-[11px] font-medium text-indigo-300">
-        ダッシュボードを開く ←
+        店舗の詳細を見る →
       </p>
         </>
       )}

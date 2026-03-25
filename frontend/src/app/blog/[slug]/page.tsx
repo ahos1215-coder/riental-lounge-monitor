@@ -150,7 +150,11 @@ export default async function BlogPostPage({ params, searchParams }: Props) {
     return (
       <main className="mx-auto w-full max-w-3xl px-4 py-10">
         <div className="mb-6">
-          <Link href="/blog" className="inline-flex items-center gap-2 text-sm text-white/70 hover:text-white">
+          <Link
+            href="/blog"
+            className="inline-flex items-center gap-2 text-sm text-white/70 transition hover:text-white"
+          >
+            <span aria-hidden="true">←</span>
             ブログ一覧へ戻る
           </Link>
         </div>
@@ -192,8 +196,13 @@ export default async function BlogPostPage({ params, searchParams }: Props) {
   return (
     <main className="mx-auto w-full max-w-3xl px-4 py-10">
       <div className="mb-6">
-        <Link href="/blog" className="inline-flex items-center gap-2 text-sm text-white/70 hover:text-white">
-          驕ｶ鄙ｫ繝ｻ驛｢譎・§・取ｺｽ・ｹ・ｧ繝ｻ・ｰ髣包ｽｳ・つ鬮ｫ蛹・ｽｽ・ｧ驍ｵ・ｺ繝ｻ・ｸ髫ｰ魃会ｽｽ・ｻ驛｢・ｧ郢晢ｽｻ        </Link>
+        <Link
+          href="/blog"
+          className="inline-flex items-center gap-2 text-sm text-white/70 transition hover:text-white"
+        >
+          <span aria-hidden="true">←</span>
+          ブログ一覧へ戻る
+        </Link>
       </div>
 
       <header className="mb-8">

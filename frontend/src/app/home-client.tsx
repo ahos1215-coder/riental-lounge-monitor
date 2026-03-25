@@ -270,13 +270,14 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                   <br />
                   やさしく照らす案内灯。
                 </h1>
-                <p className="mt-4 max-w-xl text-sm text-slate-100/80">
-                  オリエンタルラウンジを中心に、各店舗の男女比・混雑・予測をまとめてチェック。
-                  「いま行くならどこ？」を、感覚ではなくデータで選べるようにします。
+                <p className="mt-4 max-w-xl text-sm leading-relaxed text-slate-100/80">
+                  オリエンタルラウンジ各店の男女比・混雑の目安・予測を一覧で比較できます。
+                  「いま行くならどこ？」を、感覚だけでなくデータを手がかりに選べます。
                 </p>
                 {featuredStore && (
-                  <p className="mt-3 max-w-xl text-sm text-emerald-200">
-                    いまのおすすめ: {getStoreMetaBySlug(featuredStore.slug).label}（落ち着き目安 {featuredStore.calmLabel}）
+                  <p className="mt-3 max-w-xl text-sm text-emerald-200/95">
+                    いまの目安: {getStoreMetaBySlug(featuredStore.slug).label}（落ち着きやすい時間帯の目安{" "}
+                    {featuredStore.calmLabel}）
                   </p>
                 )}
                 <div className="mt-5 flex flex-wrap gap-3 text-sm">
@@ -309,13 +310,13 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
           />
 
           <section className="space-y-3">
-            <h2 className="text-sm font-semibold text-slate-100">Last visited store</h2>
+            <h2 className="text-sm font-semibold text-slate-100">最近見た店舗</h2>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/80 px-4 py-4">
               <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] md:items-center">
                 <div>
                   {lastStore ? (
                     <>
-                      <p className="text-[11px] text-slate-400">Last visited</p>
+                      <p className="text-[11px] text-slate-400">前回閲覧</p>
                       <p className="mt-1 text-lg font-semibold text-slate-50">
                         Oriental Lounge {lastStore.label}
                       </p>
@@ -323,10 +324,10 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                         {lastStore.areaLabel}
                       </p>
                       <p className="mt-1 text-[11px] text-slate-400">
-                        男女比・混雑・おすすめは店舗ページでご確認ください。
+                        男女比・混雑の目安・狙い目は店舗ページでご確認ください。
                       </p>
                       <p className="mt-2 text-[11px] text-slate-500">
-                        店舗ページを開くと、あとからここへワンタップで戻れます。
+                        店舗ページを開くと、次回はここからすぐに戻れます。
                       </p>
                       <div className="mt-3">
                         <Link
@@ -350,7 +351,7 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                         店舗を開くと、男女比・混雑などをまとめて表示します。
                       </p>
                       <p className="mt-2 text-[11px] text-slate-500">
-                        店舗ページを開くと、あとからここへワンタップで戻れます。
+                        店舗を開くと、次回はここからすぐに戻れます。
                       </p>
                       <div className="mt-3">
                         <Link
@@ -374,8 +375,8 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-sm font-semibold text-slate-100">掲載中の店舗</h2>
-                <p className="mt-0.5 text-[11px] text-slate-500">
-                  男女人数（青/赤）・現在人数・混雑度・狙い目をカードで比較できます（時間帯で自動並び替え）。
+                <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
+                  男女人数・現在の人数・混雑の目安・狙い目をカードで比較（時間帯により並び順が変わります）。
                 </p>
               </div>
               <Link
@@ -425,12 +426,12 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                     href={`/blog/${article.slug}`}
                     className="flex flex-col overflow-hidden rounded-2xl border border-slate-800 bg-slate-950/80 text-sm transition hover:border-amber-400/80 hover:bg-slate-900 hover:shadow-[0_0_20px_rgba(251,191,36,0.25)]"
                   >
-                    <div className="flex h-24 items-center justify-center border-b border-slate-800 bg-gradient-to-br from-indigo-900/40 to-slate-900/80">
-                      <span className="text-[11px] font-medium text-indigo-200/90">
+                    <div className="flex min-h-24 flex-wrap items-center justify-center gap-2 border-b border-slate-800 bg-gradient-to-br from-indigo-900/40 to-slate-900/80 px-3 py-3">
+                      <span className="text-center text-[11px] font-medium text-indigo-200/90">
                         {article.categoryLabel}
                       </span>
-                      <span className="ml-2 rounded-full border border-emerald-400/50 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">
-                        AI予測更新
+                      <span className="rounded-full border border-emerald-400/50 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-200">
+                        予測ベース
                       </span>
                     </div>
                     <div className="flex flex-1 flex-col p-3">
@@ -447,13 +448,13 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
 
           <section className="space-y-3">
             <h2 className="text-sm font-semibold text-slate-100">めぐりびとは</h2>
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-sm text-slate-100/80">
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-sm leading-relaxed text-slate-100/80">
               <p>
-                「めぐりび」は、特別な夜にふさわしい一軒を求めるあなたのための案内灯です。
-                リアルタイムの混雑傾向や男女比、独自の予測モデルをもとに、「いま行くならどこが良さそうか」をやさしく教えてくれます。
+                「めぐりび」は、特別な夜にふさわしい一軒を探すための案内灯です。
+                混雑の傾向や男女比、独自の予測モデルをもとに、「いま行くならどこが良さそうか」の参考をお届けします。
               </p>
               <p className="mt-2">
-                まずはオリエンタルラウンジから対応を始め、今後は他ブランドや二次会スポットにも対応していく予定です。
+                まずはオリエンタルラウンジから対応し、今後は他ブランドや二次会スポットにも広げていく予定です。
               </p>
             </div>
           </section>

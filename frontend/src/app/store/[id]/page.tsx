@@ -79,7 +79,8 @@ function ForecastQuickPanel({ slug }: { slug: string }) {
   return (
     <section className="mx-auto w-full max-w-6xl px-4">
       <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-        <p className="text-[11px] font-semibold text-emerald-200">ML 2.0 今日の予測ハイライト</p>
+        <p className="text-[11px] font-semibold text-emerald-200">ML 2.0 · 今日の予測ハイライト</p>
+        <p className="mt-1 text-[10px] text-white/45">数値は参考目安です。実際の混雑は店舗の状況により変わります。</p>
         <div className="mt-2 grid gap-2 md:grid-cols-3">
           <div className="rounded-xl border border-white/10 bg-black/20 p-2.5">
             <p className="text-[10px] text-white/60">賑わいピークの目安</p>
@@ -264,6 +265,7 @@ function StorePageInner() {
           }}
           className="rounded-full border border-amber-400/35 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-100 transition hover:border-amber-300/60 hover:bg-amber-500/20"
           aria-pressed={favorite}
+          aria-label={favorite ? "お気に入りから外す" : "お気に入りに追加"}
         >
           {favorite ? "★ お気に入り済み" : "☆ お気に入りに追加"}
         </button>
@@ -273,7 +275,8 @@ function StorePageInner() {
       <ForecastQuickPanel slug={slug} />
 
       <section className="mx-auto w-full max-w-6xl space-y-3 px-4">
-        <h2 className="text-sm font-semibold text-slate-100">Check other stores</h2>
+        <h2 className="text-sm font-semibold text-slate-100">ほかの店舗を見る</h2>
+        <p className="text-[11px] text-slate-500">別店舗の人数・混雑の目安を、カードからすぐに比較できます。</p>
         <div className="grid gap-3 md:grid-cols-4">
           {digestStores.map((store, idx) => (
             <StoreCard

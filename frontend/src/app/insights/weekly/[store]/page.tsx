@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { getStoreMetaBySlugStrict } from "@/app/config/stores";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import WeeklyStoreCharts from "../WeeklyStoreCharts";
 
@@ -96,8 +97,10 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { store } = await params;
   const base = getMetadataBaseUrl();
-  const title = `${store} 週次Insights`;
-  const description = `${store} の週次 Good Window サマリー（めぐりび）。`;
+  const sm = getStoreMetaBySlugStrict(store);
+  const label = sm ? `オリエンタルラウンジ ${sm.label}` : store;
+  const title = `${label} · 週次Insights`;
+  const description = `${label} の週次サマリー。混雑が落ち着きやすい時間帯（Good Window）の候補を表示します。`;
   return {
     title,
     description,
@@ -170,6 +173,9 @@ export default async function WeeklyInsightsStorePage({
   const minDuration = data.params?.min_duration_minutes ?? 120;
   const reliability = typeof metrics.reliability_score === "number" ? metrics.reliability_score : 0;
 
+  const storeMeta = getStoreMetaBySlugStrict(store);
+  const storeHeading = storeMeta ? `オリエンタルラウンジ ${storeMeta.label}` : store;
+
   const rawSeries = Array.isArray(data.series_compact) ? data.series_compact : [];
   const seriesCompact = rawSeries
     .filter(
@@ -193,27 +199,31 @@ export default async function WeeklyInsightsStorePage({
 
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="text-xs text-white/50">store</p>
-            <h1 className="text-2xl font-black tracking-tight">{store}</h1>
+            <p className="text-xs text-white/50">店舗</p>
+            <h1 className="text-2xl font-black tracking-tight">{storeHeading}</h1>
+            {storeMeta && <p className="mt-1 text-[11px] text-white/40">slug: {store}</p>}
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-xs text-white/70">
-            generated_at: {data.generated_at ?? "-"}
+            <span className="text-white/45">データ生成時刻:</span> {data.generated_at ?? "-"}
           </div>
         </div>
 
         <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <p className="text-xs text-white/50">points_used</p>
+            <p className="text-xs font-medium text-white/70">使用サンプル数</p>
+            <p className="mt-0.5 text-[10px] text-white/35">points_used</p>
             <p className="mt-2 text-2xl font-black">{metrics.points_used ?? 0}</p>
-            <p className="mt-1 text-[11px] text-white/40">分析に使ったサンプル数</p>
+            <p className="mt-1 text-[11px] text-white/40">分析に使ったデータ点数</p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <p className="text-xs text-white/50">baseline_p95_total</p>
+            <p className="text-xs font-medium text-white/70">ベースライン（p95）</p>
+            <p className="mt-0.5 text-[10px] text-white/35">baseline_p95_total</p>
             <p className="mt-2 text-2xl font-black">{formatNumber(metrics.baseline_p95_total, 1)}</p>
-            <p className="mt-1 text-[11px] text-white/40">混雑目安のベースライン（p95）</p>
+            <p className="mt-1 text-[11px] text-white/40">混雑目安の基準値</p>
           </div>
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-            <p className="text-xs text-white/50">reliability_score</p>
+            <p className="text-xs font-medium text-white/70">信頼度スコア</p>
+            <p className="mt-0.5 text-[10px] text-white/35">reliability_score</p>
             <p className="mt-2 text-2xl font-black">{formatNumber(metrics.reliability_score, 2)}</p>
             <p className="mt-1 text-[11px] text-white/40">200点以上で 1.0（参考）</p>
             <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-white/10">
@@ -227,11 +237,12 @@ export default async function WeeklyInsightsStorePage({
 
         <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5 text-sm text-white/70">
           <p>
-            <span className="text-white/45">period:</span> {data.period?.start ?? "-"} → {data.period?.end ?? "-"}
+            <span className="text-white/45">集計期間:</span> {data.period?.start ?? "-"} 〜 {data.period?.end ?? "-"}
           </p>
-          <p className="mt-2 text-xs text-white/45">
-            Good Window はスコアが {threshold} 以上が {minDuration} 分続く区間として検出しています（詳細は{" "}
-            <code className="rounded bg-black/40 px-1">scripts/generate_weekly_insights.py</code>）。
+          <p className="mt-2 text-xs leading-relaxed text-white/45">
+            Good Window は、スコアが {threshold} 以上が {minDuration} 分続く区間として検出しています（算出の詳細は{" "}
+            <code className="rounded bg-black/40 px-1">scripts/generate_weekly_insights.py</code>
+            ）。
           </p>
         </div>
 
@@ -245,23 +256,30 @@ export default async function WeeklyInsightsStorePage({
         </div>
 
         <section className="mt-8">
-          <h2 className="text-lg font-bold">Top Windows</h2>
+          <h2 className="text-lg font-bold">検出された時間帯（Good Window）</h2>
 
           {topWindows.length === 0 ? (
             <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-5 text-sm text-white/70">
-              今週はGood Windowが見つかりませんでした（条件: {threshold}以上が{minDuration}分連続）。
+              今週は条件を満たす区間が見つかりませんでした（スコア {threshold} 以上が {minDuration} 分連続）。
             </div>
           ) : (
             <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
               {topWindows.map((w, idx) => (
                 <div key={`${w.start ?? "window"}-${idx}`} className="rounded-2xl border border-white/10 bg-black/40 p-5">
-                  <p className="text-xs text-white/50">window #{idx + 1}</p>
-                  <p className="mt-2 text-sm text-white/70">start: {w.start ?? "-"}</p>
-                  <p className="text-sm text-white/70">end: {w.end ?? "-"}</p>
+                  <p className="text-xs text-white/50">候補 {idx + 1}</p>
                   <p className="mt-2 text-sm text-white/70">
-                    duration: {w.duration_minutes != null ? Math.round(w.duration_minutes) : "-"} min
+                    <span className="text-white/45">開始:</span> {w.start ?? "-"}
                   </p>
-                  <p className="text-sm text-white/70">avg_score: {formatNumber(w.avg_score, 3)}</p>
+                  <p className="text-sm text-white/70">
+                    <span className="text-white/45">終了:</span> {w.end ?? "-"}
+                  </p>
+                  <p className="mt-2 text-sm text-white/70">
+                    <span className="text-white/45">継続時間:</span>{" "}
+                    {w.duration_minutes != null ? `${Math.round(w.duration_minutes)} 分` : "-"}
+                  </p>
+                  <p className="text-sm text-white/70">
+                    <span className="text-white/45">平均スコア:</span> {formatNumber(w.avg_score, 3)}
+                  </p>
                 </div>
               ))}
             </div>

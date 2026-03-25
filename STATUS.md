@@ -34,10 +34,10 @@
 2. **ジョブ一覧**で次を確認する。
    - **`trigger`** が店舗ごとに並び、各店の `GET /api/cron/blog-draft` ステップが成功/失敗していること。
    - **`Summarize matrix results`** が **成功（緑）** であること。ここで API が各ジョブの結論を集計する。
-   - **一部店舗だけ失敗**している場合: **`notify-partial-blog-failures`** が実行され、**`OPS_NOTIFY_WEBHOOK_URL` 設定時**は Slack/Discord に「失敗店舗 slug」が載った通知が届くこと（届かない場合は Secret / Variable を確認）。
+   - **一部店舗だけ失敗**している場合: **`notify-partial-blog-failures`** が実行され、**`OPS_NOTIFY_WEBHOOK_URL` 設定時**は Slack/Discord に「問題のある店舗 slug」が載った通知が届くこと（届かない場合は Secret / Variable を確認）。**Summarize** は `continue-on-error` でジョブが緑でも **ステップ失敗**（`curl` 失敗・504 等）を GitHub API で検知する。
    - **全店成功**の場合: `notify-partial-blog-failures` は **条件によりスキップ**され、部分失敗通知は来ない（正常）。
 3. **正本**: 上記のあと、必ず **Supabase `blog_drafts`** で対象日・各店の **`error_message`** と本文を確認する（手順は上記「監視の手順（最短）」）。
-4. **部分失敗通知だけ来ない・Summarize が常に「失敗 0 件」**のとき: GitHub の **同一 run のジョブ名**を開き、matrix ジョブの表示名が **`trigger (店舗slug)`** 形式かどうかを確認する。形式が違う場合は `.github/workflows/trigger-blog-cron.yml` 内 `summarize-blog-matrix` の **正規表現**（`trigger (…)` のマッチ）を実名に合わせて修正する（詳細は `plan/BLOG_CRON_GHA.md`）。
+4. **部分失敗通知だけ来ない**のとき: **`OPS_NOTIFY_WEBHOOK_URL`** が未設定でないか確認する。同じ run で **GET ステップが赤**なのに通知が無い場合は、GitHub の matrix ジョブの表示名が **`trigger (店舗slug)`** 形式かどうかを確認する。形式が違う場合は `.github/workflows/trigger-blog-cron.yml` 内 `summarize-blog-matrix` の **正規表現**（`trigger (…)` のマッチ）を実名に合わせて修正する（詳細は `plan/BLOG_CRON_GHA.md`）。
 
 ## 将来：同期 HTTP の限界を超えるとき
 

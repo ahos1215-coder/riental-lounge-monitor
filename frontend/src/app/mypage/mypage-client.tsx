@@ -86,8 +86,8 @@ export default function MyPageClient() {
 
       <div className="relative z-10 mx-auto w-full max-w-3xl px-4 pb-16 pt-10">
         <h1 className="text-3xl font-black tracking-tight">マイページ</h1>
-        <p className="mt-2 text-sm text-white/60">
-          閲覧履歴・お気に入りはこのブラウザにだけ保存されます（アカウント連携なし）。
+        <p className="mt-2 text-sm leading-relaxed text-white/60">
+          閲覧履歴・お気に入りはこのブラウザにだけ保存されます（ログイン・アカウント連携なし）。
         </p>
 
         <section className="mt-8 space-y-3">
@@ -131,6 +131,7 @@ export default function MyPageClient() {
                   refresh();
                 }}
                 className="text-[11px] text-white/45 underline-offset-2 hover:text-amber-200/90 hover:underline"
+                aria-label="お気に入りをすべて解除"
               >
                 すべて解除
               </button>
@@ -163,6 +164,7 @@ export default function MyPageClient() {
                         refresh();
                       }}
                       className="shrink-0 rounded-md border border-white/15 px-2 py-1 text-[11px] text-white/60 hover:border-rose-400/40 hover:text-rose-200"
+                      aria-label={`${m.label}をお気に入りから外す`}
                     >
                       解除
                     </button>
@@ -176,6 +178,9 @@ export default function MyPageClient() {
         {favoriteSlugs.length > 0 && (
           <section className="mt-10 space-y-3">
             <h2 className="text-sm font-semibold text-emerald-100/90">お気に入り店舗の今日の予測（ML 2.0）</h2>
+            <p className="text-[11px] leading-relaxed text-white/45">
+              数値・時刻は参考目安です。実際の混雑は店舗の状況により変わります。
+            </p>
             <div className="grid gap-2">
               {quickForecast.map((f) => {
                 const m = slugToMeta(f.slug);
@@ -207,6 +212,7 @@ export default function MyPageClient() {
                   refresh();
                 }}
                 className="text-[11px] text-white/45 underline-offset-2 hover:text-amber-200/90 hover:underline"
+                aria-label="最近見た店舗の履歴をすべて削除"
               >
                 履歴を消す
               </button>
@@ -214,7 +220,7 @@ export default function MyPageClient() {
           </div>
           {historySlugs.length === 0 ? (
             <p className="rounded-2xl border border-dashed border-white/15 bg-white/[0.03] p-4 text-sm text-white/50">
-              店舗ダッシュボードを開くと、ここに最大12件まで表示されます。
+              店舗ページを開くと、ここに最大12件まで表示されます。
             </p>
           ) : (
             <ul className="space-y-2">

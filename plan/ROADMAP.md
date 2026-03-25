@@ -19,7 +19,7 @@ Target commit: (see git)
 - 週次 Insights の可視化強化（**実装済み**: `series_compact`＋`WeeklyStoreCharts.tsx`／`plan/WEEKLY_INSIGHTS_TUNING.md`。追加の系列や説明文は任意）
 - ブログ / Facts の運用負荷削減（**frontmatter Zod 検証は実装済み** `blogFrontmatter.ts`。残り: テンプレ整理・Facts 側など）
 - 監視・運用の可視化（ログの整理、Render/Vercel 運用の整理）
-- **GitHub Actions の失敗通知**（**実装済み**: Secret `OPS_NOTIFY_WEBHOOK_URL` + 任意 Variable `OPS_NOTIFY_WEBHOOK_TYPE`。`plan/RUNBOOK.md` 参照。`blog-ci` は対象外）
+- **GitHub Actions の失敗通知**（**実装済み**: Secret `OPS_NOTIFY_WEBHOOK_URL` + 任意 Variable `OPS_NOTIFY_WEBHOOK_TYPE`。`plan/RUNBOOK.md` 参照。`blog-ci` は対象外）。定時ブログの **部分失敗**は **`summarize-blog-matrix`** が **steps** まで確認（`plan/BLOG_CRON_GHA.md`）
 - **`POST /api/line` の防衛**: 署名検証に加え **レート制限を実装済み**（グローバル＋ユーザー単位、Upstash 推奨。`plan/DECISIONS.md` 14 / `plan/ENV.md`）。追加で IP ベース Middleware 等が必要なら別検討（Webhook は LINE 経由のため IP は補助）
 - **Gemini 出力の構造化**: frontmatter と本文の分離（JSON + text）。**2026-03 追記**: `draftGenerator.ts` で **Zod** による structured 応答の検証（本文最小長・日付形式など）を追加。破損時は従来どおり生 MDX パスへフォールバック。
 - **OGP / メタデータ**（主要ページ・ブログ）— **実装済み**（`plan/STATUS.md`）。**X（Twitter）API 連携・投稿用 API ルート**（`VISION_AND_FUTURE.md` フェーズ B）— **未実装。構想段階**。自動投稿のスコープは **人気トップ5店＋長崎店のみ**から開始する方針（§9）。

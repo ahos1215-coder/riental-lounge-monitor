@@ -2,13 +2,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { getStoreMetaBySlugStrict } from "@/app/config/stores";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 
 const weeklyBase = getMetadataBaseUrl();
 
 export const metadata: Metadata = {
   title: "週次Insights",
-  description: "週次の Good Window Insights を一覧表示します。",
+  description:
+    "店舗ごとの週次サマリー。混雑が落ち着きやすい時間帯（Good Window）の候補を一覧できます。",
   openGraph: {
     title: "週次Insights | めぐりび",
     description: "店舗別の週次サマリー（Good Window）を一覧します。",
@@ -62,14 +64,15 @@ export default async function WeeklyInsightsIndexPage() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-3xl font-black tracking-tight">週次Insights</h1>
-            <p className="mt-2 text-sm text-white/60">
-              Good Window Explorer（最小版）の週次サマリーです。
+            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-white/60">
+              店舗ごとの1週間分のデータから、混雑が落ち着きやすい時間帯（Good
+              Window）の候補をまとめた画面です。詳細は店舗名から開けます。
             </p>
           </div>
         </div>
 
         <div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-5">
-          <p className="text-xs text-white/50">generated_at</p>
+          <p className="text-xs text-white/50">一覧インデックスの更新時刻</p>
           <p className="mt-1 text-sm font-semibold">{data?.generated_at ?? "-"}</p>
         </div>
 
@@ -83,20 +86,27 @@ export default async function WeeklyInsightsIndexPage() {
           </div>
         ) : (
           <section className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {stores.map(([store, meta]) => (
-              <Link
-                key={store}
-                href={`/insights/weekly/${store}`}
-                className="group rounded-2xl border border-white/10 bg-white/5 p-5 hover:border-white/20"
-              >
-                <p className="text-xs text-white/50">store</p>
-                <p className="mt-1 text-lg font-black">{store}</p>
-                <p className="mt-3 text-xs text-white/50">latest_file</p>
-                <p className="text-sm text-white/80">{meta?.latest_file ?? "-"}</p>
-                <p className="mt-3 text-xs text-white/50">generated_at</p>
-                <p className="text-sm text-white/80">{meta?.generated_at ?? "-"}</p>
-              </Link>
-            ))}
+            {stores.map(([storeSlug, meta]) => {
+              const sm = getStoreMetaBySlugStrict(storeSlug);
+              const title = sm ? `オリエンタルラウンジ ${sm.label}` : storeSlug;
+              return (
+                <Link
+                  key={storeSlug}
+                  href={`/insights/weekly/${storeSlug}`}
+                  className="group rounded-2xl border border-white/10 bg-white/5 p-5 transition hover:border-amber-400/30 hover:bg-white/[0.07]"
+                >
+                  <p className="text-xs text-white/50">店舗</p>
+                  <p className="mt-1 text-lg font-black leading-snug">{title}</p>
+                  {sm && (
+                    <p className="mt-0.5 text-[11px] text-white/40">slug: {storeSlug}</p>
+                  )}
+                  <p className="mt-3 text-xs text-white/50">参照中のデータファイル</p>
+                  <p className="break-all text-sm text-white/80">{meta?.latest_file ?? "-"}</p>
+                  <p className="mt-3 text-xs text-white/50">店舗データの更新時刻</p>
+                  <p className="text-sm text-white/80">{meta?.generated_at ?? "-"}</p>
+                </Link>
+              );
+            })}
           </section>
         )}
       </div>

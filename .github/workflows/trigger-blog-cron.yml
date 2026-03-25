@@ -173,9 +173,24 @@ jobs:
             }
             const slugRe = /\btrigger\s*\(([^)]+)\)/;
             const matrixJobs = all.filter((j) => slugRe.test(j.name));
-            const bad = matrixJobs.filter(
+            const failedOrCancelled = matrixJobs.filter(
               (j) => j.conclusion === "failure" || j.conclusion === "cancelled",
             );
+            const successMatrix = matrixJobs.filter((j) => j.conclusion === "success");
+            const stepFailedSuccess = (
+              await Promise.all(
+                successMatrix.map(async (j) => {
+                  const { data: detail } = await github.rest.actions.getJobForWorkflowRun({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    job_id: j.id,
+                  });
+                  const hasFailedStep = (detail.steps || []).some((s) => s.conclusion === "failure");
+                  return hasFailedStep ? j : null;
+                }),
+              )
+            ).filter((x) => x != null);
+            const bad = [...failedOrCancelled, ...stepFailedSuccess];
             if (bad.length === 0) {
               core.setOutput("should_notify", "false");
               core.setOutput("notify_body", "");
@@ -185,9 +200,10 @@ jobs:
               const m = j.name.match(slugRe);
               return m ? m[1] : j.name;
             });
+            const uniq = [...new Set(slugs)].sort();
             const msg = [
-              "定時ブログ Cron: 店舗ジョブが " + bad.length + " 件失敗/キャンセル（" + slugs.join(", ") + "）。",
-              "ワークフロー全体は緑に見える場合があります。",
+              "定時ブログ Cron: 店舗 " + uniq.length + " 件に問題（" + uniq.join(", ") + "）。",
+              "ジョブは緑でも GET ステップが continue-on-error で失敗（504 等）した場合を含みます。",
               "成否の正本は Supabase blog_drafts（リポジトリ直下 STATUS.md）。",
               "repo: " + context.repo.owner + "/" + context.repo.repo,
               "ref: " + context.ref,

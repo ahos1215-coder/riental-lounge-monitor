@@ -136,22 +136,22 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
 
       <div className="relative mx-auto w-full max-w-6xl px-4 pb-16 pt-10">
         <h1 className="text-3xl font-black tracking-tight">ブログ</h1>
-        <p className="mt-2 text-sm text-white/60">
-          相席系ラウンジ・バーの攻略や夜の楽しみ方を、わかりやすく解説します。
+        <p className="mt-2 max-w-2xl text-sm leading-relaxed text-white/60">
+          相席系ラウンジ・バーの立ち回りや夜の楽しみ方、混雑の読み方などをわかりやすくまとめています。店舗別の自動更新記事もここから辿れます。
         </p>
 
-        <form className="mt-6 flex w-full items-center gap-3">
+        <form className="mt-6 flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
           <input
             name="q"
             defaultValue={q}
-            placeholder="Search 記事を検索（例：初心者、予測、会話）"
-            className="h-11 w-full rounded-xl border border-white/10 bg-white/5 px-4 text-sm text-white placeholder:text-white/30 outline-none focus:border-white/20"
+            placeholder="記事を検索（例：初心者、予測、会話）"
+            className="h-11 min-w-0 flex-1 rounded-xl border border-white/10 bg-white/5 px-4 text-sm text-white placeholder:text-white/30 outline-none focus:border-white/20"
           />
           {cat !== "all" && <input type="hidden" name="cat" value={cat} />}
           {sort !== "all" && <input type="hidden" name="sort" value={sort} />}
           <button
             type="submit"
-            className="h-11 rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-semibold hover:border-white/20"
+            className="h-11 w-full shrink-0 rounded-xl border border-white/10 bg-white/5 px-4 text-sm font-semibold hover:border-white/20 sm:w-auto"
           >
             検索
           </button>
@@ -313,8 +313,8 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
                 ))}
               </div>
 
-              <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-3 text-xs text-white/60">
-                ※ この記事群はデモです。将来的に集計結果（Facts）から自動で更新できる形に寄せます。
+              <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-3 text-xs leading-relaxed text-white/60">
+                ※ 閲覧数ランキングはコンテンツ内の値に基づくデモ表示です。自動更新記事は別枠（緑のカード）をご利用ください。
               </div>
             </div>
           </aside>
