@@ -26,6 +26,19 @@
 
 全 38 店の定時実行は **Blog draft cron (GitHub Actions)**（`.github/workflows/trigger-blog-cron.yml`）のまま。
 
+## 定時 Cron 実行後のチェックリスト（初回・ワークフロー変更直後）
+
+**いつ**: JST **18:00 便**または **21:30 便**の直後（もしくは **`workflow_dispatch`** で全店を手動実行した直後）。
+
+1. **GitHub** → **Actions** → **Blog draft cron (GitHub Actions)** → いま完了した **run** を開く。
+2. **ジョブ一覧**で次を確認する。
+   - **`trigger`** が店舗ごとに並び、各店の `GET /api/cron/blog-draft` ステップが成功/失敗していること。
+   - **`Summarize matrix results`** が **成功（緑）** であること。ここで API が各ジョブの結論を集計する。
+   - **一部店舗だけ失敗**している場合: **`notify-partial-blog-failures`** が実行され、**`OPS_NOTIFY_WEBHOOK_URL` 設定時**は Slack/Discord に「失敗店舗 slug」が載った通知が届くこと（届かない場合は Secret / Variable を確認）。
+   - **全店成功**の場合: `notify-partial-blog-failures` は **条件によりスキップ**され、部分失敗通知は来ない（正常）。
+3. **正本**: 上記のあと、必ず **Supabase `blog_drafts`** で対象日・各店の **`error_message`** と本文を確認する（手順は上記「監視の手順（最短）」）。
+4. **部分失敗通知だけ来ない・Summarize が常に「失敗 0 件」**のとき: GitHub の **同一 run のジョブ名**を開き、matrix ジョブの表示名が **`trigger (店舗slug)`** 形式かどうかを確認する。形式が違う場合は `.github/workflows/trigger-blog-cron.yml` 内 `summarize-blog-matrix` の **正規表現**（`trigger (…)` のマッチ）を実名に合わせて修正する（詳細は `plan/BLOG_CRON_GHA.md`）。
+
 ## 将来：同期 HTTP の限界を超えるとき
 
 504 が店舗単位でも再発し、45 秒バジェットや GHA 分割では足りない場合は、**202 Accepted＋バックグラウンド処理**や**キュー**の導入を検討する。選択肢と段階は **`plan/BLOG_CRON_ASYNC_FUTURE.md`** に記載する。
