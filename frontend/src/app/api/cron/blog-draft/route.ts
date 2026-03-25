@@ -54,7 +54,7 @@ function buildStableFactsId(
   source: BlogDraftPipelineSource,
 ): string {
   // SEO 用: 定時自動投稿は固定IDで上書き運用（URL固定を想定）
-  if (source === "github_actions_cron" || source === "vercel_cron") {
+  if (source === "github_actions_cron" || source === "vercel_cron" || source === "github_actions_retry") {
     const slot = edition ?? "nightly";
     return `auto_${storeSlug}_${slot}`;
   }
@@ -116,6 +116,7 @@ async function handleCron(req: NextRequest) {
     sourceParam === "line_webhook" ||
     sourceParam === "vercel_cron" ||
     sourceParam === "github_actions_cron" ||
+    sourceParam === "github_actions_retry" ||
     sourceParam === "manual_api"
       ? sourceParam
       : "github_actions_cron";

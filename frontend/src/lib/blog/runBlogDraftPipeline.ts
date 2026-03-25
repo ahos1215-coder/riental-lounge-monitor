@@ -16,6 +16,7 @@ export type BlogDraftPipelineSource =
   | "line_webhook"
   | "vercel_cron"
   | "github_actions_cron"
+  | "github_actions_retry"
   | "manual_api";
 
 export type RunBlogDraftPipelineInput = {

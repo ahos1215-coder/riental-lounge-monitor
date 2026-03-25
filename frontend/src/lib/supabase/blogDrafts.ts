@@ -137,9 +137,10 @@ export async function fetchLatestAutoBlogDrafts(limit = 12): Promise<AutoBlogDra
   if (!conf) return [];
   const { endpoint, key } = conf;
   const capped = Math.max(1, Math.min(limit, 40));
+  // 定時 cron と GHA 手動再試行は同一の自動下書きとして扱う
   const url =
     `${endpoint}?select=facts_id,store_slug,target_date,mdx_content,source,updated_at,created_at,error_message` +
-    `&source=eq.github_actions_cron&error_message=is.null&mdx_content=not.eq.` +
+    `&source=in.(github_actions_cron,github_actions_retry)&error_message=is.null&mdx_content=not.eq.` +
     `&order=updated_at.desc.nullslast,created_at.desc&limit=${capped}`;
   try {
     const res = await fetch(url, {

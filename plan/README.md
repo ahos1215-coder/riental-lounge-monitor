@@ -1,5 +1,5 @@
 # plan/ フォルダ案内（Cursor / AI 向け）
-Last updated: 2026-03-23  
+Last updated: 2026-03-25  
 Target commit: (see git)
 
 **迷ったら最初にこのファイルを読む。** 各 `.md` の役割と読了順を固定する。
@@ -44,6 +44,8 @@ Target commit: (see git)
 | `ARCHITECTURE.md` | アーキテクチャ |
 | `RUNBOOK.md` | 起動・運用・**GitHub Actions / 外部 cron**・トラブルシュート |
 | `BLOG_CRON_GHA.md` | 定時ブログの **GitHub Actions**（正本）・Secrets 一覧 |
+| `BLOG_CRON_ASYNC_FUTURE.md` | 定時ブログの **非同期化・キュー**（将来案メモ。未実装） |
+| （リポジトリ直下）`../STATUS.md` | 定時ブログの **監視・成功の定義・失敗店舗の再実行**（運用要約） |
 | `ENV.md` | 環境変数 |
 | `BLOG_PIPELINE.md` | LINE / Gemini / `blog_drafts` パイプライン |
 | `BLOG_CONTENT.md` | ブログ・Facts の編集方針 |

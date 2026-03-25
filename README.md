@@ -8,7 +8,8 @@
 2. **[plan/README.md](plan/README.md)**（`plan/` の目次・**Cursor/AI はここから**）
 3. [plan/INDEX.md](plan/INDEX.md)（主要パス・Constraints のクイック参照）
 4. [plan/CODEx_PROMPTS.md](plan/CODEx_PROMPTS.md)
-5. [plan/STATUS.md](plan/STATUS.md)
+5. [plan/STATUS.md](plan/STATUS.md)（プロジェクト全体の STATUS）
+   - **定時ブログ Cron の監視・再実行**はリポジトリ直下 [**STATUS.md**](STATUS.md) を参照
 6. [plan/DECISIONS.md](plan/DECISIONS.md)
 7. [plan/API_CONTRACT.md](plan/API_CONTRACT.md)
 8. [plan/API_CURRENT.md](plan/API_CURRENT.md)（`/api/current` の位置づけ・補足）

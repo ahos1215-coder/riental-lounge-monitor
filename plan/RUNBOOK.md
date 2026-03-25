@@ -1,5 +1,5 @@
 # RUNBOOK
-Last updated: 2026-03-23
+Last updated: 2026-03-25
 Target commit: (see git)
 
 ローカル起動・本番メモ・**初回オンボーディング**・**定期処理（cron）**・トラブルシュート。  
@@ -99,6 +99,7 @@ npm run dev
 | Public Facts | `30 0 * * *` (UTC) = JST 09:30 | `.github/workflows/generate-public-facts.yml` |
 | Blog CI | push / PR（schedule なし） | `.github/workflows/blog-ci.yml` |
 | **Blog cron（定時・本番）** | `0 9` / `30 12` UTC = JST 18:00 / 21:30 | `.github/workflows/trigger-blog-cron.yml` |
+| **Blog 再実行（失敗店舗のみ・手動）** | なし（`workflow_dispatch` のみ） | `.github/workflows/retry-blog-draft-stores.yml` |
 
 - Weekly: 手動 `workflow_dispatch` で `stores` / threshold 等を指定可能。成果物 `frontend/content/insights/weekly`
 - Public Facts: 成果物 `frontend/content/facts/public`
@@ -106,7 +107,7 @@ npm run dev
 ### Actions 失敗通知（任意・2026-03 追加）
 - **Secret**: `OPS_NOTIFY_WEBHOOK_URL`（Slack Incoming Webhook の URL 等）。**未設定のときは通知のみスキップ**し、ワークフロー自体は従来どおり。
 - **Variable**（任意）: `OPS_NOTIFY_WEBHOOK_TYPE` — `slack`（既定・`{"text":"..."}`）または `discord`（`{"content":"..."}`）。未設定または空なら Slack 形式。
-- **呼び出し元**: `generate-weekly-insights.yml` / `trigger-blog-cron.yml` / `generate-public-facts.yml` / `blog-request.yml` が失敗時に再利用ワークフロー `.github/workflows/notify-on-failure.yml` を実行。
+- **呼び出し元**: `generate-weekly-insights.yml` / `trigger-blog-cron.yml` / `retry-blog-draft-stores.yml` / `generate-public-facts.yml` / `blog-request.yml` が失敗時に再利用ワークフロー `.github/workflows/notify-on-failure.yml` を実行。
 - PR 用の `blog-ci.yml` には付けていない（失敗が多く通知が煩いため）。
 
 ### 外部 cron（運用側）
@@ -120,10 +121,12 @@ npm run dev
 ### 定時ブログ（GitHub Actions）のトラブルシュート
 
 1. **Secrets**: GitHub → Repository → **Settings → Secrets and variables → Actions** に **`CRON_SECRET`** と **`VERCEL_BLOG_CRON_BASE_URL`**（本番の `https://...vercel.app`、末尾スラッシュなし）があるか。
-2. **Actions の実行ログ**: 失敗時は `curl` の HTTP ステータス・Vercel 関数ログ（401 なら `CRON_SECRET` 不一致）。
-3. **Vercel の古い Cron**: 過去に Vercel Cron を有効にしていた場合、ダッシュボード **Settings → Cron Jobs** に古いジョブが残っていれば **削除**（コード側は `vercel.json` なし）。
+2. **Supabase `blog_drafts`（最優先）**: 対象日・店舗で **`error_message`** の有無と本文を確認する。Actions が緑でも店舗単位で失敗していることがある。
+3. **Actions の実行ログ**: 補助情報。失敗時は `curl` の HTTP ステータス・Vercel 関数ログ（401 なら `CRON_SECRET` 不一致）。
+4. **一部店舗だけ失敗したとき**: **Actions → Retry blog draft (selected stores)** で `stores` に slug をカンマ区切り指定して再実行（`plan/BLOG_CRON_GHA.md`）。
+5. **Vercel の古い Cron**: 過去に Vercel Cron を有効にしていた場合、ダッシュボード **Settings → Cron Jobs** に古いジョブが残っていれば **削除**（コード側は `vercel.json` なし）。
 
-**正本**の手順・Secrets は **`plan/BLOG_CRON_GHA.md`**。
+**手順・Secrets の正本**は **`plan/BLOG_CRON_GHA.md`**。監視の要約・再実行の入口は **`STATUS.md`**（リポジトリ直下）。同期 HTTP の限界を超える場合の将来案は **`plan/BLOG_CRON_ASYNC_FUTURE.md`**。
 
 ---
 

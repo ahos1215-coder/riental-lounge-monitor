@@ -1,0 +1,88 @@
+# Supabase blog_drafts で error が残った店舗だけを再実行する（手動）。
+# 全店舗の定時実行は trigger-blog-cron.yml を使用。
+#
+# 必要な Repository Secrets: CRON_SECRET, VERCEL_BLOG_CRON_BASE_URL（trigger-blog-cron と同一）
+
+name: Retry blog draft (selected stores)
+
+on:
+  workflow_dispatch:
+    inputs:
+      edition:
+        description: "エディション（定時と同じ）"
+        type: choice
+        required: true
+        default: evening_preview
+        options:
+          - evening_preview
+          - late_update
+      stores:
+        description: "店舗 slug をカンマ区切り（例: nagasaki,fukuoka）。空白は無視されます。"
+        required: true
+        type: string
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Retry GET /api/cron/blog-draft per store
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          BASE_URL: ${{ secrets.VERCEL_BLOG_CRON_BASE_URL }}
+          EDITION: ${{ github.event.inputs.edition }}
+          STORES_INPUT: ${{ github.event.inputs.stores }}
+        run: |
+          set -uo pipefail
+          if [ -z "${CRON_SECRET:-}" ] || [ -z "${BASE_URL:-}" ]; then
+            echo "::error::Repository Secrets に CRON_SECRET と VERCEL_BLOG_CRON_BASE_URL を設定してください。"
+            exit 1
+          fi
+          BASE="${BASE_URL%/}"
+          # カンマ区切り → 配列（空白除去）
+          STORES_NORMALIZED="$(echo "$STORES_INPUT" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | { grep -v '^$' || true; })"
+          if [ -z "$STORES_NORMALIZED" ]; then
+            echo "::error::stores が空です。カンマ区切りで 1 店舗以上指定してください。"
+            exit 1
+          fi
+          FAILURES=""
+          while IFS= read -r STORE; do
+            [ -z "$STORE" ] && continue
+            URL="${BASE}/api/cron/blog-draft?edition=${EDITION}&source=github_actions_retry&store=${STORE}"
+            echo "Retrying store=${STORE}"
+            if ! RESP="$(curl -sS -f -X GET \
+              --retry 3 \
+              --retry-delay 5 \
+              --retry-all-errors \
+              --connect-timeout 20 \
+              --max-time 300 \
+              -H "Authorization: Bearer ${CRON_SECRET}" \
+              -H "User-Agent: GitHub-Actions-blog-draft-retry" \
+              "$URL")"; then
+              echo "::error::HTTP or curl failed for store=${STORE}"
+              FAILURES="${FAILURES} ${STORE}"
+              continue
+            fi
+            echo "$RESP"
+            if command -v jq >/dev/null 2>&1; then
+              NEAR_TIMEOUT="$(echo "$RESP" | jq -r '.near_timeout // false')"
+              echo "near_timeout(${STORE})=${NEAR_TIMEOUT}"
+              if [ "$NEAR_TIMEOUT" = "true" ]; then
+                echo "::warning::blog-draft duration is close to limit. store=${STORE}"
+              fi
+            fi
+          done <<< "$STORES_NORMALIZED"
+          if [ -n "${FAILURES// }" ]; then
+            echo "::error::One or more stores failed:${FAILURES}"
+            exit 1
+          fi
+
+  notify-on-failure:
+    needs: [retry]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "Retry blog draft (selected stores)"
