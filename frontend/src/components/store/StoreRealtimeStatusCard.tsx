@@ -25,6 +25,12 @@ export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
   const total = Math.max(0, Math.round(Number(snapshot.nowTotal ?? men + women)));
   const peak = Math.max(0, Math.round(Number(snapshot.peakTotal ?? 0)));
   const crowd = crowdHintFromTotals(total, peak);
+  const occupancy = peak > 0 ? Math.round((total / peak) * 100) : null;
+  const menPct = total > 0 ? Math.round((men / total) * 100) : 50;
+  const womenPct = total > 0 ? Math.round((women / total) * 100) : 50;
+  const peakTime = snapshot.peakTimeLabel || "—";
+  const updated = snapshot.forecastUpdatedLabel || "—";
+  const delta = peak > 0 ? Math.max(0, peak - total) : 0;
 
   if (loading) {
     return (
@@ -53,13 +59,12 @@ export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">リアルタイム</p>
-          <p className="mt-0.5 text-[11px] text-slate-400">
-            店内の目安 <span className="font-semibold text-slate-200">{total}</span> 名
-          </p>
+          {total > 0 && (
+            <p className="mt-0.5 text-[11px] text-slate-400">
+              店内の目安 <span className="font-semibold text-slate-200">{total}</span> 名
+            </p>
+          )}
         </div>
-        <p className="text-[11px] text-slate-500">
-          男女比 <span className="font-medium text-slate-300">{men}:{women}</span>
-        </p>
       </div>
 
       <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -80,12 +85,20 @@ export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
 
       <div className="mt-4">
         <GenderRatioBar men={men} women={women} compact />
+        <p className="mt-1.5 text-[11px] text-slate-400">
+          男女比 <span className="font-medium text-slate-200">{menPct}%:{womenPct}%</span>
+        </p>
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-slate-200">
           混雑度（目安）: <span className="font-semibold text-white">{crowd}</span>
         </span>
+        {occupancy !== null && (
+          <span className="rounded-full border border-fuchsia-500/25 bg-fuchsia-500/10 px-2.5 py-1 text-[11px] text-fuchsia-100/90">
+            ピーク比 {occupancy}%
+          </span>
+        )}
         {snapshot.recommendation &&
           snapshot.recommendation !== "データなし" &&
           snapshot.recommendation !== "データ取得済み" && (
@@ -93,6 +106,26 @@ export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
               おすすめ度: {snapshot.recommendation}
             </span>
           )}
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-emerald-500/15 bg-emerald-950/20 px-3 py-2.5">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200/80">ML 2.0 · 予測ハイライト</p>
+        <p className="mt-1 text-[10px] text-slate-500">数値は参考目安です。実際の混雑は店舗の状況により変わります。</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-100/95">
+            <span aria-hidden>🔥</span>
+            ピーク目安 {peakTime}
+            {peak > 0 ? `（最大 ${peak} 人）` : ""}
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-full border border-slate-600/60 bg-slate-900/60 px-2.5 py-1 text-[11px] text-slate-300">
+            予測更新 {updated}
+          </span>
+          {delta > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2.5 py-1 text-[11px] text-emerald-100/90">
+              ピークまで あと約{delta}人
+            </span>
+          )}
+        </div>
       </div>
     </div>
   );

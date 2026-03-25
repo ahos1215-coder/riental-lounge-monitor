@@ -19,7 +19,6 @@ import {
 } from "recharts";
 
 import SecondVenuesList from "./SecondVenuesList";
-import { MlForecastBadges } from "./store/MlForecastBadges";
 import { StoreRealtimeStatusCard } from "./store/StoreRealtimeStatusCard";
 import type {
   PreviewRangeMode,
@@ -58,10 +57,34 @@ function TimelineLegend(props: TimelineLegendProps) {
   const payload = props.payload;
   const items = Array.isArray(payload) ? payload : [];
   if (!items.length) return null;
+  const labels: Record<string, string> = {
+    "女性：予測": "女性 · 予測",
+    "女性：実測": "女性 · 実測",
+    "男性：予測": "男性 · 予測",
+    "男性：実測": "男性 · 実測",
+  };
+  const order: Record<string, number> = {
+    "女性：予測": 0,
+    "女性：実測": 1,
+    "男性：予測": 2,
+    "男性：実測": 3,
+  };
+  const filtered = items
+    .filter((entry) => {
+      const raw = (entry?.value ?? "").toString();
+      return raw in labels;
+    })
+    .sort((a, b) => {
+      const av = (a?.value ?? "").toString();
+      const bv = (b?.value ?? "").toString();
+      return (order[av] ?? 99) - (order[bv] ?? 99);
+    });
+  if (!filtered.length) return null;
   return (
     <div className="mt-1 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-[10px] text-slate-300">
-      {items.map((entry, idx) => {
-        const value = (entry?.value ?? "").toString().replace("：", " · ");
+      {filtered.map((entry, idx) => {
+        const raw = (entry?.value ?? "").toString();
+        const value = labels[raw] ?? raw;
         const color = entry?.color ?? "#cbd5e1";
         return (
           <span key={`${value}-${idx}`} className="inline-flex items-center gap-1">
@@ -80,12 +103,18 @@ function TimelineLegend(props: TimelineLegendProps) {
 function TimelineTooltip({ active, payload, label = "" }: TimelineTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
 
+  const labels: Record<string, string> = {
+    "男性：実測": "男性（実測）",
+    "女性：実測": "女性（実測）",
+    "男性：予測": "男性（予測）",
+    "女性：予測": "女性（予測）",
+  };
+
   const filtered = payload.filter((entry) => {
     const name = entry.name ?? "";
-    return name !== "menActual" && name !== "womenActual";
+    return !!labels[name];
   });
-
-  if (filtered.length === 0) return null;
+  if (!filtered.length) return null;
 
   return (
     <div
@@ -112,7 +141,7 @@ function TimelineTooltip({ active, payload, label = "" }: TimelineTooltipProps) 
 
         return (
           <p key={`${name}-${idx}`} style={{ color }}>
-            {name}: {valueText}
+            {labels[name] ?? name}: {valueText}
           </p>
         );
       })}
@@ -209,6 +238,132 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
 
       {/* ② この後どうなる？ — 日付切替 + タイムライン（キラーコンテンツ） */}
       <section className="space-y-3">
+        <div className="rounded-3xl border border-slate-800 bg-black p-3 shadow-[0_18px_60px_rgba(0,0,0,0.85)]">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">timeline</p>
+              <p className="mt-0.5 text-[11px] text-slate-400">
+                19:00-05:00 の推移（実測 &amp; 予測 / 男性・女性）
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] text-slate-500">
+                実線=実測 / 点線=予測（データなしの時間帯は空欄）
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-3 h-72 w-full min-w-0 rounded-2xl bg-gradient-to-b from-slate-950 via-black to-black p-3">
+            {isClient && (
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart
+                  data={snapshot.series}
+                  margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 10, fill: "#9ca3af" }}
+                    stroke="#4b5563"
+                    minTickGap={22}
+                    interval="preserveStartEnd"
+                  />
+                  <YAxis
+                    tick={{ fontSize: 10, fill: "#9ca3af" }}
+                    stroke="#4b5563"
+                    allowDecimals={false}
+                  />
+                  <Tooltip content={<TimelineTooltip />} />
+                  <Legend content={<TimelineLegend />} />
+
+                  {forecastStartLabel && forecastEndLabel && (
+                    <ReferenceArea
+                      x1={forecastStartLabel}
+                      x2={forecastEndLabel}
+                      fill="#334155"
+                      fillOpacity={0.14}
+                      ifOverflow="extendDomain"
+                    />
+                  )}
+                  {currentLabel && (
+                    <ReferenceLine
+                      x={currentLabel}
+                      stroke="#94a3b8"
+                      strokeDasharray="3 3"
+                      strokeOpacity={0.8}
+                      label={{
+                        value: "現在",
+                        position: "top",
+                        fill: "#94a3b8",
+                        fontSize: 10,
+                      }}
+                    />
+                  )}
+
+                  <Area
+                    type="monotone"
+                    dataKey="menActual"
+                    stroke="none"
+                    fill="#38bdf8"
+                    fillOpacity={0.24}
+                    connectNulls
+                    legendType="none"
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="womenActual"
+                    stroke="none"
+                    fill="#f472b6"
+                    fillOpacity={0.24}
+                    connectNulls
+                    legendType="none"
+                  />
+
+                  <Line
+                    type="monotone"
+                    dataKey="menActual"
+                    name="男性：実測"
+                    stroke="#38bdf8"
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="womenActual"
+                    name="女性：実測"
+                    stroke="#f472b6"
+                    strokeWidth={2}
+                    dot={false}
+                    connectNulls
+                  />
+
+                  <Line
+                    type="monotone"
+                    dataKey="menForecast"
+                    name="男性：予測"
+                    stroke="#38bdf8"
+                    strokeWidth={2.5}
+                    dot={false}
+                    strokeDasharray="5 4"
+                    connectNulls
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="womenForecast"
+                    name="女性：予測"
+                    stroke="#f472b6"
+                    strokeWidth={2.5}
+                    dot={false}
+                    strokeDasharray="5 4"
+                    connectNulls
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+        </div>
+
         {canControlRange && (
           <div className="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-950/60 px-3 py-2">
             <p className="text-[10px] font-medium text-slate-500">表示する日の夜（19:00–05:00）</p>
@@ -222,9 +377,7 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
                       type="button"
                       onClick={() => {
                         onChangeRangeMode(opt.id);
-                        if (opt.id === "custom") {
-                          openDatePicker();
-                        }
+                        if (opt.id === "custom") openDatePicker();
                       }}
                       className={[
                         "rounded-full border px-3 py-1 text-[11px] font-semibold transition",
@@ -260,158 +413,12 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
             </div>
           </div>
         )}
-
-        <div className="rounded-3xl border border-slate-800 bg-black p-3 shadow-[0_18px_60px_rgba(0,0,0,0.85)]">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">timeline</p>
-            <p className="mt-0.5 text-[11px] text-slate-400">
-              19:00-05:00 の推移（実測 &amp; 予測 / 男性・女性）
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-[11px] text-slate-500">
-              実線=実測 / 点線=予測（データなしの時間帯は空欄）
-            </p>
-          </div>
-          </div>
-
-          <div className="mt-3 h-72 w-full min-w-0 rounded-2xl bg-gradient-to-b from-slate-950 via-black to-black p-3">
-          {isClient && (
-            <ResponsiveContainer width="100%" height="100%">
-              <ComposedChart
-                data={snapshot.series}
-                margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
-              >
-                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fontSize: 10, fill: "#9ca3af" }}
-                  stroke="#4b5563"
-                  minTickGap={22}
-                  interval="preserveStartEnd"
-                />
-                <YAxis
-                  tick={{ fontSize: 10, fill: "#9ca3af" }}
-                  stroke="#4b5563"
-                  allowDecimals={false}
-                />
-                <Tooltip content={<TimelineTooltip />} />
-                <Legend content={<TimelineLegend />} />
-
-                {forecastStartLabel && forecastEndLabel && (
-                  <ReferenceArea
-                    x1={forecastStartLabel}
-                    x2={forecastEndLabel}
-                    fill="#334155"
-                    fillOpacity={0.14}
-                    ifOverflow="extendDomain"
-                  />
-                )}
-                {currentLabel && (
-                  <ReferenceLine
-                    x={currentLabel}
-                    stroke="#94a3b8"
-                    strokeDasharray="3 3"
-                    strokeOpacity={0.8}
-                    label={{
-                      value: "現在",
-                      position: "top",
-                      fill: "#94a3b8",
-                      fontSize: 10,
-                    }}
-                  />
-                )}
-
-                <Area
-                  type="monotone"
-                  dataKey="menActual"
-                  stroke="none"
-                  fill="#38bdf8"
-                  fillOpacity={0.24}
-                  connectNulls
-                  legendType="none"
-                />
-                <Area
-                  type="monotone"
-                  dataKey="womenActual"
-                  stroke="none"
-                  fill="#f472b6"
-                  fillOpacity={0.24}
-                  connectNulls
-                  legendType="none"
-                />
-
-                <Line
-                  type="monotone"
-                  dataKey="menActual"
-                  name="男性：実測"
-                  stroke="#38bdf8"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                />
-                <Line
-                  type="monotone"
-                  dataKey="womenActual"
-                  name="女性：実測"
-                  stroke="#f472b6"
-                  strokeWidth={2}
-                  dot={false}
-                  connectNulls
-                />
-
-                <Line
-                  type="monotone"
-                  dataKey="menForecast"
-                  name="男性：予測"
-                  stroke="#38bdf8"
-                  strokeWidth={2.5}
-                  dot={false}
-                  strokeDasharray="5 4"
-                  connectNulls
-                />
-                <Line
-                  type="monotone"
-                  dataKey="womenForecast"
-                  name="女性：予測"
-                  stroke="#f472b6"
-                  strokeWidth={2.5}
-                  dot={false}
-                  strokeDasharray="5 4"
-                  connectNulls
-                />
-              </ComposedChart>
-            </ResponsiveContainer>
-          )}
-          </div>
-        </div>
-      </section>
-
-      {/* ③ AI の結論 — バッジ中心 */}
-      <section>
-        <MlForecastBadges snapshot={snapshot} loading={!!loading} />
       </section>
 
       {/* ④ フィードバック・二次会（下位） */}
       <section className={`${cardClass} p-3 text-xs`}>
-        <FeedbackPoll storeSlug={storeSlug} />
-      </section>
-
-      <section className={`${cardClass} p-3 text-xs`}>
         <SecondVenuesList storeSlug={storeSlug} />
       </section>
-
-      <footer className="mt-1 border-t border-slate-900 pt-3 text-[10px] text-slate-500">
-        <p>
-          実装例: この UI コンポーネントを{" "}
-          <code className="rounded bg-slate-900 px-1">src/app/page.tsx</code>{" "}
-          や <code className="rounded bg-slate-900 px-1">src/app/store/[id]/page.tsx</code>{" "}
-          で使い、バックエンドの <code className="rounded bg-slate-900 px-1">/api/range</code>{" "}
-          や <code className="rounded bg-slate-900 px-1">/api/forecast_today</code>{" "}
-          と接続して表示します。
-        </p>
-      </footer>
     </div>
   );
 }
