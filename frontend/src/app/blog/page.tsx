@@ -47,6 +47,14 @@ function toInt(value: string | undefined, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
+type BlogCategoryRow = (typeof BLOG_CATEGORIES)[number];
+
+function isBlogCategoryLink(
+  c: BlogCategoryRow,
+): c is BlogCategoryRow & { id: BlogCategoryId } {
+  return c.id !== "all";
+}
+
 function buildHref(params: { cat?: "all" | BlogCategoryId; sort?: "all" | "popular" | "latest"; q?: string; page?: number }): string {
   const p = new URLSearchParams();
   if (params.cat && params.cat !== "all") p.set("cat", params.cat);
@@ -150,10 +158,10 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
         </form>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          {BLOG_CATEGORIES.filter((c) => c.id !== "all").map((c) => (
+          {BLOG_CATEGORIES.filter(isBlogCategoryLink).map((c) => (
             <Link
               key={c.id}
-              href={buildHref({ cat: c.id as any, sort, q, page: 1 })}
+              href={buildHref({ cat: c.id, sort, q, page: 1 })}
               className={
                 "rounded-full border px-3 py-1 text-xs font-semibold " +
                 (cat === c.id ? "border-white/25 bg-white/10" : "border-white/10 bg-white/5 hover:border-white/20")

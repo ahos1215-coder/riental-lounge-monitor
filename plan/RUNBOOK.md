@@ -61,7 +61,7 @@ npm run dev
 #### LINE 下書き・定時 Cron（ローカル）
 1. Flask を起動（`BACKEND_URL` が `http://127.0.0.1:5000` になるよう `.env.local` を確認）
 2. `frontend` で `npm run dev`
-3. **LINE Webhook**: `.env.local` に `SKIP_LINE_SIGNATURE_VERIFY=1` を入れ、`POST http://localhost:3000/api/line` に LINE 形式の JSON を送る（`scripts/dev/smoke-requests.http` 参照）
+3. **LINE Webhook**: `.env.local` に `SKIP_LINE_SIGNATURE_VERIFY=1` を入れ、**`npm run dev`（`NODE_ENV=development`）**で `POST http://localhost:3000/api/line` に LINE 形式の JSON を送る（`scripts/dev/smoke-requests.http` 参照）。本番では署名スキップは無効（`plan/ENV.md`）。
 4. **定時 Cron 相当**: `.env.local` に `SKIP_CRON_AUTH=1`（development のみ）を入れ、`GET http://localhost:3000/api/cron/blog-draft` を叩く。または `CRON_SECRET=test` と `Authorization: Bearer test` で叩く
 5. Supabase を使う場合は `SUPABASE_*` と `GEMINI_API_KEY` を設定し、`blog_drafts` に行が増えることを確認
 6. **自動スモーク（推奨）**: 別ターミナルで `cd frontend` のうえ  
@@ -74,7 +74,7 @@ npm run dev
 - `/api/range?store=...&limit=...` が `ts` 昇順で返ること
 - `/api/forecast_today?store=...`（`ENABLE_FORECAST=1` のとき）
 - `/insights/weekly` が `index.json` を読めること
-- LINE 下書き試験: `GET http://localhost:3000/api/line` がヘルス相当。`POST /api/line` は `SKIP_LINE_SIGNATURE_VERIFY=1` 等でローカル検証可能（`ENV.md`）
+- LINE 下書き試験: `GET http://localhost:3000/api/line` がヘルス相当。`POST /api/line` は **development** で `SKIP_LINE_SIGNATURE_VERIFY=1` 等によりローカル検証可能（`ENV.md`）
 - 定時ブログ試験: `GET /api/cron/blog-draft?edition=evening_preview&source=github_actions_cron`（要 `CRON_SECRET` または development で `SKIP_CRON_AUTH=1`）。本番の定時は **GitHub Actions**（**`plan/BLOG_CRON_GHA.md`**）
 - 一括: `cd frontend` → `npm run smoke:blog-apis -- --quick` / `npm run smoke:blog-apis`（`frontend/scripts/smoke-blog-apis.mjs`）
 
