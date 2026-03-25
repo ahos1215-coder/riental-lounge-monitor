@@ -5,6 +5,13 @@
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+/** 本番では `DEBUG_INSIGHT=1` のときのみ。未設定時は development のみ。 */
+function insightTrace(...args: unknown[]): void {
+  if (process.env.DEBUG_INSIGHT === "1" || process.env.NODE_ENV === "development") {
+    console.log(...args);
+  }
+}
+
 export type NightWindow = { from: string; to: string; label: string };
 
 export type Insight = {
@@ -394,10 +401,10 @@ function pickArray(data: unknown): unknown[] {
 export async function fetchRangeRows(backendBase: string, store: string, limit: number): Promise<unknown[]> {
   const base = backendBase.replace(/\/+$/, "");
   const url = `${base}/api/range?store=${encodeURIComponent(store)}&limit=${encodeURIComponent(String(limit))}`;
-  console.log("[insight] fetchRangeRows start", { store, limit });
+  insightTrace("[insight] fetchRangeRows start", { store, limit });
   const data = await fetchJson(url);
   const rows = pickArray(data);
-  console.log("[insight] fetchRangeRows done", { rows: rows.length });
+  insightTrace("[insight] fetchRangeRows done", { rows: rows.length });
   return rows;
 }
 
@@ -407,7 +414,7 @@ export async function fetchForecastRows(
 ): Promise<{ rows: unknown[]; reasoningNotes: string[] }> {
   const base = backendBase.replace(/\/+$/, "");
   const url = `${base}/api/forecast_today?store=${encodeURIComponent(store)}`;
-  console.log("[insight] fetchForecastRows start", { store });
+  insightTrace("[insight] fetchForecastRows start", { store });
   const data = await fetchJson(url);
   const rows = pickArray(data);
   const reasoning =
@@ -420,7 +427,7 @@ export async function fetchForecastRows(
           (v): v is string => typeof v === "string" && v.trim().length > 0
         )
       : [];
-  console.log("[insight] fetchForecastRows done", { rows: rows.length, reasoningNotes: notes.length });
+  insightTrace("[insight] fetchForecastRows done", { rows: rows.length, reasoningNotes: notes.length });
   return { rows, reasoningNotes: notes };
 }
 
@@ -452,14 +459,14 @@ export async function buildInsightFromBackend(
   let forecastReasoningNotes: string[] = [];
 
   try {
-    console.log("[insight] buildInsightFromBackend -> api/range");
+    insightTrace("[insight] buildInsightFromBackend -> api/range");
     rangeRows = await fetchRangeRows(backendBase, storeSlug, limit);
     points = collectPoints(rangeRows, range.from, range.to, {
       totalKeys: ["total"],
       menKeys: ["men", "male", "m"],
       womenKeys: ["women", "female", "f"],
     });
-    console.log("[insight] api/range -> points", { points: points.length, window: "night" });
+    insightTrace("[insight] api/range -> points", { points: points.length, window: "night" });
 
     // 今夜の窓（19:00〜翌05:00）にまだ1件も無いが、日中のサンプルはある → 同一日の全日（JST）で再集計
     if (points.length === 0 && rangeRows.length > 0) {
@@ -469,7 +476,7 @@ export async function buildInsightFromBackend(
         menKeys: ["men", "male", "m"],
         womenKeys: ["women", "female", "f"],
       });
-      console.log("[insight] api/range -> points", { points: dayPts.length, window: "day_fallback" });
+      insightTrace("[insight] api/range -> points", { points: dayPts.length, window: "day_fallback" });
       if (dayPts.length > 0) {
         points = dayPts;
         range = dayRange;
@@ -491,7 +498,7 @@ export async function buildInsightFromBackend(
     source = "api/forecast_today";
     if (!skipForecastDueToTimeout) {
       try {
-        console.log("[insight] buildInsightFromBackend -> api/forecast_today");
+        insightTrace("[insight] buildInsightFromBackend -> api/forecast_today");
         const fetched = await fetchForecastRows(backendBase, storeSlug);
         forecastRows = fetched.rows;
         forecastReasoningNotes = fetched.reasoningNotes;

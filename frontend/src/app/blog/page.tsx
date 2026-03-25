@@ -136,7 +136,7 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
           <input
             name="q"
             defaultValue={q}
-            placeholder="Search  記事を検索（例：初心者、予測、会話）"
+            placeholder="Search 記事を検索（例：初心者、予測、会話）"
             className="h-11 w-full rounded-xl border border-white/10 bg-white/5 px-4 text-sm text-white placeholder:text-white/30 outline-none focus:border-white/20"
           />
           {cat !== "all" && <input type="hidden" name="cat" value={cat} />}

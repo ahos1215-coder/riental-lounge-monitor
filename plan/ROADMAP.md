@@ -1,5 +1,5 @@
 # ROADMAP
-Last updated: 2026-03-23
+Last updated: 2026-03-25
 Target commit: (see git)
 
 > **構想・フェーズ順・備忘の全文**は **`plan/VISION_AND_FUTURE.md`**。本ファイルは短いタスク一覧と「当面やらないこと」に絞る。
@@ -9,7 +9,7 @@ Target commit: (see git)
 ## P0（次に着手しやすい項目）
 - **`avoid_time` / プロンプト**: `draftGenerator.ts` で「混雑が落ち着いている目安」「提案型」の表現を固定（**2026-03 10秒まとめ用ラベル追記済み**）。ズレる場合は人手修正または微調整（`plan/VISION_AND_FUTURE.md` §9 も参照）。
 - **`LINE_RANGE_LIMIT` / `BLOG_CRON_RANGE_LIMIT`**: LINE は既定 **500**（`LINE_RANGE_LIMIT` で上書き可）。定時は **`BLOG_CRON_RANGE_LIMIT`**（既定 500）。運用で偏りがあれば両方を揃えて調整。
-- **39店舗スケール検証（実行時間 / 失敗率）**: `GET /api/cron/blog-draft` の全店舗処理が Vercel 実行上限内に収まるかを計測。必要なら GHA マトリクス分割またはジョブキュー化を検討。
+- **定時ブログのスケール（実装済みの前提）**: **`GET /api/cron/blog-draft` は 1 リクエスト = 1 店舗**（`?store=` 必須）。**GitHub Actions**（`trigger-blog-cron.yml`）が **店舗ごとに並列ジョブ**で叩き、API 内は **約 45 秒バジェット**。失敗店舗のみは **`retry-blog-draft-stores.yml`**。さらなる長時間化や 504 再発時は **`plan/BLOG_CRON_ASYNC_FUTURE.md`**。
 - **Web フロント**: 新規の「土台作り」より **既存画面の改善・見せ方・コンテンツ拡充**（`VISION_AND_FUTURE.md` フェーズ A）。**進捗メモ**: `/`・`/store/[id]`・`/stores`・**`/mypage`（お気に入り・閲覧履歴・localStorage、`meguribiStorage.ts`）**・店舗ページのお気に入りトグル。残りはブログ周りの文言・細かな UI 等。
 - 主要ドキュメントの継続同期（`plan/*` と README の整合）
 - Weekly Insights の品質改善（score 閾値・最小継続時間の**運用調整**は引き続き。可視化は下記 P1 で実装済み）
@@ -22,7 +22,7 @@ Target commit: (see git)
 - **GitHub Actions の失敗通知**（**実装済み**: Secret `OPS_NOTIFY_WEBHOOK_URL` + 任意 Variable `OPS_NOTIFY_WEBHOOK_TYPE`。`plan/RUNBOOK.md` 参照。`blog-ci` は対象外）
 - **`POST /api/line` の防衛**: 署名検証に加え **レート制限を実装済み**（グローバル＋ユーザー単位、Upstash 推奨。`plan/DECISIONS.md` 14 / `plan/ENV.md`）。追加で IP ベース Middleware 等が必要なら別検討（Webhook は LINE 経由のため IP は補助）
 - **Gemini 出力の構造化**: frontmatter と本文の分離（JSON + text）を検証し、プロンプト変更時の MDX 破損耐性を強化。
-- **X（Twitter）API 連携・OGP・投稿ルート**（`VISION_AND_FUTURE.md` フェーズ B）— **未実装。構想段階**。自動投稿のスコープは **人気トップ5店＋長崎店のみ**から開始する方針（§9）。
+- **OGP / メタデータ**（主要ページ・ブログ）— **実装済み**（`plan/STATUS.md`）。**X（Twitter）API 連携・投稿用 API ルート**（`VISION_AND_FUTURE.md` フェーズ B）— **未実装。構想段階**。自動投稿のスコープは **人気トップ5店＋長崎店のみ**から開始する方針（§9）。
 
 ## P2
 - 複数店舗/ブランドの拡張（表示/UI の拡張）
@@ -43,4 +43,4 @@ Target commit: (see git)
 - **X 自動投稿**: 全店舗一斉ポストは行わず、開始時は **人気トップ5＋長崎店**に限定（API・シャドウバンリスク回避）。
 
 ## 未実装メモ
-- 定時ブログは `GET /api/cron/blog-draft`（**GHA** から `GET` + `edition` / `source`）で実装済み。39 店舗スケール時は上記 §9 を参照。
+- 定時ブログは `GET /api/cron/blog-draft`（**GHA** から `GET` + `edition` / `source` + **`store` 必須**）で実装済み。全店は **matrix 並列**、非同期キューは **`plan/BLOG_CRON_ASYNC_FUTURE.md`**。

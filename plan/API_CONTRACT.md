@@ -1,5 +1,5 @@
 # API_CONTRACT
-Last updated: 2026-03-21
+Last updated: 2026-03-25
 Target commit: (see git)
 
 MEGRIBI の公開契約。**Flask（Render）** と **Next.js（Vercel）の LINE Webhook** を含む。互換性を壊さないこと。
@@ -19,7 +19,7 @@ MEGRIBI の公開契約。**Flask（Render）** と **Next.js（Vercel）の LIN
 
 ### POST /api/line
 - LINE Messaging API の Webhook（`Content-Type: application/json`）。
-- 本番では `x-line-signature` と `LINE_CHANNEL_SECRET` による署名検証（ローカル検証用に `SKIP_LINE_SIGNATURE_VERIFY=1` が使える場合あり。`plan/ENV.md`）。
+- 本番では `x-line-signature` と `LINE_CHANNEL_SECRET` による署名検証（**development のみ** `SKIP_LINE_SIGNATURE_VERIFY=1` でスキップ可。`plan/ENV.md`）。
 - 処理内容（高レベル）: イベント解析 → `BACKEND_URL` 経由で Flask `GET /api/range`（および必要なら `GET /api/forecast_today`）→ インサイト → Gemini 下書き → Supabase `blog_drafts` → LINE 返信。
 - **Flask の `/api/range` 契約は変更しない**（追加クエリを付けない）。窓・集計は Next アプリ層（`insightFromRange.ts`）。
 - ブログ配管に **n8n は使わない**。

@@ -204,17 +204,20 @@ export async function POST(req: NextRequest) {
   const rawBody = await req.text();
 
   const secret = process.env.LINE_CHANNEL_SECRET?.trim();
-  console.log("[line] env presence", {
-    hasLINE_CHANNEL_SECRET: Boolean(secret),
-    hasLINE_CHANNEL_ACCESS_TOKEN: Boolean(process.env.LINE_CHANNEL_ACCESS_TOKEN?.trim()),
-    hasGEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY?.trim()),
-    hasSUPABASE_URL: Boolean(process.env.SUPABASE_URL?.trim()),
-    hasSUPABASE_SERVICE_ROLE_KEY: Boolean(
-      process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || process.env.SUPABASE_SERVICE_KEY?.trim()
-    ),
-    backendUrlIsFallback: BACKEND_URL === "http://127.0.0.1:5000",
-  });
-  const forceSkip = process.env.SKIP_LINE_SIGNATURE_VERIFY === "1";
+  if (process.env.NODE_ENV === "development") {
+    console.log("[line] env presence", {
+      hasLINE_CHANNEL_SECRET: Boolean(secret),
+      hasLINE_CHANNEL_ACCESS_TOKEN: Boolean(process.env.LINE_CHANNEL_ACCESS_TOKEN?.trim()),
+      hasGEMINI_API_KEY: Boolean(process.env.GEMINI_API_KEY?.trim()),
+      hasSUPABASE_URL: Boolean(process.env.SUPABASE_URL?.trim()),
+      hasSUPABASE_SERVICE_ROLE_KEY: Boolean(
+        process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || process.env.SUPABASE_SERVICE_KEY?.trim()
+      ),
+      backendUrlIsFallback: BACKEND_URL === "http://127.0.0.1:5000",
+    });
+  }
+  const forceSkip =
+    process.env.NODE_ENV === "development" && process.env.SKIP_LINE_SIGNATURE_VERIFY === "1";
   const devWithoutSecret = process.env.NODE_ENV === "development" && !secret;
   const skipVerify = forceSkip || devWithoutSecret;
 

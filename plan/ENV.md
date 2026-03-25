@@ -1,5 +1,5 @@
 # ENV
-Last updated: 2026-03-23
+Last updated: 2026-03-25
 Target commit: (see git)
 
 値そのものは書かず、環境変数名のみ記載。
@@ -29,17 +29,20 @@ LINE Webhook（`frontend/src/app/api/line/route.ts`）:
   - `LINE_RATE_LIMIT_DISABLED`（`"1"` のとき制限オフ。ローカル検証のみ推奨）
 - `LINE_CHANNEL_SECRET`（`x-line-signature` 検証。本番では必須）
 - `LINE_CHANNEL_ACCESS_TOKEN`（返信メッセージ用）
-- `SKIP_LINE_SIGNATURE_VERIFY`（`"1"` のとき署名検証をスキップ。ローカル検証用のみ）
+- `SKIP_LINE_SIGNATURE_VERIFY`（**`NODE_ENV=development` かつ** `"1"` のときのみ署名検証をスキップ。本番・Preview では無効。**本番で有効化できない**）
 - `GEMINI_API_KEY`（下書き生成）
 - `GEMINI_MODEL`（任意。既定 `gemini-2.5-flash`。404 時は `gemini-2.5-flash-lite` を試行。古い `gemini-1.x` / `gemini-2.0-flash` 等はコード側で `gemini-2.5-flash` に正規化）
 - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SERVICE_KEY`（`blog_drafts` への INSERT。未設定時は生成のみ・DB 保存なし）
 
 定時ブログ（GitHub Actions から `GET` → `frontend/src/app/api/cron/blog-draft/route.ts`）:
 - `CRON_SECRET`（**Vercel の Environment Variables** に設定し、GHA の Repository Secret と**同じ値**にする。`Authorization: Bearer` で検証）
-- `BLOG_CRON_STORE_SLUG` または `BLOG_CRON_STORE_SLUGS`（カンマ区切り。未設定時は `DEFAULT_STORE`＝先頭店舗）
+- 本番の定時はクエリ **`store` 必須**（GHA matrix）。`BLOG_CRON_STORE_SLUG` は **クエリ未指定時のフォールバック**（主にローカル・単一店テスト）
 - `BLOG_CRON_RANGE_LIMIT`（任意。`/api/range` の limit。未設定時は 500）
 - `BLOG_BACKEND_FETCH_TIMEOUT_MS`（任意。Next から Flask への `fetch` の打ち切り。**未設定時は 40000**（40秒）。夜間データが多い店舗で `api_range_error:This operation was aborted` が出る場合に増やす。5000〜120000 の範囲）
 - `SKIP_CRON_AUTH`（**ローカル development のみ** `"1"` で認証スキップ。本番では使わない）
+
+インサイト生成（`frontend/src/lib/blog/insightFromRange.ts`、LINE / 定時 Cron から利用）:
+- `DEBUG_INSIGHT`（`"1"` のとき本番でもトレースログを出す。未設定時は **`NODE_ENV=development` のときのみ**トレース。本番の通常運用では未設定推奨）
 
 注意:
 - `NEXT_PUBLIC_*` はブラウザに配布されるため秘密値を入れない。
