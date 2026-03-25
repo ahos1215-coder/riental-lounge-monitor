@@ -41,7 +41,7 @@ Target commit: (see git)
 
 ### Content / Batch
 - Weekly Insights: GitHub Actions → `frontend/content/insights/weekly` + `index.json`
-- **定時ブログ（本番）**: `.github/workflows/trigger-blog-cron.yml`（全店舗・matrix）。**失敗店舗のみの再実行**は `.github/workflows/retry-blog-draft-stores.yml`。成否の正本は Supabase `blog_drafts`（運用要約はリポジトリ直下 **`STATUS.md`**、`plan/BLOG_CRON_GHA.md`）。将来の非同期化メモは **`plan/BLOG_CRON_ASYNC_FUTURE.md`**。
+- **定時ブログ（本番）**: `.github/workflows/trigger-blog-cron.yml`（全店舗・matrix）。**失敗店舗のみの再実行**は `.github/workflows/retry-blog-draft-stores.yml`。**一部店舗失敗時の Slack/Discord**（`OPS_NOTIFY_WEBHOOK_URL` 設定時）は `trigger-blog-cron.yml` 内の集計ジョブ。成否の正本は Supabase `blog_drafts`（運用要約はリポジトリ直下 **`STATUS.md`**、`plan/BLOG_CRON_GHA.md`）。将来の非同期化メモは **`plan/BLOG_CRON_ASYNC_FUTURE.md`**。
 - **GHA 失敗通知**（任意）: `OPS_NOTIFY_WEBHOOK_URL` 設定時、週次 Insights・定時ブログトリガ・Public Facts・Blog Request の失敗で Slack/Discord に POST（`.github/workflows/notify-on-failure.yml`）
 - Public Facts: GitHub Actions → `frontend/content/facts/public`
 - Facts の debug notes は `NEXT_PUBLIC_SHOW_FACTS_DEBUG=1` のときのみ表示

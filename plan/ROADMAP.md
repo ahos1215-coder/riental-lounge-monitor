@@ -21,7 +21,7 @@ Target commit: (see git)
 - 監視・運用の可視化（ログの整理、Render/Vercel 運用の整理）
 - **GitHub Actions の失敗通知**（**実装済み**: Secret `OPS_NOTIFY_WEBHOOK_URL` + 任意 Variable `OPS_NOTIFY_WEBHOOK_TYPE`。`plan/RUNBOOK.md` 参照。`blog-ci` は対象外）
 - **`POST /api/line` の防衛**: 署名検証に加え **レート制限を実装済み**（グローバル＋ユーザー単位、Upstash 推奨。`plan/DECISIONS.md` 14 / `plan/ENV.md`）。追加で IP ベース Middleware 等が必要なら別検討（Webhook は LINE 経由のため IP は補助）
-- **Gemini 出力の構造化**: frontmatter と本文の分離（JSON + text）を検証し、プロンプト変更時の MDX 破損耐性を強化。
+- **Gemini 出力の構造化**: frontmatter と本文の分離（JSON + text）。**2026-03 追記**: `draftGenerator.ts` で **Zod** による structured 応答の検証（本文最小長・日付形式など）を追加。破損時は従来どおり生 MDX パスへフォールバック。
 - **OGP / メタデータ**（主要ページ・ブログ）— **実装済み**（`plan/STATUS.md`）。**X（Twitter）API 連携・投稿用 API ルート**（`VISION_AND_FUTURE.md` フェーズ B）— **未実装。構想段階**。自動投稿のスコープは **人気トップ5店＋長崎店のみ**から開始する方針（§9）。
 
 ## P2

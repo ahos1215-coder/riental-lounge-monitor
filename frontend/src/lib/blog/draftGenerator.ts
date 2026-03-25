@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import type { Schema } from "@google/generative-ai";
+import { z } from "zod";
 import type { BlogEdition, InsightBuildResult } from "./insightFromRange";
 
 export type DraftGeneratorInput = {
@@ -79,7 +80,7 @@ function parseRetryAfterSeconds(e: unknown): number | null {
  * Gemini が frontmatter 前にリード文を付けたり、`---` や `title:` にインデントを付けるのを防ぐための後処理。
  * Next.js / gray-matter 系でパースできるよう、先頭を `---` 始まり・メタ行は行頭スペースなしに揃える。
  */
-function normalizeMdxForBlog(raw: string): string {
+export function normalizeMdxForBlog(raw: string): string {
   let s = raw.replace(/^\uFEFF/, "").trim();
   if (s.startsWith("```")) {
     s = s.replace(/^```[a-zA-Z]*\n?/, "").replace(/\n```\s*$/, "");
@@ -232,19 +233,22 @@ function buildUserPrompt(input: DraftGeneratorInput): string {
   ].join("\n");
 }
 
-type StructuredDraft = {
-  frontmatter: {
-    title: string;
-    description: string;
-    date: string;
-    categoryId: "guide" | "beginner" | "prediction" | "column" | "interview";
-    level: "easy" | "normal" | "pro";
-    store: string;
-    facts_id: string;
-    facts_visibility: "show";
-  };
-  body: string;
-};
+const structuredDraftSchema = z.object({
+  frontmatter: z.object({
+    title: z.string().min(1).max(500),
+    description: z.string().min(1).max(600),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}/, "date must start with YYYY-MM-DD"),
+    categoryId: z.enum(["guide", "beginner", "prediction", "column", "interview"]),
+    level: z.enum(["easy", "normal", "pro"]),
+    store: z.string().min(1).max(120),
+    facts_id: z.string().min(1).max(200),
+    facts_visibility: z.literal("show"),
+  }),
+  /** 短すぎる本文は frontmatter だけの壊れた出力とみなし却下 */
+  body: z.string().min(40),
+});
+
+type StructuredDraft = z.infer<typeof structuredDraftSchema>;
 
 function toYamlScalar(v: string): string {
   return JSON.stringify(String(v ?? ""));
@@ -271,36 +275,15 @@ function toMdxFromStructuredDraft(draft: StructuredDraft): string {
 
 function parseStructuredDraft(raw: string): StructuredDraft | null {
   try {
-    const parsed = JSON.parse(raw) as Partial<StructuredDraft>;
-    if (!parsed || typeof parsed !== "object") return null;
-    if (!parsed.frontmatter || typeof parsed.frontmatter !== "object") return null;
-    if (typeof parsed.body !== "string") return null;
-    const fm = parsed.frontmatter as Record<string, unknown>;
-    const required = [
-      "title",
-      "description",
-      "date",
-      "categoryId",
-      "level",
-      "store",
-      "facts_id",
-      "facts_visibility",
-    ] as const;
-    for (const key of required) {
-      if (typeof fm[key] !== "string" || !String(fm[key]).trim()) return null;
-    }
+    const parsed: unknown = JSON.parse(raw);
+    const r = structuredDraftSchema.safeParse(parsed);
+    if (!r.success) return null;
     return {
       frontmatter: {
-        title: String(fm.title),
-        description: String(fm.description),
-        date: String(fm.date),
-        categoryId: fm.categoryId as StructuredDraft["frontmatter"]["categoryId"],
-        level: fm.level as StructuredDraft["frontmatter"]["level"],
-        store: String(fm.store),
-        facts_id: String(fm.facts_id),
+        ...r.data.frontmatter,
         facts_visibility: "show",
       },
-      body: parsed.body.trim(),
+      body: r.data.body.trim(),
     };
   } catch {
     return null;
@@ -361,7 +344,10 @@ async function generateStructuredContentOnce(
               "facts_visibility",
             ],
           },
-          body: { type: "STRING" },
+          body: {
+            type: "STRING",
+            description: "Markdown body only (## 見出し以降)。最低約40文字。frontmatter に含めない。",
+          },
         },
         required: ["frontmatter", "body"],
       } as unknown as Schema),

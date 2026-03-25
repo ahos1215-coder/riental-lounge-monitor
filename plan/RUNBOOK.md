@@ -107,7 +107,7 @@ npm run dev
 ### Actions 失敗通知（任意・2026-03 追加）
 - **Secret**: `OPS_NOTIFY_WEBHOOK_URL`（Slack Incoming Webhook の URL 等）。**未設定のときは通知のみスキップ**し、ワークフロー自体は従来どおり。
 - **Variable**（任意）: `OPS_NOTIFY_WEBHOOK_TYPE` — `slack`（既定・`{"text":"..."}`）または `discord`（`{"content":"..."}`）。未設定または空なら Slack 形式。
-- **呼び出し元**: `generate-weekly-insights.yml` / `trigger-blog-cron.yml` / `retry-blog-draft-stores.yml` / `generate-public-facts.yml` / `blog-request.yml` が失敗時に再利用ワークフロー `.github/workflows/notify-on-failure.yml` を実行。
+- **呼び出し元**: `generate-weekly-insights.yml` / `trigger-blog-cron.yml`（**全体失敗**・**定時ブログの一部店舗失敗**の両方で `notify-on-failure.yml`）/ `retry-blog-draft-stores.yml` / `generate-public-facts.yml` / `blog-request.yml` が失敗時に再利用ワークフロー `.github/workflows/notify-on-failure.yml` を実行。
 - PR 用の `blog-ci.yml` には付けていない（失敗が多く通知が煩いため）。
 
 ### 外部 cron（運用側）

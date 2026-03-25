@@ -140,6 +140,70 @@ jobs:
             fi
           fi
 
+  # matrix 各ジョブは continue-on-error のため、一部失敗でもワークフローは緑になり得る。
+  # 失敗店舗がある場合のみ Ops Webhook へ通知（正本は引き続き Supabase blog_drafts）。
+  summarize-blog-matrix:
+    name: Summarize matrix results
+    needs: trigger
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+    outputs:
+      should_notify: ${{ steps.check.outputs.should_notify }}
+      notify_body: ${{ steps.check.outputs.notify_body }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const all = [];
+            for (let page = 1; page <= 5; page++) {
+              const { data } = await github.rest.actions.listJobsForWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: context.runId,
+                per_page: 100,
+                page,
+              });
+              all.push(...data.jobs);
+              if (data.jobs.length < 100) break;
+            }
+            const slugRe = /\btrigger\s*\(([^)]+)\)/;
+            const matrixJobs = all.filter((j) => slugRe.test(j.name));
+            const bad = matrixJobs.filter(
+              (j) => j.conclusion === "failure" || j.conclusion === "cancelled",
+            );
+            if (bad.length === 0) {
+              core.setOutput("should_notify", "false");
+              core.setOutput("notify_body", "");
+              return;
+            }
+            const slugs = bad.map((j) => {
+              const m = j.name.match(slugRe);
+              return m ? m[1] : j.name;
+            });
+            const msg = [
+              "定時ブログ Cron: 店舗ジョブが " + bad.length + " 件失敗/キャンセル（" + slugs.join(", ") + "）。",
+              "ワークフロー全体は緑に見える場合があります。",
+              "成否の正本は Supabase blog_drafts（リポジトリ直下 STATUS.md）。",
+              "repo: " + context.repo.owner + "/" + context.repo.repo,
+              "ref: " + context.ref,
+            ].join(" ");
+            core.setOutput("should_notify", "true");
+            core.setOutput("notify_body", msg);
+
+  notify-partial-blog-failures:
+    needs: summarize-blog-matrix
+    if: needs.summarize-blog-matrix.outputs.should_notify == 'true'
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "Blog draft cron (partial store failures)"
+      custom_body: ${{ needs.summarize-blog-matrix.outputs.notify_body }}
+
   notify-on-failure:
     needs: [trigger]
     if: failure()

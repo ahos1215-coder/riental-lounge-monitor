@@ -8,6 +8,11 @@ on:
         description: "通知に表示するワークフロー名"
         required: true
         type: string
+      custom_body:
+        description: "指定時はこの本文を通知する（失敗メッセージの代わり）。run URL は自動で追記。"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   notify:
@@ -20,6 +25,7 @@ jobs:
           WEBHOOK_URL: ${{ secrets.OPS_NOTIFY_WEBHOOK_URL }}
           WEBHOOK_TYPE: ${{ vars.OPS_NOTIFY_WEBHOOK_TYPE }}
           LABEL: ${{ inputs.workflow_label }}
+          CUSTOM_BODY: ${{ inputs.custom_body }}
         run: |
           set -euo pipefail
           if [ -z "${WEBHOOK_URL:-}" ]; then
@@ -28,7 +34,11 @@ jobs:
           fi
           TYPE="${WEBHOOK_TYPE:-slack}"
           RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-          MSG="GitHub Actions 失敗: ${LABEL}"$'\n'"repo: ${GITHUB_REPOSITORY}"$'\n'"ref: ${GITHUB_REF}"$'\n'"run: ${RUN_URL}"
+          if [ -n "${CUSTOM_BODY// }" ]; then
+            MSG="${CUSTOM_BODY}"$'\n'"run: ${RUN_URL}"
+          else
+            MSG="GitHub Actions 失敗: ${LABEL}"$'\n'"repo: ${GITHUB_REPOSITORY}"$'\n'"ref: ${GITHUB_REF}"$'\n'"run: ${RUN_URL}"
+          fi
           if [ "$TYPE" = "discord" ]; then
             PAYLOAD=$(jq -n --arg c "$MSG" '{content: $c}')
           else
