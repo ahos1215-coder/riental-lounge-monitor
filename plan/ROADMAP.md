@@ -44,6 +44,21 @@ Target commit: (see git)
 - Weekly: Fan-in Matrix 構成（Fan-out 38店舗並列 `max-parallel: 10` → Fan-in で index.json マージ・Git commit 1回）
 - `generate_weekly_insights.py`: `--skip-index` フラグ追加
 
+### Round 2: レポート一覧ページ + megribi_score + ナビゲーション統合
+
+| 項目 | 内容 |
+|------|------|
+| `/reports/daily` 一覧ページ | Supabase から全店舗の最新 Daily Report を取得してカード表示 |
+| `/reports/weekly` 一覧ページ | 同上（Weekly Report） |
+| `/api/megribi_score` (Flask) | 全店舗の最新データから megribi_score を計算して返す API |
+| `/api/megribi_score` (Next.js proxy) | Flask API へのプロキシ（CDN キャッシュ 2 分） |
+| トップ「今夜のおすすめ」 | megribi_score TOP 5 をトップページに表示 |
+| ヘッダーナビ | Daily / Weekly リンクを追加（モバイルでは非表示） |
+| パンくず・導線 | Daily/Weekly 個別ページ → 一覧ページへの導線、店舗詳細 → レポート一覧への導線 |
+| ブログページ | サイドバーに Weekly Report 一覧リンク追加、Daily リンクを一覧ページに変更 |
+| サイトマップ | `/reports/daily` + `/reports/weekly` を static routes に追加 |
+| `next.config.ts` | `/api/megribi_score` に CDN キャッシュヘッダー追加 |
+
 ---
 
 ## P0（次に着手しやすい項目）
@@ -59,7 +74,7 @@ Target commit: (see git)
 
 - 週次 Insights の可視化強化（**実装済み**: `series_compact`＋`WeeklyStoreCharts.tsx`。追加の系列や説明文は任意）
 - Editorial ブログの充実（LINEから定期的に分析記事を作る運用の確立）
-- `/reports/daily/` / `/reports/weekly/` ページの UX 改善（ナビゲーション・一覧ページ等）
+- ~~`/reports/daily/` / `/reports/weekly/` ページの UX 改善（ナビゲーション・一覧ページ等）~~ → **実装済み（Round 2）**
 - 監視・運用の可視化（ログの整理、Render/Vercel 運用の整理）
 - **GitHub Actions の失敗通知**（**実装済み**: `OPS_NOTIFY_WEBHOOK_URL` + `notify-on-failure.yml`。定時ブログの部分失敗は `summarize-blog-matrix` が steps まで確認）
 - **Gemini 出力の構造化**: frontmatter と本文の分離（Zod 検証は追加済み）
@@ -68,8 +83,8 @@ Target commit: (see git)
 ## P2
 
 - 複数店舗/ブランドの拡張（表示/UI の拡張）
-- `/reports/daily/` の一覧ページ（全店舗のレポートリスト）
-- `/reports/weekly/` の一覧ページ
+- ~~`/reports/daily/` の一覧ページ~~ → **実装済み（Round 2）**
+- ~~`/reports/weekly/` の一覧ページ~~ → **実装済み（Round 2）**
 - 予測の精度・運用（オンザフライ学習 vs 定期学習モデル等）
 - **PWA / Web Push**
 - **Stripe・課金・プレミアム予測**（外部助言: 個人開発では当面優先度を下げてよい）

@@ -56,13 +56,19 @@ export default async function WeeklyReportStorePage({ params }: Props) {
 
   return (
     <main className="mx-auto w-full max-w-3xl px-4 py-10">
-      <div className="mb-6">
+      <div className="mb-6 flex flex-wrap gap-4">
         <Link
-          href="/stores"
+          href="/reports?tab=weekly"
           className="inline-flex items-center gap-2 text-sm text-white/70 transition hover:text-white"
         >
           <span aria-hidden>←</span>
-          店舗一覧へ戻る
+          AI予測レポート一覧
+        </Link>
+        <Link
+          href={`/store/${store.slug}?store=${store.slug}`}
+          className="text-sm text-white/50 transition hover:text-white"
+        >
+          店舗ページ →
         </Link>
       </div>
 

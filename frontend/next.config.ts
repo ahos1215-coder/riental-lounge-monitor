@@ -37,6 +37,12 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        source: "/api/megribi_score",
+        headers: [
+          { key: "Cache-Control", value: "public, s-maxage=120, stale-while-revalidate=600" },
+        ],
+      },
+      {
         // AIレポート: 10分CDNキャッシュ（18:00/21:30のみ更新）
         source: "/api/reports/:path*",
         headers: [

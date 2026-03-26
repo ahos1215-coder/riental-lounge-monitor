@@ -176,10 +176,10 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-sm font-bold text-indigo-200">AI予測・Daily Report</h2>
                 <Link
-                  href="/reports/daily/shibuya"
+                  href="/reports"
                   className="text-[11px] text-indigo-300/80 hover:text-indigo-200"
                 >
-                  店舗別レポートを見る →
+                  AI予測レポート一覧 →
                 </Link>
               </div>
               <p className="mt-2 text-xs text-white/60">
@@ -248,16 +248,16 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
               </p>
               <div className="mt-3 space-y-2">
                 <Link
-                  href="/reports/daily/shibuya"
+                  href="/reports"
                   className="block rounded-lg border border-indigo-400/25 bg-black/20 px-3 py-2 text-xs text-indigo-100 hover:bg-indigo-500/10"
                 >
-                  Daily Report（渋谷）
+                  AI予測レポート一覧（Daily / Weekly）
                 </Link>
                 <Link
                   href="/stores"
                   className="block rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/70 hover:bg-white/5"
                 >
-                  全店舗のレポートを見る →
+                  全店舗を見る →
                 </Link>
               </div>
             </div>

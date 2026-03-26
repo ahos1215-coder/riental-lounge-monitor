@@ -40,6 +40,12 @@ export function MeguribiHeader({ showSearchChip }: MeguribiHeaderProps) {
               店舗一覧
             </Link>
             <Link
+              href="/reports"
+              className="font-medium text-slate-300 transition hover:text-amber-300"
+            >
+              AI予測
+            </Link>
+            <Link
               href="/blog"
               className="font-medium text-slate-300 transition hover:text-amber-300"
             >

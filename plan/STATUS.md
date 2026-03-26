@@ -17,20 +17,24 @@ Target commit: (see git)
 - `/tasks/multi_collect` / `/api/tasks/collect_all_once`（本番収集の入口 → Supabase `logs`）
 - `/tasks/tick` / `/tasks/collect` / `/tasks/seed`（レガシー・ローカル向け）
 - `/tasks/update_second_venues`（任意。`GOOGLE_PLACES_API_KEY` がある場合のみ）
-- 互換維持のプレースホルダ: `/api/heatmap` `/api/summary` `/api/range_prevweek` `/api/stores/list`
+- `/api/megribi_score`（全店舗 or 指定店舗の megribi_score を返す。`?store=` / `?stores=` 対応。Supabase backend 必須）
+- 全 `/tasks/*` エンドポイントに `CRON_SECRET` 認証追加済み
+- 旧プレースホルダ API（`/api/heatmap` 等）は削除済み
 
 ### Frontend (Next.js / Vercel)
 
 #### ページルート（実装済み）
 | パス | 概要 |
 |------|------|
-| `/` | トップ。`StoreCard`＋ブログ新着。「店舗を探す」誘導（`#store-directory`） |
+| `/` | トップ。「今夜のおすすめ」（megribi_score TOP 5）+ Last visited + ブログ新着 + レポートリンク |
 | `/stores` | 全店舗一覧（12件/ページ・地域タブ・`/api/range_multi` バッチ取得） |
-| `/store/[id]` | 店舗詳細（単数 `id`。`/stores/[id]` は意図的に404） |
-| `/blog` | 編集ブログ一覧。AI予測レポートへの誘導バナー付き |
+| `/store/[id]` | 店舗詳細（単数 `id`。`/stores/[id]` は意図的に404）+ AI レポート要約 + レポート一覧導線 |
+| `/reports/daily` | **Daily Report 一覧**（全店舗の最新 Daily Report をカード表示） |
+| `/reports/daily/[store_slug]` | **Daily Report 個別**：最新 `content_type='daily'`・`is_published=true` |
+| `/reports/weekly` | **Weekly Report 一覧**（全店舗の最新 Weekly Report をカード表示） |
+| `/reports/weekly/[store_slug]` | **Weekly Report 個別**：最新 `content_type='weekly'`・`is_published=true` |
+| `/blog` | 編集ブログ一覧。Daily/Weekly Report 一覧への誘導バナー付き |
 | `/blog/[slug]` | **editorial（`content_type='editorial'`, `is_published=true`）のみ**表示 |
-| `/reports/daily/[store_slug]` | **Daily Report**：Supabase から最新 `content_type='daily'`・`is_published=true` を取得して表示 |
-| `/reports/weekly/[store_slug]` | **Weekly Report**：Supabase から最新 `content_type='weekly'`・`is_published=true` を取得して表示 |
 | `/insights/weekly` | Weekly Insights インデックス（`index.json` から）|
 | `/insights/weekly/[store]` | Weekly Insights 店舗別（`WeeklyStoreCharts.tsx`、`series_compact` 可視化）|
 | `/mypage` | お気に入り・閲覧履歴（`meguribiStorage.ts` / `localStorage`）|
@@ -41,7 +45,7 @@ Target commit: (see git)
     - **`approve`**: 最新の未公開 `editorial` 下書きを特定 → `is_published=true` に更新 → `/blog/[public_slug]` の URL を返信
   - `GET /api/line`: ヘルス `{"ok":true,"service":"line-webhook"}`
 - **OGP / メタデータ**: ルート `metadataBase`（`NEXT_PUBLIC_SITE_URL` 等）、動的 OG 画像、主要ページの `openGraph` / `twitter`
-- **Sitemap**: `/reports/daily/[store_slug]`（priority 0.85 / daily）＋ `/reports/weekly/[store_slug]`（priority 0.8 / weekly）が全店舗分登録済み。旧 `/blog/auto-*` URLは廃止。
+- **Sitemap**: `/reports/daily`（一覧）＋ `/reports/weekly`（一覧）＋ `/reports/daily/[store_slug]`（priority 0.85 / daily）＋ `/reports/weekly/[store_slug]`（priority 0.8 / weekly）が全店舗分登録済み。旧 `/blog/auto-*` URLは廃止。
 - **週次 Insights UI**: `/insights/weekly/[store]` に Recharts 可視化（`WeeklyStoreCharts.tsx`）。`series_compact` で時系列。旧 JSON はプレースホルダ表示。
 - **ブログ frontmatter**: Zod 形状検証＋日付形式チェック（`blogFrontmatter.ts` / `content.ts`）。`BLOG_STRICT_FRONTMATTER` / `BLOG_LOG_FRONTMATTER` は `plan/ENV.md`。
 - **`/stores`**: 12 店舗/ページ・地域タブ・`/api/range_multi` バッチ取得。予測 API が 503 のときはカードに「予測なし」表示。

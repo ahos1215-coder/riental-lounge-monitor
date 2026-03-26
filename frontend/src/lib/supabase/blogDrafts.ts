@@ -449,6 +449,72 @@ export async function publishEditorialBySlug(
  * LINE 承認フロー: 特定 LINE ユーザーの最新 editorial 未公開下書きを取得する。
  * "公開" メッセージ受信時に、どの下書きを承認するか特定するために使う。
  */
+export type ReportListItem = {
+  store_slug: string;
+  target_date: string;
+  edition?: string;
+  created_at?: string;
+  heading: string | null;
+};
+
+/**
+ * 全店舗の最新の公開済みレポートを取得（一覧ページ用）。
+ * 各店舗の最新1件のみ返す（created_at desc で取得し、フロントで重複除去）。
+ */
+export async function fetchAllLatestPublishedReports(
+  contentType: PublishedReportType,
+  limit = 50,
+): Promise<ReportListItem[]> {
+  const conf = endpointUrl();
+  if (!conf) return [];
+  const { endpoint, key } = conf;
+  const url =
+    `${endpoint}?select=store_slug,target_date,edition,created_at,mdx_content` +
+    `&content_type=eq.${encodeURIComponent(contentType)}` +
+    `&is_published=eq.true&error_message=is.null&mdx_content=not.eq.` +
+    `&order=created_at.desc&limit=${Math.min(limit, 200)}`;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      next: { revalidate: 300 },
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) return [];
+    const parsed = (await res.json()) as unknown;
+    if (!Array.isArray(parsed)) return [];
+
+    const seen = new Set<string>();
+    const items: ReportListItem[] = [];
+    for (const raw of parsed) {
+      if (!raw || typeof raw !== "object") continue;
+      const v = raw as Record<string, unknown>;
+      const slug = typeof v.store_slug === "string" ? v.store_slug : "";
+      if (!slug || seen.has(slug)) continue;
+      seen.add(slug);
+      const mdx = typeof v.mdx_content === "string" ? v.mdx_content : "";
+      let heading: string | null = null;
+      for (const line of mdx.split("\n")) {
+        const m = line.match(/^#{1,3}\s+(.+)/);
+        if (m) { heading = m[1].trim(); break; }
+      }
+      items.push({
+        store_slug: slug,
+        target_date: typeof v.target_date === "string" ? v.target_date : "",
+        edition: typeof v.edition === "string" ? v.edition : undefined,
+        created_at: typeof v.created_at === "string" ? v.created_at : undefined,
+        heading,
+      });
+    }
+    return items;
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchLatestUnpublishedEditorialByLineUser(
   lineUserId: string,
 ): Promise<{ facts_id: string; public_slug: string | null; store_slug: string; target_date: string } | null> {

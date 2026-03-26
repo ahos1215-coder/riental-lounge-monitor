@@ -145,6 +145,33 @@ type LastVisitFetchedTrend = {
   fallbackLine?: number[];
 };
 
+type MegribiScoreItem = {
+  slug: string;
+  score: number;
+  total: number;
+  men: number;
+  women: number;
+  female_ratio: number;
+};
+
+function ScoreBar({ score }: { score: number }) {
+  const pct = Math.round(score * 100);
+  const color =
+    pct >= 70
+      ? "bg-emerald-400"
+      : pct >= 40
+        ? "bg-amber-400"
+        : "bg-slate-500";
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-slate-800">
+        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="text-[10px] font-bold tabular-nums text-white/70">{pct}</span>
+    </div>
+  );
+}
+
 export default function HomePage({ latestBlogPosts }: HomePageProps) {
   const [lastStore, setLastStore] = useState<StoreMeta | null>(null);
   const [lastVisitFetched, setLastVisitFetched] = useState<LastVisitFetchedTrend>({
@@ -152,6 +179,27 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
     men: [],
     women: [],
   });
+  const [topStores, setTopStores] = useState<MegribiScoreItem[]>([]);
+  const [topStoresLoading, setTopStoresLoading] = useState(true);
+
+  useEffect(() => {
+    const ac = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch("/api/megribi_score", { signal: ac.signal });
+        if (!res.ok) { setTopStoresLoading(false); return; }
+        const json = (await res.json()) as { ok: boolean; data?: MegribiScoreItem[] };
+        if (!ac.signal.aborted && json.ok && Array.isArray(json.data)) {
+          setTopStores(json.data.filter((d) => d.total > 0).slice(0, 5));
+        }
+      } catch {
+        /* ignore */
+      } finally {
+        if (!ac.signal.aborted) setTopStoresLoading(false);
+      }
+    })();
+    return () => ac.abort();
+  }, []);
 
   useEffect(() => {
     try {
@@ -280,11 +328,8 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                   <Link href="/stores" className="text-indigo-300 hover:text-indigo-200">
                     店舗一覧
                   </Link>
-                  <Link
-                    href="/insights/weekly"
-                    className="text-indigo-300 hover:text-indigo-200"
-                  >
-                    週次 Insights
+                  <Link href="/reports" className="text-indigo-300 hover:text-indigo-200">
+                    AI予測レポート
                   </Link>
                   <Link href="/blog" className="text-indigo-300 hover:text-indigo-200">
                     ブログ
@@ -360,6 +405,60 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                 </div>
               </div>
             </div>
+          </section>
+
+          {/* 今夜のおすすめ TOP 5 */}
+          <section className="scroll-mt-24 space-y-3">
+            <div className="flex items-end justify-between gap-3">
+              <h2 className="text-sm font-semibold text-slate-100">今夜のおすすめ</h2>
+              <Link href="/stores" className="text-xs text-indigo-300 hover:text-indigo-200">
+                全店舗スコアを見る →
+              </Link>
+            </div>
+            <p className="text-[11px] text-slate-500">
+              めぐりびスコア（混雑率 × 女性比率）が高い順にピックアップ。
+            </p>
+            {topStoresLoading ? (
+              <div className="grid gap-2 sm:grid-cols-5">
+                {[...Array(5)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="h-24 animate-pulse rounded-xl border border-slate-800 bg-slate-900/40"
+                  />
+                ))}
+              </div>
+            ) : topStores.length === 0 ? (
+              <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-sm text-slate-400">
+                現在スコアを計算中です。しばらくしてからお試しください。
+              </div>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-5">
+                {topStores.map((item, idx) => {
+                  const meta = getStoreMetaBySlug(item.slug);
+                  return (
+                    <Link
+                      key={item.slug}
+                      href={`/store/${item.slug}?store=${item.slug}`}
+                      className="group flex flex-col items-center rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-3 text-center transition hover:border-emerald-500/50 hover:bg-slate-900/80"
+                    >
+                      <span className="text-[10px] font-bold text-emerald-300/70">
+                        #{idx + 1}
+                      </span>
+                      <span className="mt-1 text-xs font-bold text-white group-hover:text-emerald-200">
+                        {meta.label}
+                      </span>
+                      <span className="mt-0.5 text-[10px] text-white/35">{meta.areaLabel}</span>
+                      <div className="mt-1.5">
+                        <ScoreBar score={item.score} />
+                      </div>
+                      <span className="mt-1 text-[9px] text-white/30">
+                        {item.total}人（男{item.men} / 女{item.women}）
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
           </section>
 
           <section id="store-directory" className="scroll-mt-24 space-y-3">

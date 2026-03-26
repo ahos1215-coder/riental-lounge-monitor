@@ -5,6 +5,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from ..config import AppConfig
 from ..ml.forecast_service import ForecastService
+from ..ml.megribi_score import megribi_score as calc_megribi_score
 
 bp = Blueprint("forecast", __name__, url_prefix="/api")
 
@@ -30,6 +31,20 @@ def _error_status(raw: dict) -> int:
     if err in {"model_schema_mismatch", "model_unavailable"}:
         return 503
     return 200
+
+
+def _supabase_provider(cfg: AppConfig):
+    from ..data.provider import SupabaseLogsProvider
+    if not (cfg.supabase_url and cfg.supabase_service_role_key):
+        return None
+    if "SUPABASE_PROVIDER" not in current_app.config:
+        current_app.config["SUPABASE_PROVIDER"] = SupabaseLogsProvider(
+            base_url=cfg.supabase_url,
+            api_key=cfg.supabase_service_role_key,
+            session=current_app.config.get("HTTP_SESSION"),
+            logger=current_app.logger,
+        )
+    return current_app.config["SUPABASE_PROVIDER"]
 
 
 def _resolve_store_id(cfg: AppConfig) -> str:
@@ -93,7 +108,6 @@ def forecast_next_hour():
         "api_forecast.success store=%s points=%d", store, len(points)
     )
 
-    # 既存契約を維持しつつ、推論根拠を追加で返す
     return jsonify({"ok": True, "data": points, "reasoning": raw.get("reasoning", {})})
 
 
@@ -122,5 +136,74 @@ def forecast_today():
         "api_forecast.success store=%s points=%d", store, len(points)
     )
 
-    # 既存契約を維持しつつ、推論根拠を追加で返す
     return jsonify({"ok": True, "data": points, "reasoning": raw.get("reasoning", {})})
+
+
+@bp.get("/megribi_score")
+def api_megribi_score():
+    """各店舗の最新データから megribi_score を計算して返す。
+    ?store=slug または ?stores=slug1,slug2 で対象指定。
+    省略時は全店舗を返す。
+    """
+    from ..utils.stores import SLUG_TO_ID
+
+    cfg = _config()
+    logger = current_app.logger
+
+    single = request.args.get("store")
+    multi = request.args.get("stores")
+
+    if single:
+        slugs = [single.strip().lower()]
+    elif multi:
+        slugs = [s.strip().lower() for s in multi.split(",") if s.strip()]
+    else:
+        slugs = list(SLUG_TO_ID.keys())
+
+    backend = (cfg.data_backend or "legacy").lower()
+    if backend != "supabase" or not (cfg.supabase_url and cfg.supabase_service_role_key):
+        return jsonify({"ok": False, "error": "supabase-required"}), 501
+
+    provider = _supabase_provider(cfg)
+    if provider is None:
+        return jsonify({"ok": False, "error": "supabase-unavailable"}), 502
+
+    results = []
+    for slug in slugs[:40]:
+        store_id = SLUG_TO_ID.get(slug)
+        if not store_id:
+            continue
+        try:
+            rows = provider.fetch_range(store_id=store_id, limit=1)
+        except Exception:
+            continue
+        if not rows:
+            continue
+
+        latest = rows[-1]
+        total = float(latest.get("total", 0) or 0)
+        men = float(latest.get("men", 0) or 0)
+        women = float(latest.get("women", 0) or 0)
+
+        capacity = 80.0
+        occupancy_rate = min(total / capacity, 1.0) if capacity > 0 else 0.0
+        female_ratio = women / total if total > 0 else 0.5
+
+        score = calc_megribi_score(
+            female_ratio=female_ratio,
+            occupancy_rate=occupancy_rate,
+        )
+        results.append({
+            "slug": slug,
+            "score": round(score, 3),
+            "total": int(total),
+            "men": int(men),
+            "women": int(women),
+            "female_ratio": round(female_ratio, 3),
+            "occupancy_rate": round(occupancy_rate, 3),
+            "ts": latest.get("ts", ""),
+        })
+
+    results.sort(key=lambda r: r["score"], reverse=True)
+    logger.info("api_megribi_score.success count=%d", len(results))
+    return jsonify({"ok": True, "data": results})

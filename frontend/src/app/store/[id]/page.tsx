@@ -318,6 +318,14 @@ function StorePageInner() {
               </div>
             )}
           </div>
+          <div className="mt-3">
+            <Link
+              href="/reports"
+              className="text-xs text-indigo-300 hover:text-indigo-200"
+            >
+              AI予測レポート一覧 →
+            </Link>
+          </div>
         </section>
       )}
 
