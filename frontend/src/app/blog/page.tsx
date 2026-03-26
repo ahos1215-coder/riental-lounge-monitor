@@ -9,8 +9,7 @@ import {
   type BlogCategoryId,
 } from "@/lib/blog/content";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
-import { fetchLatestAutoBlogDrafts } from "@/lib/supabase/blogDrafts";
-import { getStoreMetaBySlug } from "../config/stores";
+import { STORES } from "../config/stores";
 
 const blogBase = getMetadataBaseUrl();
 
@@ -100,32 +99,7 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
     .sort((a, b) => b.views - a.views)
     .slice(0, 5);
 
-  const autoDraftRows = await fetchLatestAutoBlogDrafts(8);
-  const autoCards = autoDraftRows.map((row) => {
-    const meta = getStoreMetaBySlug(row.store_slug);
-    const updated = row.updated_at ?? row.created_at ?? "";
-    const updatedLabel = updated
-      ? new Intl.DateTimeFormat("ja-JP", {
-          timeZone: "Asia/Tokyo",
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-          hour12: false,
-        }).format(new Date(updated))
-      : row.target_date;
-    const title = `【自動更新】${meta.label}の最新予測と混雑ヒント`;
-    const description = `ML 2.0の最新推論を反映（更新: ${updatedLabel}）`;
-    return {
-      href: `/blog/auto-${row.store_slug}-${row.facts_id.split("_").slice(-1)[0] ?? "nightly"}`,
-      title,
-      description,
-      updatedLabel,
-      storeLabel: meta.label,
-    };
-  });
-  const autoQuickLinks = autoCards.slice(0, 6);
+  const dailyReportStores = STORES.slice(0, 6);
 
   return (
     <main className="relative min-h-[calc(100vh-80px)] bg-black text-white">
@@ -198,48 +172,37 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
 
         <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_340px]">
           <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {autoQuickLinks.length > 0 && (
-              <div className="sm:col-span-2 lg:col-span-3 rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <h2 className="text-sm font-bold text-emerald-200">AI自動更新（固定URL）</h2>
-                  <span className="text-[11px] text-emerald-100/70">SEO向け上書き運用</span>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {autoQuickLinks.map((card) => (
-                    <Link
-                      key={`quick-${card.href}`}
-                      href={card.href}
-                      className="rounded-full border border-emerald-400/40 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-100 hover:bg-emerald-500/20"
-                    >
-                      {card.storeLabel} 最新予測
-                    </Link>
-                  ))}
-                </div>
+            <div className="sm:col-span-2 lg:col-span-3 rounded-2xl border border-indigo-500/25 bg-indigo-500/5 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-bold text-indigo-200">AI予測・Daily Report</h2>
+                <Link
+                  href="/reports/daily/shibuya"
+                  className="text-[11px] text-indigo-300/80 hover:text-indigo-200"
+                >
+                  店舗別レポートを見る →
+                </Link>
               </div>
-            )}
-            {autoCards.map((card) => (
-              <Link
-                key={card.href}
-                href={card.href}
-                className="group overflow-hidden rounded-2xl border border-emerald-500/30 bg-emerald-500/5 hover:border-emerald-400/60"
-              >
-                <div className="relative aspect-[16/9]">
-                  <div className="absolute inset-0 bg-gradient-to-br from-emerald-700/40 to-slate-900/80" />
-                  <div className="absolute inset-0 bg-black/30" />
-                </div>
-                <div className="p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <span className="inline-flex items-center rounded-md bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-200">
-                      自動更新
-                    </span>
-                    <span className="text-xs text-white/50">{card.updatedLabel}</span>
-                  </div>
-                  <p className="mt-3 text-sm font-black leading-snug text-white">{card.title}</p>
-                  <p className="mt-2 text-xs text-white/70">{card.description}</p>
-                  <p className="mt-1 text-[11px] text-white/40">店舗: {card.storeLabel}</p>
-                </div>
-              </Link>
-            ))}
+              <p className="mt-2 text-xs text-white/60">
+                毎日 18:00 / 21:30 に自動生成される最新予測予報。店舗ページから各店の最新レポートを確認できます。
+              </p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {dailyReportStores.map((s) => (
+                  <Link
+                    key={s.slug}
+                    href={`/reports/daily/${encodeURIComponent(s.slug)}`}
+                    className="rounded-full border border-indigo-400/40 bg-indigo-500/10 px-3 py-1 text-xs font-semibold text-indigo-100 hover:bg-indigo-500/20"
+                  >
+                    {s.label}
+                  </Link>
+                ))}
+                <Link
+                  href="/stores"
+                  className="rounded-full border border-white/20 bg-white/5 px-3 py-1 text-xs font-semibold text-white/70 hover:bg-white/10"
+                >
+                  全店舗 →
+                </Link>
+              </div>
+            </div>
             {rows.map((post) => (
               <Link
                 key={post.slug}
@@ -278,23 +241,26 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
           </section>
 
           <aside className="space-y-4">
-            {autoQuickLinks.length > 0 && (
-              <div className="rounded-2xl border border-emerald-500/25 bg-emerald-500/5 p-5">
-                <h2 className="text-sm font-bold text-emerald-100">自動更新リンク</h2>
-                <div className="mt-3 space-y-2">
-                  {autoQuickLinks.map((card) => (
-                    <Link
-                      key={`aside-${card.href}`}
-                      href={card.href}
-                      className="block rounded-lg border border-emerald-400/25 bg-black/20 px-3 py-2 text-xs text-emerald-100 hover:bg-emerald-500/10"
-                    >
-                      <span className="font-semibold">{card.storeLabel}</span>
-                      <span className="ml-2 text-emerald-200/80">{card.updatedLabel}</span>
-                    </Link>
-                  ))}
-                </div>
+            <div className="rounded-2xl border border-indigo-500/25 bg-indigo-500/5 p-5">
+              <h2 className="text-sm font-bold text-indigo-100">AI予測レポート</h2>
+              <p className="mt-2 text-xs text-white/60 leading-relaxed">
+                Daily / Weekly の自動生成レポートは専用ページで公開しています。
+              </p>
+              <div className="mt-3 space-y-2">
+                <Link
+                  href="/reports/daily/shibuya"
+                  className="block rounded-lg border border-indigo-400/25 bg-black/20 px-3 py-2 text-xs text-indigo-100 hover:bg-indigo-500/10"
+                >
+                  Daily Report（渋谷）
+                </Link>
+                <Link
+                  href="/stores"
+                  className="block rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-xs text-white/70 hover:bg-white/5"
+                >
+                  全店舗のレポートを見る →
+                </Link>
               </div>
-            )}
+            </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
               <h2 className="text-sm font-bold">人気記事ランキング</h2>
               <div className="mt-4 space-y-3">
@@ -314,7 +280,7 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
               </div>
 
               <div className="mt-4 rounded-xl border border-white/10 bg-black/30 p-3 text-xs leading-relaxed text-white/60">
-                ※ 閲覧数ランキングはコンテンツ内の値に基づくデモ表示です。自動更新記事は別枠（緑のカード）をご利用ください。
+                ※ 閲覧数ランキングはコンテンツ内の値に基づくデモ表示です。AI予測レポートは上部または左サイドバーからご確認ください。
               </div>
             </div>
           </aside>

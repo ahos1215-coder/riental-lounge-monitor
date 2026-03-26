@@ -1,12 +1,16 @@
 name: Generate Weekly Insights
 
+# 各店舗を独立した matrix ジョブで並列生成し、最後に Fan-in ジョブで
+# index.json を再構築して Git に 1 回だけコミットする。
+# Supabase への upsert は各 matrix ジョブ内で完結する。
+
 on:
   workflow_dispatch:
     inputs:
       stores:
-        description: "対象ストア（スペース/カンマ区切り）"
+        description: "対象ストア（スペース/カンマ区切り、'all' または空白で全店舗）"
         required: false
-        default: "shibuya"
+        default: "all"
       threshold:
         description: "Good Window 閾値"
         required: false
@@ -23,10 +27,56 @@ permissions:
   contents: write
 
 jobs:
-  generate:
+  # ─────────────────────────────────────────────────────────────
+  # Fan-out: 店舗ごとの並列生成ジョブ
+  # ─────────────────────────────────────────────────────────────
+  generate-store:
     runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        store:
+          - nagasaki
+          - fukuoka
+          - kokura
+          - oita
+          - kumamoto
+          - miyazaki
+          - kagoshima
+          - okinawa_ag
+          - gangnam
+          - sapporo_ag
+          - sendai_ag
+          - shibuya
+          - ebisu
+          - shibuya_ag
+          - shinjuku
+          - ueno
+          - ueno_ag
+          - kashiwa
+          - machida
+          - yokohama
+          - omiya
+          - utsunomiya
+          - takasaki
+          - nagoya_ag
+          - nagoya_nishiki
+          - nagoya_sakae
+          - shizuoka
+          - hamamatsu
+          - kanazawa_ag
+          - osaka_ekimae
+          - umeda_ag
+          - tenma
+          - shinsaibashi
+          - namba
+          - kyoto
+          - kobe
+          - okayama
+          - hiroshima_ag
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -40,18 +90,39 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
-          python -m pip install pytest
 
-      - name: Warm up insights endpoint
+      # workflow_dispatch で特定の店舗のみ指定された場合はスキップ
+      - name: Check store filter
+        id: filter
+        env:
+          INPUT_STORES: ${{ github.event.inputs.stores }}
+          CURRENT_STORE: ${{ matrix.store }}
         run: |
-          curl -fsSL --retry 3 --retry-all-errors --max-time 60 "https://www.meguribi.jp/api/range?store=shibuya&limit=1" >/dev/null
+          if [ -z "$INPUT_STORES" ] || [ "$INPUT_STORES" = "all" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            # カンマ・スペース区切りをカンマ統一して検索
+            NORMALIZED=$(echo "$INPUT_STORES" | tr ' ' ',')
+            if echo ",$NORMALIZED," | grep -q ",$CURRENT_STORE,"; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "run=false" >> "$GITHUB_OUTPUT"
+              echo "Skipping $CURRENT_STORE (not in filter: $INPUT_STORES)"
+            fi
+          fi
 
-      - name: Generate weekly insights
+      - name: Warm up API endpoint
+        if: steps.filter.outputs.run == 'true'
+        run: |
+          curl -fsSL --retry 3 --retry-all-errors --max-time 60 \
+            "https://www.meguribi.jp/api/range?store=${{ matrix.store }}&limit=1" >/dev/null
+
+      - name: Generate weekly insights (single store, skip index)
+        if: steps.filter.outputs.run == 'true'
         env:
           NEXT_PUBLIC_BASE_URL: https://www.meguribi.jp
-          INSIGHTS_STORES: shibuya
-          INSIGHTS_THRESHOLD: "0.4"
-          INSIGHTS_MIN_DURATION_MINUTES: "60"
+          INSIGHTS_THRESHOLD: ${{ github.event.inputs.threshold || '0.4' }}
+          INSIGHTS_MIN_DURATION_MINUTES: ${{ github.event.inputs.min_duration_minutes || '60' }}
           INSIGHTS_HTTP_TIMEOUT_SECONDS: "90"
           INSIGHTS_HTTP_RETRIES: "4"
           INSIGHTS_SYNC_SUPABASE: "1"
@@ -62,23 +133,102 @@ jobs:
             echo "::error::Repository Secrets に SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY を設定してください。"
             exit 1
           fi
-          if [ -n "${{ github.event.inputs.stores }}" ]; then
-            export INSIGHTS_STORES="${{ github.event.inputs.stores }}"
-          fi
-          if [ -n "${{ github.event.inputs.threshold }}" ]; then
-            export INSIGHTS_THRESHOLD="${{ github.event.inputs.threshold }}"
-          fi
-          if [ -n "${{ github.event.inputs.min_duration_minutes }}" ]; then
-            export INSIGHTS_MIN_DURATION_MINUTES="${{ github.event.inputs.min_duration_minutes }}"
-          fi
           python scripts/generate_weekly_insights.py \
-            --stores "$INSIGHTS_STORES" \
+            --stores "${{ matrix.store }}" \
             --threshold "$INSIGHTS_THRESHOLD" \
-            --min-duration-minutes "$INSIGHTS_MIN_DURATION_MINUTES"
+            --min-duration-minutes "$INSIGHTS_MIN_DURATION_MINUTES" \
+            --skip-index
+
+      # 生成した店舗 JSON を Artifact に保存（Fan-in ジョブで回収）
+      - name: Upload store artifact
+        if: steps.filter.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: weekly-${{ matrix.store }}
+          path: frontend/content/insights/weekly/${{ matrix.store }}/
+          retention-days: 1
+          if-no-files-found: warn
+
+  # ─────────────────────────────────────────────────────────────
+  # Fan-in: 全 Artifact を集約して index.json を再構築し Git コミット
+  # ─────────────────────────────────────────────────────────────
+  collect-and-commit:
+    needs: generate-store
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest
+
+      - name: Download all store artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: weekly-*
+          path: /tmp/weekly-artifacts
+
+      - name: Merge artifacts and rebuild index.json
+        run: |
+          python - <<'PYEOF'
+          import json, os, shutil
+          from pathlib import Path
+          from datetime import datetime, timezone
+
+          artifacts_root = Path("/tmp/weekly-artifacts")
+          target_root = Path("frontend/content/insights/weekly")
+          target_root.mkdir(parents=True, exist_ok=True)
+
+          stores_index: dict = {}
+          generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+          for store_artifact_dir in sorted(artifacts_root.iterdir()):
+              # actions/download-artifact@v4 は "weekly-<store>/<files>" の構造で展開する
+              store_slug = store_artifact_dir.name.replace("weekly-", "", 1)
+              target_store_dir = target_root / store_slug
+              target_store_dir.mkdir(parents=True, exist_ok=True)
+
+              for json_file in sorted(store_artifact_dir.glob("*.json")):
+                  dest = target_store_dir / json_file.name
+                  shutil.copy2(json_file, dest)
+                  try:
+                      data = json.loads(json_file.read_text(encoding="utf-8"))
+                      stores_index[store_slug] = {
+                          "latest_file": json_file.name,
+                          "generated_at": data.get("generated_at", generated_at),
+                      }
+                  except json.JSONDecodeError:
+                      pass
+
+          index_path = target_root / "index.json"
+          index_payload: dict = {}
+          if index_path.exists():
+              try:
+                  index_payload = json.loads(index_path.read_text(encoding="utf-8"))
+              except json.JSONDecodeError:
+                  pass
+
+          merged_stores = {**index_payload.get("stores", {}), **stores_index}
+          index_payload["generated_at"] = generated_at
+          index_payload["stores"] = merged_stores
+
+          with index_path.open("w", encoding="utf-8", newline="\n") as fh:
+              json.dump(index_payload, fh, ensure_ascii=True, indent=2)
+              fh.write("\n")
+
+          print(f"index.json updated: {len(merged_stores)} stores total, {len(stores_index)} refreshed.")
+          PYEOF
 
       - name: Run tests
-        run: |
-          python -m pytest -q
+        run: python -m pytest -q
 
       - name: Commit and push if changed
         run: |
@@ -93,7 +243,7 @@ jobs:
           git push
 
   notify-on-failure:
-    needs: [generate]
+    needs: [generate-store, collect-and-commit]
     if: failure()
     uses: ./.github/workflows/notify-on-failure.yml
     secrets: inherit

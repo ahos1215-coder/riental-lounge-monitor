@@ -97,15 +97,7 @@ export async function GET(req: Request) {
   const row = await fetchLatestAutoBlogDraftByStoreSlug(store);
   if (!row) return NextResponse.json({ ok: true, hasData: false }, { status: 200 });
 
-  let slot = "nightly";
-  const prefix = `auto_${row.store_slug}_`;
-  if (row.facts_id.startsWith(prefix)) {
-    slot = row.facts_id.slice(prefix.length) || "nightly";
-  } else {
-    const parts = row.facts_id.split("_");
-    slot = parts.slice(-1)[0] ?? "nightly";
-  }
-  const href = `/blog/auto-${row.store_slug}-${slot}`;
+  const href = `/reports/daily/${encodeURIComponent(row.store_slug)}`;
   const title = `今日の傾向まとめ`;
   const updatedLabel = formatUpdatedLabel(row.created_at, row.target_date);
   const { bullets } = extractSummary(row.mdx_content);

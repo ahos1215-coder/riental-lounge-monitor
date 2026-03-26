@@ -378,6 +378,12 @@ def main() -> int:
     parser.add_argument("--min-duration-minutes", type=int)
     parser.add_argument("--ideal", type=float)
     parser.add_argument("--gender-weight", type=float)
+    parser.add_argument(
+        "--skip-index",
+        action="store_true",
+        default=False,
+        help="index.json の更新をスキップする（matrix 並列ジョブ用）",
+    )
     args = parser.parse_args()
 
     stores_value = args.stores or os.environ.get("INSIGHTS_STORES")
@@ -496,6 +502,9 @@ def main() -> int:
                 generated_at=generated_at,
                 payload=payload,
             )
+
+    if args.skip_index:
+        return 0
 
     index_payload["generated_at"] = generated_at
     index_payload["stores"] = stores_index
