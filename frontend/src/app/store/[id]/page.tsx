@@ -18,7 +18,7 @@ import {
   parseRangeResponse,
   pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
-import { DEFAULT_STORE, STORES, getStoreMetaBySlug } from "../../config/stores";
+import { DEFAULT_STORE, STORES, getStoreMetaBySlug, getStoreMetaBySlugStrict } from "../../config/stores";
 
 type ReportSummaryItem = {
   bullets: string[];
@@ -79,6 +79,14 @@ function StorePageInner() {
       : Array.isArray(slugRaw)
         ? slugRaw[0]
         : "";
+
+  // URLパスの店舗slugが不正な場合は店舗一覧へリダイレクト
+  const strictMeta = getStoreMetaBySlugStrict(slugFromPath);
+  useEffect(() => {
+    if (slugFromPath && !strictMeta) {
+      router.replace("/stores");
+    }
+  }, [slugFromPath, strictMeta, router]);
 
   const meta = getStoreMetaBySlug(slugFromPath || searchParams.get("store") || DEFAULT_STORE);
   const slug = meta.slug;

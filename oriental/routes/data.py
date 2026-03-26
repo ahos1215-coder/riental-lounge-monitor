@@ -252,27 +252,6 @@ def api_meta():
     return jsonify({"ok": True, "data": data})
 
 
-@bp.get("/api/heatmap")
-def api_heatmap():
-    return jsonify({"ok": True, "data": []})
-
-
-@bp.get("/api/stores/list")
-def api_stores_list():
-    return jsonify({"ok": True, "data": []})
-
-
-# ★★ forecast_today は完全削除しました ★★
-
-
-@bp.get("/api/range_prevweek")
-def api_range_prevweek():
-    return jsonify({"ok": True, "data": []})
-
-
-@bp.get("/api/summary")
-def api_summary():
-    return jsonify({"ok": True, "data": {}})
 
 
 @bp.get("/api/second_venues")

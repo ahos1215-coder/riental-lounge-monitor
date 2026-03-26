@@ -69,7 +69,8 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 ### Content / Batch
 
 #### Daily Report（`content_type='daily'`, `is_published=true`）
-- **Workflow**: `.github/workflows/trigger-blog-cron.yml`（毎日 JST 18:00 / 21:30）
+- **Workflow**: `.github/workflows/trigger-blog-cron.yml`（`workflow_dispatch` 専用・スケジュールなし）
+- **トリガー**: **cron-job.org** が JST 18:00 / 21:30 に GitHub `workflow_dispatch` API を呼び出す（GHA 内部 schedule は削除済み）
 - **構成**: 38店舗 × 独立 matrix ジョブ、`max-parallel: 15`、`continue-on-error: true`
 - **エンドポイント**: `GET /api/cron/blog-draft?store=<slug>&edition=<edition>&source=github_actions_cron`
 - **保存**: Supabase `blog_drafts`（`content_type='daily'`, `is_published=true`）

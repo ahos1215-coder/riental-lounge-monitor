@@ -21,6 +21,21 @@ from multi_collect import PREF_COORDS, STORES, collect_all_once
 bp = Blueprint("tasks", __name__)
 
 
+def _require_cron_secret() -> bool:
+    """
+    環境変数 CRON_SECRET が設定されている場合、
+    Authorization: Bearer <CRON_SECRET> ヘッダーを必須とする。
+    返り値が True なら認証失敗（呼び出し元で 401 を返す）。
+    """
+    secret = os.getenv("CRON_SECRET", "").strip()
+    if not secret:
+        return False  # 未設定時はスキップ（後方互換）
+    auth = request.headers.get("Authorization", "")
+    if auth == f"Bearer {secret}":
+        return False
+    return True  # 認証失敗
+
+
 @bp.route("/tasks/collect", methods=["GET", "POST"])
 def tasks_collect_single():
     """
@@ -81,6 +96,8 @@ def tasks_multi_collect():
     正常時: {"ok": true, "stores": 38, "task": "collect_all_once"}
     異常時: {"ok": false, "error": "..."}（HTTP 200 を維持）
     """
+    if _require_cron_secret():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
     logger = current_app.logger
     logger.info("collect_all_once.start")
     started = time.perf_counter()
@@ -105,6 +122,8 @@ def api_tasks_collect_all_once():
 
 @bp.get("/tasks/tick")
 def tasks_tick():
+    if _require_cron_secret():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
     cfg = _config()
     current = timeutil.now(cfg.timezone)
     is_in, start_dt, end_dt = timeutil.collection_window(
@@ -123,6 +142,8 @@ def tasks_tick():
 
 @bp.get("/tasks/seed")
 def tasks_seed():
+    if _require_cron_secret():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
     cfg = _config()
     today = timeutil.now(cfg.timezone).date()
     if storage.has_entry_for_date(cfg, today):
@@ -133,6 +154,8 @@ def tasks_seed():
 
 @bp.route("/tasks/update_second_venues", methods=["GET", "POST"])
 def tasks_update_second_venues():
+    if _require_cron_secret():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
     cfg = _config()
     logger = current_app.logger
     api_key = os.getenv("GOOGLE_PLACES_API_KEY", "")

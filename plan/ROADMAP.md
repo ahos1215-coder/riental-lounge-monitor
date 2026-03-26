@@ -87,7 +87,7 @@ Target commit: (see git)
 ## スケール・SEO・Cron（方針の要約）
 
 - **SEO（Daily Report）**: `/reports/daily/[store_slug]` は固定 URL（上書き運用）。カニバリゼーションを避け鮮度（Freshness）を優先。Weekly も同様に `/reports/weekly/[store_slug]` で固定 URL。
-- **定時ブログの時計**: **GitHub Actions**（`.github/workflows/trigger-blog-cron.yml`）が正本。`vercel.json` の Cron は**使わない**（削除済み）。
+- **定時ブログの時計**: **cron-job.org** が正本（JST 18:00 / 21:30 に GitHub `workflow_dispatch` を呼び出す）。`trigger-blog-cron.yml` は `schedule` を持たず `workflow_dispatch` 専用。`vercel.json` の Cron は**使わない**（削除済み）。
 - **Weekly の Git コミット**: Fan-in ジョブが 1回のみ commit するため、並列書き込みの競合なし。
 - **X 自動投稿**: 全店舗一斉ポストは行わず、開始時は **人気トップ5＋長崎店**に限定（API・シャドウバンリスク回避）。
 

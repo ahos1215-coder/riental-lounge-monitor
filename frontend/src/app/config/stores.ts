@@ -382,7 +382,11 @@ export const DEFAULT_STORE = STORES[0].slug;
 export function getStoreMetaBySlug(slug: string | null | undefined): StoreMeta {
   if (!slug) return STORES[0];
   const normalized = slug.toLowerCase();
-  return STORES.find((s) => s.slug === normalized) ?? STORES[0];
+  const found = STORES.find((s) => s.slug === normalized);
+  if (!found && typeof window !== "undefined") {
+    console.warn(`[getStoreMetaBySlug] unknown slug "${slug}", falling back to default store`);
+  }
+  return found ?? STORES[0];
 }
 
 /** 一致する店舗が無いときは null（cron 等でデフォルト店にフォールバックしない） */
