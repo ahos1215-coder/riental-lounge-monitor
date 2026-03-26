@@ -1,0 +1,128 @@
+# X (Twitter) 自動投稿 — Daily Report 生成後に呼ばれる。
+#
+# 投稿対象: SNS_POST_ALLOWED_STORE_SLUGS（CSV）+ nagasaki（ハードコード）
+# 対象外の店舗は API が 403 を返すので安全にスキップされる。
+#
+# 必要な Secrets:
+#   VERCEL_BLOG_CRON_BASE_URL  — Vercel のベース URL（末尾スラッシュなし）
+#   SNS_POST_SECRET            — /api/sns/post の認証トークン
+#   X_API_KEY, X_API_SECRET, X_ACCESS_TOKEN, X_ACCESS_TOKEN_SECRET — X API OAuth 1.0a
+#     ※ X の API キーが未設定でも dry_run として安全に動作する
+#
+# トリガー:
+#   - workflow_dispatch（手動）
+#   - workflow_run: trigger-blog-cron.yml 完了後に自動実行
+
+name: X auto-post (after Daily Report)
+
+on:
+  workflow_dispatch:
+    inputs:
+      store:
+        description: "投稿する店舗 slug（空 = 全許可店舗）"
+        type: string
+        required: false
+      dry_run:
+        description: "dry_run（true = 実投稿しない）"
+        type: boolean
+        required: false
+        default: true
+  workflow_run:
+    workflows: ["Blog draft cron (GitHub Actions)"]
+    types: [completed]
+
+jobs:
+  post:
+    name: Post to X
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    timeout-minutes: 5
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Determine targets and dry_run
+        id: targets
+        run: |
+          set -e
+          # workflow_dispatch → 指定 store or 全許可店舗
+          # workflow_run → 全許可店舗を自動投稿
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            INPUT_STORE="${{ github.event.inputs.store }}"
+            DRY_RUN="${{ github.event.inputs.dry_run }}"
+          else
+            INPUT_STORE=""
+            DRY_RUN="false"
+          fi
+
+          # デフォルトの許可店舗リスト（6店舗：人気 Top5 + 長崎）
+          ALL_STORES="nagasaki,shibuya,ebisu,shinjuku,umeda_ag,fukuoka"
+
+          if [ -n "$INPUT_STORE" ]; then
+            echo "stores=$INPUT_STORE" >> "$GITHUB_OUTPUT"
+          else
+            echo "stores=$ALL_STORES" >> "$GITHUB_OUTPUT"
+          fi
+          echo "dry_run=$DRY_RUN" >> "$GITHUB_OUTPUT"
+
+      - name: Post for each store
+        env:
+          BASE_URL: ${{ secrets.VERCEL_BLOG_CRON_BASE_URL }}
+          SNS_SECRET: ${{ secrets.SNS_POST_SECRET }}
+          SITE_URL: ${{ secrets.VERCEL_BLOG_CRON_BASE_URL }}
+        run: |
+          set -e
+          STORES="${{ steps.targets.outputs.stores }}"
+          DRY_RUN="${{ steps.targets.outputs.dry_run }}"
+
+          if [ -z "${BASE_URL:-}" ] || [ -z "${SNS_SECRET:-}" ]; then
+            echo "::warning::VERCEL_BLOG_CRON_BASE_URL or SNS_POST_SECRET is not set. Skipping."
+            exit 0
+          fi
+
+          IFS=',' read -ra SLUG_LIST <<< "$STORES"
+          SUCCESS=0
+          FAIL=0
+
+          for SLUG in "${SLUG_LIST[@]}"; do
+            SLUG="$(echo "$SLUG" | tr -d ' ')"
+            BLOG_URL="${SITE_URL}/reports/daily/${SLUG}"
+            TITLE="【AI予測】オリエンタルラウンジ ${SLUG} の今夜の混雑予測"
+
+            BODY=$(cat <<ENDJSON
+          {"store_slug":"${SLUG}","blog_url":"${BLOG_URL}","title":"${TITLE}","dry_run":${DRY_RUN}}
+          ENDJSON
+            )
+
+            echo "→ Posting for ${SLUG} (dry_run=${DRY_RUN})..."
+            HTTP_CODE=$(curl -sS -o /tmp/resp.json -w "%{http_code}" \
+              -X POST \
+              --connect-timeout 15 \
+              --max-time 60 \
+              -H "Authorization: Bearer ${SNS_SECRET}" \
+              -H "Content-Type: application/json" \
+              -d "$BODY" \
+              "${BASE_URL}/api/sns/post" || echo "000")
+
+            cat /tmp/resp.json 2>/dev/null || true
+            echo ""
+
+            if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+              echo "  ✅ ${SLUG}: ${HTTP_CODE}"
+              SUCCESS=$((SUCCESS + 1))
+            elif [ "$HTTP_CODE" = "403" ]; then
+              echo "  ⏭️ ${SLUG}: not in allowed list (403), skipping"
+            else
+              echo "  ❌ ${SLUG}: HTTP ${HTTP_CODE}"
+              FAIL=$((FAIL + 1))
+            fi
+
+            sleep 2
+          done
+
+          echo ""
+          echo "=== Summary: success=${SUCCESS}, failed=${FAIL} ==="
+          if [ "$FAIL" -gt 0 ]; then
+            echo "::warning::${FAIL} store(s) failed to post"
+          fi

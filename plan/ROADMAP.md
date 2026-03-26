@@ -59,6 +59,21 @@ Target commit: (see git)
 | サイトマップ | `/reports/daily` + `/reports/weekly` を static routes に追加 |
 | `next.config.ts` | `/api/megribi_score` に CDN キャッシュヘッダー追加 |
 
+### Round 3: Chart.js 削除 + StoreCard UI 改善
+
+| 項目 | 内容 |
+|------|------|
+| Chart.js 完全削除 | `chart.js`, `chartjs-adapter-date-fns`, `react-chartjs-2` を package.json から削除。死コード `ForecastNextHourChart.tsx` / `ForecastPreviewChart.tsx` を削除 |
+| StoreCard プレースホルダ改善 | `ピーク予測 0人`・`混雑 —`・`狙い目 —` を非表示に。関連店舗カードのラベル二重表記を修正 |
+
+### Round 4: マイページ ダッシュボード化 + X 自動投稿
+
+| 項目 | 内容 |
+|------|------|
+| マイページ全面リニューアル | お気に入り店舗をリッチカード化（リアルタイム人数・男女スパークライン・megribi_score・ML 予測サマリ・Daily/Weekly リンク）。閲覧履歴をピルタグに圧縮。ナビリンク更新 |
+| `/api/sns/post` X API 統合 | OAuth 1.0a 署名・リトライ・dry_run 対応。環境変数未設定時は安全にスキップ |
+| `x-auto-post.yml` GHA ワークフロー | `trigger-blog-cron.yml` 完了後に自動実行（`workflow_run`）。許可店舗のみポスト。手動 dispatch 対応 |
+
 ---
 
 ## P0（次に着手しやすい項目）
@@ -78,7 +93,7 @@ Target commit: (see git)
 - 監視・運用の可視化（ログの整理、Render/Vercel 運用の整理）
 - **GitHub Actions の失敗通知**（**実装済み**: `OPS_NOTIFY_WEBHOOK_URL` + `notify-on-failure.yml`。定時ブログの部分失敗は `summarize-blog-matrix` が steps まで確認）
 - **Gemini 出力の構造化**: frontmatter と本文の分離（Zod 検証は追加済み）
-- **OGP / メタデータ**（**実装済み**）。**X（Twitter）API 連携・投稿用 API ルート**（未実装・構想段階）
+- **OGP / メタデータ**（**実装済み**）。~~**X（Twitter）API 連携・投稿用 API ルート**~~ → **実装済み（Round 4: OAuth 1.0a + GHA workflow）**
 
 ## P2
 
