@@ -1,14 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   DEFAULT_STORE,
   STORES,
   getStoreMetaBySlug,
   type StoreMeta,
 } from "./config/stores";
-import { StoreCard } from "@/components/StoreCard";
 import { LAST_STORE_KEY } from "@/lib/browser/meguribiStorage";
 import {
   STORE_CARD_RANGE_LIMIT,
@@ -16,7 +15,6 @@ import {
   buildActualSparklineFromRange,
   buildGenderSparklineFromRange,
   parseRangeResponse,
-  pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
 
 export type HomeBlogTeaser = {
@@ -28,26 +26,6 @@ export type HomeBlogTeaser = {
 
 type HomePageProps = {
   latestBlogPosts: HomeBlogTeaser[];
-};
-
-type ForecastPoint = { ts: string; men_pred?: number; women_pred?: number; total_pred?: number };
-type StoreRealtimeCard = {
-  slug: string;
-  stats: {
-    menCount: number;
-    womenCount: number;
-    nowTotal: number;
-    peakPredTotal: number;
-    genderRatio: string;
-    crowdLevel: string;
-    recommendLabel: string;
-  };
-  /** 予測合計の折れ線（実測男女が足りないときのフォールバック） */
-  sparkline: number[];
-  sparklineMen: number[];
-  sparklineWomen: number[];
-  nowTotal: number;
-  maxPred: number;
 };
 
 const FALLBACK_LAST_STORE = {
@@ -160,21 +138,6 @@ function getAreaLabelFromSlug(slug: string): string {
   return getStoreMetaBySlug(slug || DEFAULT_STORE).areaLabel || "エリア未設定";
 }
 
-function toHmJst(iso: string): string {
-  return new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(iso));
-}
-
-function crowdLabelFromPred(maxPred: number): string {
-  if (maxPred >= 120) return "混雑";
-  if (maxPred >= 80) return "ほどよい";
-  return "空いている";
-}
-
 type LastVisitFetchedTrend = {
   loading: boolean;
   men: number[];
@@ -184,8 +147,6 @@ type LastVisitFetchedTrend = {
 
 export default function HomePage({ latestBlogPosts }: HomePageProps) {
   const [lastStore, setLastStore] = useState<StoreMeta | null>(null);
-  const [storeRealtime, setStoreRealtime] = useState<Record<string, StoreRealtimeCard>>({});
-  const [realtimeLoading, setRealtimeLoading] = useState(true);
   const [lastVisitFetched, setLastVisitFetched] = useState<LastVisitFetchedTrend>({
     loading: true,
     men: [],
@@ -203,114 +164,9 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
     }
   }, []);
 
-  const sourceStoresForRealtime = useMemo(() => STORES.slice(0, 12), []);
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      setRealtimeLoading(true);
-      const results = await Promise.all(
-        sourceStoresForRealtime.map(async (store) => {
-          try {
-            const [forecastRes, rangeRes] = await Promise.all([
-              fetch(`/api/forecast_today?store=${encodeURIComponent(store.slug)}`, { cache: "no-store" }),
-              fetch(
-                `/api/range?store=${encodeURIComponent(store.slug)}&limit=${STORE_CARD_RANGE_LIMIT}`,
-                { cache: "no-store" },
-              ),
-            ]);
-            const rangeBody: unknown = await rangeRes.json();
-            const forecastUnavailable =
-              !forecastRes.ok && forecastRes.status === 503;
-            const forecastText = await forecastRes.text();
-            let forecastRows: ForecastPoint[] = [];
-            if (forecastRes.ok) {
-              try {
-                const forecastBody = JSON.parse(forecastText) as {
-                  data?: ForecastPoint[];
-                };
-                forecastRows = Array.isArray(forecastBody?.data)
-                  ? forecastBody.data
-                  : [];
-              } catch {
-                forecastRows = [];
-              }
-            }
-            const rangeRows = parseRangeResponse(rangeBody);
-            const current = pickLatestRangeRow(rangeRows) ?? {};
-            const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
-            const womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
-            const nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
-
-            const totals = forecastRows
-              .map((r) => Math.max(0, Math.round(Number(r.total_pred ?? 0))))
-              .filter((n) => Number.isFinite(n));
-            const maxPred = totals.length ? Math.round(Math.max(...totals)) : 0;
-            let calm = forecastRows[0];
-            for (const r of forecastRows) {
-              if (Number(r.total_pred ?? 0) < Number(calm?.total_pred ?? Number.POSITIVE_INFINITY)) calm = r;
-            }
-            const calmLabel = calm?.ts ? toHmJst(calm.ts) : "--:--";
-
-            const stats = {
-              menCount: menNow,
-              womenCount: womenNow,
-              nowTotal,
-              peakPredTotal: maxPred,
-              genderRatio: `${menNow}:${womenNow}`,
-              crowdLevel: forecastUnavailable
-                ? "予測なし"
-                : crowdLabelFromPred(maxPred),
-              recommendLabel: forecastUnavailable
-                ? "現在ご利用いただけません"
-                : calm?.ts
-                  ? `${calmLabel}ごろ`
-                  : "データ不足",
-            };
-            const sparkline = totals.slice(0, 10);
-            const genderSparks = buildGenderSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
-            const actualTotals = buildActualSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
-            const sparklineMen = genderSparks.men;
-            const sparklineWomen = genderSparks.women;
-            const sparklineFallback =
-              actualTotals.length >= 2 ? actualTotals : sparkline;
-            const card: StoreRealtimeCard = {
-              slug: store.slug,
-              stats,
-              sparkline: sparklineFallback,
-              nowTotal,
-              maxPred,
-              sparklineMen,
-              sparklineWomen,
-            };
-            return card;
-          } catch {
-            return null;
-          }
-        }),
-      );
-      if (!mounted) return;
-      const mapped: Record<string, StoreRealtimeCard> = {};
-      for (const r of results) {
-        if (r) mapped[r.slug] = r;
-      }
-      setStoreRealtime(mapped);
-      setRealtimeLoading(false);
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [sourceStoresForRealtime]);
-
   const lastDisplaySlug = lastStore?.slug ?? FALLBACK_LAST_STORE.slug;
-  const gridCardForLastVisit = storeRealtime[lastDisplaySlug];
-  const lastVisitFromGrid =
-    (gridCardForLastVisit?.sparklineMen?.length ?? 0) >= 2 &&
-    (gridCardForLastVisit?.sparklineWomen?.length ?? 0) >= 2;
 
   useEffect(() => {
-    if (lastVisitFromGrid) return;
-
     const ac = new AbortController();
     setLastVisitFetched((p) => ({ ...p, loading: true }));
 
@@ -360,35 +216,9 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
     })();
 
     return () => ac.abort();
-  }, [lastDisplaySlug, lastVisitFromGrid]);
-
-  const digestStores = useMemo(() => {
-    const hour = new Date().getHours();
-    const cards = Object.values(storeRealtime);
-    const bySlug = new Map(cards.map((c) => [c.slug, c]));
-    const ranked = [...cards].sort((a, b) => {
-      if (hour >= 20 || hour <= 1) return b.maxPred - a.maxPred;
-      return a.nowTotal - b.nowTotal;
-    });
-    const picked = ranked.slice(0, 6).map((c) => getStoreMetaBySlug(c.slug));
-    if (picked.length >= 6) return picked;
-    const exists = new Set(picked.map((s) => s.slug));
-    for (const s of STORES) {
-      if (exists.has(s.slug)) continue;
-      if (!bySlug.has(s.slug) && picked.length < 6) picked.push(s);
-    }
-    return picked.slice(0, 6);
-  }, [storeRealtime]);
+  }, [lastDisplaySlug]);
 
   const lastVisitChartBlock = (() => {
-    if (lastVisitFromGrid && gridCardForLastVisit) {
-      return (
-        <LastVisitGenderTrendChart
-          men={gridCardForLastVisit.sparklineMen}
-          women={gridCardForLastVisit.sparklineWomen}
-        />
-      );
-    }
     if (lastVisitFetched.loading) {
       return <LastVisitChartSkeleton />;
     }
@@ -437,10 +267,10 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                     今夜の予測を見る
                   </Link>
                   <Link
-                    href="#store-grid"
+                    href="#store-directory"
                     className="inline-flex items-center justify-center rounded-md border border-slate-500/60 bg-black/40 px-4 py-2 text-slate-100/80 hover:border-amber-300/80 hover:bg-slate-900"
                   >
-                    掲載中の店舗へ
+                    店舗一覧の案内へ
                   </Link>
                 </div>
                 <nav
@@ -470,7 +300,7 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
             </div>
           </section>
 
-          <section className="space-y-3">
+          <section id="last-visited" className="scroll-mt-24 space-y-3">
             <h2 className="text-sm font-semibold text-slate-100">Last visited store</h2>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/80 px-4 py-4">
               <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] md:items-center">
@@ -532,37 +362,27 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
             </div>
           </section>
 
-          <section id="store-grid" className="scroll-mt-24 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <h2 className="text-sm font-semibold text-slate-100">掲載中の店舗</h2>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
-                  男女比・人数・混雑の目安を一覧（時間帯で並びが変わります）。
-                </p>
+          <section id="store-directory" className="scroll-mt-24 space-y-3">
+            <h2 className="text-sm font-semibold text-slate-100">店舗の男女比・予測を見る</h2>
+            <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-sm leading-relaxed text-slate-100/85">
+              <p>
+                オリエンタルラウンジ{" "}
+                <span className="font-semibold text-slate-100">{STORES.length}</span>{" "}
+                店舗の実測・予測は、
+                <strong className="font-medium text-indigo-200">店舗一覧</strong>
+                にまとめています。地域での絞り込み・検索・ページ送りで探せます。
+              </p>
+              <p className="mt-2 text-[13px] text-slate-400">
+                トップでは「直前に見た店」の推移だけを表示し、特定店の抜粋一覧は出しません（一覧と役割が重なるため）。
+              </p>
+              <div className="mt-4">
+                <Link
+                  href="/stores"
+                  className="inline-flex items-center justify-center rounded-md bg-indigo-500 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-400"
+                >
+                  店舗一覧を開く
+                </Link>
               </div>
-              <Link
-                href="/stores"
-                className="shrink-0 text-xs text-indigo-300 hover:text-indigo-200"
-              >
-                すべて見る →
-              </Link>
-            </div>
-            <div className="grid gap-3 md:grid-cols-3">
-              {digestStores.map((store, idx) => (
-                <StoreCard
-                  key={store.slug}
-                  slug={store.slug}
-                  label={`Oriental Lounge ${store.label}`}
-                  brandLabel="ORIENTAL LOUNGE"
-                  areaLabel={store.areaLabel}
-                  isHighlight={idx === 0}
-                  stats={storeRealtime[store.slug]?.stats}
-                  sparklinePoints={storeRealtime[store.slug]?.sparkline}
-                  sparklineMen={storeRealtime[store.slug]?.sparklineMen}
-                  sparklineWomen={storeRealtime[store.slug]?.sparklineWomen}
-                  isLoading={realtimeLoading && !storeRealtime[store.slug]}
-                />
-              ))}
             </div>
           </section>
 
