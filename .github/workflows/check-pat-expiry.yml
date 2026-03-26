@@ -1,0 +1,122 @@
+# GitHub PAT 期限切れ通知
+# 毎週月曜 09:00 JST (UTC 00:00) に PAT の残り有効期限を確認し、
+# 30日以内に期限が切れる場合は LINE に Push 通知を送る。
+#
+# 必要な Secrets:
+#   GH_PAT_CHECK_TOKEN   — チェック対象の PAT（meta エンドポイントで自己検査）
+#   LINE_CHANNEL_ACCESS_TOKEN — LINE Messaging API チャネルアクセストークン
+#   LINE_USER_ID             — 通知先の LINE ユーザー ID（またはグループ ID）
+#
+# ※ GH_PAT_CHECK_TOKEN の「有効期限」は GitHub REST /user エンドポイントの
+#    X-OAuth-Scopes ヘッダーでは取れないため、
+#    token-check スクリプトで /user を呼び、ステータスと期限情報を取得する。
+#    classic PAT の期限は gh api /user/installations では取れないが、
+#    "Authorization: token XXX" で GET /user を叩いて
+#    レスポンスヘッダー github-authentication-token-expiration を読む。
+
+name: Check PAT expiry and notify LINE
+
+on:
+  schedule:
+    # 毎週月曜 09:00 JST = UTC 00:00
+    - cron: "0 0 * * MON"
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Check PAT expiry
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Check PAT expiry via GitHub API
+        id: expiry
+        env:
+          GH_PAT: ${{ secrets.GH_PAT_CHECK_TOKEN }}
+        run: |
+          set -e
+
+          if [ -z "${GH_PAT:-}" ]; then
+            echo "::warning::GH_PAT_CHECK_TOKEN is not set. Skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # /user を叩いてレスポンスヘッダーの github-authentication-token-expiration を取得
+          EXPIRY_HEADER=$(curl -sS -D - -o /dev/null \
+            -H "Authorization: token ${GH_PAT}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/user \
+            | grep -i "github-authentication-token-expiration" \
+            | sed 's/github-authentication-token-expiration: //i' \
+            | tr -d '\r\n')
+
+          echo "Expiry header: ${EXPIRY_HEADER}"
+
+          if [ -z "$EXPIRY_HEADER" ]; then
+            echo "::notice::PAT has no expiry (no-expiry classic token, or header not returned)"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # 残り日数を計算
+          EXPIRY_EPOCH=$(date -d "$EXPIRY_HEADER" +%s 2>/dev/null || echo "0")
+          NOW_EPOCH=$(date +%s)
+          DAYS_LEFT=$(( (EXPIRY_EPOCH - NOW_EPOCH) / 86400 ))
+
+          echo "Days left: ${DAYS_LEFT}"
+          echo "days_left=${DAYS_LEFT}" >> "$GITHUB_OUTPUT"
+          echo "expiry_date=${EXPIRY_HEADER}" >> "$GITHUB_OUTPUT"
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          if [ "$DAYS_LEFT" -le 30 ]; then
+            echo "should_notify=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_notify=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Notify LINE
+        if: steps.expiry.outputs.skip != 'true' && steps.expiry.outputs.should_notify == 'true'
+        env:
+          LINE_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER:  ${{ secrets.LINE_USER_ID }}
+        run: |
+          set -e
+
+          if [ -z "${LINE_TOKEN:-}" ] || [ -z "${LINE_USER:-}" ]; then
+            echo "::warning::LINE_CHANNEL_ACCESS_TOKEN or LINE_USER_ID is not set. Skipping LINE notification."
+            exit 0
+          fi
+
+          DAYS="${{ steps.expiry.outputs.days_left }}"
+          EXPIRY="${{ steps.expiry.outputs.expiry_date }}"
+
+          if [ "$DAYS" -le 0 ]; then
+            LEVEL="🔴 期限切れ"
+            MSG="GitHub PAT の有効期限が切れています！\n\n期限: ${EXPIRY}\n\n今すぐ再発行して GitHub Secrets を更新してください。\nhttps://github.com/settings/tokens"
+          elif [ "$DAYS" -le 7 ]; then
+            LEVEL="🔴 残り${DAYS}日"
+            MSG="GitHub PAT の期限があと ${DAYS} 日で切れます！\n\n期限: ${EXPIRY}\n\n早急に再発行して GitHub Secrets を更新してください。\nhttps://github.com/settings/tokens"
+          else
+            LEVEL="🟡 残り${DAYS}日"
+            MSG="GitHub PAT の期限が ${DAYS} 日後に切れます。\n\n期限: ${EXPIRY}\n\n余裕があるうちに再発行を検討してください。\nhttps://github.com/settings/tokens"
+          fi
+
+          # LINE Push Message API
+          HTTP_CODE=$(curl -sS -o /tmp/line_resp.json -w "%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${LINE_TOKEN}" \
+            -d "{\"to\":\"${LINE_USER}\",\"messages\":[{\"type\":\"text\",\"text\":\"[めぐりび] GitHub PAT 期限警告\n${LEVEL}\n\n${MSG}\"}]}" \
+            "https://api.line.me/v2/bot/message/push")
+
+          cat /tmp/line_resp.json 2>/dev/null || true
+          echo ""
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ LINE notification sent (days_left=${DAYS})"
+          else
+            echo "::error::LINE push failed: HTTP ${HTTP_CODE}"
+            exit 1
+          fi

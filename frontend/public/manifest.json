@@ -1,0 +1,51 @@
+{
+  "name": "めぐりび | MEGRIBI",
+  "short_name": "めぐりび",
+  "description": "オリエンタルラウンジの混雑傾向・男女比・予測をまとめてチェック。今夜の一軒をデータで選ぶための案内灯。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "orientation": "portrait",
+  "scope": "/",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "/icons/screenshot-wide.png",
+      "sizes": "1280x720",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "店舗一覧ページ"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "店舗一覧",
+      "short_name": "一覧",
+      "description": "全店舗の混雑状況を一覧表示",
+      "url": "/stores",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "AI予測レポート",
+      "short_name": "レポート",
+      "description": "毎日更新のAI予測レポート",
+      "url": "/reports",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

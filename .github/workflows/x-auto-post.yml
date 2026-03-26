@@ -87,8 +87,9 @@ jobs:
 
           for SLUG in "${SLUG_LIST[@]}"; do
             SLUG="$(echo "$SLUG" | tr -d ' ')"
-            BLOG_URL="${SITE_URL}/reports/daily/${SLUG}"
-            TITLE="【AI予測】オリエンタルラウンジ ${SLUG} の今夜の混雑予測"
+            # UTM パラメータ付き URL（X 経由の流入計測）
+            BLOG_URL="${SITE_URL}/reports/daily/${SLUG}?utm_source=twitter&utm_medium=social&utm_campaign=daily_report&utm_content=${SLUG}"
+            TITLE="【AI予測】オリエンタルラウンジ ${SLUG} の今夜の混雑予測 #相席ラウンジ #めぐりび"
 
             BODY=$(cat <<ENDJSON
           {"store_slug":"${SLUG}","blog_url":"${BLOG_URL}","title":"${TITLE}","dry_run":${DRY_RUN}}

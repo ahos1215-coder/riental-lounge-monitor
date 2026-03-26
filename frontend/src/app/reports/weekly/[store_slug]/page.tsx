@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { getStoreMetaBySlugStrict } from "@/app/config/stores";
+import { ReservationLinkCard } from "@/components/ReservationLinkCard";
 import { fetchLatestPublishedReportByStore } from "@/lib/supabase/blogDrafts";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 
@@ -87,6 +88,14 @@ export default async function WeeklyReportStorePage({ params }: Props) {
       <article className="prose prose-invert mt-10 max-w-none prose-headings:text-white prose-p:text-white/80 prose-li:text-white/80">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
       </article>
+
+      <div className="mt-10">
+        <ReservationLinkCard
+          storeName={`オリエンタルラウンジ ${store.label}`}
+          storeSlug={store.slug}
+          utmCampaign="weekly_report"
+        />
+      </div>
     </main>
   );
 }

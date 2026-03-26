@@ -14,6 +14,11 @@ export const metadata: Metadata = {
   description:
     "オリエンタルラウンジの混雑傾向・男女比・予測をまとめてチェック。今夜の一軒をデータで選ぶための案内灯。",
   applicationName: "めぐりび",
+  manifest: "/manifest.json",
+  icons: {
+    icon: "/icons/icon.svg",
+    apple: "/icons/icon.svg",
+  },
   openGraph: {
     type: "website",
     locale: "ja_JP",
@@ -42,6 +47,13 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja">
+      <head>
+        <meta name="theme-color" content="#000000" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="めぐりび" />
+      </head>
       <body className="bg-black">
         <MeguribiHeader />
         <div className="min-h-screen text-slate-50">{children}</div>

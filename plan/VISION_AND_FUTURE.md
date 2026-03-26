@@ -1,5 +1,5 @@
 # VISION_AND_FUTURE
-Last updated: 2026-03-21
+Last updated: 2026-03-26 (Round 4 完了)
 Target commit: (see git)
 
 > **このファイルの役割**  
@@ -12,125 +12,136 @@ Target commit: (see git)
 
 ## 1. プロジェクトの目的（プロダクト）
 
-- **MEGRIBI（めぐりび）**: 相席ラウンジ等の **混雑の可視化** と（設定により）**簡易予測** を通じて、来店タイミングの判断材料を提供する Web サービス。
+- **MEGRIBI（めぐりび）**: 相席ラウンジ等の **混雑の可視化** と **ML ベースの予測** を通じて、来店タイミングの判断材料を提供する Web サービス。
 - **データの正本**: Supabase `logs`。収集は Render 上の Flask／`multi_collect` 系。
-- **フロント**: Next.js（Vercel）。**ブログ／コンテンツ**は半自動運用（AI 下書き＋人の承認）を前提とする（詳細は `plan/BLOG_CONTENT.md`）。
+- **フロント**: Next.js（Vercel）。コンテンツは 3 分類運用:
+  - **Daily/Weekly Report**: 完全自動（GitHub Actions + Gemini + cron-job.org）
+  - **Editorial Blog**: AI 下書き＋LINE 承認の半自動運用
+- **ML**: XGBoost ベースの店舗別最適化モデル（38 店舗分）。日次自動学習
 
 ### 個人のビジョン（参考・plan の必須要件ではない）
 
-- 趣味・個人開発としての側面、収益・自動化・メディア化などの**志向**は、オーナーの判断としてありうる。  
-- **リポジトリの技術ドキュメント（`plan/*.md`）は主に実装・運用契約**を記す。ビジネス目標の詳細は本書の「展望」で整理し、README には短く触れる程度でよい。
+- 趣味・個人開発としての側面、収益・自動化・メディア化などの**志向**は、オーナーの判断としてありうる。
+- **リポジトリの技術ドキュメント（`plan/*.md`）は主に実装・運用契約**を記す。
 
 ---
 
-## 2. 現状の到達点（要約）
+## 2. 現状の到達点（Round 4 完了 / 2026-03-26）
 
-詳細は **`plan/STATUS.md`**。ここでは一覧のみ。
+詳細は **`plan/STATUS.md`**。
 
 | 領域 | 状態 |
 |------|------|
-| 収集 → Supabase | 本番系で稼働想定（`/tasks/multi_collect` 等） |
-| Flask API | `/api/range` 等。`/api/range` は **`store` + `limit` のみ**（契約固定） |
-| Next.js 画面 | `/`・`/stores`・`/store/[id]`・`/blog`・`/insights/weekly` 等 **既に存在** |
-| 週次 Insights / Public Facts | GitHub Actions → `frontend/content/*` |
-| LINE 下書き | `POST /api/line` → Flask でレンジ取得 → `insightFromRange` → Gemini → **`blog_drafts`**。**n8n は使わない** |
-| 予測 API | `ENABLE_FORECAST=1` で `/api/forecast_*`。ML は `oriental/ml/`（XGBoost 系） |
-| 公開ブログ | MDX はリポジトリ管理。**「公開までフル自動」ではない**（下書きとサイト掲載は分離） |
+| 収集 → Supabase | 本番稼働。cron-job.org → Flask `/tasks/multi_collect`（`CRON_SECRET` 認証）|
+| Flask API | `/api/range` `/api/megribi_score` `/api/forecast_*` 等 11 エンドポイント稼働 |
+| Next.js 画面 | 13 ページルート実装済み（`/` `/stores` `/store/[id]` `/reports` `/reports/*/[store_slug]` `/blog` `/mypage` `/insights/weekly` 等） |
+| Next.js API | 12 API route 稼働（proxy + cron + LINE + SNS） |
+| AI 予測レポート | Daily: 38 店舗 × 2 回/日、Weekly: 38 店舗 × 1 回/週。全自動 |
+| Editorial Blog | LINE → Gemini → 承認 → 公開。半自動 |
+| ML 予測 | 店舗別 XGBoost モデル。日次自動学習（GHA `train-ml-model.yml`） |
+| megribi_score | Flask + Next.js proxy。トップ「今夜のおすすめ」+ マイページカード |
+| マイページ | ダッシュボード化完了（リッチカード・スパークライン・ML 予測・レポートリンク） |
+| X 自動投稿 | OAuth 1.0a 実装済み。Daily Report 後に自動トリガー（dry_run 開始） |
+| Recharts 統合 | Chart.js 完全削除、全チャート Recharts に統一 |
+| CDN キャッシュ | API proxy に `s-maxage` + `stale-while-revalidate` |
+| OGP | 全主要ページに設定済み |
+| Sitemap | 全店舗の Daily/Weekly レポート URL 登録済み |
 
 ---
 
 ## 3. 方針（既に決まっていること）
 
-- **n8n**: ブログ／LINE 配管に **使わない（廃止・非採用）**。
-- **PR の URL を LINE に自動送信**: **当面やらない**（必要なら再設計。**n8n は使わない**）。`plan/ROADMAP.md` 参照。
-- **二次会スポット**: **map-link** が本流（`plan/SECOND_VENUES.md`）。
-- **`avoid_time`**: 内部では「窓内で total が最小の時刻」。読者向けには **「入店しやすさ・落ち着きの目安」** とし、「ねらい目＝最高の相席」とは書かない。プロンプトは `draftGenerator.ts` で固定し、ズレは人手チェック。
+- **n8n**: 使わない（廃止・非採用）
+- **PR の URL を LINE に自動送信**: 当面やらない
+- **二次会スポット**: map-link が本流（`plan/SECOND_VENUES.md`）
+- **`avoid_time`**: 「窓内で total が最小の時刻」。読者向けには「入店しやすさの目安」
+- **X 自動投稿**: 全店舗一斉ポストは行わない。段階的拡大
+- **cron-job.org**: Daily Report の外部トリガー正本。GHA schedule は削除済み
+- **`/reports` 統合**: 1 ページに Daily/Weekly をタブ切替。個別レポートは SEO 用固定 URL
 
 ---
 
 ## 4. 展望とフェーズ（実装の目安・順番）
 
-以下は **優先度の目安**。リソースに応じて前後してよい。
+### フェーズ A — 運用の安定・既存の磨き込み ✅ 大部分完了
 
-### フェーズ A — 運用の安定・既存の磨き込み（今〜短期）
+**完了した項目**:
+1. ✅ LINE 下書きの品質確認（`RANGE_LIMIT` 調整済み）
+2. ✅ Web フロント全ページ実装（トップ・店舗一覧・詳細・レポート・マイページ・ブログ）
+3. ✅ `plan/*` と STATUS の同期
+4. ✅ CDN キャッシュ・パフォーマンス最適化
+5. ✅ Chart.js → Recharts 統合
+6. ✅ StoreCard UI 改善
 
-**ゴール**: 既存機能を信頼して使える状態にする。
+**残タスク**:
+- デッドコード削除（STATUS.md 記載の未参照ファイル）
+- Weekly Insights のパラメータ調整
+- `/api/current` の位置づけ決定
+- `/insights/weekly` と `/reports/weekly` の重複整理
+- E2E テスト / error.tsx / loading.tsx の充実
 
-1. LINE 下書きの品質確認（`RANGE_LIMIT`、`avoid_time` の人手チェック）
-2. **Web フロント**は「これから一から」ではなく、**既存画面の改善・見せ方・コンテンツ拡充**が次の中心
-3. `plan/*` と README の同期
-4. Weekly Insights のパラメータ調整
-5. `/api/current` の位置づけ（Supabase 直取得に寄せるか、現状維持か）決定
+### フェーズ B — 発信（X / 拡散）✅ 基盤完了
 
-### フェーズ B — 発信（X / 拡散）
+**完了した項目**:
+1. ✅ X (Twitter) API 統合（OAuth 1.0a、`/api/sns/post`）
+2. ✅ GHA ワークフロー `x-auto-post.yml`（Daily Report 後自動トリガー）
+3. ✅ OGP（`og:title` / `og:image`）設定済み
+4. ✅ 許可店舗制御（`SNS_POST_ALLOWED_STORE_SLUGS`）
+5. ✅ dry_run / 段階的拡大の仕組み
 
-**ゴール**: 検索以外の流入（X）を取りにいく。**未実装を前提とした構想**。
+**残タスク**:
+- X API キーの本番設定と dry_run 解除
+- 投稿効果の計測（UTM パラメータ付与）
+- OG 画像の動的生成（予測サマリ入り）
+- アフィリエイト枠の検討（予約リンク + UTM）
 
-1. X（Twitter）開発者アカウント・API（無料枠からでも可）
-2. Vercel から **投稿する API ルート**（レート制限・失敗時リトライを設計に含める）
-3. トリガー例: **記事公開後**・**1 日 1 回バッチ**など（「生成と同時」は後からでも可）
-4. **OGP**（`og:title` / `og:image`）でリンク展開を強化
-5. 画像: 最初は **既存グラフの画像化・テンプレ画像**から。ヒートマップ ML は後段
-6. アフィリエイト: **枠・計測（UTM）・表記**から着手（法令・ポリシーとセット）
-7. **自動投稿のスコープ（方針）**: API 制限・シャドウバン等のリスクを避けるため、**全店舗の自動ポストは行わない**。運用開始時は **人気トップ5店舗＋長崎店**に絞り、効果と負荷を見てから拡大を検討する（詳細は **§9**）。
+### フェーズ C — 予測・ML の「本番品質」 ⚙️ 進行中
 
-### フェーズ C — 予測・ML の「本番品質」
+**現状の技術的事実**:
+- **ML 2.0 本番稼働**: 38 店舗別 XGBoost モデル。日次自動学習
+- **`megribi_score`**: 女性比率・占有率・安定性から算出。トップ・マイページで表示
+- **`model_registry.py`**: Supabase Storage からモデルダウンロード・キャッシュ・スキーマ検証
 
-**ゴール**: 「機械学習ヒートマップ」など**商品化レベル**は未着手でも、**数値予測の信頼性**を上げる。
-
-**現状の技術的事実**（認識合わせ）:
-
-- **`oriental/ml/model_xgb.py`**: `XGBRegressor` による `ForecastModel`
-- **`oriental/ml/forecast_service.py`**: 履歴取得 → 前処理 → **リクエスト内で fit → 予測**（データ不足時はフォールバック）
-- **`scripts/train_local.py`** / **`oriental/models/service.py`**: よりリッチな学習・保存（オフライン・実験・将来の「学習済みモデル配布」向け）
-- **「ヒートマップ画像を ML で一発生成」パイプライン**は **未着手**でよい。まずは **チャート画像化** でも可
-
-推奨タスク:
-
-1. データ蓄積の確認（店舗・期間）
-2. オフライン評価（`train_local` 等で精度の見える化）
-3. 本番方針: **オンザフライ学習のまま** vs **定期学習してモデル配布** の決定
-4. 異常値・欠損時のユーザー向けメッセージ
+**残タスク**:
+1. オフライン評価（精度の見える化）
+2. 異常値・欠損時のユーザー向けメッセージ改善
+3. 予測精度の定期レポート（Weekly Report への組み込み等）
+4. ヒートマップ画像生成（将来）
 
 ### フェーズ D — PWA・通知
 
-**ゴール**: ホーム画面追加・リピーター向け通知（**未実装を前提**）。
+**ゴール**: ホーム画面追加・リピーター向け通知。
 
-1. Web App Manifest、`service worker` の方針
-2. Web Push（VAPID、購読の保存、送信ジョブ）— **インフラ・秘密管理が重い**のでフェーズ C の後でもよい
+1. Web App Manifest、Service Worker
+2. Web Push（VAPID、購読の保存、送信ジョブ）
 
 ### フェーズ E — 課金・プレミアム
 
-**ゴール**: Stripe 等による **B2C 課金**（**未実装を前提**）。
+**ゴール**: Stripe 等による B2C 課金。**当面は優先度低**。
 
-**心構え（外部助言の整理）**: 趣味・個人開発のリソースでは **当面フェーズ E を頭から外してよい**、という整理もありうる（`plan/ADVISORY_SYNTHESIS.md`）。
-
-1. Checkout / Webhook / 会員フラグ（Supabase 等）
-2. **プレミアムだけ予測や通知を出す**等の権限設計
-3. 利用規約・プライバシー（課金・通知・位置情報の扱い）
+1. Checkout / Webhook / 会員フラグ
+2. プレミアム限定機能（リアルタイム通知・高精度予測等）
 
 ---
 
 ## 5. 「公開までフル自動」への切り替え（将来オプション）
 
-- **技術的には可能**: 環境変数などで **自動公開 ON/OFF**（例: 承認済みとみなして MDX コミット or 公開 API）。
-- **前提**: **禁止語・数値レンジ・店舗整合**などのガードレール、**Staging** での検証。
-- **現状**: 半自動（下書き〜`blog_drafts`、サイトの MDX は人手・PR 前提）。**未実装**。
+- **技術的には可能**: 環境変数で自動公開 ON/OFF
+- **前提**: ガードレール（禁止語・数値レンジ・店舗整合）、Staging 検証
+- **現状**: Daily/Weekly は完全自動。Editorial は半自動（LINE 承認）
 
 ---
 
 ## 6. 技術的に追加検討しがちな項目（チェックリスト）
 
-本番・自動化を広げるほど重要。**すべて必須ではない**。
-
-| 区分 | 例 |
-|------|-----|
-| 運用 | ヘルスチェックのアラート、ログ集約、Supabase バックアップ、秘密のローテーション手順 |
-| 安全 | `POST /api/line` 等の **レート制限**、異常検知 |
-| 品質 | 下書き・公開前の自動チェック、主要 API のテスト拡充 |
-| 発信 | X API、OGP、画像生成パイプライン |
-| 課金 | Stripe、Webhook、権限制御 |
-| 法令 | プライバシーポリシー、Cookie 同意（解析・広告を入れる場合） |
+| 区分 | 例 | 現状 |
+|------|-----|------|
+| 運用 | ヘルスチェックアラート、ログ集約、Supabase バックアップ | 部分実装（GHA 失敗通知あり） |
+| 安全 | レート制限、異常検知 | LINE webhook: Upstash。`/tasks/*`: CRON_SECRET |
+| 品質 | 下書きの自動チェック、API テスト | Zod 検証済み。Python テスト 13 ファイル |
+| 発信 | X API、OGP、画像生成 | ✅ X API + OGP 完了。画像生成は未着手 |
+| 課金 | Stripe、Webhook、権限制御 | 未着手 |
+| 法令 | プライバシーポリシー、Cookie 同意 | フッターにリンクあり |
 
 ---
 
@@ -138,15 +149,14 @@ Target commit: (see git)
 
 | ファイル | 内容 |
 |----------|------|
-| `plan/README.md` | **plan フォルダの目次**（AI はここから） |
+| `plan/README.md` | **plan フォルダの目次** |
 | `plan/STATUS.md` | **いま動いているもの** |
-| `plan/ROADMAP.md` | **P0/P1 と当面やらないこと**（短いリスト）・スケール要約 |
+| `plan/ROADMAP.md` | **P0/P1/P2 と Round 5 以降の提案** |
 | `plan/BLOG_PIPELINE.md` | LINE・Gemini・`blog_drafts` |
 | `plan/BLOG_CONTENT.md` | ブログ方針・Facts と文章の分離 |
 | `plan/DECISIONS.md` | 変更してはいけない判断 |
 | `plan/ARCHITECTURE.md` | データフロー |
 | `plan/RUNBOOK.md` | 起動・定期ジョブ・オンボーディング |
-| `plan/ADVISORY_SYNTHESIS.md` | **外部（Gemini 等）アドバイスの要約**（拘束力なし） |
 
 ---
 
@@ -159,25 +169,23 @@ Target commit: (see git)
 
 ## 9. 全店展開・SEO・Cron・SNS（スケール方針の記録）
 
-> テストは当面 **指定店舗のみ**でも、設計判断を忘れないため **ここに固定**する。数値（39 店舗・1 日 2 本）は計画値。
+> テストは当面 **指定店舗のみ**でも、設計判断を忘れないため **ここに固定**する。
 
 ### 9.1 ブログと SEO（同一 URL の上書き）
 
-- **想定負荷**: 最大 **39 店舗 × 1 日 2 本**（18 時便・21 時半便）の下書き生成・公開パイプライン。
-- **方針**: 店舗・日付ごとに **同一 `facts_id` に対応する公開 URL を維持**し、更新時は **`drafts:export` 等での上書き（`--force`）** とする。
-- **狙い**: 類似タイトル・類似 URL が乱立する **カニバリゼーション**を避け、**情報の鮮度（Freshness）** を出しやすい運用に寄せる（検索エンジンが「同じページが更新された」と扱える前提）。
+- **想定負荷**: 最大 38 店舗 × 1 日 2 本の Daily Report
+- **方針**: 店舗・日付ごとに同一 `facts_id` に対応する公開 URL を維持し、上書き更新
+- **狙い**: カニバリゼーション回避、情報の鮮度（Freshness）優先
 
-### 9.2 Cron とスケール（GitHub Actions 正本）
+### 9.2 Cron とスケール
 
-- **現状**: 定時ブログは **GitHub Actions** が `GET /api/cron/blog-draft` を実行（`plan/BLOG_CRON_GHA.md`、`plan/BLOG_PIPELINE.md`）。**Vercel Hobby の Cron は使わない**（実行時刻のブレが大きいため）。
-- **課題**: 店舗数が増えると、**1 リクエスト内で全店舗を処理**する現行 API の **所要時間・`maxDuration`** や、**GHA の実行時間**がボトルネックになりうる。
-- **将来タスク（検討）**: ジョブ分割・バッチ API・キュー等。シークレット運用・失敗通知・コストと **複雑さのトレードオフ**を評価する。
+- **Daily**: cron-job.org → GHA `workflow_dispatch` → matrix 38 店舗（`max-parallel: 15`）
+- **Weekly**: GHA schedule → Fan-in Matrix（`max-parallel: 10`）
+- **課題**: 店舗数増加時は `max-parallel` 調整。非同期キューは `BLOG_CRON_ASYNC_FUTURE.md`
 
-### 9.3 X（Twitter）自動投稿のスコープ
+### 9.3 X（Twitter）自動投稿
 
-- **方針**: **全店舗の自動ポストは行わない**（API 制限・シャドウバン含むリスク分散）。
-- **運用開始時**: **人気トップ5店舗＋長崎店**のみに絞って自動投稿を試す。効果・クレーム・API 負荷を見てから段階的に拡大する。
-- **実装準備（スケルトン）**: `frontend/src/app/api/sns/post/route.ts`
-  - `POST /api/sns/post` は当面 dry-run 中心（`SNS_POST_SECRET` 認証必須）。
-  - 許可店舗は `SNS_POST_ALLOWED_STORE_SLUGS`（CSV）と `nagasaki` を対象に制御。
-  - 本番投稿統合（X APIキー運用・監査ログ）は次フェーズ。
+- **方針**: 全店舗一斉ポストは行わない（API 制限・シャドウバンリスク）
+- **現状**: OAuth 1.0a 実装済み。`x-auto-post.yml` で Daily Report 後に自動トリガー
+- **許可店舗**: `SNS_POST_ALLOWED_STORE_SLUGS`（CSV）+ nagasaki。dry_run から段階的に解除
+- **将来**: 投稿テンプレートの多様化、Weekly Report の X 投稿追加
