@@ -66,9 +66,9 @@ ENABLE_WEATHER = os.environ.get("ENABLE_WEATHER", "1") == "1"
 
 # Open-Meteo は短時間に多数リクエストすると 429 になる。同一座標はディスクキャッシュで再取得しない。
 # 既定 1 時間（5 分おきの収集でも実質 1 回/時間/エリア）
-WEATHER_CACHE_TTL_SEC = int(os.environ.get("WEATHER_CACHE_TTL_SEC", "3600"))
+WEATHER_CACHE_TTL_SEC = int(os.environ.get("WEATHER_CACHE_TTL_SEC", "7200"))
 # 実 HTTP の最小間隔（秒）。バースト緩和
-WEATHER_HTTP_MIN_INTERVAL_SEC = float(os.environ.get("WEATHER_HTTP_MIN_INTERVAL_SEC", "3.0"))
+WEATHER_HTTP_MIN_INTERVAL_SEC = float(os.environ.get("WEATHER_HTTP_MIN_INTERVAL_SEC", "6.0"))
 # 接続エラー等の再試行（429 とは別）
 WEATHER_HTTP_MAX_RETRIES = int(os.environ.get("WEATHER_HTTP_MAX_RETRIES", "3"))
 # 429: 長時間 sleep すると Gunicorn の worker timeout（既定30s）で落ちるため、短い待機＋最大1回だけ再試行
@@ -548,13 +548,34 @@ def fetch_current_weather(
     if out is not None:
         return out
 
+    # HTTP 失敗（429 含む）後は、ディスクキャッシュのタイムスタンプをリセットして
+    # 次の収集ラン以降の即時リトライ（スノーボール）を防ぐ。
+    # stale があればその値を、なければ全 None を WEATHER_CACHE_TTL_SEC 間キャッシュする。
+    now_fail = time.time()
     if stale:
         t = _tuple_from_cache_entry(stale)
         print(
             f"[weather][stale-cache] using expired cache after failure key={key} code={t[0]}"
         )
+        disk[key] = {
+            "ts": now_fail,  # タイムスタンプを現在時刻にリセット（TTL を再スタート）
+            "code": stale.get("code"),
+            "label": stale.get("label"),
+            "temp_c": stale.get("temp_c"),
+            "precip_mm": stale.get("precip_mm"),
+        }
+        _save_weather_disk_cache(disk)
         return t
 
+    # stale もない場合は None エントリを書いて 15 分間の再試行を抑制
+    disk[key] = {
+        "ts": now_fail,
+        "code": None,
+        "label": None,
+        "temp_c": None,
+        "precip_mm": None,
+    }
+    _save_weather_disk_cache(disk)
     return None, None, None, None
 
 # ========= GAS への POST =========

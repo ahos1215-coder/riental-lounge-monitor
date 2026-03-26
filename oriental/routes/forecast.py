@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import os
+import time
 from flask import Blueprint, current_app, jsonify, request
+
+# Flask プロセス内でのキャッシュ TTL（秒）
+# ワーカーごとに独立するが、CDN キャッシュと合わせて十分な効果がある
+_FORECAST_CACHE_TTL = int(os.getenv("FORECAST_RESULT_CACHE_TTL", "300"))  # 5 分
 
 from ..config import AppConfig
 from ..ml.forecast_service import ForecastService
@@ -31,6 +36,29 @@ def _error_status(raw: dict) -> int:
     if err in {"model_schema_mismatch", "model_unavailable"}:
         return 503
     return 200
+
+
+# ---------- 軽量な in-process キャッシュ ----------
+
+def _forecast_cache() -> dict:
+    if "FORECAST_RESULT_CACHE" not in current_app.config:
+        current_app.config["FORECAST_RESULT_CACHE"] = {}
+    return current_app.config["FORECAST_RESULT_CACHE"]
+
+
+def _get_cached(key: str) -> dict | None:
+    cache = _forecast_cache()
+    entry = cache.get(key)
+    if not entry:
+        return None
+    if time.time() - entry["at"] > _FORECAST_CACHE_TTL:
+        cache.pop(key, None)
+        return None
+    return entry["data"]
+
+
+def _set_cached(key: str, data: dict) -> None:
+    _forecast_cache()[key] = {"at": time.time(), "data": data}
 
 
 def _supabase_provider(cfg: AppConfig):
@@ -98,6 +126,12 @@ def forecast_next_hour():
     store = _resolve_store_id(cfg)
     freq = max(1, int(os.getenv("FORECAST_FREQ_MIN", "15")))
 
+    cache_key = f"next_hour:{store}"
+    cached = _get_cached(cache_key)
+    if cached:
+        current_app.logger.info("api_forecast.cache_hit store=%s horizon=next_hour", store)
+        return jsonify(cached)
+
     current_app.logger.info("api_forecast.start store=%s horizon=next_hour", store)
     raw = _service().forecast_next_hour(store_id=store, freq_min=freq)
     if not raw.get("ok", True):
@@ -108,7 +142,9 @@ def forecast_next_hour():
         "api_forecast.success store=%s points=%d", store, len(points)
     )
 
-    return jsonify({"ok": True, "data": points, "reasoning": raw.get("reasoning", {})})
+    result = {"ok": True, "data": points, "reasoning": raw.get("reasoning", {})}
+    _set_cached(cache_key, result)
+    return jsonify(result)
 
 
 @bp.get("/forecast_today")
@@ -124,6 +160,12 @@ def forecast_today():
     start_h = int(os.getenv("NIGHT_START_H", "19"))
     end_h = int(os.getenv("NIGHT_END_H", "5"))
 
+    cache_key = f"today:{store}"
+    cached = _get_cached(cache_key)
+    if cached:
+        current_app.logger.info("api_forecast.cache_hit store=%s horizon=today", store)
+        return jsonify(cached)
+
     current_app.logger.info("api_forecast.start store=%s horizon=today", store)
     raw = _service().forecast_today(
         store_id=store, freq_min=freq, start_h=start_h, end_h=end_h
@@ -136,7 +178,9 @@ def forecast_today():
         "api_forecast.success store=%s points=%d", store, len(points)
     )
 
-    return jsonify({"ok": True, "data": points, "reasoning": raw.get("reasoning", {})})
+    result = {"ok": True, "data": points, "reasoning": raw.get("reasoning", {})}
+    _set_cached(cache_key, result)
+    return jsonify(result)
 
 
 @bp.get("/megribi_score")

@@ -57,7 +57,7 @@ class ForecastService:
             )
             fallback_provider = legacy_provider
 
-        history_limit = min(cfg.max_range_limit, 2000)
+        history_limit = min(cfg.max_range_limit, 600)
         model_registry = ForecastModelRegistry.from_app(app)
 
         return cls(
