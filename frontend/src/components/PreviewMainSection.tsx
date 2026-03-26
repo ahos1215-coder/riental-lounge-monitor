@@ -20,6 +20,7 @@ import {
 
 import SecondVenuesList from "./SecondVenuesList";
 import { StoreRealtimeStatusCard } from "./store/StoreRealtimeStatusCard";
+import { LatestForecastSummaryCard } from "./store/LatestForecastSummaryCard";
 import type {
   PreviewRangeMode,
   StoreSnapshot,
@@ -365,8 +366,8 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
         </div>
 
         {canControlRange && (
-          <div className="flex flex-col gap-2 rounded-2xl border border-slate-800 bg-slate-950/60 px-3 py-2">
-            <p className="text-[10px] font-medium text-slate-500">表示する日の夜（19:00–05:00）</p>
+          <div className="flex flex-col gap-2 rounded-2xl border border-slate-800/70 bg-slate-950/40 px-3 py-2">
+            <p className="text-[10px] text-slate-500">表示する日の夜（19:00–05:00）</p>
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex flex-wrap items-center gap-1">
                 {RANGE_MODE_OPTIONS.map((opt) => {
@@ -413,6 +414,8 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
             </div>
           </div>
         )}
+
+        <LatestForecastSummaryCard storeSlug={storeSlug} snapshot={snapshot} />
       </section>
 
       {/* ④ フィードバック・二次会（下位） */}

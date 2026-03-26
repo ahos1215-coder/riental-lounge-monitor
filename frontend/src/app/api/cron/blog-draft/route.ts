@@ -38,7 +38,11 @@ function todayYmdJst(): string {
   }).format(new Date());
 }
 
-const REQUEST_BUDGET_MS = 45_000;
+/**
+ * 1リクエスト=1店舗の下書き生成（GHA matrix）なので、Vercel の maxDuration(60s) に寄せて余裕を確保する。
+ * 45s だと Gemini + バックエンド取得で間に合わない店舗が出て `mdx_content=""` が保存されてしまう。
+ */
+const REQUEST_BUDGET_MS = 58_000;
 
 function parseRequestedStoreSlug(url: URL): string | null {
   const raw = url.searchParams.get("store")?.trim().toLowerCase();

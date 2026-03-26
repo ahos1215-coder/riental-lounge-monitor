@@ -22,6 +22,8 @@ type StoreCardProps = {
     recommendLabel?: string;
   };
   sparklinePoints?: number[];
+  /** 一覧などで /api/range だけ先に反映し、予測を後追いするとき */
+  forecastPending?: boolean;
   isLoading?: boolean;
 };
 
@@ -66,6 +68,7 @@ export function StoreCard({
   isHighlight = false,
   stats,
   sparklinePoints,
+  forecastPending = false,
   isLoading = false,
 }: StoreCardProps) {
   const resolvedHref = useMemo(
@@ -146,7 +149,11 @@ export function StoreCard({
           {hasStats && (
             <div className="flex items-center gap-1">
               <span className="text-white/50">ピーク予測</span>
-              <span className="font-semibold text-indigo-200">{peakPredTotal}人</span>
+              {forecastPending ? (
+                <span className="font-semibold text-white/35">取得中</span>
+              ) : (
+                <span className="font-semibold text-indigo-200">{peakPredTotal}人</span>
+              )}
             </div>
           )}
           <div className="flex items-center gap-1">
@@ -155,12 +162,22 @@ export function StoreCard({
           </div>
           <div className="flex items-center gap-1">
             <span className="text-white/50">混雑</span>
-            <span className={`font-semibold ${crowdClass}`}>{crowdIcon} {crowd}</span>
+            {forecastPending ? (
+              <span className="font-semibold text-white/35">取得中</span>
+            ) : (
+              <span className={`font-semibold ${crowdClass}`}>
+                {crowdIcon} {crowd}
+              </span>
+            )}
           </div>
           {hasStats && (
             <div className="flex items-center gap-1 text-right">
               <span className="text-white/50">狙い目</span>
-              <span className="max-w-[7rem] truncate font-semibold text-white">{recommend}</span>
+              {forecastPending ? (
+                <span className="max-w-[7rem] truncate font-semibold text-white/35">取得中</span>
+              ) : (
+                <span className="max-w-[7rem] truncate font-semibold text-white">{recommend}</span>
+              )}
             </div>
           )}
         </div>
@@ -171,7 +188,11 @@ export function StoreCard({
           hasStats ? "h-16" : "h-10 opacity-70"
         }`}
       >
-        <SimpleLineChart points={sparklinePoints} />
+        {forecastPending ? (
+          <div className="h-12 w-full animate-pulse rounded bg-slate-800/60" aria-hidden />
+        ) : (
+          <SimpleLineChart points={sparklinePoints} />
+        )}
       </div>
 
       <p className="mt-2 text-[11px] font-medium text-indigo-300">

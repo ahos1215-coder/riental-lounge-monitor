@@ -20,6 +20,8 @@ type StoreRealtimeCard = {
     recommendLabel: string;
   };
   sparkline: number[];
+  /** true の間は予測API待ち（実測のみ表示） */
+  forecastPending?: boolean;
 };
 
 const BRAND_TABS: { id: BrandFilter; label: string }[] = [
@@ -28,6 +30,9 @@ const BRAND_TABS: { id: BrandFilter; label: string }[] = [
   { id: "jis", label: "JIS" },
   { id: "aisekiya", label: "相席屋" },
 ];
+
+/** 同時に飛ばす店舗数。Render 側の予測APIが重いため多すぎると全体が遅延しやすい */
+const STORE_LIST_FETCH_CONCURRENCY = 6;
 
 export default function StoresPage() {
   const [brandFilter, setBrandFilter] = useState<BrandFilter>("all");
@@ -72,80 +77,160 @@ export default function StoresPage() {
   };
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      setRealtimeLoading(true);
-      const targets = filteredStores.slice(0, 24);
-      const results = await Promise.all(
-        targets.map(async (store) => {
-          try {
-            const [forecastRes, rangeRes] = await Promise.all([
-              fetch(`/api/forecast_today?store=${encodeURIComponent(store.slug)}`, {
-                cache: "no-store",
-              }),
-              fetch(`/api/range?store=${encodeURIComponent(store.slug)}&limit=1`, {
-                cache: "no-store",
-              }),
-            ]);
-            const forecastBody = (await forecastRes.json()) as { data?: ForecastPoint[] };
-            const rangeBody = (await rangeRes.json()) as RangePoint[] | { data?: RangePoint[]; rows?: RangePoint[] };
-            const forecastRows = Array.isArray(forecastBody?.data) ? forecastBody.data : [];
-            const rangeRows = Array.isArray(rangeBody)
-              ? rangeBody
-              : Array.isArray(rangeBody?.data)
-                ? rangeBody.data
-                : Array.isArray(rangeBody?.rows)
-                  ? rangeBody.rows
-                  : [];
-            const current = rangeRows[0] ?? {};
-            const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
-            const womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
-            const nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
+    const controller = new AbortController();
+    const { signal } = controller;
+    const targets = filteredStores.slice(0, 24);
 
-            const totals = forecastRows
-              .map((r) => Math.max(0, Math.round(Number(r.total_pred ?? 0))))
-              .filter((n) => Number.isFinite(n));
-            const maxPred = totals.length ? Math.round(Math.max(...totals)) : 0;
-
-            let calm = forecastRows[0];
-            for (const r of forecastRows) {
-              if (Number(r.total_pred ?? 0) < Number(calm?.total_pred ?? Number.POSITIVE_INFINITY)) {
-                calm = r;
-              }
-            }
-            const calmLabel = calm?.ts ? toHmJst(calm.ts) : "--:--";
-
-            const card: StoreRealtimeCard = {
-              slug: store.slug,
-              stats: {
-                menCount: menNow,
-                womenCount: womenNow,
-                nowTotal,
-                peakPredTotal: maxPred,
-                genderRatio: `${menNow}:${womenNow}`,
-                crowdLevel: crowdLabelFromPred(maxPred),
-                recommendLabel: calm?.ts ? `${calmLabel}ごろ` : "確認中",
-              },
-              sparkline: totals.slice(0, 10),
-            };
-            return card;
-          } catch {
-            return null;
-          }
-        }),
-      );
-
-      if (!mounted) return;
-      const mapped: Record<string, StoreRealtimeCard> = {};
-      for (const row of results) {
-        if (row) mapped[row.slug] = row;
-      }
-      setStoreRealtime(mapped);
+    if (targets.length === 0) {
+      setStoreRealtime({});
       setRealtimeLoading(false);
-    })();
+      return () => controller.abort();
+    }
+
+    setRealtimeLoading(true);
+    setStoreRealtime({});
+
+    function parseRangeRows(
+      rangeBody: RangePoint[] | { data?: RangePoint[]; rows?: RangePoint[] },
+    ): RangePoint[] {
+      if (Array.isArray(rangeBody)) return rangeBody;
+      if (Array.isArray(rangeBody?.data)) return rangeBody.data;
+      if (Array.isArray(rangeBody?.rows)) return rangeBody.rows;
+      return [];
+    }
+
+    function isAbortError(err: unknown): boolean {
+      return (
+        (err instanceof DOMException && err.name === "AbortError") ||
+        (err instanceof Error && err.name === "AbortError")
+      );
+    }
+
+    async function fetchStoreCard(store: StoreMeta): Promise<void> {
+      let menNow = 0;
+      let womenNow = 0;
+      let nowTotal = 0;
+
+      try {
+        const rangeRes = await fetch(
+          `/api/range?store=${encodeURIComponent(store.slug)}&limit=1`,
+          { cache: "no-store", signal },
+        );
+        if (signal.aborted) return;
+        if (!rangeRes.ok) return;
+        const rangeBody = (await rangeRes.json()) as
+          | RangePoint[]
+          | { data?: RangePoint[]; rows?: RangePoint[] };
+        if (signal.aborted) return;
+
+        const rangeRows = parseRangeRows(rangeBody);
+        const current = rangeRows[0] ?? {};
+        menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
+        womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
+        nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
+
+        const partialCard: StoreRealtimeCard = {
+          slug: store.slug,
+          stats: {
+            menCount: menNow,
+            womenCount: womenNow,
+            nowTotal,
+            peakPredTotal: 0,
+            genderRatio: `${menNow}:${womenNow}`,
+            crowdLevel: "取得中",
+            recommendLabel: "取得中",
+          },
+          sparkline: [],
+          forecastPending: true,
+        };
+        setStoreRealtime((prev) => ({ ...prev, [store.slug]: partialCard }));
+      } catch (err) {
+        if (signal.aborted || isAbortError(err)) return;
+        return;
+      }
+
+      try {
+        const forecastRes = await fetch(
+          `/api/forecast_today?store=${encodeURIComponent(store.slug)}`,
+          { cache: "no-store", signal },
+        );
+        if (signal.aborted) return;
+        if (!forecastRes.ok) throw new Error(`forecast ${forecastRes.status}`);
+        const forecastBody = (await forecastRes.json()) as { data?: ForecastPoint[] };
+        if (signal.aborted) return;
+
+        const forecastRows = Array.isArray(forecastBody?.data) ? forecastBody.data : [];
+        const totals = forecastRows
+          .map((r) => Math.max(0, Math.round(Number(r.total_pred ?? 0))))
+          .filter((n) => Number.isFinite(n));
+        const maxPred = totals.length ? Math.round(Math.max(...totals)) : 0;
+
+        let calm = forecastRows[0];
+        for (const r of forecastRows) {
+          if (Number(r.total_pred ?? 0) < Number(calm?.total_pred ?? Number.POSITIVE_INFINITY)) {
+            calm = r;
+          }
+        }
+        const calmLabel = calm?.ts ? toHmJst(calm.ts) : "--:--";
+
+        const fullCard: StoreRealtimeCard = {
+          slug: store.slug,
+          stats: {
+            menCount: menNow,
+            womenCount: womenNow,
+            nowTotal,
+            peakPredTotal: maxPred,
+            genderRatio: `${menNow}:${womenNow}`,
+            crowdLevel: crowdLabelFromPred(maxPred),
+            recommendLabel: calm?.ts ? `${calmLabel}ごろ` : "確認中",
+          },
+          sparkline: totals.slice(0, 10),
+          forecastPending: false,
+        };
+        if (signal.aborted) return;
+        setStoreRealtime((prev) => ({ ...prev, [store.slug]: fullCard }));
+      } catch (err) {
+        if (signal.aborted || isAbortError(err)) return;
+        setStoreRealtime((prev) => {
+          const cur = prev[store.slug];
+          if (!cur) return prev;
+          return {
+            ...prev,
+            [store.slug]: {
+              ...cur,
+              stats: {
+                ...cur.stats,
+                peakPredTotal: 0,
+                crowdLevel: "確認中",
+                recommendLabel: "確認中",
+              },
+              sparkline: [],
+              forecastPending: false,
+            },
+          };
+        });
+      }
+    }
+
+    let nextIndex = 0;
+    async function worker(): Promise<void> {
+      while (true) {
+        const i = nextIndex++;
+        if (i >= targets.length) break;
+        await fetchStoreCard(targets[i]!);
+      }
+    }
+
+    const poolSize = Math.min(STORE_LIST_FETCH_CONCURRENCY, targets.length);
+    void Promise.all(Array.from({ length: poolSize }, () => worker())).finally(() => {
+      if (!signal.aborted) {
+        setRealtimeLoading(false);
+      }
+    });
 
     return () => {
-      mounted = false;
+      controller.abort();
+      setRealtimeLoading(false);
     };
   }, [filteredStores]);
 
@@ -235,6 +320,7 @@ export default function StoresPage() {
                     isHighlight={idx === 0}
                     stats={storeRealtime[store.slug]?.stats}
                     sparklinePoints={storeRealtime[store.slug]?.sparkline}
+                    forecastPending={storeRealtime[store.slug]?.forecastPending}
                     isLoading={realtimeLoading && !storeRealtime[store.slug]}
                   />
                 ))}

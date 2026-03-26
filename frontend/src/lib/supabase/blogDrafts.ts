@@ -139,9 +139,9 @@ export async function fetchLatestAutoBlogDrafts(limit = 12): Promise<AutoBlogDra
   const capped = Math.max(1, Math.min(limit, 40));
   // 定時 cron と GHA 手動再試行は同一の自動下書きとして扱う
   const url =
-    `${endpoint}?select=facts_id,store_slug,target_date,mdx_content,source,updated_at,created_at,error_message` +
+    `${endpoint}?select=facts_id,store_slug,target_date,mdx_content,source,created_at,error_message` +
     `&source=in.(github_actions_cron,github_actions_retry)&error_message=is.null&mdx_content=not.eq.` +
-    `&order=updated_at.desc.nullslast,created_at.desc&limit=${capped}`;
+    `&order=created_at.desc&limit=${capped}`;
   try {
     const res = await fetch(url, {
       method: "GET",
@@ -163,7 +163,6 @@ export async function fetchLatestAutoBlogDrafts(limit = 12): Promise<AutoBlogDra
         target_date: typeof v.target_date === "string" ? v.target_date : "",
         mdx_content: typeof v.mdx_content === "string" ? v.mdx_content : "",
         source: typeof v.source === "string" ? v.source : "",
-        updated_at: typeof v.updated_at === "string" ? v.updated_at : undefined,
         created_at: typeof v.created_at === "string" ? v.created_at : undefined,
       }))
       .filter((v) => v.facts_id && v.store_slug && v.mdx_content);
@@ -172,12 +171,51 @@ export async function fetchLatestAutoBlogDrafts(limit = 12): Promise<AutoBlogDra
   }
 }
 
+export async function fetchLatestAutoBlogDraftByStoreSlug(storeSlug: string): Promise<AutoBlogDraftView | null> {
+  const conf = endpointUrl();
+  const slug = storeSlug.trim().toLowerCase();
+  if (!conf || !slug) return null;
+  const { endpoint, key } = conf;
+  const url =
+    `${endpoint}?select=facts_id,store_slug,target_date,mdx_content,source,created_at,error_message` +
+    `&store_slug=eq.${encodeURIComponent(slug)}` +
+    `&source=in.(github_actions_cron,github_actions_retry)` +
+    `&error_message=is.null&mdx_content=not.eq.` +
+    `&order=created_at.desc&limit=1`;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) return null;
+    const parsed = (await res.json()) as unknown;
+    if (!Array.isArray(parsed) || !parsed[0] || typeof parsed[0] !== "object") return null;
+    const v = parsed[0] as Record<string, unknown>;
+    const row: AutoBlogDraftView = {
+      facts_id: typeof v.facts_id === "string" ? v.facts_id : "",
+      store_slug: typeof v.store_slug === "string" ? v.store_slug : "",
+      target_date: typeof v.target_date === "string" ? v.target_date : "",
+      mdx_content: typeof v.mdx_content === "string" ? v.mdx_content : "",
+      source: typeof v.source === "string" ? v.source : "",
+      created_at: typeof v.created_at === "string" ? v.created_at : undefined,
+    };
+    return row.facts_id && row.store_slug && row.mdx_content ? row : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchAutoBlogDraftByFactsId(factsId: string): Promise<AutoBlogDraftView | null> {
   const conf = endpointUrl();
   if (!conf || !factsId.trim()) return null;
   const { endpoint, key } = conf;
   const url =
-    `${endpoint}?select=facts_id,store_slug,target_date,mdx_content,source,updated_at,created_at,error_message` +
+    `${endpoint}?select=facts_id,store_slug,target_date,mdx_content,source,created_at,error_message` +
     `&facts_id=eq.${encodeURIComponent(factsId)}&error_message=is.null&limit=1`;
   try {
     const res = await fetch(url, {
@@ -199,7 +237,6 @@ export async function fetchAutoBlogDraftByFactsId(factsId: string): Promise<Auto
       target_date: typeof v.target_date === "string" ? v.target_date : "",
       mdx_content: typeof v.mdx_content === "string" ? v.mdx_content : "",
       source: typeof v.source === "string" ? v.source : "",
-      updated_at: typeof v.updated_at === "string" ? v.updated_at : undefined,
       created_at: typeof v.created_at === "string" ? v.created_at : undefined,
     };
     return row.facts_id && row.store_slug && row.mdx_content ? row : null;

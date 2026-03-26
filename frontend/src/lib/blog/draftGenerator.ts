@@ -11,6 +11,8 @@ export type DraftGeneratorInput = {
   insightResult: InsightBuildResult;
   /** Extra instructions from LINE (topic, tone, audience) */
   topicHint?: string;
+  /** パイプライン呼び出し元（定時 cron は rate-limit 待ちを短くする） */
+  source?: "line_webhook" | "vercel_cron" | "github_actions_cron" | "github_actions_retry" | "manual_api";
 };
 
 /**
@@ -74,6 +76,16 @@ function parseRetryAfterSeconds(e: unknown): number | null {
   const m = /retry in ([\d.]+)\s*s/i.exec(msg);
   if (m) return Math.min(120, Math.ceil(parseFloat(m[1])) + 2);
   return null;
+}
+
+function maxRateLimitWaitSeconds(source?: DraftGeneratorInput["source"]): number {
+  // 定時 cron は 1店舗=1リクエストでも、GHA の並列実行で 429 待ちが発生しやすい。
+  // ここで長時間 sleep すると Vercel の実行上限(60s)に達し、mdx が空で保存されてしまうため、
+  // cron 系は短い待ちで諦めて呼び出し元でフォールバック生成する。
+  if (source === "github_actions_cron" || source === "github_actions_retry" || source === "vercel_cron") {
+    return 3;
+  }
+  return 120;
 }
 
 /**
@@ -364,7 +376,8 @@ async function generateWithRateLimitRetries(
   modelName: string,
   prompt: string,
   systemInstruction: string,
-  maxAttempts = 4
+  maxAttempts = 4,
+  maxWaitSec = 120
 ): Promise<string> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -379,6 +392,9 @@ async function generateWithRateLimitRetries(
       }
       const fromApi = parseRetryAfterSeconds(e);
       const backoffSec = fromApi ?? Math.min(90, 15 * 2 ** attempt);
+      if (backoffSec > maxWaitSec) {
+        throw new Error(`rate limited (retry-after ${backoffSec}s)`);
+      }
       console.warn("[gemini] rate limited, retrying", {
         model: modelName,
         attempt: attempt + 1,
@@ -395,7 +411,8 @@ async function generateStructuredWithRateLimitRetries(
   modelName: string,
   prompt: string,
   systemInstruction: string,
-  maxAttempts = 3
+  maxAttempts = 3,
+  maxWaitSec = 120
 ): Promise<string> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -410,10 +427,53 @@ async function generateStructuredWithRateLimitRetries(
       }
       const fromApi = parseRetryAfterSeconds(e);
       const backoffSec = fromApi ?? Math.min(60, 10 * 2 ** attempt);
+      if (backoffSec > maxWaitSec) {
+        throw new Error(`rate limited (retry-after ${backoffSec}s)`);
+      }
       await sleep(backoffSec * 1000);
     }
   }
   throw lastErr;
+}
+
+export function buildFallbackBlogDraftMdx(input: DraftGeneratorInput): string {
+  const edition = input.insightResult.draft_context?.edition ?? "evening_preview";
+  const { insight, draft_context } = input.insightResult;
+  const title = `${input.storeLabel}｜今日の傾向まとめ（${input.dateYmd}）`;
+  const peak = insight.peak_time || "—";
+  const avoid = insight.avoid_time || "—";
+  const crowd = insight.crowd_label || "—";
+  const noteLines = [
+    draft_context?.hourly_hint ? `- ${draft_context.hourly_hint}` : null,
+    draft_context?.gender_note ? `- ${draft_context.gender_note}` : null,
+  ].filter(Boolean) as string[];
+
+  return [
+    "---",
+    `title: "${title}"`,
+    `description: "本日の混雑傾向を短く要約。ピーク時間（賑わいの目安）と入店しやすさの目安を3行で。"` ,
+    `date: "${input.dateYmd}"`,
+    "categoryId: prediction",
+    "level: easy",
+    `store: "${input.storeSlug}"`,
+    `facts_id: "${input.factsId}"`,
+    "facts_visibility: show",
+    "---",
+    "",
+    "## 今日の結論",
+    `- 混雑度（目安）: ${crowd}`,
+    `- ピーク時間（賑わいの目安）: ${peak} 前後`,
+    `- 入店しやすさの目安（待ちにくさ）: ${avoid} 前後`,
+    "",
+    "## 混みやすい時間 / 避けたい時間",
+    `- 混みやすい時間: ${peak} 前後（賑わいが出やすい目安）`,
+    `- 入店しやすい時間: ${avoid} 前後（待ちにくさの目安）`,
+    "",
+    "## 今日の一言",
+    `- 本記事は自動生成です（${edition}）。タイムラインの点線（予測）も合わせて確認するのがおすすめです。`,
+    ...(noteLines.length ? ["", "## 補足メモ", ...noteLines] : []),
+    "",
+  ].join("\n");
 }
 
 /**
@@ -432,6 +492,7 @@ export async function generateBlogDraftMdx(input: DraftGeneratorInput): Promise<
   const prompt = buildUserPrompt(input);
 
   const candidates = buildCandidateModels(requested);
+  const maxWaitSec = maxRateLimitWaitSeconds(input.source);
 
   let lastError: unknown;
   for (const modelName of candidates) {
@@ -442,7 +503,9 @@ export async function generateBlogDraftMdx(input: DraftGeneratorInput): Promise<
           genAI,
           modelName,
           `${prompt}\n\n出力は JSON のみ。frontmatter と body を分離して返してください。`,
-          systemInstruction
+          systemInstruction,
+          3,
+          maxWaitSec
         );
         const parsed = parseStructuredDraft(structuredText);
         if (parsed) {
@@ -455,7 +518,7 @@ export async function generateBlogDraftMdx(input: DraftGeneratorInput): Promise<
         });
       }
 
-      const text = await generateWithRateLimitRetries(genAI, modelName, prompt, systemInstruction);
+      const text = await generateWithRateLimitRetries(genAI, modelName, prompt, systemInstruction, 4, maxWaitSec);
       if (!text?.trim()) {
         throw new Error("Gemini returned empty content");
       }

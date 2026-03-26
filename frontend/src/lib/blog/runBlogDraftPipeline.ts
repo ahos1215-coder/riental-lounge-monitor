@@ -4,7 +4,7 @@ import {
   type BlogEdition,
   type InsightBuildResult,
 } from "./insightFromRange";
-import { generateBlogDraftMdx } from "./draftGenerator";
+import { buildFallbackBlogDraftMdx, generateBlogDraftMdx } from "./draftGenerator";
 import { insertBlogDraft, isBlogDraftsConfigured } from "@/lib/supabase/blogDrafts";
 
 function truncate(s: string, max: number): string {
@@ -59,14 +59,29 @@ export async function runBlogDraftPipeline(
       edition,
     });
 
-    const mdx = await generateBlogDraftMdx({
-      storeLabel: store.label,
-      storeSlug: store.slug,
-      dateYmd,
-      factsId,
-      insightResult,
-      topicHint: topicHint ?? "",
-    });
+    let mdx = "";
+    try {
+      mdx = await generateBlogDraftMdx({
+        storeLabel: store.label,
+        storeSlug: store.slug,
+        dateYmd,
+        factsId,
+        insightResult,
+        topicHint: topicHint ?? "",
+        source,
+      });
+    } catch (e) {
+      // cron で 429 retry-after が長い場合などは、ここで即フォールバックして mdx を必ず保存する
+      mdx = buildFallbackBlogDraftMdx({
+        storeLabel: store.label,
+        storeSlug: store.slug,
+        dateYmd,
+        factsId,
+        insightResult,
+        topicHint: topicHint ?? "",
+        source,
+      });
+    }
 
     const insightPayload = {
       facts_id: factsId,
