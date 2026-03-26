@@ -68,11 +68,11 @@ ENABLE_WEATHER = os.environ.get("ENABLE_WEATHER", "1") == "1"
 # 既定 1 時間（5 分おきの収集でも実質 1 回/時間/エリア）
 WEATHER_CACHE_TTL_SEC = int(os.environ.get("WEATHER_CACHE_TTL_SEC", "3600"))
 # 実 HTTP の最小間隔（秒）。バースト緩和
-WEATHER_HTTP_MIN_INTERVAL_SEC = float(os.environ.get("WEATHER_HTTP_MIN_INTERVAL_SEC", "0.85"))
+WEATHER_HTTP_MIN_INTERVAL_SEC = float(os.environ.get("WEATHER_HTTP_MIN_INTERVAL_SEC", "3.0"))
 # 接続エラー等の再試行（429 とは別）
 WEATHER_HTTP_MAX_RETRIES = int(os.environ.get("WEATHER_HTTP_MAX_RETRIES", "3"))
 # 429: 長時間 sleep すると Gunicorn の worker timeout（既定30s）で落ちるため、短い待機＋最大1回だけ再試行
-WEATHER_429_RETRY_SLEEP_SEC = float(os.environ.get("WEATHER_429_RETRY_SLEEP_SEC", "2.5"))
+WEATHER_429_RETRY_SLEEP_SEC = float(os.environ.get("WEATHER_429_RETRY_SLEEP_SEC", "5.0"))
 WEATHER_429_EXTRA_TRIES = int(os.environ.get("WEATHER_429_EXTRA_TRIES", "1"))
 WEATHER_FETCH_WINDOW_MINUTES = int(os.environ.get("WEATHER_FETCH_WINDOW_MINUTES", "10"))
 _CACHE_DIR = _root / ".cache"
