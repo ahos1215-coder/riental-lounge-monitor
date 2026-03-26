@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import time
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -273,6 +274,93 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _supabase_conf() -> tuple[str, str] | None:
+    base = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
+    key = (
+        os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
+        or os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
+    )
+    if not base or not key:
+        return None
+    return base, key
+
+
+def _upsert_weekly_report_to_supabase(
+    *,
+    store: str,
+    date_label: str,
+    generated_at: str,
+    payload: dict[str, Any],
+    source: str = "github_actions_weekly",
+) -> None:
+    conf = _supabase_conf()
+    if conf is None:
+        raise RuntimeError("SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY is required for weekly sync")
+    base, key = conf
+    endpoint = f"{base}/rest/v1/blog_drafts"
+    facts_id = f"weekly_{store}"
+    body = {
+        "store_id": f"ol_{store}",
+        "store_slug": store,
+        "target_date": date_label,
+        "facts_id": facts_id,
+        "mdx_content": (
+            f"# Weekly Report: {store}\n\n"
+            f"- generated_at: {generated_at}\n"
+            f"- source: {source}\n\n"
+            "このレポートは週次の自動生成データです。"
+        ),
+        "insight_json": payload,
+        "source": source,
+        "content_type": "weekly",
+        "is_published": True,
+        "edition": "weekly",
+        "public_slug": f"weekly-report-{store}",
+        "line_user_id": None,
+        "error_message": None,
+    }
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+        "User-Agent": DEFAULT_USER_AGENT,
+    }
+    patch_url = f"{endpoint}?facts_id=eq.{facts_id}"
+    patch_req = Request(
+        patch_url,
+        data=json.dumps(body, ensure_ascii=True).encode("utf-8"),
+        headers=headers,
+        method="PATCH",
+    )
+    with urlopen(patch_req, timeout=30) as resp:
+        patch_raw = resp.read().decode("utf-8")
+    try:
+        patch_rows = json.loads(patch_raw)
+    except json.JSONDecodeError:
+        patch_rows = []
+    if isinstance(patch_rows, list) and len(patch_rows) > 0:
+        return
+
+    insert_body = dict(body)
+    insert_body["id"] = str(uuid.uuid4())
+    insert_req = Request(
+        endpoint,
+        data=json.dumps(insert_body, ensure_ascii=True).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    with urlopen(insert_req, timeout=30):
+        pass
+
+
 def _call_find_good_windows(points: list[dict[str, Any]], **kwargs: Any) -> list[dict[str, Any]]:
     sig = inspect.signature(find_good_windows)
     accepts_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
@@ -311,6 +399,7 @@ def main() -> int:
     )
     timeout_seconds = max(1, _env_int("INSIGHTS_HTTP_TIMEOUT_SECONDS", DEFAULT_HTTP_TIMEOUT_SECONDS))
     retries = max(1, _env_int("INSIGHTS_HTTP_RETRIES", DEFAULT_HTTP_RETRIES))
+    sync_to_supabase = _env_bool("INSIGHTS_SYNC_SUPABASE", False)
 
     base_url = (
         os.environ.get("MEGRIBI_BASE_URL")
@@ -400,6 +489,13 @@ def main() -> int:
             handle.write("\n")
 
         stores_index[store] = {"latest_file": out_path.name, "generated_at": generated_at}
+        if sync_to_supabase:
+            _upsert_weekly_report_to_supabase(
+                store=store,
+                date_label=date_label,
+                generated_at=generated_at,
+                payload=payload,
+            )
 
     index_payload["generated_at"] = generated_at
     index_payload["stores"] = stores_index

@@ -16,7 +16,8 @@ on:
         required: false
         default: "60"
   schedule:
-    - cron: "30 15 * * 0"
+    # 毎週水曜 06:30 JST（UTC では火曜 21:30）
+    - cron: "30 21 * * 2"
 
 permissions:
   contents: write
@@ -53,7 +54,14 @@ jobs:
           INSIGHTS_MIN_DURATION_MINUTES: "60"
           INSIGHTS_HTTP_TIMEOUT_SECONDS: "90"
           INSIGHTS_HTTP_RETRIES: "4"
+          INSIGHTS_SYNC_SUPABASE: "1"
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "::error::Repository Secrets に SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY を設定してください。"
+            exit 1
+          fi
           if [ -n "${{ github.event.inputs.stores }}" ]; then
             export INSIGHTS_STORES="${{ github.event.inputs.stores }}"
           fi

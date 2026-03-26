@@ -19,6 +19,20 @@ export type BlogDraftPipelineSource =
   | "github_actions_retry"
   | "manual_api";
 
+function derivePublicationFields(source: BlogDraftPipelineSource): {
+  contentType: "daily" | "weekly" | "editorial";
+  isPublished: boolean;
+} {
+  if (
+    source === "vercel_cron" ||
+    source === "github_actions_cron" ||
+    source === "github_actions_retry"
+  ) {
+    return { contentType: "daily", isPublished: true };
+  }
+  return { contentType: "editorial", isPublished: false };
+}
+
 export type RunBlogDraftPipelineInput = {
   backendUrl: string;
   rangeLimit: number;
@@ -53,6 +67,7 @@ export async function runBlogDraftPipeline(
 ): Promise<RunBlogDraftPipelineOk | RunBlogDraftPipelineErr> {
   const { backendUrl, rangeLimit, store, dateYmd, factsId, topicHint, edition, source, lineUserId } =
     input;
+  const publication = derivePublicationFields(source);
 
   try {
     const insightResult = await buildInsightFromBackend(backendUrl, store.slug, dateYmd, rangeLimit, {
@@ -104,6 +119,9 @@ export async function runBlogDraftPipeline(
         mdx_content: mdx,
         insight_json: insightPayload as unknown as Record<string, unknown>,
         source,
+        content_type: publication.contentType,
+        is_published: publication.isPublished,
+        edition: edition ?? insightResult.draft_context.edition ?? null,
         line_user_id: lineUserId ?? null,
         error_message: null,
       });
@@ -151,6 +169,9 @@ export async function runBlogDraftPipeline(
         mdx_content: "",
         insight_json: {},
         source,
+        content_type: publication.contentType,
+        is_published: publication.isPublished,
+        edition: edition ?? null,
         line_user_id: lineUserId ?? null,
         error_message: msg,
       });

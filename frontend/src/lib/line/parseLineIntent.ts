@@ -15,8 +15,27 @@ export type ParsedLineIntent =
       store: StoreMeta;
       dateYmd: string;
       factsId: string;
-      /** Remaining free text after store/date tokens (topic / style hints) */
       topicHint: string;
+    }
+  | {
+      /**
+       * 分析・読み物記事のオーダー。
+       * "〇〇を分析して" "〇〇のレポート" など。
+       * pipeline は editorial（is_published=false）として保存する。
+       */
+      kind: "editorial_analysis";
+      store: StoreMeta;
+      dateYmd: string;
+      factsId: string;
+      topicHint: string;
+    }
+  | {
+      /**
+       * LINE で「公開」「OK」などを送ると最新の editorial 下書きを承認する。
+       * targetSlug が指定されれば特定の public_slug を承認する。
+       */
+      kind: "approve";
+      targetSlug: string | null;
     }
   | { kind: "help" }
   | { kind: "error"; message: string };
@@ -31,6 +50,35 @@ export function buildFactsId(slug: string, dateYmd: string): string {
  * Parse user text from LINE.
  * Examples: "渋谷 今夜", "shibuya", "ol_shibuya 2025-12-21", "新宿　お願い　混雑について"
  */
+const APPROVE_PATTERNS = [
+  /^(公開|publish|ok|ＯＫ|承認|掲載)$/i,
+  /^(公開して|公開お願い|publishして)$/i,
+];
+
+const EDITORIAL_PATTERNS = [
+  /分析して?/,
+  /レポート/,
+  /調査して?/,
+  /まとめて?/,
+  /比較して?/,
+  /データ(を|で)?見て?/,
+];
+
+function isApproveMessage(text: string): { matched: true; slug: string | null } | { matched: false } {
+  const t = text.trim();
+  for (const pat of APPROVE_PATTERNS) {
+    if (pat.test(t)) return { matched: true, slug: null };
+  }
+  // "〇〇-slug を公開" のような slug 指定
+  const slugMatch = t.match(/^([a-z0-9-]+(?:_[a-z0-9-]+)*)\s*(を|で)?(公開|publish|承認)/i);
+  if (slugMatch) return { matched: true, slug: slugMatch[1] };
+  return { matched: false };
+}
+
+function isEditorialRequest(rest: string): boolean {
+  return EDITORIAL_PATTERNS.some((p) => p.test(rest));
+}
+
 export function parseLineIntent(text: string): ParsedLineIntent {
   const trimmed = text.trim();
   if (!trimmed) {
@@ -40,6 +88,12 @@ export function parseLineIntent(text: string): ParsedLineIntent {
   const lower = trimmed.toLowerCase();
   if (lower === "help" || lower === "ヘルプ" || lower === "?" || lower === "？") {
     return { kind: "help" };
+  }
+
+  // 承認インテント
+  const approveCheck = isApproveMessage(trimmed);
+  if (approveCheck.matched) {
+    return { kind: "approve", targetSlug: approveCheck.slug };
   }
 
   const dateMatch = trimmed.match(/\b(\d{4}-\d{2}-\d{2})\b/);
@@ -65,14 +119,14 @@ export function parseLineIntent(text: string): ParsedLineIntent {
   const { store, consumedTokens } = matched;
   const topicTokens = tokens.filter((t) => !consumedTokens.includes(t));
   const topicHint = topicTokens.join(" ").trim();
+  const factsId = buildFactsId(store.slug, dateYmd);
 
-  return {
-    kind: "draft",
-    store,
-    dateYmd,
-    factsId: buildFactsId(store.slug, dateYmd),
-    topicHint,
-  };
+  // 分析・編集記事インテント（"分析して" "レポート" 等のキーワードがある）
+  if (isEditorialRequest(rest)) {
+    return { kind: "editorial_analysis", store, dateYmd, factsId, topicHint };
+  }
+
+  return { kind: "draft", store, dateYmd, factsId, topicHint };
 }
 
 function resolveStoreFromTokens(tokens: string[]): { store: StoreMeta; consumedTokens: string[] } | null {

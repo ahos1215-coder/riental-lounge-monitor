@@ -4,6 +4,11 @@ import crypto from "node:crypto";
 import { parseLineIntent } from "@/lib/line/parseLineIntent";
 import { runBlogDraftPipeline } from "@/lib/blog/runBlogDraftPipeline";
 import { limitLineUserDraft, limitLineWebhookGlobal } from "@/lib/rateLimit/lineWebhookLimits";
+import {
+  publishEditorialByFactsId,
+  publishEditorialBySlug,
+  fetchLatestUnpublishedEditorialByLineUser,
+} from "@/lib/supabase/blogDrafts";
 
 /** Flask backend base URL (same as other Next API proxies). */
 // Vercel 側で `BACKEND-URL` として登録されてしまうケースがあるため、保険で別名も許容する。
@@ -84,19 +89,138 @@ function truncate(s: string, max: number): string {
   return `${s.slice(0, max - 20)}\n…(省略)`;
 }
 
+function siteBaseUrl(): string {
+  return (
+    process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ||
+    process.env.NEXT_PUBLIC_BASE_URL?.replace(/\/$/, "") ||
+    "https://www.meguribi.jp"
+  );
+}
+
 function helpText(): string {
   return [
-    "【MEGRIBI 下書きボット】",
-    "店舗名と任意で日付・トピックを送ってください。",
+    "【MEGRIBI レポートボット】",
     "",
-    "例:",
-    "・渋谷",
-    "・新宿 今夜",
-    "・shibuya 2025-12-21",
-    "・ol_shinjuku 2025-12-20 初心者向けに",
+    "■ 予報下書きを作る",
+    "　店舗名と任意で日付・トピックを送ってください。",
+    "　例: 渋谷 / 新宿 今夜 / shibuya 2025-12-21",
+    "",
+    "■ 分析レポートを依頼する",
+    "　「〇〇を分析して」「〇〇のレポート」「〇〇を比較して」",
+    "　例: 渋谷 先週と比較して / 福岡を分析して",
+    "",
+    "■ 分析記事を公開する",
+    "　「公開」「ok」「承認」を送ると直近の未公開記事が公開されます。",
+    "　例: 公開 / ok / 〇〇-slug を公開",
     "",
     "日付を省略すると今日（日本時間）です。",
   ].join("\n");
+}
+
+async function handleApproveIntent(
+  replyToken: string,
+  lineUserId: string | null,
+  targetSlug: string | null,
+): Promise<void> {
+  // slug 指定がある場合はそちらを優先
+  if (targetSlug) {
+    const result = await publishEditorialBySlug(targetSlug);
+    if (!result.ok) {
+      await replyLine(replyToken, `公開に失敗しました。\n${result.error}`);
+      return;
+    }
+    const url = `${siteBaseUrl()}/blog/${encodeURIComponent(result.publicSlug)}`;
+    await replyLine(replyToken, `公開しました！\n${url}`);
+    return;
+  }
+
+  // slug 指定なし → LINE ユーザーの直近の未公開 editorial を探す
+  if (!lineUserId) {
+    await replyLine(replyToken, "承認対象を特定できません（user ID 不明）。slug を指定して送ってください。");
+    return;
+  }
+
+  const draft = await fetchLatestUnpublishedEditorialByLineUser(lineUserId);
+  if (!draft) {
+    await replyLine(replyToken, "承認できる未公開の分析記事が見つかりませんでした。");
+    return;
+  }
+
+  const result = await publishEditorialByFactsId(draft.facts_id);
+  if (!result.ok) {
+    await replyLine(replyToken, `公開に失敗しました。\n${result.error}`);
+    return;
+  }
+
+  const slug = result.publicSlug ?? draft.public_slug ?? draft.facts_id;
+  const url = `${siteBaseUrl()}/blog/${encodeURIComponent(slug)}`;
+  await replyLine(
+    replyToken,
+    `${draft.store_slug}（${draft.target_date}）の記事を公開しました！\n${url}`,
+  );
+}
+
+async function handleDraftOrEditorialIntent(
+  replyToken: string,
+  lineUserId: string | null,
+  intent: {
+    kind: "draft" | "editorial_analysis";
+    store: import("@/app/config/stores").StoreMeta;
+    dateYmd: string;
+    factsId: string;
+    topicHint: string;
+  },
+): Promise<void> {
+  const userLimit = await limitLineUserDraft(lineUserId);
+  if (!userLimit.success) {
+    await replyLine(
+      replyToken,
+      "生成は短時間の上限に達しました。しばらく（目安: 1時間）してから再度お試しください。",
+    );
+    return;
+  }
+
+  try {
+    console.log("[line] Running pipeline", { kind: intent.kind, slug: intent.store.slug });
+    const result = await runBlogDraftPipeline({
+      backendUrl: BACKEND_URL,
+      rangeLimit: lineRangeLimit(),
+      store: intent.store,
+      dateYmd: intent.dateYmd,
+      factsId: intent.factsId,
+      topicHint: intent.topicHint,
+      source: "line_webhook",
+      lineUserId,
+    });
+
+    if (!result.ok) {
+      await replyLine(replyToken, `処理中にエラーが発生しました。\n${truncate(result.error, 800)}`);
+      return;
+    }
+
+    const { insightResult } = result;
+    console.log("[line] Pipeline ok", {
+      kind: intent.kind,
+      source: insightResult.source,
+      crowd_label: insightResult.insight.crowd_label,
+    });
+
+    let suffix = "";
+    if (intent.kind === "editorial_analysis") {
+      suffix = [
+        "",
+        "----",
+        "分析記事として保存しました（未公開）。",
+        "内容を確認後、「公開」と送ると公開URLが発行されます。",
+      ].join("\n");
+    }
+
+    await replyLine(replyToken, result.summaryLines.join("\n") + suffix);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("[line] pipeline error", msg);
+    await replyLine(replyToken, `処理中にエラーが発生しました。\n${truncate(msg, 800)}`);
+  }
 }
 
 async function processMessageEvent(ev: LineEvent): Promise<void> {
@@ -112,71 +236,26 @@ async function processMessageEvent(ev: LineEvent): Promise<void> {
 
   const intent = parseLineIntent(text);
   console.log("[line] Intent kind:", intent.kind);
-  if (intent.kind === "draft") {
-    console.log("[line] Intent draft:", {
-      storeSlug: intent.store.slug,
-      storeLabel: intent.store.label,
-      dateYmd: intent.dateYmd,
-      factsId: intent.factsId,
-      topicHint: intent.topicHint,
-    });
-  } else if (intent.kind === "error") {
-    console.log("[line] Intent error:", intent.message);
-  }
+
   if (intent.kind === "help") {
     await replyLine(replyToken, helpText());
     return;
   }
   if (intent.kind === "error") {
+    console.log("[line] Intent error:", intent.message);
     await replyLine(replyToken, intent.message);
     return;
   }
 
-  const draft = intent;
   const lineUserId = ev.source?.userId ?? null;
 
-  const userLimit = await limitLineUserDraft(lineUserId);
-  if (!userLimit.success) {
-    await replyLine(
-      replyToken,
-      "下書き生成は短時間の上限に達しました。しばらく（目安: 1時間）してから再度お試しください。",
-    );
+  if (intent.kind === "approve") {
+    await handleApproveIntent(replyToken, lineUserId, intent.targetSlug);
     return;
   }
 
-  try {
-    console.log("[line] Running blog draft pipeline");
-    const result = await runBlogDraftPipeline({
-      backendUrl: BACKEND_URL,
-      rangeLimit: lineRangeLimit(),
-      store: draft.store,
-      dateYmd: draft.dateYmd,
-      factsId: draft.factsId,
-      topicHint: draft.topicHint,
-      source: "line_webhook",
-      lineUserId,
-    });
-
-    if (!result.ok) {
-      await replyLine(replyToken, `処理中にエラーが発生しました。\n${truncate(result.error, 800)}`);
-      return;
-    }
-
-    const { insightResult } = result;
-    console.log("[line] Pipeline ok", {
-      source: insightResult.source,
-      shift: insightResult.shift,
-      crowd_label: insightResult.insight.crowd_label,
-      peak_time: insightResult.insight.peak_time,
-      avoid_time: insightResult.insight.avoid_time,
-    });
-
-    await replyLine(replyToken, result.summaryLines.join("\n"));
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    console.error("[line] processMessageEvent", msg);
-    await replyLine(replyToken, `処理中にエラーが発生しました。\n${truncate(msg, 800)}`);
-  }
+  // draft / editorial_analysis
+  await handleDraftOrEditorialIntent(replyToken, lineUserId, intent);
 }
 
 async function handleWebhookBody(rawBody: string): Promise<void> {

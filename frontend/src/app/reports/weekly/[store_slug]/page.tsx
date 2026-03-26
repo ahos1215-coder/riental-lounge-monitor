@@ -1,18 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { getMetadataBaseUrl } from "@/lib/siteUrl";
-import { fetchPublishedEditorialBySlug } from "@/lib/supabase/blogDrafts";
 import { getStoreMetaBySlugStrict } from "@/app/config/stores";
-
-export const dynamicParams = true;
+import { fetchLatestPublishedReportByStore } from "@/lib/supabase/blogDrafts";
+import { getMetadataBaseUrl } from "@/lib/siteUrl";
 
 type Props = {
-  params: Promise<{ slug: string }>;
+  params: Promise<{ store_slug: string }>;
 };
 
 function stripFrontmatter(raw: string): string {
@@ -23,64 +20,62 @@ function stripFrontmatter(raw: string): string {
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { slug } = await params;
-  const row = await fetchPublishedEditorialBySlug(slug);
-  if (!row) return {};
-  const store = getStoreMetaBySlugStrict(row.store_slug);
-  const storeName = store ? `オリエンタルラウンジ ${store.label}` : row.store_slug;
-  const title = `${storeName} 分析レポート`;
-  const description = `${storeName} の編集記事（承認済み）です。`;
+  const { store_slug } = await params;
+  const meta = getStoreMetaBySlugStrict(store_slug);
+  const label = meta ? `オリエンタルラウンジ ${meta.label}` : store_slug;
+  const title = `${label} · Weekly Report`;
+  const description = `${label} の最新AI週報（毎週水曜更新）を表示します。`;
   const base = getMetadataBaseUrl();
-  const url = new URL(`/blog/${encodeURIComponent(slug)}`, base);
-
   return {
     title,
     description,
-    alternates: { canonical: url.href },
     openGraph: {
-      title,
+      title: `${title} | めぐりび`,
       description,
-      url,
+      url: new URL(`/reports/weekly/${encodeURIComponent(store_slug)}`, base),
       type: "article",
       locale: "ja_JP",
     },
     twitter: {
       card: "summary_large_image",
-      title,
+      title: `${title} | めぐりび`,
       description,
     },
   };
 }
 
-export default async function BlogPostPage({ params }: Props) {
-  const { slug } = await params;
-  const row = await fetchPublishedEditorialBySlug(slug);
+export default async function WeeklyReportStorePage({ params }: Props) {
+  const { store_slug } = await params;
+  const store = getStoreMetaBySlugStrict(store_slug);
+  if (!store) notFound();
+
+  const row = await fetchLatestPublishedReportByStore(store.slug, "weekly");
   if (!row) notFound();
 
-  const store = getStoreMetaBySlugStrict(row.store_slug);
   const content = stripFrontmatter(row.mdx_content);
 
   return (
     <main className="mx-auto w-full max-w-3xl px-4 py-10">
       <div className="mb-6">
         <Link
-          href="/blog"
+          href="/stores"
           className="inline-flex items-center gap-2 text-sm text-white/70 transition hover:text-white"
         >
-          <span aria-hidden="true">←</span>
-          ブログ一覧へ戻る
+          <span aria-hidden>←</span>
+          店舗一覧へ戻る
         </Link>
       </div>
 
       <header className="mb-8">
         <h1 className="text-2xl font-bold leading-tight text-white md:text-3xl">
-          {store ? `${store.label} 分析レポート` : `${row.store_slug} 分析レポート`}
+          {store.label} Weekly Report
         </h1>
         <p className="mt-2 text-sm text-white/60">
-          {row.target_date}
-          {store ? ` / ${store.label}` : ""}
+          {row.target_date} / 最新更新: {row.created_at ?? "-"}
         </p>
-        <p className="mt-4 text-base text-white/75">LINE承認済みの編集記事です。</p>
+        <p className="mt-4 text-base text-white/75">
+          毎週水曜の自動生成で更新される最新週報です。
+        </p>
       </header>
 
       <article className="prose prose-invert mt-10 max-w-none prose-headings:text-white prose-p:text-white/80 prose-li:text-white/80">
