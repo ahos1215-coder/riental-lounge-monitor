@@ -7,6 +7,7 @@
         "drafts:export": "node scripts/export-blog-draft.mjs",
         "smoke:blog-apis": "node scripts/smoke-blog-apis.mjs",
         "dev": "next dev",
+        "dev:clean": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/clean-next-dev.ps1",
         "build": "next build",
         "start": "next start",
         "lint": "eslint src",

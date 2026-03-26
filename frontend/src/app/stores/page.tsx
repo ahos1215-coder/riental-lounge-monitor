@@ -4,10 +4,17 @@ import { useMemo, useState } from "react";
 import { StoreCard } from "@/components/StoreCard";
 import { STORES, type StoreMeta } from "../config/stores";
 import { useEffect } from "react";
+import {
+  STORE_CARD_RANGE_LIMIT,
+  STORE_CARD_SPARKLINE_POINTS,
+  buildActualSparklineFromRange,
+  buildGenderSparklineFromRange,
+  parseRangeResponse,
+  pickLatestRangeRow,
+} from "@/lib/storeCardRangeSparkline";
 
 type BrandFilter = "all" | "oriental" | "jis" | "aisekiya";
 type ForecastPoint = { ts: string; total_pred?: number };
-type RangePoint = { men?: number; women?: number; total?: number };
 type StoreRealtimeCard = {
   slug: string;
   stats: {
@@ -20,6 +27,8 @@ type StoreRealtimeCard = {
     recommendLabel: string;
   };
   sparkline: number[];
+  sparklineMen: number[];
+  sparklineWomen: number[];
   /** true の間は予測API待ち（実測のみ表示） */
   forecastPending?: boolean;
 };
@@ -90,15 +99,6 @@ export default function StoresPage() {
     setRealtimeLoading(true);
     setStoreRealtime({});
 
-    function parseRangeRows(
-      rangeBody: RangePoint[] | { data?: RangePoint[]; rows?: RangePoint[] },
-    ): RangePoint[] {
-      if (Array.isArray(rangeBody)) return rangeBody;
-      if (Array.isArray(rangeBody?.data)) return rangeBody.data;
-      if (Array.isArray(rangeBody?.rows)) return rangeBody.rows;
-      return [];
-    }
-
     function isAbortError(err: unknown): boolean {
       return (
         (err instanceof DOMException && err.name === "AbortError") ||
@@ -110,21 +110,32 @@ export default function StoresPage() {
       let menNow = 0;
       let womenNow = 0;
       let nowTotal = 0;
+      let actualSparkline: number[] = [];
+      let sparklineMen: number[] = [];
+      let sparklineWomen: number[] = [];
 
       try {
         const rangeRes = await fetch(
-          `/api/range?store=${encodeURIComponent(store.slug)}&limit=1`,
+          `/api/range?store=${encodeURIComponent(store.slug)}&limit=${STORE_CARD_RANGE_LIMIT}`,
           { cache: "no-store", signal },
         );
         if (signal.aborted) return;
         if (!rangeRes.ok) return;
-        const rangeBody = (await rangeRes.json()) as
-          | RangePoint[]
-          | { data?: RangePoint[]; rows?: RangePoint[] };
+        const rangeBody: unknown = await rangeRes.json();
         if (signal.aborted) return;
 
-        const rangeRows = parseRangeRows(rangeBody);
-        const current = rangeRows[0] ?? {};
+        const rangeRows = parseRangeResponse(rangeBody);
+        actualSparkline = buildActualSparklineFromRange(
+          rangeRows,
+          STORE_CARD_SPARKLINE_POINTS,
+        );
+        const genderSparks = buildGenderSparklineFromRange(
+          rangeRows,
+          STORE_CARD_SPARKLINE_POINTS,
+        );
+        sparklineMen = genderSparks.men;
+        sparklineWomen = genderSparks.women;
+        const current = pickLatestRangeRow(rangeRows) ?? {};
         menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
         womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
         nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
@@ -140,7 +151,9 @@ export default function StoresPage() {
             crowdLevel: "取得中",
             recommendLabel: "取得中",
           },
-          sparkline: [],
+          sparkline: actualSparkline,
+          sparklineMen,
+          sparklineWomen,
           forecastPending: true,
         };
         setStoreRealtime((prev) => ({ ...prev, [store.slug]: partialCard }));
@@ -184,7 +197,9 @@ export default function StoresPage() {
             crowdLevel: crowdLabelFromPred(maxPred),
             recommendLabel: calm?.ts ? `${calmLabel}ごろ` : "確認中",
           },
-          sparkline: totals.slice(0, 10),
+          sparkline: actualSparkline,
+          sparklineMen,
+          sparklineWomen,
           forecastPending: false,
         };
         if (signal.aborted) return;
@@ -204,7 +219,9 @@ export default function StoresPage() {
                 crowdLevel: "確認中",
                 recommendLabel: "確認中",
               },
-              sparkline: [],
+              sparkline: cur.sparkline,
+              sparklineMen: cur.sparklineMen,
+              sparklineWomen: cur.sparklineWomen,
               forecastPending: false,
             },
           };
@@ -320,6 +337,8 @@ export default function StoresPage() {
                     isHighlight={idx === 0}
                     stats={storeRealtime[store.slug]?.stats}
                     sparklinePoints={storeRealtime[store.slug]?.sparkline}
+                    sparklineMen={storeRealtime[store.slug]?.sparklineMen}
+                    sparklineWomen={storeRealtime[store.slug]?.sparklineWomen}
                     forecastPending={storeRealtime[store.slug]?.forecastPending}
                     isLoading={realtimeLoading && !storeRealtime[store.slug]}
                   />

@@ -10,6 +10,14 @@ import {
 } from "./config/stores";
 import { StoreCard } from "@/components/StoreCard";
 import { LAST_STORE_KEY } from "@/lib/browser/meguribiStorage";
+import {
+  STORE_CARD_RANGE_LIMIT,
+  STORE_CARD_SPARKLINE_POINTS,
+  buildActualSparklineFromRange,
+  buildGenderSparklineFromRange,
+  parseRangeResponse,
+  pickLatestRangeRow,
+} from "@/lib/storeCardRangeSparkline";
 import ForecastSummaryBar from "./components/ForecastSummaryBar";
 
 export type HomeBlogTeaser = {
@@ -24,7 +32,6 @@ type HomePageProps = {
 };
 
 type ForecastPoint = { ts: string; men_pred?: number; women_pred?: number; total_pred?: number };
-type RangePoint = { men?: number; women?: number; total?: number };
 type StoreRealtimeCard = {
   slug: string;
   stats: {
@@ -36,7 +43,10 @@ type StoreRealtimeCard = {
     crowdLevel: string;
     recommendLabel: string;
   };
+  /** 予測合計の折れ線（実測男女が足りないときのフォールバック） */
   sparkline: number[];
+  sparklineMen: number[];
+  sparklineWomen: number[];
   calmLabel: string;
   peakLabel: string;
   nowTotal: number;
@@ -123,19 +133,16 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
           try {
             const [forecastRes, rangeRes] = await Promise.all([
               fetch(`/api/forecast_today?store=${encodeURIComponent(store.slug)}`, { cache: "no-store" }),
-              fetch(`/api/range?store=${encodeURIComponent(store.slug)}&limit=1`, { cache: "no-store" }),
+              fetch(
+                `/api/range?store=${encodeURIComponent(store.slug)}&limit=${STORE_CARD_RANGE_LIMIT}`,
+                { cache: "no-store" },
+              ),
             ]);
             const forecastBody = (await forecastRes.json()) as { data?: ForecastPoint[] };
-            const rangeBody = (await rangeRes.json()) as RangePoint[] | { data?: RangePoint[]; rows?: RangePoint[] };
+            const rangeBody: unknown = await rangeRes.json();
             const forecastRows = Array.isArray(forecastBody?.data) ? forecastBody.data : [];
-            const rangeRows = Array.isArray(rangeBody)
-              ? rangeBody
-              : Array.isArray(rangeBody?.data)
-                ? rangeBody.data
-                : Array.isArray(rangeBody?.rows)
-                  ? rangeBody.rows
-                  : [];
-            const current = rangeRows[0] ?? {};
+            const rangeRows = parseRangeResponse(rangeBody);
+            const current = pickLatestRangeRow(rangeRows) ?? {};
             const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
             const womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
             const nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
@@ -165,15 +172,23 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
             }
             const peakLabel = peak?.ts ? toHmJst(peak.ts) : "--:--";
             const sparkline = totals.slice(0, 10);
+            const genderSparks = buildGenderSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
+            const actualTotals = buildActualSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
+            const sparklineMen = genderSparks.men;
+            const sparklineWomen = genderSparks.women;
+            const sparklineFallback =
+              actualTotals.length >= 2 ? actualTotals : sparkline;
             const card: StoreRealtimeCard = {
               slug: store.slug,
               stats,
-              sparkline,
+              sparkline: sparklineFallback,
               calmLabel,
               peakLabel,
               nowTotal,
               maxPred,
               hasSignal: maxPred >= 80,
+              sparklineMen,
+              sparklineWomen,
             };
             return card;
           } catch {
@@ -385,6 +400,8 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                   isHighlight={idx === 0}
                   stats={storeRealtime[store.slug]?.stats}
                   sparklinePoints={storeRealtime[store.slug]?.sparkline}
+                  sparklineMen={storeRealtime[store.slug]?.sparklineMen}
+                  sparklineWomen={storeRealtime[store.slug]?.sparklineWomen}
                   isLoading={realtimeLoading && !storeRealtime[store.slug]}
                 />
               ))}

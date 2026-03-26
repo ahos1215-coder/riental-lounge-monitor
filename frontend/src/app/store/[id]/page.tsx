@@ -9,10 +9,17 @@ import {
   recordStoreVisit,
   toggleFavoriteStore,
 } from "@/lib/browser/meguribiStorage";
+import {
+  STORE_CARD_RANGE_LIMIT,
+  STORE_CARD_SPARKLINE_POINTS,
+  buildActualSparklineFromRange,
+  buildGenderSparklineFromRange,
+  parseRangeResponse,
+  pickLatestRangeRow,
+} from "@/lib/storeCardRangeSparkline";
 import { DEFAULT_STORE, STORES, getStoreMetaBySlug } from "../../config/stores";
 
 type ForecastCardPoint = { ts: string; total_pred?: number };
-type RangePoint = { men?: number; women?: number; total?: number };
 type RealtimeCardStats = {
   menCount: number;
   womenCount: number;
@@ -104,7 +111,15 @@ function StorePageInner() {
 
   const [favorite, setFavorite] = useState(false);
   const [relatedRealtime, setRelatedRealtime] = useState<
-    Record<string, { stats: RealtimeCardStats; sparkline: number[] }>
+    Record<
+      string,
+      {
+        stats: RealtimeCardStats;
+        sparkline: number[];
+        sparklineMen: number[];
+        sparklineWomen: number[];
+      }
+    >
   >({});
   const [relatedLoading, setRelatedLoading] = useState(false);
 
@@ -122,19 +137,16 @@ function StorePageInner() {
           try {
             const [forecastRes, rangeRes] = await Promise.all([
               fetch(`/api/forecast_today?store=${encodeURIComponent(store.slug)}`, { cache: "no-store" }),
-              fetch(`/api/range?store=${encodeURIComponent(store.slug)}&limit=1`, { cache: "no-store" }),
+              fetch(
+                `/api/range?store=${encodeURIComponent(store.slug)}&limit=${STORE_CARD_RANGE_LIMIT}`,
+                { cache: "no-store" },
+              ),
             ]);
             const forecastBody = (await forecastRes.json()) as { data?: ForecastCardPoint[] };
-            const rangeBody = (await rangeRes.json()) as RangePoint[] | { data?: RangePoint[]; rows?: RangePoint[] };
+            const rangeBody: unknown = await rangeRes.json();
             const forecastRows = Array.isArray(forecastBody?.data) ? forecastBody.data : [];
-            const rangeRows = Array.isArray(rangeBody)
-              ? rangeBody
-              : Array.isArray(rangeBody?.data)
-                ? rangeBody.data
-                : Array.isArray(rangeBody?.rows)
-                  ? rangeBody.rows
-                  : [];
-            const current = rangeRows[0] ?? {};
+            const rangeRows = parseRangeResponse(rangeBody);
+            const current = pickLatestRangeRow(rangeRows) ?? {};
             const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
             const womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
             const nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
@@ -149,6 +161,11 @@ function StorePageInner() {
               }
             }
             const calmLabel = calm?.ts ? toHmJstStore(calm.ts) : "--:--";
+            const forecastSpark = totals.slice(0, 10);
+            const genderSparks = buildGenderSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
+            const actualTotals = buildActualSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
+            const sparklineFallback =
+              actualTotals.length >= 2 ? actualTotals : forecastSpark;
             return {
               slug: store.slug,
               stats: {
@@ -160,7 +177,9 @@ function StorePageInner() {
                 crowdLevel: crowdLabelFromPredStore(maxPred),
                 recommendLabel: calm?.ts ? `${calmLabel}ごろ` : "確認中",
               },
-              sparkline: totals.slice(0, 10),
+              sparkline: sparklineFallback,
+              sparklineMen: genderSparks.men,
+              sparklineWomen: genderSparks.women,
             };
           } catch {
             return null;
@@ -169,9 +188,24 @@ function StorePageInner() {
       );
 
       if (!mounted) return;
-      const mapped: Record<string, { stats: RealtimeCardStats; sparkline: number[] }> = {};
+      const mapped: Record<
+        string,
+        {
+          stats: RealtimeCardStats;
+          sparkline: number[];
+          sparklineMen: number[];
+          sparklineWomen: number[];
+        }
+      > = {};
       for (const row of results) {
-        if (row) mapped[row.slug] = { stats: row.stats, sparkline: row.sparkline };
+        if (row) {
+          mapped[row.slug] = {
+            stats: row.stats,
+            sparkline: row.sparkline,
+            sparklineMen: row.sparklineMen,
+            sparklineWomen: row.sparklineWomen,
+          };
+        }
       }
       setRelatedRealtime(mapped);
       setRelatedLoading(false);
@@ -215,6 +249,8 @@ function StorePageInner() {
               isHighlight={idx === 0}
               stats={relatedRealtime[store.slug]?.stats}
               sparklinePoints={relatedRealtime[store.slug]?.sparkline}
+              sparklineMen={relatedRealtime[store.slug]?.sparklineMen}
+              sparklineWomen={relatedRealtime[store.slug]?.sparklineWomen}
               isLoading={relatedLoading && !relatedRealtime[store.slug]}
             />
           ))}

@@ -22,6 +22,9 @@ type StoreCardProps = {
     recommendLabel?: string;
   };
   sparklinePoints?: number[];
+  /** 実測レンジ由来の男女推移（あれば合計1本よりこちらを優先表示） */
+  sparklineMen?: number[];
+  sparklineWomen?: number[];
   /** 一覧などで /api/range だけ先に反映し、予測を後追いするとき */
   forecastPending?: boolean;
   isLoading?: boolean;
@@ -59,6 +62,71 @@ function SimpleLineChart({ points }: { points?: number[] }) {
   );
 }
 
+/** 男女を同じYスケールで重ねる（カード内ミニチャート・/api/range 実測のみ） */
+function GenderTrendMiniChart({ men, women }: { men: number[]; women: number[] }) {
+  const all = [...men, ...women];
+  const max = Math.max(...all, 1);
+  const min = Math.min(...all);
+  const span = Math.max(1, max - min);
+  const width = 180;
+  const n = men.length;
+  const step = width / Math.max(1, n - 1);
+  const toY = (v: number) => Math.round(44 - ((v - min) / span) * 28);
+  const pathMen = men
+    .map((v, i) => `${Math.round(i * step)},${toY(v)}`)
+    .join(" ");
+  const pathWomen = women
+    .map((v, i) => `${Math.round(i * step)},${toY(v)}`)
+    .join(" ");
+
+  return (
+    <div className="flex w-full flex-col gap-0.5">
+      <svg
+        viewBox="0 0 180 56"
+        className="h-10 w-full shrink-0"
+        role="img"
+        aria-label="直近の男性・女性人数の推移（実測）"
+      >
+        <line
+          x1="0"
+          y1="50"
+          x2="180"
+          y2="50"
+          className="stroke-white/[0.08]"
+          strokeWidth={1}
+        />
+        <polyline
+          points={pathMen}
+          fill="none"
+          className="stroke-cyan-300/90"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <polyline
+          points={pathWomen}
+          fill="none"
+          className="stroke-pink-300/90"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      <div className="flex justify-center gap-3 text-[9px] leading-none text-white/40">
+        <span className="flex items-center gap-1">
+          <span className="h-0.5 w-2.5 rounded-full bg-cyan-300/90" aria-hidden />
+          男性
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="h-0.5 w-2.5 rounded-full bg-pink-300/90" aria-hidden />
+          女性
+        </span>
+        <span className="text-white/30">実測・直近</span>
+      </div>
+    </div>
+  );
+}
+
 export function StoreCard({
   slug,
   label,
@@ -68,6 +136,8 @@ export function StoreCard({
   isHighlight = false,
   stats,
   sparklinePoints,
+  sparklineMen,
+  sparklineWomen,
   forecastPending = false,
   isLoading = false,
 }: StoreCardProps) {
@@ -99,6 +169,14 @@ export function StoreCard({
       ? "text-sky-200"
       : "text-white";
   const crowdIcon = crowd === "混雑" ? "▲" : crowd === "ほどよい" ? "●" : crowd === "空いている" ? "○" : "・";
+
+  const hasGenderTrend =
+    Array.isArray(sparklineMen) &&
+    Array.isArray(sparklineWomen) &&
+    sparklineMen.length >= 2 &&
+    sparklineMen.length === sparklineWomen.length;
+  const hasSparklineData =
+    Array.isArray(sparklinePoints) && sparklinePoints.length >= 2;
 
   const cardClass = isHighlight
     ? "flex cursor-pointer flex-col rounded-2xl border border-indigo-500/70 bg-indigo-500/10 p-3 text-sm transition hover:bg-indigo-500/20"
@@ -184,12 +262,20 @@ export function StoreCard({
       </div>
 
       <div
-        className={`mt-2 w-full overflow-hidden rounded-md border border-slate-800 bg-slate-950 p-2 ${
-          hasStats ? "h-16" : "h-10 opacity-70"
+        className={`mt-2 w-full overflow-hidden rounded-md border border-slate-800 bg-slate-950 px-2 py-1.5 ${
+          hasStats ? "min-h-[4.25rem]" : "h-10 opacity-70"
         }`}
       >
-        {forecastPending ? (
-          <div className="h-12 w-full animate-pulse rounded bg-slate-800/60" aria-hidden />
+        {!hasGenderTrend && !hasSparklineData ? (
+          forecastPending ? (
+            <div className="h-12 w-full animate-pulse rounded bg-slate-800/60" aria-hidden />
+          ) : (
+            <p className="flex min-h-12 items-center justify-center px-2 text-center text-[10px] leading-snug text-white/35">
+              男女内訳つきの実測が十分に無く、推移を表示できません
+            </p>
+          )
+        ) : hasGenderTrend ? (
+          <GenderTrendMiniChart men={sparklineMen!} women={sparklineWomen!} />
         ) : (
           <SimpleLineChart points={sparklinePoints} />
         )}
