@@ -39,8 +39,8 @@ type RealtimeCardStats = {
   nowTotal: number;
   peakPredTotal: number;
   genderRatio: string;
-  crowdLevel: string;
-  recommendLabel: string;
+  crowdLevel?: string;
+  recommendLabel?: string;
 };
 
 
@@ -179,8 +179,8 @@ function StorePageInner() {
                 nowTotal,
                 peakPredTotal: 0,
                 genderRatio: `${menNow}:${womenNow}`,
-                crowdLevel: "—",
-                recommendLabel: "—",
+                crowdLevel: undefined,
+                recommendLabel: undefined,
               },
               sparkline: actualTotals,
               sparklineMen: genderSparks.men,
@@ -337,7 +337,7 @@ function StorePageInner() {
             <StoreCard
               key={store.slug}
               slug={store.slug}
-              label={`Oriental Lounge ${store.label}`}
+              label={store.label}
               brandLabel="ORIENTAL LOUNGE"
               areaLabel={store.areaLabel}
               isHighlight={idx === 0}

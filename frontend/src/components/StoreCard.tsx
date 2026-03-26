@@ -151,6 +151,7 @@ export function StoreCard({
   const womenCount = Math.max(0, Math.round(Number(stats?.womenCount ?? 0)));
   const nowTotal = Math.max(0, Math.round(Number(stats?.nowTotal ?? menCount + womenCount)));
   const peakPredTotal = Math.max(0, Math.round(Number(stats?.peakPredTotal ?? 0)));
+  const hasPeakPred = peakPredTotal > 0;
   const gender = (() => {
     const raw = stats?.genderRatio;
     if (!raw) return "-";
@@ -158,8 +159,10 @@ export function StoreCard({
     if (!m) return raw;
     return `${Math.round(Number(m[1]))}:${Math.round(Number(m[2]))}`;
   })();
-  const crowd = stats?.crowdLevel ?? "-";
-  const recommend = stats?.recommendLabel ?? "確認中";
+  const crowd = stats?.crowdLevel;
+  const hasCrowd = crowd != null && crowd !== "—" && crowd !== "-";
+  const recommend = stats?.recommendLabel;
+  const hasRecommend = recommend != null && recommend !== "—" && recommend !== "-";
   const crowdClass =
     crowd === "混雑"
       ? "text-rose-300"
@@ -224,7 +227,7 @@ export function StoreCard({
           )}
         </div>
         <div className="flex flex-col items-end gap-0.5 text-[11px] text-white/70">
-          {hasStats && (
+          {hasStats && (forecastPending || hasPeakPred) && (
             <div className="flex items-center gap-1">
               <span className="text-white/50">ピーク予測</span>
               {forecastPending ? (
@@ -238,17 +241,19 @@ export function StoreCard({
             <span className="text-white/50">比</span>
             <span className="font-semibold text-white">{gender}</span>
           </div>
-          <div className="flex items-center gap-1">
-            <span className="text-white/50">混雑</span>
-            {forecastPending ? (
-              <span className="font-semibold text-white/35">取得中</span>
-            ) : (
-              <span className={`font-semibold ${crowdClass}`}>
-                {crowdIcon} {crowd}
-              </span>
-            )}
-          </div>
-          {hasStats && (
+          {(forecastPending || hasCrowd) && (
+            <div className="flex items-center gap-1">
+              <span className="text-white/50">混雑</span>
+              {forecastPending ? (
+                <span className="font-semibold text-white/35">取得中</span>
+              ) : (
+                <span className={`font-semibold ${crowdClass}`}>
+                  {crowdIcon} {crowd}
+                </span>
+              )}
+            </div>
+          )}
+          {hasStats && (forecastPending || hasRecommend) && (
             <div className="flex items-center gap-1 text-right">
               <span className="text-white/50">狙い目</span>
               {forecastPending ? (
