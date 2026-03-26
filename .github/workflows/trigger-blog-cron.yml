@@ -18,11 +18,6 @@ on:
         options:
           - evening_preview
           - late_update
-  schedule:
-    # 毎日 UTC 09:00 → 日本時間 18:00
-    - cron: "0 9 * * *"
-    # 毎日 UTC 12:30 → 日本時間 21:30
-    - cron: "30 12 * * *"
 
 jobs:
   trigger:
@@ -78,31 +73,19 @@ jobs:
         id: meta
         env:
           EVENT_NAME: ${{ github.event_name }}
-          SCHEDULE: ${{ github.event.schedule }}
           INPUT_EDITION: ${{ github.event.inputs.edition }}
         run: |
           set -e
-          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "edition=${INPUT_EDITION}" >> "$GITHUB_OUTPUT"
-            echo "trigger=workflow_dispatch" >> "$GITHUB_OUTPUT"
-          elif [ "$EVENT_NAME" = "schedule" ]; then
-            case "$SCHEDULE" in
-              "0 9 * * *")
-                echo "edition=evening_preview" >> "$GITHUB_OUTPUT"
-                ;;
-              "30 12 * * *")
-                echo "edition=late_update" >> "$GITHUB_OUTPUT"
-                ;;
-              *)
-                echo "::error::未対応の schedule: $SCHEDULE"
-                exit 1
-                ;;
-            esac
-            echo "trigger=schedule" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::未対応の event: $EVENT_NAME"
+          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            echo "::error::このワークフローは workflow_dispatch 専用です。event: $EVENT_NAME"
             exit 1
           fi
+          if [ -z "${INPUT_EDITION:-}" ]; then
+            echo "::error::edition が指定されていません。workflow_dispatch inputs.edition を指定してください。"
+            exit 1
+          fi
+          echo "edition=${INPUT_EDITION}" >> "$GITHUB_OUTPUT"
+          echo "trigger=workflow_dispatch" >> "$GITHUB_OUTPUT"
 
       - name: GET /api/cron/blog-draft
         continue-on-error: true

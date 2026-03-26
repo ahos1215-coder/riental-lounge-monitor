@@ -18,6 +18,37 @@ begin
   end if;
 end $$;
 
+-- facts_id が重複している既存データを整理（新しい created_at を残す）
+with ranked as (
+  select
+    ctid,
+    row_number() over (
+      partition by facts_id
+      order by created_at desc, id desc
+    ) as rn
+  from public.blog_drafts
+)
+delete from public.blog_drafts d
+using ranked r
+where d.ctid = r.ctid
+  and r.rn > 1;
+
+-- public_slug 重複（null 以外）も同様に整理
+with ranked_slug as (
+  select
+    ctid,
+    row_number() over (
+      partition by public_slug
+      order by created_at desc, id desc
+    ) as rn
+  from public.blog_drafts
+  where public_slug is not null
+)
+delete from public.blog_drafts d
+using ranked_slug r
+where d.ctid = r.ctid
+  and r.rn > 1;
+
 create unique index if not exists blog_drafts_facts_id_uidx
   on public.blog_drafts (facts_id);
 

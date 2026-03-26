@@ -5,6 +5,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { getStoreMetaBySlugStrict } from "@/app/config/stores";
+import { FactsSummaryCard } from "@/components/blog/FactsSummaryCard";
+import { readPublicFacts } from "@/lib/blog/publicFacts";
 import { fetchLatestPublishedReportByStore } from "@/lib/supabase/blogDrafts";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 
@@ -53,6 +55,9 @@ export default async function DailyReportStorePage({ params }: Props) {
   if (!row) notFound();
 
   const content = stripFrontmatter(row.mdx_content);
+  const publicFacts = row.facts_id ? readPublicFacts(row.facts_id) : null;
+  const factsForThisStore = publicFacts?.store?.id ? publicFacts.store.id === store.slug : true;
+  const facts = factsForThisStore ? publicFacts : null;
 
   return (
     <main className="mx-auto w-full max-w-3xl px-4 py-10">
@@ -77,6 +82,18 @@ export default async function DailyReportStorePage({ params }: Props) {
           18:00/21:30 の自動生成結果のうち、最新1件を表示しています。
         </p>
       </header>
+
+      {facts && (
+        <div className="mb-8">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold text-white/90">参考データ（Facts）</h2>
+            <p className="text-xs text-white/55">
+              ※ レポート本文とは別生成の短い要約です。矛盾がある場合は本文を優先してください。
+            </p>
+          </div>
+          <FactsSummaryCard facts={facts} />
+        </div>
+      )}
 
       <article className="prose prose-invert mt-10 max-w-none prose-headings:text-white prose-p:text-white/80 prose-li:text-white/80">
         <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
