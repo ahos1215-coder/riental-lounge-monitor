@@ -45,7 +45,8 @@ const BRAND_TABS: { id: BrandFilter; label: string }[] = [
 ];
 
 const STORES_PER_PAGE = 12;
-const STORE_LIST_ROW_CHUNK = 3;
+/** 予測APIは店舗ごとに並列。2行分まとめて叩いて一覧の埋まりを早くする（md:grid-cols-3 × 2） */
+const STORE_LIST_ROW_CHUNK = 6;
 
 export default function StoresListClient() {
   const searchParams = useSearchParams();
