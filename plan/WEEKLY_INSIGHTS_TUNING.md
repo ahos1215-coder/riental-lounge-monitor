@@ -6,8 +6,15 @@ Last updated: 2026-03-23
 ## 生成の入口
 
 - **スクリプト**: `scripts/generate_weekly_insights.py`
-- **GitHub Actions**: `.github/workflows/generate-weekly-insights.yml`（`workflow_dispatch` と週次 `cron`）
-- **出力**: `frontend/content/insights/weekly/<store>/<date>.json` と `index.json`
+  - `--stores <slug>`: 対象店舗（1店舗 or カンマ区切り）
+  - `--skip-index`: `index.json` の書き込みをスキップ（Fan-in Matrix の各 matrix ジョブで使用）
+- **GitHub Actions**: `.github/workflows/generate-weekly-insights.yml`（Fan-in Matrix 構成）
+  - **Fan-out** `generate-store`: 38 店舗を `max-parallel: 10` で並列実行（`--skip-index` あり）
+  - **Fan-in** `collect-and-commit`: Artifact を集約して `index.json` を再構築し Git commit 1回
+- **出力**:
+  - `frontend/content/insights/weekly/<store>/<date>.json`（各店舗 JSON）
+  - `frontend/content/insights/weekly/index.json`（Fan-in ジョブが再構築）
+  - Supabase `blog_drafts`（`content_type='weekly'`, `is_published=true`）→ `/reports/weekly/[store_slug]` で表示
 
 ## JSON に含まれる可視化用フィールド
 
@@ -26,8 +33,11 @@ Last updated: 2026-03-23
 | `MEGRIBI_BASE_URL` / `NEXT_PUBLIC_BASE_URL` | `/api/range` の取得先 | `https://www.meguribi.jp` | 本番 URL |
 | `INSIGHTS_HTTP_TIMEOUT_SECONDS` | HTTP タイムアウト | `60` | `90` |
 | `INSIGHTS_HTTP_RETRIES` | リトライ回数 | `3` | `4` |
+| `INSIGHTS_SYNC_SUPABASE` | `"1"` で Supabase upsert を実行 | `false` | `"1"` |
+| `SUPABASE_URL` | Supabase プロジェクト URL | — | Secret |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase Service Role Key | — | Secret |
 
-CLI 引数 `--threshold` / `--min-duration-minutes` / `--limit` は環境変数より優先されます。
+CLI 引数 `--threshold` / `--min-duration-minutes` / `--limit` / `--skip-index` は環境変数より優先されます。
 
 ## 調整の観点（実データが溜まってから）
 

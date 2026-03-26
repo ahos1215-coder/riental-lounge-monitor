@@ -1,46 +1,97 @@
 # ROADMAP
-Last updated: 2026-03-25
+Last updated: 2026-03-26
 Target commit: (see git)
 
 > **構想・フェーズ順・備忘の全文**は **`plan/VISION_AND_FUTURE.md`**。本ファイルは短いタスク一覧と「当面やらないこと」に絞る。
 
 ---
 
+## 実装済み（2026-03-26 完了）
+
+### コンテンツ戦略の完全リファクタ（Step 1–5）
+
+| 分類 | URL | 生成 | 公開条件 |
+|------|-----|------|---------|
+| Daily Report | `/reports/daily/[store_slug]` | GHA 毎日 18:00/21:30 | `is_published=true`（自動）|
+| Weekly Report | `/reports/weekly/[store_slug]` | GHA 毎週水曜 06:30 JST | `is_published=true`（自動）|
+| Editorial Blog | `/blog/[slug]` | LINE 指示 + Gemini | LINE 承認で `is_published=true` |
+
+**Step 1: DB スキーマ拡張**
+- `blog_drafts` に `content_type` / `is_published` / `edition` / `public_slug` を追加
+- Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
+- `facts_id` UNIQUE インデックス、`public_slug` UNIQUE（where not null）、複合インデックス
+
+**Step 2: 生成パイプライン対応**
+- `runBlogDraftPipeline.ts`: `source` から `content_type` / `is_published` を自動導出
+- `/api/cron/blog-draft/route.ts`: `content_type='daily'`, `is_published=true` で保存
+- `generate_weekly_insights.py`: Supabase upsert（`content_type='weekly'`, `is_published=true`）
+
+**Step 3: ルーティング & UI**
+- `/reports/daily/[store_slug]` ページ新設
+- `/reports/weekly/[store_slug]` ページ新設
+- `/blog/[slug]` は editorial かつ is_published=true のみ表示
+- `sitemap.ts`: `/reports/daily/` + `/reports/weekly/` 全店舗分登録（旧 `auto-*` 廃止）
+- `blog/page.tsx`: `autoCards` 削除 → Daily Report 誘導バナーに置き換え
+- `/api/blog/latest-store-summary/route.ts`: href → `/reports/daily/[store_slug]`
+
+**Step 4: LINE 承認フロー**
+- `parseLineIntent.ts`: `approve` / `editorial_analysis` インテント追加
+- `blogDrafts.ts`: `publishEditorialBySlug` / `publishEditorialByFactsId` / `fetchLatestUnpublishedEditorialByLineUser` 追加
+- `route.ts`: `handleApproveIntent` / `handleDraftOrEditorialIntent` で処理分岐
+
+**Step 5: GitHub Actions Matrix 最適化**
+- Daily: `max-parallel: 20 → 15`
+- Weekly: Fan-in Matrix 構成（Fan-out 38店舗並列 `max-parallel: 10` → Fan-in で index.json マージ・Git commit 1回）
+- `generate_weekly_insights.py`: `--skip-index` フラグ追加
+
+---
+
 ## P0（次に着手しやすい項目）
-- **`avoid_time` / プロンプト**: `draftGenerator.ts` で「混雑が落ち着いている目安」「提案型」の表現を固定（**2026-03 10秒まとめ用ラベル追記済み**）。ズレる場合は人手修正または微調整（`plan/VISION_AND_FUTURE.md` §9 も参照）。
-- **`LINE_RANGE_LIMIT` / `BLOG_CRON_RANGE_LIMIT`**: LINE は既定 **500**（`LINE_RANGE_LIMIT` で上書き可）。定時は **`BLOG_CRON_RANGE_LIMIT`**（既定 500）。運用で偏りがあれば両方を揃えて調整。
-- **定時ブログのスケール（実装済みの前提）**: **`GET /api/cron/blog-draft` は 1 リクエスト = 1 店舗**（`?store=` 必須）。**GitHub Actions**（`trigger-blog-cron.yml`）が **店舗ごとに並列ジョブ**で叩き、API 内は **約 45 秒バジェット**。失敗店舗のみは **`retry-blog-draft-stores.yml`**。さらなる長時間化や 504 再発時は **`plan/BLOG_CRON_ASYNC_FUTURE.md`**。
-- **Web フロント**: 新規の「土台作り」より **既存画面の改善・見せ方・コンテンツ拡充**（`VISION_AND_FUTURE.md` フェーズ A）。**進捗メモ**: `/`・`/store/[id]`・`/stores`・**`/mypage`（お気に入り・閲覧履歴・localStorage、`meguribiStorage.ts`）**・店舗ページのお気に入りトグル。残りはブログ周りの文言・細かな UI 等。
-- 主要ドキュメントの継続同期（`plan/*` と README の整合）
-- Weekly Insights の品質改善（score 閾値・最小継続時間の**運用調整**は引き続き。可視化は下記 P1 で実装済み）
-- **`/api/current`**: **方針メモを `plan/API_CURRENT.md` に追記済み**（当面は Flask 実装維持）。Supabase 直取得へ寄せるかは別タスクで決定
+
+- **`avoid_time` / プロンプト**: `draftGenerator.ts` で「混雑が落ち着いている目安」「提案型」の表現を固定（2026-03 ラベル追記済み）。ズレる場合は人手修正または微調整。
+- **`LINE_RANGE_LIMIT` / `BLOG_CRON_RANGE_LIMIT`**: LINE は既定 **500**。定時は **`BLOG_CRON_RANGE_LIMIT`**（既定 500）。偏りがあれば両方揃えて調整。
+- **Web フロント**: 新規の「土台作り」より **既存画面の改善・見せ方・コンテンツ拡充**。進捗: `/`・`/store/[id]`・`/stores`・`/mypage`・`/reports/daily/`・`/reports/weekly/`・`/blog/[slug]` 実装済み。残りはブログ文言・細かな UI 等。
+- **主要ドキュメントの継続同期**（`plan/*` と README の整合）
+- **Weekly Insights の品質改善**（score 閾値・最小継続時間の運用調整。`plan/WEEKLY_INSIGHTS_TUNING.md`）
+- **`/api/current`**: 当面は Flask 実装維持（`plan/API_CURRENT.md`）。Supabase 直取得へ寄せるかは別タスク。
 
 ## P1
-- 週次 Insights の可視化強化（**実装済み**: `series_compact`＋`WeeklyStoreCharts.tsx`／`plan/WEEKLY_INSIGHTS_TUNING.md`。追加の系列や説明文は任意）
-- ブログ / Facts の運用負荷削減（**frontmatter Zod 検証は実装済み** `blogFrontmatter.ts`。残り: テンプレ整理・Facts 側など）
+
+- 週次 Insights の可視化強化（**実装済み**: `series_compact`＋`WeeklyStoreCharts.tsx`。追加の系列や説明文は任意）
+- Editorial ブログの充実（LINEから定期的に分析記事を作る運用の確立）
+- `/reports/daily/` / `/reports/weekly/` ページの UX 改善（ナビゲーション・一覧ページ等）
 - 監視・運用の可視化（ログの整理、Render/Vercel 運用の整理）
-- **GitHub Actions の失敗通知**（**実装済み**: Secret `OPS_NOTIFY_WEBHOOK_URL` + 任意 Variable `OPS_NOTIFY_WEBHOOK_TYPE`。`plan/RUNBOOK.md` 参照。`blog-ci` は対象外）。定時ブログの **部分失敗**は **`summarize-blog-matrix`** が **steps** まで確認（`plan/BLOG_CRON_GHA.md`）
-- **`POST /api/line` の防衛**: 署名検証に加え **レート制限を実装済み**（グローバル＋ユーザー単位、Upstash 推奨。`plan/DECISIONS.md` 14 / `plan/ENV.md`）。追加で IP ベース Middleware 等が必要なら別検討（Webhook は LINE 経由のため IP は補助）
-- **Gemini 出力の構造化**: frontmatter と本文の分離（JSON + text）。**2026-03 追記**: `draftGenerator.ts` で **Zod** による structured 応答の検証（本文最小長・日付形式など）を追加。破損時は従来どおり生 MDX パスへフォールバック。
-- **OGP / メタデータ**（主要ページ・ブログ）— **実装済み**（`plan/STATUS.md`）。**X（Twitter）API 連携・投稿用 API ルート**（`VISION_AND_FUTURE.md` フェーズ B）— **未実装。構想段階**。自動投稿のスコープは **人気トップ5店＋長崎店のみ**から開始する方針（§9）。
+- **GitHub Actions の失敗通知**（**実装済み**: `OPS_NOTIFY_WEBHOOK_URL` + `notify-on-failure.yml`。定時ブログの部分失敗は `summarize-blog-matrix` が steps まで確認）
+- **Gemini 出力の構造化**: frontmatter と本文の分離（Zod 検証は追加済み）
+- **OGP / メタデータ**（**実装済み**）。**X（Twitter）API 連携・投稿用 API ルート**（未実装・構想段階）
 
 ## P2
+
 - 複数店舗/ブランドの拡張（表示/UI の拡張）
-- 予測の精度・運用（オンザフライ学習 vs 定期学習モデル等。`VISION_AND_FUTURE.md` フェーズ C）
-- **PWA / Web Push**（フェーズ D）
-- **Stripe・課金・プレミアム予測**（フェーズ E）— **外部助言: 個人開発では当面優先度を下げてよい**（`plan/ADVISORY_SYNTHESIS.md`）
+- `/reports/daily/` の一覧ページ（全店舗のレポートリスト）
+- `/reports/weekly/` の一覧ページ
+- 予測の精度・運用（オンザフライ学習 vs 定期学習モデル等）
+- **PWA / Web Push**
+- **Stripe・課金・プレミアム予測**（外部助言: 個人開発では当面優先度を下げてよい）
 
 ## 当面やらない（方針）
+
 - **PR の URL を LINE に自動送信する**仕組み（必要になったら設計から検討。**n8n は使わない**）。
+- `/api/range` へのクエリ追加・サーバ側時間フィルタ。
+- フロントから Supabase 直アクセス。
 
 ## 将来オプション（仕様未定）
+
 - **公開までフル自動**（環境変数 ON/OFF 等）。**ガードレール・Staging 前提**。`VISION_AND_FUTURE.md` §5。
 
-## スケール・SEO・Cron（方針の要約・詳細は `VISION_AND_FUTURE.md` §9）
-- **SEO（全店・1日2本）**: 店舗ごとの記事 URL は **同一 `facts_id` パスへの上書き**（`npm run drafts:export -- --force` 等）とし、**カニバリゼーションを避け鮮度（Freshness）**を優先。
-- **定時ブログの時計**: **GitHub Actions**（`.github/workflows/trigger-blog-cron.yml`）が正本。`vercel.json` の Cron は **使わない**（二重実行防止のため削除済み）。Secrets・スケジュールは **`plan/BLOG_CRON_GHA.md`**。
-- **Vercel Hobby の Cron**（参考）: 使わないが、各式は 1 日 1 回まで・実行時刻にブレがありやすい、などの制約は公式ドキュメント参照。
+## スケール・SEO・Cron（方針の要約）
+
+- **SEO（Daily Report）**: `/reports/daily/[store_slug]` は固定 URL（上書き運用）。カニバリゼーションを避け鮮度（Freshness）を優先。Weekly も同様に `/reports/weekly/[store_slug]` で固定 URL。
+- **定時ブログの時計**: **GitHub Actions**（`.github/workflows/trigger-blog-cron.yml`）が正本。`vercel.json` の Cron は**使わない**（削除済み）。
+- **Weekly の Git コミット**: Fan-in ジョブが 1回のみ commit するため、並列書き込みの競合なし。
 - **X 自動投稿**: 全店舗一斉ポストは行わず、開始時は **人気トップ5＋長崎店**に限定（API・シャドウバンリスク回避）。
 
 ## 未実装メモ
-- 定時ブログは `GET /api/cron/blog-draft`（**GHA** から `GET` + `edition` / `source` + **`store` 必須**）で実装済み。全店は **matrix 並列**、非同期キューは **`plan/BLOG_CRON_ASYNC_FUTURE.md`**。
+
+- 定時ブログは `GET /api/cron/blog-draft`（**GHA** から `GET` + `edition` / `source` + **`store` 必須**）で実装済み。全店は **matrix 並列**（`max-parallel: 15`）、非同期キューは **`plan/BLOG_CRON_ASYNC_FUTURE.md`**。
+- Weekly の Fan-in Matrix は実装済み。さらなる並列度アップや Render API への負荷増大時は `max-parallel` を調整。
