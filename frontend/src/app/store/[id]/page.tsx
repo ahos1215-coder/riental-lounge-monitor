@@ -33,7 +33,6 @@ type ReportSummaryData = {
   weekly: ReportSummaryItem;
 };
 
-type ForecastCardPoint = { ts: string; total_pred?: number };
 type RealtimeCardStats = {
   menCount: number;
   womenCount: number;
@@ -44,20 +43,6 @@ type RealtimeCardStats = {
   recommendLabel: string;
 };
 
-function toHmJstStore(iso: string): string {
-  return new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(iso));
-}
-
-function crowdLabelFromPredStore(maxPred: number): string {
-  if (maxPred >= 120) return "混雑";
-  if (maxPred >= 80) return "ほどよい";
-  return "空いている";
-}
 
 function StorePageFallback() {
   return (
@@ -163,72 +148,33 @@ function StorePageInner() {
 
     (async () => {
       setRelatedLoading(true);
+      // 関連店舗はrangeのみ取得（forecast_todayはメイン店舗のみ）
       const results = await Promise.all(
         digestStores.map(async (store) => {
           try {
-            const [forecastRes, rangeRes] = await Promise.all([
-              fetch(`/api/forecast_today?store=${encodeURIComponent(store.slug)}`, { cache: "no-store" }),
-              fetch(
-                `/api/range?store=${encodeURIComponent(store.slug)}&limit=${STORE_CARD_RANGE_LIMIT}`,
-                { cache: "no-store" },
-              ),
-            ]);
+            const rangeRes = await fetch(
+              `/api/range?store=${encodeURIComponent(store.slug)}&limit=${STORE_CARD_RANGE_LIMIT}`,
+            );
             const rangeBody: unknown = await rangeRes.json();
-            const forecastUnavailable =
-              !forecastRes.ok && forecastRes.status === 503;
-            const forecastText = await forecastRes.text();
-            let forecastRows: ForecastCardPoint[] = [];
-            if (forecastRes.ok) {
-              try {
-                const forecastBody = JSON.parse(forecastText) as {
-                  data?: ForecastCardPoint[];
-                };
-                forecastRows = Array.isArray(forecastBody?.data)
-                  ? forecastBody.data
-                  : [];
-              } catch {
-                forecastRows = [];
-              }
-            }
             const rangeRows = parseRangeResponse(rangeBody);
             const current = pickLatestRangeRow(rangeRows) ?? {};
             const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
             const womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
             const nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
-            const totals = forecastRows
-              .map((r) => Math.max(0, Math.round(Number(r.total_pred ?? 0))))
-              .filter((n) => Number.isFinite(n));
-            const maxPred = totals.length ? Math.round(Math.max(...totals)) : 0;
-            let calm = forecastRows[0];
-            for (const r of forecastRows) {
-              if (Number(r.total_pred ?? 0) < Number(calm?.total_pred ?? Number.POSITIVE_INFINITY)) {
-                calm = r;
-              }
-            }
-            const calmLabel = calm?.ts ? toHmJstStore(calm.ts) : "--:--";
-            const forecastSpark = totals.slice(0, 10);
             const genderSparks = buildGenderSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
             const actualTotals = buildActualSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
-            const sparklineFallback =
-              actualTotals.length >= 2 ? actualTotals : forecastSpark;
             return {
               slug: store.slug,
               stats: {
                 menCount: menNow,
                 womenCount: womenNow,
                 nowTotal,
-                peakPredTotal: maxPred,
+                peakPredTotal: 0,
                 genderRatio: `${menNow}:${womenNow}`,
-                crowdLevel: forecastUnavailable
-                  ? "予測なし"
-                  : crowdLabelFromPredStore(maxPred),
-                recommendLabel: forecastUnavailable
-                  ? "現在ご利用いただけません"
-                  : calm?.ts
-                    ? `${calmLabel}ごろ`
-                    : "確認中",
+                crowdLevel: "—",
+                recommendLabel: "—",
               },
-              sparkline: sparklineFallback,
+              sparkline: actualTotals,
               sparklineMen: genderSparks.men,
               sparklineWomen: genderSparks.women,
             };

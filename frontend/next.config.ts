@@ -8,7 +8,43 @@ loadEnvConfig(repoRoot);
 loadEnvConfig(process.cwd());
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  async headers() {
+    return [
+      {
+        // 実測データ: 60秒CDNキャッシュ
+        source: "/api/range",
+        headers: [
+          { key: "Cache-Control", value: "public, s-maxage=60, stale-while-revalidate=300" },
+        ],
+      },
+      {
+        source: "/api/range_multi",
+        headers: [
+          { key: "Cache-Control", value: "public, s-maxage=60, stale-while-revalidate=300" },
+        ],
+      },
+      {
+        // 予測データ: 5分CDNキャッシュ（モデル再計算は15分ごと）
+        source: "/api/forecast_today",
+        headers: [
+          { key: "Cache-Control", value: "public, s-maxage=300, stale-while-revalidate=900" },
+        ],
+      },
+      {
+        source: "/api/forecast_next_hour",
+        headers: [
+          { key: "Cache-Control", value: "public, s-maxage=300, stale-while-revalidate=900" },
+        ],
+      },
+      {
+        // AIレポート: 10分CDNキャッシュ（18:00/21:30のみ更新）
+        source: "/api/reports/:path*",
+        headers: [
+          { key: "Cache-Control", value: "public, s-maxage=600, stale-while-revalidate=1800" },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

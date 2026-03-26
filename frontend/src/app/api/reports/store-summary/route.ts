@@ -1,5 +1,3 @@
-"use server";
-
 import { NextResponse } from "next/server";
 import {
   fetchLatestPublishedReportByStore,
@@ -60,6 +58,9 @@ const EDITION_LABELS: Record<string, string> = {
   weekly: "週報",
 };
 
+/** AIレポートは18:00/21:30のみ更新 → 10分CDNキャッシュ、30分stale-while-revalidate */
+const CACHE_HEADER = "public, s-maxage=600, stale-while-revalidate=1800";
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const store = (url.searchParams.get("store") ?? "").trim().toLowerCase();
@@ -69,7 +70,13 @@ export async function GET(req: Request) {
   }
 
   if (!isBlogDraftsConfigured()) {
-    return NextResponse.json({ ok: true, daily: null, weekly: null }, { status: 200 });
+    return NextResponse.json(
+      { ok: true, daily: null, weekly: null },
+      {
+        status: 200,
+        headers: { "cache-control": CACHE_HEADER },
+      },
+    );
   }
 
   const [dailyRow, weeklyRow] = await Promise.all([
@@ -96,5 +103,11 @@ export async function GET(req: Request) {
       }
     : null;
 
-  return NextResponse.json({ ok: true, daily, weekly }, { status: 200 });
+  return NextResponse.json(
+    { ok: true, daily, weekly },
+    {
+      status: 200,
+      headers: { "cache-control": CACHE_HEADER },
+    },
+  );
 }

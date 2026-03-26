@@ -1,7 +1,10 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { DEFAULT_STORE } from "../../config/stores";
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:5000";
+
+/** 予測モデルは15分ごとに再計算 → 5分CDNキャッシュ、15分stale-while-revalidate */
+const CACHE_HEADER = "public, s-maxage=300, stale-while-revalidate=900";
 
 type ErrorBody = {
   ok: false;
@@ -19,19 +22,16 @@ export async function GET(req: NextRequest) {
   const store = resolveStore(searchParams);
 
   const base = BACKEND_URL.replace(/\/+$/, "");
-  const apiUrl = `${base}/api/forecast_today?store=${encodeURIComponent(
-    store
-  )}`;
+  const apiUrl = `${base}/api/forecast_today?store=${encodeURIComponent(store)}`;
 
   try {
-    const backendRes = await fetch(apiUrl, { next: { revalidate: 0 } });
+    const backendRes = await fetch(apiUrl, { next: { revalidate: 300 } });
     const buf = await backendRes.arrayBuffer();
 
     const headers = new Headers();
     const contentType = backendRes.headers.get("content-type");
-    if (contentType) {
-      headers.set("content-type", contentType);
-    }
+    if (contentType) headers.set("content-type", contentType);
+    if (backendRes.ok) headers.set("cache-control", CACHE_HEADER);
 
     return new NextResponse(buf, {
       status: backendRes.status,

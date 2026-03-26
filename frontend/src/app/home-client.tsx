@@ -174,7 +174,7 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
       try {
         const rangeRes = await fetch(
           `/api/range?store=${encodeURIComponent(lastDisplaySlug)}&limit=${STORE_CARD_RANGE_LIMIT}`,
-          { cache: "no-store", signal: ac.signal },
+          { signal: ac.signal },
         );
         if (!rangeRes.ok) {
           if (!ac.signal.aborted) {

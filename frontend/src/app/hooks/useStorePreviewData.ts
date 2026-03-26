@@ -436,7 +436,7 @@ export function useStorePreviewData(
 
         const forecastUrl = `/api/forecast_today?store=${encodeURIComponent(meta.slug)}`;
         // 初期表示高速化: まず実測(/api/range)だけで描画し、予測は後追いで合流
-        const rangeRes = await fetch(rangeUrl, { cache: "no-store", signal });
+        const rangeRes = await fetch(rangeUrl, { signal });
         const rangeJson = await rangeRes.json().catch(() => ({}));
 
         const allRangePoints = parseRangePoints(rangeJson);
@@ -477,7 +477,7 @@ export function useStorePreviewData(
           return;
         }
 
-        const forecastRes = await fetch(forecastUrl, { cache: "no-store", signal });
+        const forecastRes = await fetch(forecastUrl, { signal });
         const forecastJson = await forecastRes.json().catch(() => ({}));
         const allForecastPoints = parseForecastPoints(forecastJson);
         const forecastPoints = allForecastPoints.filter((p) =>

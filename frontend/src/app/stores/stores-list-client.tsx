@@ -199,7 +199,7 @@ export default function StoresListClient() {
         const slugs = targets.map((t) => t.slug).join(",");
         const r = await fetch(
           `/api/range_multi?stores=${encodeURIComponent(slugs)}&limit=${STORE_CARD_RANGE_LIMIT}`,
-          { cache: "no-store", signal },
+          { signal },
         );
         if (signal.aborted) return;
         if (r.ok) {
@@ -236,7 +236,7 @@ export default function StoresListClient() {
           } else {
             const rangeRes = await fetch(
               `/api/range?store=${encodeURIComponent(store.slug)}&limit=${STORE_CARD_RANGE_LIMIT}`,
-              { cache: "no-store", signal },
+              { signal },
             );
             if (signal.aborted) return;
             if (!rangeRes.ok) return;
@@ -285,7 +285,7 @@ export default function StoresListClient() {
         try {
           const forecastRes = await fetch(
             `/api/forecast_today?store=${encodeURIComponent(store.slug)}`,
-            { cache: "no-store", signal },
+            { signal },
           );
           if (signal.aborted) return;
           if (!forecastRes.ok) {
