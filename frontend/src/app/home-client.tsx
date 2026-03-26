@@ -138,9 +138,23 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                 { cache: "no-store" },
               ),
             ]);
-            const forecastBody = (await forecastRes.json()) as { data?: ForecastPoint[] };
             const rangeBody: unknown = await rangeRes.json();
-            const forecastRows = Array.isArray(forecastBody?.data) ? forecastBody.data : [];
+            const forecastUnavailable =
+              !forecastRes.ok && forecastRes.status === 503;
+            const forecastText = await forecastRes.text();
+            let forecastRows: ForecastPoint[] = [];
+            if (forecastRes.ok) {
+              try {
+                const forecastBody = JSON.parse(forecastText) as {
+                  data?: ForecastPoint[];
+                };
+                forecastRows = Array.isArray(forecastBody?.data)
+                  ? forecastBody.data
+                  : [];
+              } catch {
+                forecastRows = [];
+              }
+            }
             const rangeRows = parseRangeResponse(rangeBody);
             const current = pickLatestRangeRow(rangeRows) ?? {};
             const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
@@ -163,8 +177,14 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
               nowTotal,
               peakPredTotal: maxPred,
               genderRatio: `${menNow}:${womenNow}`,
-              crowdLevel: crowdLabelFromPred(maxPred),
-              recommendLabel: calm?.ts ? `${calmLabel}ごろ` : "データ不足",
+              crowdLevel: forecastUnavailable
+                ? "予測なし"
+                : crowdLabelFromPred(maxPred),
+              recommendLabel: forecastUnavailable
+                ? "現在ご利用いただけません"
+                : calm?.ts
+                  ? `${calmLabel}ごろ`
+                  : "データ不足",
             };
             let peak = forecastRows[0];
             for (const r of forecastRows) {

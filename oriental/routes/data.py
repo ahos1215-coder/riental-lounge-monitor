@@ -11,6 +11,7 @@ from ..data.provider import SupabaseError, SupabaseLogsProvider
 from ..data.second_venues_repository import SecondVenuesRepository
 from ..utils import storage, timeutil
 from ..utils.log import format_payload
+from ..utils.stores import SLUG_TO_ID
 
 bp = Blueprint("data", __name__)
 
@@ -144,6 +145,103 @@ def api_range():
         query.limit,
     )
     return jsonify({"ok": True, "rows": limited})
+
+
+def _parse_multi_store_slugs(raw: str, *, max_stores: int) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for part in raw.split(","):
+        tok = part.strip().lower()
+        if not tok or tok not in SLUG_TO_ID:
+            continue
+        if tok in seen:
+            continue
+        seen.add(tok)
+        out.append(tok)
+        if len(out) >= max_stores:
+            break
+    return out
+
+
+@bp.get("/api/range_multi")
+def api_range_multi():
+    """複数店舗の range を1リクエストで返す（Supabase backend のみ）。"""
+    cfg = _config()
+    logger = current_app.logger
+    params_dict = request.args.to_dict(flat=False)
+    logger.info("api_range_multi.start params=%s", format_payload(params_dict))
+
+    try:
+        query = _parse_range_query(cfg)
+    except RangeQueryError as exc:
+        logger.warning(
+            "api_range_multi.validation_error detail=%s params=%s",
+            exc,
+            format_payload(params_dict),
+        )
+        return jsonify({"ok": False, "error": "invalid-parameters", "detail": str(exc)}), 422
+
+    backend = (cfg.data_backend or "legacy").lower()
+    if backend != "supabase":
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "range-multi-requires-supabase",
+                    "detail": "set DATA_BACKEND=supabase for batch range",
+                }
+            ),
+            501,
+        )
+
+    provider = _supabase_provider(cfg)
+    if provider is None:
+        logger.warning("api_range_multi.supabase_missing_config")
+        return jsonify({"ok": False, "error": "supabase-unavailable"}), 502
+
+    raw_stores = request.args.get("stores") or ""
+    slugs = _parse_multi_store_slugs(raw_stores, max_stores=40)
+    if not slugs:
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "missing-or-invalid-stores",
+                    "detail": "provide stores=slug1,slug2 (known slugs only)",
+                }
+            ),
+            422,
+        )
+
+    if query.start and query.end:
+        start_utc, end_utc = _range_bounds_to_utc(query.start, query.end, cfg.timezone)
+    else:
+        start_utc, end_utc = None, None
+
+    by_slug: dict[str, dict] = {}
+    for slug in slugs:
+        store_id = SLUG_TO_ID[slug]
+        try:
+            supabase_rows = provider.fetch_range(
+                store_id=store_id,
+                start_ts=start_utc,
+                end_ts=end_utc,
+                limit=query.limit,
+            )
+        except SupabaseError as exc:
+            logger.warning("api_range_multi.supabase_error slug=%s detail=%s", slug, exc)
+            by_slug[slug] = {"rows": []}
+            continue
+        deduped = _deduplicate_by_ts(supabase_rows)
+        limited = deduped[-query.limit :]
+        by_slug[slug] = {"rows": limited}
+
+    logger.info(
+        "api_range_multi.success slug_count=%d limit=%d",
+        len(slugs),
+        query.limit,
+    )
+    return jsonify({"ok": True, "by_slug": by_slug})
 
 
 @bp.get("/api/meta")

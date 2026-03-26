@@ -356,6 +356,22 @@ export const STORES: StoreMeta[] = [
   },
 ];
 
+/** 店舗一覧の地域ボタン表示順（各店の `regionLabel` と一致） */
+export const STORE_REGION_FILTER_ORDER: readonly string[] = [
+  "北海道・東北",
+  "関東",
+  "中部",
+  "近畿",
+  "中国・四国",
+  "九州・沖縄",
+  "海外",
+];
+
+/** ボタン表記の上書き（未指定は `regionLabel` をそのまま表示） */
+export const STORE_REGION_BUTTON_LABEL: Partial<Record<string, string>> = {
+  近畿: "関西・近畿",
+};
+
 export const STORE_OPTIONS: StoreOption[] = STORES.map((s) => ({
   value: s.slug,
   label: s.label,

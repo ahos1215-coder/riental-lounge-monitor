@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-03-25
+Last updated: 2026-03-26
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -8,6 +8,7 @@ Target commit: (see git)
 - `/healthz`（稼働確認）
 - `/api/current`（ローカル保存の最新レコード。Supabase 直取得ではない）
 - `/api/range`（**`store` / `limit` のみ**。Supabase は `ts.desc` 取得 → 返却は `ts.asc`、**サーバ側の夜窓フィルタなし**）
+- `/api/range_multi`（**`stores=slug1,slug2,...` + `limit` 等**。Supabase のみ。店舗一覧の一括 range 取得用）
 - `/api/meta`（設定サマリ）
 - `/api/forecast_today` / `/api/forecast_next_hour`（`ENABLE_FORECAST=1` のときのみ。無効時は 503）
   - **店舗別最適化モデル（ML 2.0）本番稼働中**。全38店舗で固有の重みを使った推論を有効化済み。
@@ -30,7 +31,8 @@ Target commit: (see git)
 - **OGP / メタデータ**: ルート `metadataBase`（`NEXT_PUBLIC_SITE_URL` 等）、動的 OG 画像 `opengraph-image.tsx`、主要ページの `openGraph` / `twitter`（ブログ記事は canonical 付き）
 - **週次 Insights UI**: `/insights/weekly/[store]` に Recharts 可視化（`WeeklyStoreCharts.tsx`）。JSON の **`series_compact`**（`scripts/generate_weekly_insights.py` が出力、最大約240点）で時系列。旧 JSON はプレースホルダ表示。
 - **ブログ frontmatter**: Zod 形状検証＋日付形式チェック（`blogFrontmatter.ts` / `content.ts` の `gateBlogFrontmatter`）。`BLOG_STRICT_FRONTMATTER` / `BLOG_LOG_FRONTMATTER` は `plan/ENV.md`。
-- その他 Next API routes: `/api/range` 等は Flask へのプロキシ（既存）
+- その他 Next API routes: `/api/range` / **`/api/range_multi`** 等は Flask へのプロキシ（既存）
+- **`/stores`**: 12 店舗/ページ・地域タブ（`regionLabel`）・**`?page=` / `?region=`** と URL 同期。一覧は **`/api/range_multi`** で実測 range をバッチ取得（失敗時は従来どおり `/api/range` にフォールバック）。予測 API が 503 のときはカードに「予測なし」等を表示
 
 ### LINE 下書きパイプライン（要点）
 - **n8n は使わない（廃止）**。司令塔は Next.js のみ。

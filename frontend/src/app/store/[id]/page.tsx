@@ -142,9 +142,23 @@ function StorePageInner() {
                 { cache: "no-store" },
               ),
             ]);
-            const forecastBody = (await forecastRes.json()) as { data?: ForecastCardPoint[] };
             const rangeBody: unknown = await rangeRes.json();
-            const forecastRows = Array.isArray(forecastBody?.data) ? forecastBody.data : [];
+            const forecastUnavailable =
+              !forecastRes.ok && forecastRes.status === 503;
+            const forecastText = await forecastRes.text();
+            let forecastRows: ForecastCardPoint[] = [];
+            if (forecastRes.ok) {
+              try {
+                const forecastBody = JSON.parse(forecastText) as {
+                  data?: ForecastCardPoint[];
+                };
+                forecastRows = Array.isArray(forecastBody?.data)
+                  ? forecastBody.data
+                  : [];
+              } catch {
+                forecastRows = [];
+              }
+            }
             const rangeRows = parseRangeResponse(rangeBody);
             const current = pickLatestRangeRow(rangeRows) ?? {};
             const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
@@ -174,8 +188,14 @@ function StorePageInner() {
                 nowTotal,
                 peakPredTotal: maxPred,
                 genderRatio: `${menNow}:${womenNow}`,
-                crowdLevel: crowdLabelFromPredStore(maxPred),
-                recommendLabel: calm?.ts ? `${calmLabel}ごろ` : "確認中",
+                crowdLevel: forecastUnavailable
+                  ? "予測なし"
+                  : crowdLabelFromPredStore(maxPred),
+                recommendLabel: forecastUnavailable
+                  ? "現在ご利用いただけません"
+                  : calm?.ts
+                    ? `${calmLabel}ごろ`
+                    : "確認中",
               },
               sparkline: sparklineFallback,
               sparklineMen: genderSparks.men,
