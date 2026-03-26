@@ -18,7 +18,6 @@ import {
   parseRangeResponse,
   pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
-import ForecastSummaryBar from "./components/ForecastSummaryBar";
 
 export type HomeBlogTeaser = {
   slug: string;
@@ -47,11 +46,8 @@ type StoreRealtimeCard = {
   sparkline: number[];
   sparklineMen: number[];
   sparklineWomen: number[];
-  calmLabel: string;
-  peakLabel: string;
   nowTotal: number;
   maxPred: number;
-  hasSignal: boolean;
 };
 
 const FALLBACK_LAST_STORE = {
@@ -186,11 +182,6 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                   ? `${calmLabel}ごろ`
                   : "データ不足",
             };
-            let peak = forecastRows[0];
-            for (const r of forecastRows) {
-              if (Number(r.total_pred ?? 0) > Number(peak?.total_pred ?? Number.NEGATIVE_INFINITY)) peak = r;
-            }
-            const peakLabel = peak?.ts ? toHmJst(peak.ts) : "--:--";
             const sparkline = totals.slice(0, 10);
             const genderSparks = buildGenderSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
             const actualTotals = buildActualSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
@@ -202,11 +193,8 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
               slug: store.slug,
               stats,
               sparkline: sparklineFallback,
-              calmLabel,
-              peakLabel,
               nowTotal,
               maxPred,
-              hasSignal: maxPred >= 80,
               sparklineMen,
               sparklineWomen,
             };
@@ -253,29 +241,6 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
     return cards.sort((a, b) => a.nowTotal - b.nowTotal)[0];
   }, [storeRealtime]);
 
-  const summary = useMemo(() => {
-    const cards = Object.values(storeRealtime);
-    if (!cards.length) {
-      return {
-        loading: true,
-        peakSummary: "確認中",
-        calmSummary: "確認中",
-        signalText: "確認中",
-      };
-    }
-    const peakCard = [...cards].sort((a, b) => b.maxPred - a.maxPred)[0];
-    const calmCard = [...cards].sort((a, b) => a.nowTotal - b.nowTotal)[0];
-    const signalCount = cards.filter((c) => c.hasSignal).length;
-    const signalText =
-      signalCount > 0 ? `注目シグナル ${signalCount}店舗` : "通常コンディション";
-    return {
-      loading: false,
-      peakSummary: `${getStoreMetaBySlug(peakCard.slug).label} ${peakCard.maxPred}名・${peakCard.peakLabel}頃`,
-      calmSummary: `${getStoreMetaBySlug(calmCard.slug).label} ${calmCard.nowTotal}名（現在）`,
-      signalText,
-    };
-  }, [storeRealtime]);
-
   return (
     <div className="relative min-h-screen bg-black font-display text-slate-50">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(79,70,229,0.18)_0%,transparent_32%),radial-gradient(circle_at_80%_70%,rgba(236,72,153,0.16)_0%,transparent_32%)]" />
@@ -298,11 +263,6 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                   オリエンタルラウンジを中心に、各店舗の男女比や混雑の予測をまとめてチェック。
                   「いま行くならどこ？」を、感覚ではなくデータで選べるようにします。
                 </p>
-                {featuredStore && (
-                  <p className="mt-3 max-w-xl text-sm text-emerald-200">
-                    いまのおすすめ: {getStoreMetaBySlug(featuredStore.slug).label}・落ち着き目安 {featuredStore.calmLabel}頃
-                  </p>
-                )}
                 <div className="mt-5 flex flex-wrap gap-3 text-sm">
                   <Link
                     href={
@@ -324,13 +284,6 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
               </div>
             </div>
           </section>
-
-          <ForecastSummaryBar
-            loading={summary.loading}
-            peakSummary={summary.peakSummary}
-            calmSummary={summary.calmSummary}
-            signalText={summary.signalText}
-          />
 
           <section className="space-y-3">
             <h2 className="text-sm font-semibold text-slate-100">Last visited store</h2>
@@ -399,7 +352,7 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
               <div>
                 <h2 className="text-sm font-semibold text-slate-100">掲載中の店舗</h2>
                 <p className="mt-0.5 text-[11px] leading-relaxed text-slate-500">
-                  男女比・人数・ピーク予測を一覧（時間帯で並びが変わります）。
+                  男女比・人数・混雑の目安を一覧（時間帯で並びが変わります）。
                 </p>
               </div>
               <Link
