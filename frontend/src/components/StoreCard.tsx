@@ -28,6 +28,8 @@ type StoreCardProps = {
   /** 一覧などで /api/range だけ先に反映し、予測を後追いするとき */
   forecastPending?: boolean;
   isLoading?: boolean;
+  /** めぐりびスコア 0.0〜1.0。≥0.65 → 緑GO / ≥0.40 → 黄WAIT / <0.40 → 赤SKIP */
+  megribiScore?: number | null;
 };
 
 function SimpleLineChart({ points }: { points?: number[] }) {
@@ -127,6 +129,27 @@ function GenderTrendMiniChart({ men, women }: { men: number[]; women: number[] }
   );
 }
 
+function MegribiScoreBadge({ score }: { score: number | null | undefined }) {
+  if (score == null) return null;
+  if (score >= 0.65)
+    return (
+      <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 ring-1 ring-emerald-500/40">
+        ● GO
+      </span>
+    );
+  if (score >= 0.40)
+    return (
+      <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300 ring-1 ring-amber-500/40">
+        ● WAIT
+      </span>
+    );
+  return (
+    <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-bold text-rose-300 ring-1 ring-rose-500/40">
+      ● SKIP
+    </span>
+  );
+}
+
 export function StoreCard({
   slug,
   label,
@@ -140,6 +163,7 @@ export function StoreCard({
   sparklineWomen,
   forecastPending = false,
   isLoading = false,
+  megribiScore,
 }: StoreCardProps) {
   const resolvedHref = useMemo(
     () => href ?? `/store/${slug}?store=${slug}`,
@@ -206,7 +230,10 @@ export function StoreCard({
         <>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] font-medium text-white/60">{brandLabel}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-[11px] font-medium text-white/60">{brandLabel}</p>
+            <MegribiScoreBadge score={megribiScore} />
+          </div>
           <h2 className="mt-0.5 text-base font-semibold leading-tight">
             {label}
           </h2>

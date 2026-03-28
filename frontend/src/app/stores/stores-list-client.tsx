@@ -35,6 +35,7 @@ type StoreRealtimeCard = {
   sparklineMen: number[];
   sparklineWomen: number[];
   forecastPending?: boolean;
+  megribiScore?: number | null;
 };
 
 const BRAND_TABS: { id: BrandFilter; label: string }[] = [
@@ -379,6 +380,35 @@ export default function StoresListClient() {
         const chunk = targets.slice(i, i + STORE_LIST_ROW_CHUNK);
         await Promise.all(chunk.map((store) => fetchStoreCard(store)));
       }
+
+      // めぐりびスコアをバッチ取得してカードに反映
+      if (!signal.aborted && targets.length > 0) {
+        try {
+          const slugsCsv = targets.map((t) => t.slug).join(",");
+          const mRes = await fetch(
+            `/api/megribi_score?stores=${encodeURIComponent(slugsCsv)}`,
+            { signal },
+          );
+          if (!signal.aborted && mRes.ok) {
+            const mJson = (await mRes.json()) as Record<string, { score?: number }>;
+            if (!signal.aborted) {
+              setStoreRealtime((prev) => {
+                const next = { ...prev };
+                for (const t of targets) {
+                  const score = mJson[t.slug]?.score ?? null;
+                  if (next[t.slug]) {
+                    next[t.slug] = { ...next[t.slug], megribiScore: score };
+                  }
+                }
+                return next;
+              });
+            }
+          }
+        } catch {
+          // スコア取得失敗は非致命的
+        }
+      }
+
       if (!signal.aborted) {
         setRealtimeLoading(false);
       }
@@ -533,6 +563,7 @@ export default function StoresListClient() {
                       sparklineWomen={storeRealtime[store.slug]?.sparklineWomen}
                       forecastPending={storeRealtime[store.slug]?.forecastPending}
                       isLoading={realtimeLoading && !storeRealtime[store.slug]}
+                      megribiScore={storeRealtime[store.slug]?.megribiScore}
                     />
                   ))}
                 </div>

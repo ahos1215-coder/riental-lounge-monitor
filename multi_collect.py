@@ -86,6 +86,12 @@ WEATHER_CACHE_PATH = Path(os.environ.get("WEATHER_CACHE_PATH", str(_DEFAULT_WEAT
 # 同一プロセス内の連続 Open-Meteo 呼び出しの間隔制御
 _last_open_meteo_http_at: float = 0.0
 
+# ---------- 失敗アラート設定 ----------
+# Webhook URL（LINE Notify / Slack / Discord 等）。未設定時はアラート無効。
+ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
+# 収集失敗率がこの値以上になったらアラートを送る（0.5 = 50%以上失敗）
+ALERT_FAIL_RATIO_THRESHOLD = float(os.environ.get("ALERT_FAIL_RATIO_THRESHOLD", "0.5"))
+
 # 基準地点（とりあえず長崎市近辺）
 WEATHER_LAT = float(os.environ.get("WEATHER_LAT", "32.75"))
 WEATHER_LON = float(os.environ.get("WEATHER_LON", "129.87"))
@@ -118,243 +124,12 @@ PREF_COORDS: dict[str, tuple[float, float]] = {
     "seoul": (37.5665, 126.9780),
 }
 
-# ---------- 全38店舗 ----------
+# ---------- 全38店舗 (frontend/src/data/stores.json が単一ソース) ----------
 
-STORES = [
-    # Optional per-store coordinates for weather; defaults to WEATHER_LAT/WEATHER_LON when missing.
-    {
-        "store": "長崎",
-        "store_id": "ol_nagasaki",
-        "url": "https://oriental-lounge.com/stores/38",
-        "pref": "nagasaki",
-        "lat": 32.744,
-        "lon": 129.873,
-    },
-    {
-        "store": "福岡",
-        "store_id": "ol_fukuoka",
-        "url": "https://oriental-lounge.com/stores/15",
-        "pref": "fukuoka",
-        "lat": 33.5902,
-        "lon": 130.4017,
-    },
-    {
-        "store": "小倉",
-        "store_id": "ol_kokura",
-        "url": "https://oriental-lounge.com/stores/16",
-        "pref": "fukuoka",
-    },
-    {
-        "store": "大分",
-        "store_id": "ol_oita",
-        "url": "https://oriental-lounge.com/stores/40",
-        "pref": "oita",
-    },
-    {
-        "store": "熊本",
-        "store_id": "ol_kumamoto",
-        "url": "https://oriental-lounge.com/stores/22",
-        "pref": "kumamoto",
-    },
-    {
-        "store": "宮崎",
-        "store_id": "ol_miyazaki",
-        "url": "https://oriental-lounge.com/stores/18",
-        "pref": "miyazaki",
-    },
-    {
-        "store": "鹿児島",
-        "store_id": "ol_kagoshima",
-        "url": "https://oriental-lounge.com/stores/19",
-        "pref": "kagoshima",
-    },
-    {
-        "store": "ag沖縄",
-        "store_id": "ol_okinawa_ag",
-        "url": "https://oriental-lounge.com/stores/20",
-        "pref": "okinawa",
-    },
-    {
-        "store": "ソウル カンナム",
-        "store_id": "ol_gangnam",
-        "url": "https://oriental-lounge.com/stores/34",
-        "pref": "seoul",
-    },
-    {
-        "store": "ag札幌",
-        "store_id": "ol_sapporo_ag",
-        "url": "https://oriental-lounge.com/stores/1",
-        "pref": "hokkaido",
-    },
-    {
-        "store": "ag仙台",
-        "store_id": "ol_sendai_ag",
-        "url": "https://oriental-lounge.com/stores/2",
-        "pref": "miyagi",
-    },
-    {
-        "store": "渋谷本店",
-        "store_id": "ol_shibuya",
-        "url": "https://oriental-lounge.com/stores/4",
-        "pref": "tokyo",
-    },
-    {
-        "store": "恵比寿",
-        "store_id": "ol_ebisu",
-        "url": "https://oriental-lounge.com/stores/35",
-        "pref": "tokyo",
-    },
-    {
-        "store": "ag渋谷",
-        "store_id": "ol_shibuya_ag",
-        "url": "https://oriental-lounge.com/stores/27",
-        "pref": "tokyo",
-    },
-    {
-        "store": "新宿",
-        "store_id": "ol_shinjuku",
-        "url": "https://oriental-lounge.com/stores/3",
-        "pref": "tokyo",
-    },
-    {
-        "store": "上野",
-        "store_id": "ol_ueno",
-        "url": "https://oriental-lounge.com/stores/33",
-        "pref": "tokyo",
-    },
-    {
-        "store": "ag上野",
-        "store_id": "ol_ueno_ag",
-        "url": "https://oriental-lounge.com/stores/28",
-        "pref": "tokyo",
-    },
-    {
-        "store": "柏",
-        "store_id": "ol_kashiwa",
-        "url": "https://oriental-lounge.com/stores/42",
-        "pref": "chiba",
-    },
-    {
-        "store": "町田",
-        "store_id": "ol_machida",
-        "url": "https://oriental-lounge.com/stores/6",
-        "pref": "tokyo",
-    },
-    {
-        "store": "横浜",
-        "store_id": "ol_yokohama",
-        "url": "https://oriental-lounge.com/stores/23",
-        "pref": "kanagawa",
-    },
-    {
-        "store": "大宮",
-        "store_id": "ol_omiya",
-        "url": "https://oriental-lounge.com/stores/24",
-        "pref": "saitama",
-    },
-    {
-        "store": "宇都宮",
-        "store_id": "ol_utsunomiya",
-        "url": "https://oriental-lounge.com/stores/26",
-        "pref": "tochigi",
-    },
-    {
-        "store": "高崎",
-        "store_id": "ol_takasaki",
-        "url": "https://oriental-lounge.com/stores/37",
-        "pref": "gunma",
-    },
-    {
-        "store": "ag名古屋",
-        "store_id": "ol_nagoya_ag",
-        "url": "https://oriental-lounge.com/stores/32",
-        "pref": "aichi",
-    },
-    {
-        "store": "名古屋 錦",
-        "store_id": "ol_nagoya_nishiki",
-        "url": "https://oriental-lounge.com/stores/25",
-        "pref": "aichi",
-    },
-    {
-        "store": "名古屋 栄",
-        "store_id": "ol_nagoya_sakae",
-        "url": "https://oriental-lounge.com/stores/8",
-        "pref": "aichi",
-    },
-    {
-        "store": "静岡",
-        "store_id": "ol_shizuoka",
-        "url": "https://oriental-lounge.com/stores/7",
-        "pref": "shizuoka",
-    },
-    {
-        "store": "浜松",
-        "store_id": "ol_hamamatsu",
-        "url": "https://oriental-lounge.com/stores/31",
-        "pref": "shizuoka",
-    },
-    {
-        "store": "ag金沢",
-        "store_id": "ol_kanazawa_ag",
-        "url": "https://oriental-lounge.com/stores/36",
-        "pref": "ishikawa",
-    },
-    {
-        "store": "大阪駅前",
-        "store_id": "ol_osaka_ekimae",
-        "url": "https://oriental-lounge.com/stores/41",
-        "pref": "osaka",
-    },
-    {
-        "store": "ag梅田",
-        "store_id": "ol_umeda_ag",
-        "url": "https://oriental-lounge.com/stores/10",
-        "pref": "osaka",
-    },
-    {
-        "store": "天満",
-        "store_id": "ol_tenma",
-        "url": "https://oriental-lounge.com/stores/39",
-        "pref": "osaka",
-    },
-    {
-        "store": "心斎橋",
-        "store_id": "ol_shinsaibashi",
-        "url": "https://oriental-lounge.com/stores/11",
-        "pref": "osaka",
-    },
-    {
-        "store": "難波",
-        "store_id": "ol_namba",
-        "url": "https://oriental-lounge.com/stores/12",
-        "pref": "osaka",
-    },
-    {
-        "store": "京都",
-        "store_id": "ol_kyoto",
-        "url": "https://oriental-lounge.com/stores/9",
-        "pref": "kyoto",
-    },
-    {
-        "store": "神戸",
-        "store_id": "ol_kobe",
-        "url": "https://oriental-lounge.com/stores/13",
-        "pref": "hyogo",
-    },
-    {
-        "store": "岡山",
-        "store_id": "ol_okayama",
-        "url": "https://oriental-lounge.com/stores/29",
-        "pref": "okayama",
-    },
-    {
-        "store": "ag広島",
-        "store_id": "ol_hiroshima_ag",
-        "url": "https://oriental-lounge.com/stores/14",
-        "pref": "hiroshima",
-    },
-]
+_STORES_JSON_PATH = _root / "frontend" / "src" / "data" / "stores.json"
+with _STORES_JSON_PATH.open(encoding="utf-8") as _f:
+    STORES: list[dict] = json.load(_f)
+
 
 # ========= 天気ユーティリティ =========
 
@@ -784,6 +559,20 @@ def scrape_store(url: str) -> tuple[int | None, int | None]:
     print(f"[scrape] (fallback) url={url} men={men} women={women}")
     return men, women
 
+# ========= アラート送信 =========
+
+
+def _send_alert(message: str) -> None:
+    """ALERT_WEBHOOK_URL に POST する。未設定時は何もしない。"""
+    if not ALERT_WEBHOOK_URL:
+        return
+    try:
+        requests.post(ALERT_WEBHOOK_URL, json={"text": message}, timeout=10)
+        print(f"[alert] sent message={message[:80]}")
+    except Exception as e:
+        print(f"[alert][error] failed to send alert: {e}")
+
+
 # ========= ヘルパー: 天気キー解決 =========
 
 
@@ -993,10 +782,19 @@ def collect_all_once(*, target_store_id: str | None = None) -> None:
     success, fail = _write_results(stores, scrape_results, weather_map)
 
     duration = time.time() - t_start
+    total = len(stores)
     print(
-        f"collect_all_once.done stores={len(stores)} success={success} fail={fail} "
+        f"collect_all_once.done stores={total} success={success} fail={fail} "
         f"duration={duration:.1f}s"
     )
+
+    # 失敗率が閾値を超えた場合はアラートを送信
+    if total > 0 and fail / total >= ALERT_FAIL_RATIO_THRESHOLD:
+        msg = (
+            f"[MEGURIBI] 収集失敗アラート: {fail}/{total} 店舗が失敗 "
+            f"(失敗率 {fail / total * 100:.0f}% / duration={duration:.1f}s)"
+        )
+        _send_alert(msg)
 
 
 if __name__ == "__main__":
