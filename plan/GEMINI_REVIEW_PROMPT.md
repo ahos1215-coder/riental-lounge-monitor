@@ -27,7 +27,7 @@ Last updated: 2026-03-28 (Round 4.5 完了後の包括レビュー)
 
 | レイヤー | 技術 | ホスティング |
 |----------|------|-------------|
-| データ収集 | Python (BeautifulSoup) + cron-job.org（15分毎） | Render Starter |
+| データ収集 | Python (BeautifulSoup) + cron-job.org（5分毎） | Render Starter |
 | DB | Supabase (PostgreSQL) — logs / blog_drafts / secondary_venues | Supabase Free |
 | Backend API | Flask + Gunicorn (2 workers × 2 threads, timeout 300s) | Render Starter ($7/月, 2025-12〜) |
 | ML | XGBoost（38店舗別モデル、39特徴量、日次自動再学習） | GHA → Supabase Storage |
@@ -40,7 +40,7 @@ Last updated: 2026-03-28 (Round 4.5 完了後の包括レビュー)
 ### 規模の詳細
 
 **データ収集**:
-- 38店舗（日本全国 37 + ソウル 1）を 15分毎にスクレイピング → Supabase logs
+- 38店舗（日本全国 37 + ソウル 1）を 5分毎にスクレイピング → Supabase logs
 - 天気データ統合（Open-Meteo API、都道府県単位でキャッシュ）
 - ThreadPoolExecutor(10) で並列スクレイプ（38店舗 ~3-5s）
 

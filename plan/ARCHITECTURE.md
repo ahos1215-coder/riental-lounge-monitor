@@ -16,7 +16,7 @@ Target commit: (see git)
 ## Data Flow
 
 ### 1) 収集
-`multi_collect.py` または `/tasks/multi_collect` が Supabase `logs` に書き込む。cron-job.org が 15 分毎にトリガー（`CRON_SECRET` 認証）。`/tasks/tick` はレガシー。
+`multi_collect.py` または `/tasks/multi_collect` が Supabase `logs` に書き込む。cron-job.org が 5 分毎にトリガー（`CRON_SECRET` 認証）。`/tasks/tick` はレガシー。
 
 ### 2) Flask API
 `/api/range` / `/api/current` / `/api/forecast_*` / `/api/forecast_today_multi` / `/api/megribi_score` を提供。`/api/range` は Supabase を `ts.desc` で取得し `ts.asc` で返却。

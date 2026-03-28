@@ -151,7 +151,7 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 | サービス | 対象 | JST | 備考 |
 |----------|------|-----|------|
 | GHA schedule | `trigger-blog-cron.yml` | 18:00 / 21:30 | UTC 09:00 / 12:30。cron-job.org 不要 |
-| cron-job.org | `/tasks/multi_collect` | 15分毎（営業時間帯） | `CRON_SECRET` 認証 |
+| cron-job.org | `/tasks/multi_collect` | 5分毎（営業時間帯） | `CRON_SECRET` 認証 |
 | GHA schedule | `train-ml-model.yml` | 05:30 | UTC 20:30 |
 | GHA schedule | `generate-public-facts.yml` | 09:30 | UTC 00:30 |
 | GHA schedule | `generate-weekly-insights.yml` | 水曜 06:30 | UTC 火曜 21:30 |
@@ -170,6 +170,7 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 - 週次インサイト生成は `/api/range` の可用性に依存（Actions はタイムアウト/リトライあり）
 - `/api/current` はローカル保存の最新値のため、Supabase の最新とは一致しない場合がある（**方針メモ**: `plan/API_CURRENT.md`）
 - `/api/range` の **`limit` が小さい**と、その日の夜以外のサンプルしか取れずインサイトが偏る。**現行既定は 500**（`LINE_RANGE_LIMIT` / `BLOG_CRON_RANGE_LIMIT`）
+- **Supabase Free Tier (500MB) のストレージ**: 5分間隔 × 38店舗 × 営業時間帯 = ~4,560行/日、~166万行/年。1行 ~300-500 bytes + index で推定 500-800MB/年。**1年前後で DB 容量の監視が必要**。必要に応じて過去ログのダウンサンプリング（5分→1時間）または Supabase Pro への移行を検討
 - Daily Report は `/api/cron/blog-draft` の 1リクエスト完了時間が Vercel の制約（~60秒）に近い場合がある。504 再発時は `plan/BLOG_CRON_ASYNC_FUTURE.md`
 - Open-Meteo 天気 API は 429 レート制限あり。リクエスト間隔を十分空けること（天気データは disk cache + TTL で 1 時間に 1 回取得）
 
