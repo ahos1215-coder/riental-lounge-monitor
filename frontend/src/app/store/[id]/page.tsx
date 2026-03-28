@@ -156,23 +156,37 @@ function StorePageInner() {
 
     (async () => {
       setRelatedLoading(true);
-      // 関連店舗はrangeのみ取得（forecast_todayはメイン店舗のみ）
-      const results = await Promise.all(
-        digestStores.map(async (store) => {
+      try {
+        // 関連店舗は range_multi で1リクエストに束ねる（forecast_todayはメイン店舗のみ）
+        const slugsCsv = digestStores.map((s) => s.slug).join(",");
+        const batchRes = await fetch(
+          `/api/range_multi?stores=${encodeURIComponent(slugsCsv)}&limit=${STORE_CARD_RANGE_LIMIT}`,
+        );
+        const batchBody = batchRes.ok
+          ? ((await batchRes.json()) as { ok?: boolean; by_slug?: Record<string, { rows?: unknown[] }> })
+          : null;
+        const bySlug = batchBody?.ok && batchBody.by_slug ? batchBody.by_slug : null;
+
+        const mapped: Record<
+          string,
+          {
+            stats: RealtimeCardStats;
+            sparkline: number[];
+            sparklineMen: number[];
+            sparklineWomen: number[];
+          }
+        > = {};
+        for (const store of digestStores) {
           try {
-            const rangeRes = await fetch(
-              `/api/range?store=${encodeURIComponent(store.slug)}&limit=${STORE_CARD_RANGE_LIMIT}`,
-            );
-            const rangeBody: unknown = await rangeRes.json();
-            const rangeRows = parseRangeResponse(rangeBody);
+            const rows = bySlug?.[store.slug]?.rows ?? [];
+            const rangeRows = parseRangeResponse({ rows });
             const current = pickLatestRangeRow(rangeRows) ?? {};
             const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
             const womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
             const nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
             const genderSparks = buildGenderSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
             const actualTotals = buildActualSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
-            return {
-              slug: store.slug,
+            mapped[store.slug] = {
               stats: {
                 menCount: menNow,
                 womenCount: womenNow,
@@ -187,33 +201,16 @@ function StorePageInner() {
               sparklineWomen: genderSparks.women,
             };
           } catch {
-            return null;
+            // 個別店舗の処理失敗は無視して続行
           }
-        }),
-      );
+        }
 
-      if (!mounted) return;
-      const mapped: Record<
-        string,
-        {
-          stats: RealtimeCardStats;
-          sparkline: number[];
-          sparklineMen: number[];
-          sparklineWomen: number[];
-        }
-      > = {};
-      for (const row of results) {
-        if (row) {
-          mapped[row.slug] = {
-            stats: row.stats,
-            sparkline: row.sparkline,
-            sparklineMen: row.sparklineMen,
-            sparklineWomen: row.sparklineWomen,
-          };
-        }
+        if (!mounted) return;
+        setRelatedRealtime(mapped);
+      } catch {
+        // サイレント
       }
-      setRelatedRealtime(mapped);
-      setRelatedLoading(false);
+      if (mounted) setRelatedLoading(false);
     })();
 
     return () => {

@@ -46,8 +46,6 @@ const BRAND_TABS: { id: BrandFilter; label: string }[] = [
 ];
 
 const STORES_PER_PAGE = 12;
-/** 予測APIは店舗ごとに並列。2行分まとめて叩いて一覧の埋まりを早くする（md:grid-cols-3 × 2） */
-const STORE_LIST_ROW_CHUNK = 6;
 
 export default function StoresListClient() {
   const searchParams = useSearchParams();
@@ -375,10 +373,8 @@ export default function StoresListClient() {
         }
       }
 
-      for (let i = 0; i < targets.length; i += STORE_LIST_ROW_CHUNK) {
-        if (signal.aborted) return;
-        const chunk = targets.slice(i, i + STORE_LIST_ROW_CHUNK);
-        await Promise.all(chunk.map((store) => fetchStoreCard(store)));
+      if (!signal.aborted) {
+        await Promise.all(targets.map((store) => fetchStoreCard(store)));
       }
 
       // めぐりびスコアをバッチ取得してカードに反映
