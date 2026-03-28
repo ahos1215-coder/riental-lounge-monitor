@@ -3,7 +3,7 @@ Last updated: 2026-03-28 (Round 4.5: パフォーマンス最適化)
 Target commit: (see git)
 
 ## Overview
-- Stack: Supabase (logs/stores/blog_drafts) → Flask API (Render) → Next.js (Vercel)
+- Stack: Supabase (logs/stores/blog_drafts) → Flask API (**Render Starter $7/月**, 2025-12〜) → Next.js (Vercel)
 - Source of truth: Supabase `logs`（Google Sheet / GAS は legacy fallback）
 - Night window（19:00–05:00）: **店舗 UI** は `useStorePreviewData.ts`。**LINE 下書き**は `insightFromRange.ts`（Next サーバー）。Flask は夜窓を採らない
 - Second venues は map-link 方式（frontend でリンク生成）
@@ -41,7 +41,7 @@ Target commit: (see git)
 
 #### `/stores` ページのリクエスト順序（単一 worker 対策）
 
-Render Free プランの gunicorn は `--workers 2 --threads 2` だが、同一ワーカーに複数リクエストが入るとシリアル処理になる。重い forecast_today_multi（~7s）が先に処理されると range_multi（~1s）がブロックされ、ユーザーは何も見えない状態が長く続く。
+Render Starter プラン（$7/月、2025-12 移行済み）の gunicorn は `--workers ${WEB_CONCURRENCY:-2} --threads ${GUNICORN_THREADS:-2}`。スリープなし・永続ディスク対応。ただし同一ワーカーに複数リクエストが入るとシリアル処理になる。重い forecast_today_multi（~7s）が先に処理されると range_multi（~1s）がブロックされ、ユーザーは何も見えない状態が長く続く。
 
 **解決**: フロントエンドのリクエスト発火順を制御:
 1. `range_multi` を **最優先で await** — 部分カード（人数・チャート）を即表示

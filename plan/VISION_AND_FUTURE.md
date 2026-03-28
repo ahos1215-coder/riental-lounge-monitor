@@ -13,7 +13,7 @@ Target commit: (see git)
 ## 1. プロジェクトの目的（プロダクト）
 
 - **MEGRIBI（めぐりび）**: 相席ラウンジ等の **混雑の可視化** と **ML ベースの予測** を通じて、来店タイミングの判断材料を提供する Web サービス。
-- **データの正本**: Supabase `logs`。収集は Render 上の Flask／`multi_collect` 系。
+- **データの正本**: Supabase `logs`。収集は **Render Starter**（$7/月、2025-12 移行済み）上の Flask／`multi_collect` 系。スリープなし
 - **フロント**: Next.js（Vercel）。コンテンツは 3 分類運用:
   - **Daily/Weekly Report**: 完全自動（GitHub Actions + Gemini + cron-job.org）
   - **Editorial Blog**: AI 下書き＋LINE 承認の半自動運用

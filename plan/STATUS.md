@@ -4,7 +4,7 @@ Target commit: (see git)
 
 ## 現在動いている機能
 
-### Backend (Flask / Render)
+### Backend (Flask / Render Starter $7/月, 2025-12〜)
 - `/healthz`（稼働確認）
 - `/api/current`（ローカル保存の最新レコード。Supabase 直取得ではない）
 - `/api/range`（**`store` / `limit` のみ**。Supabase は `ts.desc` 取得 → 返却は `ts.asc`、**サーバ側の夜窓フィルタなし**）
