@@ -195,16 +195,10 @@ export default function StoresListClient() {
       const rangeBySlug = new Map<string, ReturnType<typeof parseRangeResponse>>();
       let batchOk = false;
       const slugsCsv = targets.map((t) => t.slug).join(",");
-
-      // forecast_today_multi を range_multi と同時発火（最大のボトルネック解消）
       type ForecastBatchBody = { ok?: boolean; by_slug?: Record<string, { data?: ForecastPoint[] }> };
-      const forecastBatchPromise: Promise<ForecastBatchBody | null> = fetch(
-        `/api/forecast_today_multi?stores=${encodeURIComponent(slugsCsv)}`,
-        { signal },
-      )
-        .then((r) => (r.ok ? (r.json() as Promise<ForecastBatchBody>) : null))
-        .catch(() => null);
 
+      // ① range_multi を最優先で発火 → 部分カードを最速表示
+      // (forecast_today_multi は range 完了後に発火 — gunicorn single worker 対策)
       try {
         const r = await fetch(
           `/api/range_multi?stores=${encodeURIComponent(slugsCsv)}&limit=${STORE_CARD_RANGE_LIMIT}`,
@@ -406,12 +400,9 @@ export default function StoresListClient() {
       }
 
       if (!signal.aborted) {
-        const forecastPromises = targets.map((store) => fetchStoreCard(store, forecastBatchPromise));
-
-        // めぐりびスコアを forecast と同時にバッチ取得
+        // ② megribi_score を先に発火（軽量 0.5s — gunicorn で先に処理される）
         const megribiPromise = (async () => {
           try {
-            const slugsCsv = targets.map((t) => t.slug).join(",");
             const mRes = await fetch(
               `/api/megribi_score?stores=${encodeURIComponent(slugsCsv)}`,
               { signal },
@@ -435,6 +426,18 @@ export default function StoresListClient() {
             // スコア取得失敗は非致命的
           }
         })();
+
+        // ③ forecast_today_multi を megribi の直後に発火
+        // (megribi が先にワーカーに届き 0.5s で処理、forecast は後続で ~7s)
+        const forecastBatchPromise: Promise<ForecastBatchBody | null> = fetch(
+          `/api/forecast_today_multi?stores=${encodeURIComponent(slugsCsv)}`,
+          { signal },
+        )
+          .then((r) => (r.ok ? (r.json() as Promise<ForecastBatchBody>) : null))
+          .catch(() => null);
+
+        // ④ 部分カード描画 + forecast バッチ待ち
+        const forecastPromises = targets.map((store) => fetchStoreCard(store, forecastBatchPromise));
 
         await Promise.all([...forecastPromises, megribiPromise]);
       }
