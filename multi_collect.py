@@ -11,6 +11,7 @@ import os
 import re
 import time
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -53,8 +54,11 @@ print(
 # Supabase logs.src_brand に入れるブランド名
 SUPABASE_BRAND = "oriental"
 
-# 店舗を回す間隔（秒）
+# 店舗を回す間隔（秒）— 書き込みフェーズで使用
 BETWEEN_STORES_SEC = float(os.environ.get("BETWEEN_STORES_SEC", "0.0"))
+
+# 並列スクレイピングのワーカー数（デフォルト10）
+SCRAPE_MAX_WORKERS = int(os.environ.get("SCRAPE_MAX_WORKERS", "10"))
 
 # GAS への POST リトライ回数
 GAS_MAX_RETRY = int(os.environ.get("GAS_MAX_RETRY", "3"))
@@ -780,88 +784,156 @@ def scrape_store(url: str) -> tuple[int | None, int | None]:
     print(f"[scrape] (fallback) url={url} men={men} women={women}")
     return men, women
 
-# ========= 38店舗ぶんを一気に送る =========
+# ========= ヘルパー: 天気キー解決 =========
 
-def collect_all_once(*, target_store_id: str | None = None) -> None:
-    print("collect_all_once.start")
 
-    # 県ごとに天気を1回だけ取り、prefキャッシュで使い回す
+def _resolve_weather_key_and_coords(entry: dict) -> tuple[str, tuple[float, float]]:
+    """店舗エントリから天気キャッシュキーと座標を返す。"""
+    pref = entry.get("pref")
+    lat = entry.get("lat")
+    lon = entry.get("lon")
+
+    if pref:
+        coord = PREF_COORDS.get(pref)
+        if coord:
+            return pref, coord
+        if lat is not None and lon is not None:
+            return pref, (float(lat), float(lon))
+        return pref, (WEATHER_LAT, WEATHER_LON)
+
+    if lat is not None and lon is not None:
+        return "_default", (float(lat), float(lon))
+    return "_default", (WEATHER_LAT, WEATHER_LON)
+
+
+# ========= Phase 1: 天気プリフェッチ =========
+
+
+def _prefetch_weather(
+    stores: list[dict],
+) -> dict[str, tuple[int | None, str | None, float | None, float | None]]:
+    """
+    全店舗の天気データを事前に解決する（sequential / rate-limit 遵守）。
+    返値: {store_id: (weather_code, weather_label, temp_c, precip_mm)}
+    """
+    result: dict[str, tuple[int | None, str | None, float | None, float | None]] = {}
+
+    if not ENABLE_WEATHER:
+        return result
+
+    now_minute = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=9))).minute
+    hourly_window = 0 <= now_minute <= max(0, WEATHER_FETCH_WINDOW_MINUTES)
+    if not hourly_window:
+        print(
+            f"[weather] outside hourly window minute={now_minute} "
+            f"threshold={WEATHER_FETCH_WINDOW_MINUTES}"
+        )
+        return result
+
     weather_by_pref: dict[
         str, tuple[int | None, str | None, float | None, float | None]
     ] = {}
-    checked_hourly_weather_store: dict[str, bool] = {}
-    now_minute = datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=9))).minute
-    hourly_window = 0 <= now_minute <= max(0, WEATHER_FETCH_WINDOW_MINUTES)
-
-    def resolve_weather_key_and_coords(entry: dict) -> tuple[str, tuple[float, float]]:
-        pref = entry.get("pref")
-        lat = entry.get("lat")
-        lon = entry.get("lon")
-
-        if pref:
-            coord = PREF_COORDS.get(pref)
-            if coord:
-                return pref, coord
-            if lat is not None and lon is not None:
-                return pref, (float(lat), float(lon))
-            return pref, (WEATHER_LAT, WEATHER_LON)
-
-        # pref が無い店舗は共通キーでまとめ、手元の lat/lon が無ければ環境変数を使う
-        if lat is not None and lon is not None:
-            return "_default", (float(lat), float(lon))
-        return "_default", (WEATHER_LAT, WEATHER_LON)
-
-    stores = STORES
-    if target_store_id:
-        stores = [s for s in STORES if s.get("store_id") == target_store_id]
-        if not stores:
-            print(f"[error] store_id not found: {target_store_id}")
-            return
+    checked_hourly: dict[str, bool] = {}
 
     for entry in stores:
-        store_name = entry["store"]
         store_id = entry["store_id"]
-        url = entry["url"]
 
-        weather_code: int | None = None
-        weather_label: str | None = None
-        temp_c: float | None = None
-        precip_mm: float | None = None
-        if ENABLE_WEATHER:
-            has_weather_this_hour = checked_hourly_weather_store.get(store_id)
-            if has_weather_this_hour is None:
-                has_weather_this_hour = _store_has_weather_this_hour(store_id)
-                checked_hourly_weather_store[store_id] = has_weather_this_hour
+        has_weather = checked_hourly.get(store_id)
+        if has_weather is None:
+            has_weather = _store_has_weather_this_hour(store_id)
+            checked_hourly[store_id] = has_weather
 
-            should_fetch_hourly = hourly_window and (not has_weather_this_hour)
-            if should_fetch_hourly:
-                weather_key, (lat, lon) = resolve_weather_key_and_coords(entry)
-                if weather_key not in weather_by_pref:
-                    weather_by_pref[weather_key] = fetch_current_weather(lat, lon)
-                    print(
-                        f"[weather][pref-cache] key={weather_key} lat={lat} lon={lon} fetched"
-                    )
-                weather_code, weather_label, temp_c, precip_mm = weather_by_pref[weather_key]
-                if weather_code is not None:
-                    checked_hourly_weather_store[store_id] = True
-            else:
-                print(
-                    f"[weather] skip fetch store_id={store_id} minute={now_minute} "
-                    f"window={hourly_window} has_hourly={has_weather_this_hour}"
-                )
-
-        try:
-            men, women = scrape_store(url)
-        except Exception as e:
-            print(f"[error] scrape failed store={store_name} url={url} err={e}")
+        if has_weather:
+            print(
+                f"[weather] skip fetch store_id={store_id} minute={now_minute} "
+                f"window={hourly_window} has_hourly=True"
+            )
             continue
+
+        weather_key, (lat, lon) = _resolve_weather_key_and_coords(entry)
+        if weather_key not in weather_by_pref:
+            weather_by_pref[weather_key] = fetch_current_weather(lat, lon)
+            print(
+                f"[weather][pref-cache] key={weather_key} lat={lat} lon={lon} fetched"
+            )
+
+        w = weather_by_pref[weather_key]
+        result[store_id] = w
+        if w[0] is not None:
+            checked_hourly[store_id] = True
+
+    return result
+
+
+# ========= Phase 2: 並列スクレイピング =========
+
+
+def _parallel_scrape(
+    stores: list[dict],
+) -> dict[str, tuple[int | None, int | None]]:
+    """
+    ThreadPoolExecutor で全店舗を並列スクレイピングする。
+    返値: {store_id: (men, women)}  — 失敗時は (None, None)
+    """
+    results: dict[str, tuple[int | None, int | None]] = {}
+    max_workers = min(len(stores), SCRAPE_MAX_WORKERS)
+
+    print(f"[scrape] parallel start stores={len(stores)} workers={max_workers}")
+    t0 = time.time()
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_entry = {
+            executor.submit(scrape_store, entry["url"]): entry
+            for entry in stores
+        }
+        for future in as_completed(future_to_entry):
+            entry = future_to_entry[future]
+            store_id = entry["store_id"]
+            store_name = entry["store"]
+            try:
+                men, women = future.result()
+                results[store_id] = (men, women)
+            except Exception as e:
+                print(f"[error] scrape failed store={store_name} url={entry['url']} err={e}")
+                results[store_id] = (None, None)
+
+    elapsed = time.time() - t0
+    ok = sum(1 for m, w in results.values() if m is not None and w is not None)
+    print(f"[scrape] parallel done elapsed={elapsed:.1f}s ok={ok} fail={len(results) - ok}")
+    return results
+
+
+# ========= Phase 3: 結果書き込み =========
+
+
+def _write_results(
+    stores: list[dict],
+    scrape_results: dict[str, tuple[int | None, int | None]],
+    weather_map: dict[str, tuple[int | None, str | None, float | None, float | None]],
+) -> tuple[int, int]:
+    """
+    スクレイピング結果を GAS + Supabase に書き込む。
+    返値: (success_count, fail_count)
+    """
+    success = 0
+    fail = 0
+
+    for entry in stores:
+        store_id = entry["store_id"]
+        store_name = entry["store"]
+        men, women = scrape_results.get(store_id, (None, None))
 
         if men is None or women is None:
             print(f"[warn] count missing store={store_name} men={men} women={women}")
+            fail += 1
             continue
 
-        # GAS（任意） — 仕様を壊さないよう、今は天気コードだけ送る
-        body = {
+        weather_code, weather_label, temp_c, precip_mm = weather_map.get(
+            store_id, (None, None, None, None)
+        )
+
+        # GAS（任意）
+        body: dict[str, object] = {
             "store": store_name,
             "men": int(men),
             "women": int(women),
@@ -870,7 +942,6 @@ def collect_all_once(*, target_store_id: str | None = None) -> None:
             body["weather_code"] = weather_code
         if weather_label is not None:
             body["weather_label"] = weather_label
-
         post_to_gas(body)
 
         # Supabase
@@ -884,7 +955,48 @@ def collect_all_once(*, target_store_id: str | None = None) -> None:
             precip_mm,
         )
 
-        time.sleep(BETWEEN_STORES_SEC)
+        if BETWEEN_STORES_SEC > 0:
+            time.sleep(BETWEEN_STORES_SEC)
+
+        success += 1
+
+    return success, fail
+
+
+# ========= 38店舗ぶんを一気に送る =========
+
+
+def collect_all_once(*, target_store_id: str | None = None) -> None:
+    """
+    3-phase パイプライン:
+      Phase 1 — 天気プリフェッチ (sequential, Open-Meteo rate-limit 遵守)
+      Phase 2 — 38 店舗並列スクレイピング (ThreadPoolExecutor)
+      Phase 3 — GAS / Supabase 書き込み (sequential)
+    """
+    print("collect_all_once.start")
+    t_start = time.time()
+
+    stores = STORES
+    if target_store_id:
+        stores = [s for s in STORES if s.get("store_id") == target_store_id]
+        if not stores:
+            print(f"[error] store_id not found: {target_store_id}")
+            return
+
+    # Phase 1: 天気データ事前取得
+    weather_map = _prefetch_weather(stores)
+
+    # Phase 2: 並列スクレイピング
+    scrape_results = _parallel_scrape(stores)
+
+    # Phase 3: 結果書き込み
+    success, fail = _write_results(stores, scrape_results, weather_map)
+
+    duration = time.time() - t_start
+    print(
+        f"collect_all_once.done stores={len(stores)} success={success} fail={fail} "
+        f"duration={duration:.1f}s"
+    )
 
 
 if __name__ == "__main__":
