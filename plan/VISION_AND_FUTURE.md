@@ -1,5 +1,5 @@
 # VISION_AND_FUTURE
-Last updated: 2026-03-29 (Round 7 完了)
+Last updated: 2026-03-29 (Round 8 完了)
 Target commit: (see git)
 
 > **このファイルの役割**  
@@ -26,7 +26,7 @@ Target commit: (see git)
 
 ---
 
-## 2. 現状の到達点（Round 7 完了 / 2026-03-29）
+## 2. 現状の到達点（Round 8 完了 / 2026-03-29）
 
 詳細は **`plan/STATUS.md`**。
 
@@ -38,7 +38,7 @@ Target commit: (see git)
 | Next.js API | 14 API route 稼働（proxy + cron + LINE + SNS） |
 | AI 予測レポート | Daily: 38 店舗 × 2 回/日、Weekly: 38 店舗 × 1 回/週。全自動 |
 | Editorial Blog | LINE → Gemini → 承認 → 公開。半自動 |
-| ML 予測 | 店舗別 XGBoost モデル。日次自動学習（GHA `train-ml-model.yml`） |
+| ML 予測 | 店舗別 XGBoost モデル（ML 3.0）。Optuna HPO + Early Stopping + Holdout Test 評価。日次自動学習 |
 | megribi_score | Flask + Next.js proxy。トップ「今夜のおすすめ」+ マイページカード |
 | マイページ | ダッシュボード化完了（リッチカード・スパークライン・ML 予測・レポートリンク） |
 | X 自動投稿 | OAuth 1.0a 実装済み。Daily Report 後に自動トリガー。日本語店舗名テンプレート |
@@ -106,12 +106,15 @@ Target commit: (see git)
 - OG 画像の動的生成（予測サマリ入り）
 - アフィリエイト枠の検討（予約リンク + UTM）
 
-### フェーズ C — 予測・ML の「本番品質」 ⚙️ 進行中
+### フェーズ C — 予測・ML の「本番品質」 ✅ 大部分完了
 
 **現状の技術的事実**:
-- **ML 2.0 本番稼働**: 38 店舗別 XGBoost モデル。日次自動学習
+- **ML 3.0 本番稼働**: 38 店舗別 XGBoost モデル。Optuna HPO + Early Stopping。日次自動学習
+- **特徴量**: 29→19 に最適化（推論時 NaN のラグ系・重複 `dow`・`gender_diff` を除外）
+- **評価基盤**: 時系列 Train/Test Split（80/20）。Holdout Test で真の汎化精度を測定
+- **Feature Importance**: metadata.json に店舗別で永続化
 - **`megribi_score`**: 女性比率・占有率・安定性から算出。トップ・マイページで表示
-- **`model_registry.py`**: Supabase Storage からモデルダウンロード・キャッシュ・スキーマ検証
+- **`model_registry.py`**: Supabase Storage からモデルダウンロード・キャッシュ・スキーマ検証（v2）
 - **パフォーマンス最適化（Round 4.5 完了）**:
   - `megribi_score` / `range_multi` / `forecast_today_multi`: ThreadPoolExecutor(12) で並列化
   - `forecast_today_multi`: 12 店舗の個別 API 呼び出しを 1 バッチに集約
@@ -125,6 +128,7 @@ Target commit: (see git)
 3. 予測精度の定期レポート（Weekly Report への組み込み等）
 4. ヒートマップ画像生成（将来）
 5. モデルのプリロード（起動時に全店舗モデルをメモリに載せる — GIL ボトルネック軽減）
+6. 精度トレンドの可視化（日次メトリクスの履歴蓄積）
 
 ### フェーズ D — PWA・通知 ⚙️ 部分完了
 

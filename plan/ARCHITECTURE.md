@@ -1,5 +1,5 @@
 # ARCHITECTURE
-Last updated: 2026-03-29 (Round 7: PWA + OG 画像 + 店舗比較 + Editorial 強化)
+Last updated: 2026-03-29 (Round 8: ML 最適化 — Optuna HPO + Early Stopping + Feature Pruning)
 Target commit: (see git)
 
 ## Overview
@@ -81,7 +81,11 @@ Weekly Report（毎週水曜 06:30 JST — GHA schedule）:
 ML Model Training（毎日 05:30 JST — GHA schedule）:
   train-ml-model.yml
   └─ scripts/train_ml_model.py
-     └─ 38店舗分の XGBoost モデル学習 → Supabase Storage upload
+     ├─ 38店舗分の XGBoost モデル学習 → Supabase Storage upload
+     ├─ 時系列 Train/Test Split（80/20）で Holdout 精度を測定
+     ├─ Optuna HPO（30 trials/店舗、ML_OPTUNA_ENABLED=1 で制御）
+     ├─ Early Stopping（n_estimators=300 上限、early_stopping_rounds=15）
+     └─ Feature Importance + HPO best params を metadata.json に永続化
 
 Public Facts（毎日 09:30 JST — GHA schedule）:
   generate-public-facts.yml
@@ -143,7 +147,7 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `oriental/ml/forecast_service.py`（ML 推論オーケストレーション）
 - `oriental/ml/megribi_score.py`（スコア算出 + good_windows）
 - `oriental/ml/model_registry.py`（Supabase Storage からモデルロード）
-- `oriental/ml/preprocess.py`（特徴量エンジニアリング）
+- `oriental/ml/preprocess.py`（特徴量エンジニアリング — 19 FEATURE_COLUMNS、schema v2）
 - `multi_collect.py`（収集ロジック）
 
 ### Frontend (Next.js)

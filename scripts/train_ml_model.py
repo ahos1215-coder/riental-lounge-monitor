@@ -18,6 +18,13 @@ import xgboost as xgb
 from dotenv import load_dotenv
 from xgboost import XGBRegressor
 
+try:
+    import optuna
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    HAS_OPTUNA = True
+except ImportError:
+    HAS_OPTUNA = False
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -55,14 +62,17 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def _build_xgb_model() -> XGBRegressor:
-    return XGBRegressor(
-        n_estimators=100,
-        max_depth=4,
-        learning_rate=0.1,
-        subsample=0.8,
-        objective="reg:squarederror",
-    )
+def _build_xgb_model(**overrides: Any) -> XGBRegressor:
+    params: dict[str, Any] = {
+        "n_estimators": 300,
+        "max_depth": 4,
+        "learning_rate": 0.1,
+        "subsample": 0.8,
+        "objective": "reg:squarederror",
+        "early_stopping_rounds": 15,
+    }
+    params.update(overrides)
+    return XGBRegressor(**params)
 
 
 @dataclass(slots=True)
@@ -78,6 +88,8 @@ class TrainingConfig:
     store_id: str | None
     sample_weight_peak: float
     sample_weight_rain: float
+    optuna_trials: int
+    optuna_enabled: bool
 
     @classmethod
     def from_env(cls) -> "TrainingConfig":
@@ -91,13 +103,15 @@ class TrainingConfig:
             supabase_service_key=supabase_service_key,
             bucket=os.getenv("FORECAST_MODEL_BUCKET", "ml-models").strip(),
             prefix=os.getenv("FORECAST_MODEL_PREFIX", "forecast/latest").strip().strip("/"),
-            schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v1").strip(),
+            schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v2").strip(),
             timezone=os.getenv("TIMEZONE", "Asia/Tokyo").strip(),
             train_days=_env_int("ML_TRAIN_DAYS", 180),
             train_limit=_env_int("ML_TRAIN_LIMIT", 120000),
             store_id=os.getenv("ML_TRAIN_STORE_ID", "").strip() or None,
             sample_weight_peak=_env_float("ML_TRAIN_WEIGHT_PEAK", 1.8),
             sample_weight_rain=_env_float("ML_TRAIN_WEIGHT_RAIN", 1.8),
+            optuna_trials=_env_int("ML_OPTUNA_TRIALS", 30),
+            optuna_enabled=os.getenv("ML_OPTUNA_ENABLED", "1").strip() == "1",
         )
 
     def validate(self) -> None:
@@ -175,22 +189,115 @@ def _sample_weights(df: pd.DataFrame, cfg: TrainingConfig) -> np.ndarray:
     return weights
 
 
-def _train_models(df: pd.DataFrame, work_dir: Path, cfg: TrainingConfig, store_id: str, date_tag: str) -> tuple[Path, Path, XGBRegressor, XGBRegressor]:
-    x = df[FEATURE_COLUMNS]
-    y_men = df["men"].astype(float)
-    y_women = df["women"].astype(float)
-    weights = _sample_weights(df, cfg)
+def _optuna_objective(
+    trial: "optuna.Trial",
+    x_train: pd.DataFrame,
+    y_train: pd.Series,
+    x_test: pd.DataFrame,
+    y_test: pd.Series,
+    weights: np.ndarray,
+) -> float:
+    """Optuna objective: minimize MAE on held-out test set."""
+    params = {
+        "n_estimators": 300,
+        "max_depth": trial.suggest_int("max_depth", 3, 8),
+        "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+        "subsample": trial.suggest_float("subsample", 0.6, 1.0),
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.5, 1.0),
+        "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
+        "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+        "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+        "objective": "reg:squarederror",
+        "early_stopping_rounds": 15,
+    }
+    model = XGBRegressor(**params)
+    model.fit(x_train, y_train, sample_weight=weights, eval_set=[(x_test, y_test)], verbose=False)
+    pred = model.predict(x_test)
+    return float(np.mean(np.abs(pred - y_test.to_numpy())))
 
-    model_men = _build_xgb_model()
-    model_women = _build_xgb_model()
-    model_men.fit(x, y_men, sample_weight=weights)
-    model_women.fit(x, y_women, sample_weight=weights)
+
+def _optimize_params(
+    train_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    cfg: TrainingConfig,
+    store_id: str,
+) -> dict[str, Any]:
+    """Run Optuna HPO for a single store. Returns best params dict."""
+    if not HAS_OPTUNA or not cfg.optuna_enabled or cfg.optuna_trials <= 0:
+        return {}
+
+    x_train = train_df[FEATURE_COLUMNS]
+    x_test = test_df[FEATURE_COLUMNS]
+    y_men_train = train_df["men"].astype(float)
+    y_men_test = test_df["men"].astype(float)
+    weights = _sample_weights(train_df, cfg)
+
+    study = optuna.create_study(direction="minimize")
+    study.optimize(
+        lambda trial: _optuna_objective(trial, x_train, y_men_train, x_test, y_men_test, weights),
+        n_trials=cfg.optuna_trials,
+        show_progress_bar=False,
+    )
+    best = study.best_params
+    print(f"[train-ml][optuna] store={store_id} best_mae={study.best_value:.3f} params={json.dumps(best)}")
+    return best
+
+
+def _time_series_split(df: pd.DataFrame, test_ratio: float = 0.2) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Split DataFrame chronologically: train on older data, test on recent data."""
+    split_idx = int(len(df) * (1.0 - test_ratio))
+    split_idx = max(1, min(split_idx, len(df) - 1))
+    return df.iloc[:split_idx].copy(), df.iloc[split_idx:].copy()
+
+
+def _train_models(
+    df: pd.DataFrame, work_dir: Path, cfg: TrainingConfig, store_id: str, date_tag: str,
+    hpo_params: dict[str, Any] | None = None,
+) -> tuple[Path, Path, XGBRegressor, XGBRegressor, pd.DataFrame, dict[str, float], dict[str, float]]:
+    train_df, test_df = _time_series_split(df, test_ratio=0.2)
+    x_train = train_df[FEATURE_COLUMNS]
+    y_men_train = train_df["men"].astype(float)
+    y_women_train = train_df["women"].astype(float)
+    weights = _sample_weights(train_df, cfg)
+
+    x_test = test_df[FEATURE_COLUMNS]
+    y_men_test = test_df["men"].astype(float)
+    y_women_test = test_df["women"].astype(float)
+
+    extra = dict(hpo_params) if hpo_params else {}
+    model_men = _build_xgb_model(**extra)
+    model_women = _build_xgb_model(**extra)
+    model_men.fit(
+        x_train, y_men_train, sample_weight=weights,
+        eval_set=[(x_test, y_men_test)], verbose=False,
+    )
+    model_women.fit(
+        x_train, y_women_train, sample_weight=weights,
+        eval_set=[(x_test, y_women_test)], verbose=False,
+    )
+    best_men_rounds = getattr(model_men, "best_iteration", model_men.n_estimators) + 1
+    best_women_rounds = getattr(model_women, "best_iteration", model_women.n_estimators) + 1
+    print(f"[train-ml][early_stop] store={store_id} best_rounds men={best_men_rounds} women={best_women_rounds}")
+
+    # Retrain on full data using the discovered optimal n_estimators
+    full_weights = _sample_weights(df, cfg)
+    prod_extra = {**extra}
+    prod_extra.pop("early_stopping_rounds", None)
+    prod_model_men = _build_xgb_model(n_estimators=best_men_rounds, early_stopping_rounds=None, **prod_extra)
+    prod_model_women = _build_xgb_model(n_estimators=best_women_rounds, early_stopping_rounds=None, **prod_extra)
+    prod_model_men.fit(df[FEATURE_COLUMNS], df["men"].astype(float), sample_weight=full_weights)
+    prod_model_women.fit(df[FEATURE_COLUMNS], df["women"].astype(float), sample_weight=full_weights)
 
     model_men_path = work_dir / f"model_{store_id}_{date_tag}_men.json"
     model_women_path = work_dir / f"model_{store_id}_{date_tag}_women.json"
-    model_men.save_model(str(model_men_path))
-    model_women.save_model(str(model_women_path))
-    return model_men_path, model_women_path, model_men, model_women
+    prod_model_men.save_model(str(model_men_path))
+    prod_model_women.save_model(str(model_women_path))
+
+    # Feature importance (from production models trained on full data)
+    fi_men = dict(zip(FEATURE_COLUMNS, prod_model_men.feature_importances_.tolist()))
+    fi_women = dict(zip(FEATURE_COLUMNS, prod_model_women.feature_importances_.tolist()))
+
+    return model_men_path, model_women_path, model_men, model_women, test_df, fi_men, fi_women
 
 
 def _rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
@@ -213,19 +320,22 @@ def _evaluate_rows(df: pd.DataFrame, pred_men: np.ndarray, pred_women: np.ndarra
 
 
 def _log_metrics_by_store(
-    df: pd.DataFrame, model_men: XGBRegressor, model_women: XGBRegressor
+    test_df: pd.DataFrame, model_men: XGBRegressor, model_women: XGBRegressor
 ) -> dict[str, dict[str, Any]]:
-    """Evaluate per-store metrics and return them for metadata embedding."""
-    pred_men_all = model_men.predict(df[FEATURE_COLUMNS])
-    pred_women_all = model_women.predict(df[FEATURE_COLUMNS])
-    stores = sorted(df["store_id"].dropna().unique().tolist()) if "store_id" in df.columns else ["all"]
+    """Evaluate per-store metrics on held-out test data and return for metadata."""
+    if test_df.empty:
+        return {}
+    test_df = test_df.reset_index(drop=True)
+    pred_men_all = model_men.predict(test_df[FEATURE_COLUMNS])
+    pred_women_all = model_women.predict(test_df[FEATURE_COLUMNS])
+    stores = sorted(test_df["store_id"].dropna().unique().tolist()) if "store_id" in test_df.columns else ["all"]
     all_metrics: dict[str, dict[str, Any]] = {}
     for store in stores:
         if store == "all":
-            sdf = df
-            idx = np.arange(len(df))
+            sdf = test_df
+            idx = np.arange(len(test_df))
         else:
-            sdf = df[df["store_id"] == store]
+            sdf = test_df[test_df["store_id"] == store]
             idx = sdf.index.to_numpy()
         if len(sdf) == 0:
             continue
@@ -247,10 +357,11 @@ def _log_metrics_by_store(
             segment = {}
         entry = {
             "store_id": store,
-            "rows": int(len(sdf)),
+            "rows_test": int(len(sdf)),
             "overall": overall,
             "weekend_night_segment_rows": int(peak_mask.sum()),
             "weekend_night_segment": segment,
+            "evaluation": "holdout_test_20pct",
         }
         print("[train-ml][metrics]", json.dumps(entry, ensure_ascii=True))
         all_metrics[store] = entry
@@ -317,6 +428,8 @@ def main() -> int:
     parser.add_argument("--days", type=int, help="override ML_TRAIN_DAYS")
     parser.add_argument("--limit", type=int, help="override ML_TRAIN_LIMIT")
     parser.add_argument("--store-id", help="override ML_TRAIN_STORE_ID")
+    parser.add_argument("--no-optuna", action="store_true", help="disable Optuna HPO")
+    parser.add_argument("--optuna-trials", type=int, help="override ML_OPTUNA_TRIALS")
     args = parser.parse_args()
 
     cfg = TrainingConfig.from_env()
@@ -326,6 +439,10 @@ def main() -> int:
         cfg.train_limit = args.limit
     if args.store_id:
         cfg.store_id = args.store_id
+    if args.no_optuna:
+        cfg.optuna_enabled = False
+    if args.optuna_trials is not None:
+        cfg.optuna_trials = args.optuna_trials
     cfg.validate()
 
     session = requests.Session()
@@ -356,8 +473,21 @@ def main() -> int:
             if len(sdf) < 200:
                 print(f"[train-ml][skip] store_id={store_id} rows={len(sdf)} (<200)")
                 continue
-            model_men_path, model_women_path, model_men, model_women = _train_models(sdf, work_dir, cfg, store_id, date_tag)
-            store_metrics = _log_metrics_by_store(sdf, model_men, model_women)
+
+            # Optuna HPO (uses train/test split internally)
+            train_part, test_part = _time_series_split(sdf, test_ratio=0.2)
+            hpo_params = _optimize_params(train_part, test_part, cfg, store_id)
+
+            model_men_path, model_women_path, model_men, model_women, test_df, fi_men, fi_women = _train_models(
+                sdf, work_dir, cfg, store_id, date_tag, hpo_params=hpo_params,
+            )
+            store_metrics = _log_metrics_by_store(test_df, model_men, model_women)
+            if hpo_params:
+                for k in store_metrics:
+                    store_metrics[k]["hpo_params"] = hpo_params
+            for k in store_metrics:
+                store_metrics[k]["feature_importance_men"] = fi_men
+                store_metrics[k]["feature_importance_women"] = fi_women
             all_metrics.update(store_metrics)
 
             # Latest alias for simpler rollback/fallback

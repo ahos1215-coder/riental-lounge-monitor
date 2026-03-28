@@ -12,7 +12,7 @@ FEATURE_COLUMNS = [
     "minute",
     "minutes_to_midnight",
     "day_of_week",
-    "dow",
+    # "dow" removed: identical to day_of_week (both dt.dayofweek)
     "is_weekend",
     "is_holiday",
     "is_pre_holiday",
@@ -22,20 +22,15 @@ FEATURE_COLUMNS = [
     "precip_mm",
     "next_morning_rain",
     "temp_diff_yesterday",
-    "gender_diff",
+    # "gender_diff" removed: NaN at inference time (men/women unknown for future rows)
     "feat_payday_night_peak",
     "feat_rain_night_exit",
     "feat_pre_holiday_surge",
     "sin_time",
     "cos_time",
-    "men_lag_12",
-    "men_lag_24",
-    "men_ma_2",
-    "men_ma_4",
-    "women_lag_12",
-    "women_lag_24",
-    "women_ma_2",
-    "women_ma_4",
+    # Lag/MA features removed: NaN at inference time → median-filled → constant noise
+    # "men_lag_12", "men_lag_24", "men_ma_2", "men_ma_4",
+    # "women_lag_12", "women_lag_24", "women_ma_2", "women_ma_4",
 ]
 
 

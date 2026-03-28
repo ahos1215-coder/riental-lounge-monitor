@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-03-29 (Round 7 完了: ユーザー体験の深化 — PWA + OG 画像 + 店舗比較 + Editorial 強化)
+Last updated: 2026-03-29 (Round 8: ML 最適化 — Train/Test Split + Optuna + Early Stopping + Feature Pruning)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -11,13 +11,14 @@ Target commit: (see git)
 - `/api/range_multi`（**`stores=slug1,slug2,...` + `limit` 等**。Supabase のみ。店舗一覧の一括 range 取得用。**ThreadPoolExecutor(12) で並列取得**）
 - `/api/meta`（設定サマリ）
 - `/api/forecast_today` / `/api/forecast_next_hour`（`ENABLE_FORECAST=1` のときのみ。無効時は 503）
-  - **店舗別最適化モデル（ML 2.0）本番稼働中**。全38店舗で固有の重みを使った推論を有効化済み。
+  - **店舗別最適化モデル（ML 3.0）本番稼働中**。全38店舗で Optuna HPO + Early Stopping による個別最適化モデル。
   - `model_registry.py` は `metadata.json` の `has_store_models` / `store_models` を検証し、**店舗別モデルを最優先でロード**。不整合時は明示エラー、未対応メタデータ時のみグローバルモデルへフォールバック。
+  - **schema_version v2**: 特徴量を 29→19 に削減（推論時 NaN になるラグ系・重複 `dow` を除外）
   - **Flask プロセス内キャッシュ**: TTL 60s（`FORECAST_RESULT_CACHE_TTL`）。CDN キャッシュと合わせ最大遅延 ~2 分
 - `/api/forecast_today_multi`（`?stores=slug1,slug2,...` 最大40店舗。**ThreadPoolExecutor(12) で並列実行** — 12店舗でも ~1-2s。Flask 内キャッシュ共有）
 - `/api/second_venues`（最小応答。未設定時は空配列）
 - `/api/megribi_score`（全店舗 or 指定店舗の megribi_score を返す。`?store=` / `?stores=` 対応。Supabase backend 必須。**ThreadPoolExecutor(12) で並列取得 — 38店舗12s→<1s**）
-- `/api/forecast_accuracy`（`metadata.json` から店舗別 MAE/RMSE メトリクスを返却。学習後にのみ更新）
+- `/api/forecast_accuracy`（`metadata.json` から店舗別 MAE/RMSE メトリクスを返却。**Holdout Test（直近20%）による真の汎化精度**。Feature importance も含む）
 - `/tasks/multi_collect` / `/api/tasks/collect_all_once`（本番収集の入口 → Supabase `logs`。デフォルト 202 Accepted + バックグラウンドスレッド実行。`?mode=sync` で旧同期モード。`/tasks/multi_collect/status` でステータス確認）
 - `/tasks/tick` / `/tasks/collect` / `/tasks/seed`（レガシー・ローカル向け）
 - `/tasks/update_second_venues`（任意。`GOOGLE_PLACES_API_KEY` がある場合のみ）

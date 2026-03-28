@@ -48,15 +48,19 @@ jobs:
           ML_TRAIN_STORE_ID: ""
           ML_TRAIN_WEIGHT_PEAK: ${{ vars.ML_TRAIN_WEIGHT_PEAK }}
           ML_TRAIN_WEIGHT_RAIN: ${{ vars.ML_TRAIN_WEIGHT_RAIN }}
+          ML_OPTUNA_ENABLED: ${{ vars.ML_OPTUNA_ENABLED }}
+          ML_OPTUNA_TRIALS: ${{ vars.ML_OPTUNA_TRIALS }}
         run: |
           set -euo pipefail
           export FORECAST_MODEL_BUCKET="${FORECAST_MODEL_BUCKET:-ml-models}"
           export FORECAST_MODEL_PREFIX="${FORECAST_MODEL_PREFIX:-forecast/latest}"
-          export FORECAST_MODEL_SCHEMA_VERSION="${FORECAST_MODEL_SCHEMA_VERSION:-v1}"
+          export FORECAST_MODEL_SCHEMA_VERSION="${FORECAST_MODEL_SCHEMA_VERSION:-v2}"
           export ML_TRAIN_DAYS="${ML_TRAIN_DAYS:-180}"
           export ML_TRAIN_LIMIT="${ML_TRAIN_LIMIT:-120000}"
           export ML_TRAIN_WEIGHT_PEAK="${ML_TRAIN_WEIGHT_PEAK:-1.8}"
           export ML_TRAIN_WEIGHT_RAIN="${ML_TRAIN_WEIGHT_RAIN:-1.8}"
+          export ML_OPTUNA_ENABLED="${ML_OPTUNA_ENABLED:-1}"
+          export ML_OPTUNA_TRIALS="${ML_OPTUNA_TRIALS:-30}"
           EXTRA_ARGS=""
           if [ -n "${{ github.event.inputs.days }}" ]; then
             EXTRA_ARGS="${EXTRA_ARGS} --days ${{ github.event.inputs.days }}"

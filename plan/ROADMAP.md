@@ -1,5 +1,5 @@
 # ROADMAP
-Last updated: 2026-03-29 (Round 7 完了)
+Last updated: 2026-03-29 (Round 8 完了)
 Target commit: (see git)
 
 > **構想・フェーズ順・備忘の全文**は **`plan/VISION_AND_FUTURE.md`**。本ファイルは短いタスク一覧と「当面やらないこと」に絞る。
@@ -116,16 +116,27 @@ Target commit: (see git)
 | ヘッダーナビ拡張 | 「比較」リンクを追加 |
 | LINE Editorial 拡張 | 月間まとめ（`月間`/`今月`/`先月`）・エリア比較（同地域店舗の自動選択）スコープ追加。help テキスト更新 |
 
+### Round 8: ML 最適化（評価基盤正常化 + Optuna HPO + Early Stopping）
+
+| 項目 | 内容 |
+|------|------|
+| Train/Test Split | 時系列順 80%/20% 分割。リーク（Train=Eval）を排除し、Holdout Test で真の汎化精度を報告 |
+| 特徴量削減（29→19） | 推論時 NaN になるラグ系 8 列（`men_lag_*`, `women_lag_*`, `men_ma_*`, `women_ma_*`）+ 重複 `dow` + `gender_diff` を `FEATURE_COLUMNS` から除外 |
+| Early Stopping | `n_estimators` を 100 固定 → 300 上限 + `early_stopping_rounds=15` で動的決定。店舗ごとに最適な木の数が自動選択 |
+| Optuna HPO | 店舗別ハイパーパラメータ最適化（`max_depth`, `learning_rate`, `subsample`, `colsample_bytree`, `min_child_weight`, `reg_alpha`, `reg_lambda`）。デフォルト 30 trials / 店舗 |
+| Feature Importance 永続化 | `metadata.json` に店舗別の feature_importance_men / feature_importance_women を記録 |
+| schema_version v2 | 特徴量変更に伴い v1→v2 にバンプ。Flask / GHA の両方でデフォルト更新 |
+
 ---
 
-## Round 8（提案: 収益化・拡張）
+## Round 9（提案: 収益化・拡張）
 
 | # | 項目 | 推奨モデル | 理由 |
 |---|------|-----------|------|
-| 8-1 | アフィリエイト枠 + UTM 計測 | Sonnet | Daily Report / 店舗詳細に予約リンク枠（**UTM + アフィリエイトリンク基盤実装済み**） |
-| 8-2 | 他ブランド対応（JIS・相席屋） | Opus | stores.ts / スクレイパー / UI の大規模拡張設計 |
-| 8-3 | Web Push 通知 | Opus | VAPID 鍵・購読管理・送信ジョブの設計 |
-| 8-4 | ユーザー認証 + プレミアム機能 | Opus | Supabase Auth / Stripe Checkout の設計判断 |
+| 9-1 | アフィリエイト枠 + UTM 計測 | Sonnet | Daily Report / 店舗詳細に予約リンク枠（**UTM + アフィリエイトリンク基盤実装済み**） |
+| 9-2 | 他ブランド対応（JIS・相席屋） | Opus | stores.ts / スクレイパー / UI の大規模拡張設計 |
+| 9-3 | Web Push 通知 | Opus | VAPID 鍵・購読管理・送信ジョブの設計 |
+| 9-4 | ユーザー認証 + プレミアム機能 | Opus | Supabase Auth / Stripe Checkout の設計判断 |
 
 ---
 
