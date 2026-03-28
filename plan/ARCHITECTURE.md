@@ -1,5 +1,5 @@
 # ARCHITECTURE
-Last updated: 2026-03-26 (Round 4 完了)
+Last updated: 2026-03-28 (Round 4.5: パフォーマンス最適化)
 Target commit: (see git)
 
 ## Overview
@@ -19,15 +19,19 @@ Target commit: (see git)
 `multi_collect.py` または `/tasks/multi_collect` が Supabase `logs` に書き込む。cron-job.org が 15 分毎にトリガー（`CRON_SECRET` 認証）。`/tasks/tick` はレガシー。
 
 ### 2) Flask API
-`/api/range` / `/api/current` / `/api/forecast_*` / `/api/megribi_score` を提供。`/api/range` は Supabase を `ts.desc` で取得し `ts.asc` で返却。
+`/api/range` / `/api/current` / `/api/forecast_*` / `/api/forecast_today_multi` / `/api/megribi_score` を提供。`/api/range` は Supabase を `ts.desc` で取得し `ts.asc` で返却。
+
+**並列化パターン**: `range_multi`・`megribi_score`・`forecast_today_multi` は `ThreadPoolExecutor(max_workers=12)` で Supabase クエリ / ML 推論を並列実行。GIL 下でも I/O 待ち（HTTP）が支配的なため効果大。
+
+**Flask プロセス内キャッシュ**: `forecast_today` / `forecast_today_multi` は TTL 60s のインメモリキャッシュを共有。CDN `s-maxage=60` と組み合わせ、最大遅延 ~2 分。
 
 ### 3) Next.js ページ・API Routes
 
 | パス | データ取得元 |
 |------|--------------|
-| `/` | `/api/range` + `/api/megribi_score` + `getAllPostMetas()`（静的 MDX） |
-| `/store/[id]` | `/api/range` + `/api/forecast_today` + `/api/reports/store-summary` |
-| `/stores` | `/api/range_multi` + `/api/forecast_today`（6 店舗チャンク） |
+| `/` | `/api/range` + `/api/megribi_score`（TOP 5 今夜のおすすめ）+ `getAllPostMetas()`（静的 MDX） |
+| `/store/[id]` | `/api/range` + `/api/forecast_today`（**Promise.all 同時発火**）+ `/api/reports/store-summary` |
+| `/stores` | **request ordering 戦略**: ① `/api/range_multi` await → 部分カード即表示 → ② `/api/megribi_score` → ③ `/api/forecast_today_multi`（バッチ）を後続発火。単一 gunicorn worker でも ~1.5s で初期表示 |
 | `/reports` | `/api/reports/list`（Supabase: 全店舗最新 Daily/Weekly メタ） |
 | `/reports/daily/[store_slug]` | Supabase `blog_drafts`（`content_type='daily'`, `is_published=true`） |
 | `/reports/weekly/[store_slug]` | Supabase `blog_drafts`（`content_type='weekly'`, `is_published=true`） |
@@ -35,10 +39,20 @@ Target commit: (see git)
 | `/blog/[slug]` | Supabase `blog_drafts`（`content_type='editorial'`, `is_published=true`） |
 | `/mypage` | `/api/range` + `/api/forecast_today` + `/api/megribi_score`（お気に入り店舗分） |
 
+#### `/stores` ページのリクエスト順序（単一 worker 対策）
+
+Render Free プランの gunicorn は `--workers 2 --threads 2` だが、同一ワーカーに複数リクエストが入るとシリアル処理になる。重い forecast_today_multi（~7s）が先に処理されると range_multi（~1s）がブロックされ、ユーザーは何も見えない状態が長く続く。
+
+**解決**: フロントエンドのリクエスト発火順を制御:
+1. `range_multi` を **最優先で await** — 部分カード（人数・チャート）を即表示
+2. `megribi_score`（軽量 ~0.5s）を発火
+3. `forecast_today_multi`（重い ~2-7s）を最後に発火
+4. forecast 結果が返ったらカードにマージ（プログレッシブレンダリング）
+
 ### 4) GitHub Actions バッチ
 
 ```
-Daily Report（毎日 18:00 / 21:30 JST — cron-job.org → workflow_dispatch）:
+Daily Report（毎日 18:00 / 21:30 JST — GHA native schedule）:
   trigger-blog-cron.yml
   └─ matrix: 38 store × 独立ジョブ (max-parallel: 15)
      └─ GET /api/cron/blog-draft?store=<slug>&edition=...
@@ -116,8 +130,8 @@ trigger-blog-cron.yml (Daily Report) 完了
 ## Key Files
 
 ### Backend (Python / Flask)
-- `oriental/routes/data.py`（/api/range, /api/current, /api/range_multi, /api/second_venues）
-- `oriental/routes/forecast.py`（/api/forecast_*, /api/megribi_score）
+- `oriental/routes/data.py`（/api/range, /api/current, /api/range_multi（ThreadPoolExecutor 並列化）, /api/second_venues）
+- `oriental/routes/forecast.py`（/api/forecast_*, /api/forecast_today_multi, /api/megribi_score — ThreadPoolExecutor 並列化）
 - `oriental/routes/tasks.py`（/tasks/multi_collect, /tasks/tick, CRON_SECRET 認証）
 - `oriental/data/provider.py`（SupabaseLogsProvider, GoogleSheetProvider）
 - `oriental/ml/forecast_service.py`（ML 推論オーケストレーション）
@@ -127,14 +141,15 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `multi_collect.py`（収集ロジック）
 
 ### Frontend (Next.js)
-- `frontend/src/app/api/*/route.ts`（backend proxy + SNS + LINE + cron）
+- `frontend/src/app/api/*/route.ts`（backend proxy 7本 + SNS + LINE + cron）
+- `frontend/src/app/api/forecast_today_multi/route.ts`（バッチ forecast proxy、CDN `s-maxage=60`）
 - `frontend/src/app/reports/page.tsx`（統合レポート一覧: reports-client.tsx）
 - `frontend/src/app/reports/daily/[store_slug]/page.tsx`（Daily Report 個別）
 - `frontend/src/app/reports/weekly/[store_slug]/page.tsx`（Weekly Report 個別）
 - `frontend/src/app/mypage/mypage-client.tsx`（ダッシュボード型マイページ）
 - `frontend/src/app/home-client.tsx`（トップ: megribi_score + last visited）
-- `frontend/src/app/stores/stores-list-client.tsx`（店舗一覧）
-- `frontend/src/app/store/[id]/page.tsx`（店舗詳細）
+- `frontend/src/app/stores/stores-list-client.tsx`（店舗一覧 — request ordering 戦略）
+- `frontend/src/app/store/[id]/page.tsx`（店舗詳細 — range+forecast 同時発火）
 - `frontend/src/lib/blog/insightFromRange.ts`（LINE 用インサイト・窓計算）
 - `frontend/src/lib/blog/draftGenerator.ts`（Gemini 下書き）
 - `frontend/src/lib/blog/runBlogDraftPipeline.ts`（source → content_type 導出）

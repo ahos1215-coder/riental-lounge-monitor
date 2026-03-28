@@ -1,5 +1,5 @@
 # API_CONTRACT
-Last updated: 2026-03-25
+Last updated: 2026-03-28 (Round 4.5: forecast_today_multi + megribi_score + range_multi 契約追加)
 Target commit: (see git)
 
 MEGRIBI の公開契約。**Flask（Render）** と **Next.js（Vercel）の LINE Webhook** を含む。互換性を壊さないこと。
@@ -155,17 +155,86 @@ Response
 Note
 - 本番 UX は map-link 方式（frontend）。backend は最小応答の維持のみ。
 
-## GET /api/heatmap
-Placeholder。`{ ok: true, data: [] }`
+## GET /api/range_multi
+複数店舗の range データを一括取得。
 
-## GET /api/range_prevweek
-Placeholder。`{ ok: true, data: [] }`
+Query
+- `stores`: カンマ区切りの店舗スラグ（最大40）
+- `limit`: 各店舗の返却件数
 
-## GET /api/summary
-Placeholder。`{ ok: true, data: {} }`
+Behavior
+- **ThreadPoolExecutor(12)** で Supabase に並列クエリ。
+- 各店舗の結果は `ts.asc` で返却。
 
-## GET /api/stores/list
-Placeholder。`{ ok: true, data: [] }`
+Response
+```json
+{
+  "ok": true,
+  "by_slug": {
+    "shibuya": { "rows": [ { "ts": "...", "men": 0, "women": 0, "total": 0, ... } ] },
+    "shinjuku": { "rows": [ ... ] }
+  }
+}
+```
+
+## GET /api/forecast_today_multi
+複数店舗の forecast_today を1リクエストで返すバッチエンドポイント。
+
+Query
+- `stores`: カンマ区切りの店舗スラグ（最大40）
+
+Behavior
+- `ENABLE_FORECAST=1` のときのみ有効。無効時は 503。
+- **ThreadPoolExecutor(max_workers=12)** で並列推論。
+- Flask プロセス内キャッシュ（TTL 60s）を `forecast_today` と共有。キャッシュヒット時は推論スキップ。
+
+Response
+```json
+{
+  "ok": true,
+  "by_slug": {
+    "shibuya": { "ok": true, "data": [ { "ts": "...", "men": 0, "women": 0, "total": 0 } ] },
+    "shinjuku": { "ok": true, "data": [ ... ] }
+  }
+}
+```
+
+Error
+- `422 { ok: false, error: "no-valid-stores" }` — 有効な店舗スラグが 0 件
+- `503 { ok: false, error: "forecast-disabled" }` — ENABLE_FORECAST=0
+
+## GET /api/megribi_score
+各店舗の最新データから megribi_score を計算して返す。
+
+Query
+- `store`: 単一店舗スラグ（省略時は全店舗）
+- `stores`: カンマ区切りの複数店舗スラグ
+
+Behavior
+- Supabase backend 必須。**ThreadPoolExecutor(12)** で並列取得。
+- 結果はスコア降順でソート。
+
+Response
+```json
+{
+  "ok": true,
+  "data": [
+    {
+      "slug": "shibuya",
+      "score": 0.785,
+      "total": 42,
+      "men": 20,
+      "women": 22,
+      "female_ratio": 0.524,
+      "occupancy_rate": 0.525,
+      "ts": "2026-03-28T20:15:00+09:00"
+    }
+  ]
+}
+```
+
+Error
+- `501 { ok: false, error: "supabase-required" }` — data_backend が supabase 以外
 
 ## GET|POST /tasks/collect
 単店舗の legacy 収集（GAS append）。
@@ -180,7 +249,17 @@ Response
 ## GET|POST /tasks/multi_collect
 本番収集の入口（`collect_all_once` を実行し Supabase `logs` へ書き込む）。
 
-Response
+Behavior
+- デフォルト: **202 Accepted** + バックグラウンドスレッド実行（非同期）。
+- `?mode=sync`: 旧同期モード（完了まで待機）。
+- `/tasks/multi_collect/status`: 実行中タスクのステータス確認。
+
+Response（デフォルト 202）
+```json
+{ "ok": true, "task": "collect_all_once", "stores": 38, "mode": "async" }
+```
+
+Response（`?mode=sync` 200）
 ```json
 { "ok": true, "task": "collect_all_once", "stores": 38 }
 ```

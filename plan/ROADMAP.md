@@ -1,5 +1,5 @@
 # ROADMAP
-Last updated: 2026-03-26 (Round 4 完了)
+Last updated: 2026-03-28 (Round 4.5 完了)
 Target commit: (see git)
 
 > **構想・フェーズ順・備忘の全文**は **`plan/VISION_AND_FUTURE.md`**。本ファイルは短いタスク一覧と「当面やらないこと」に絞る。
@@ -73,6 +73,17 @@ Target commit: (see git)
 | `/api/sns/post` X API 統合 | OAuth 1.0a 署名・リトライ・dry_run 対応。環境変数未設定時は安全にスキップ |
 | `x-auto-post.yml` GHA ワークフロー | `trigger-blog-cron.yml` 完了後に自動実行。許可店舗のみポスト |
 
+### Round 4.5: パフォーマンス最適化（sub-3s ページロード）
+
+| 項目 | 内容 |
+|------|------|
+| `megribi_score` 並列化 | Flask: ThreadPoolExecutor(12) で 38 店舗並列取得。12s → <1s |
+| `range_multi` 並列化 | Flask: ThreadPoolExecutor(12) で Supabase 並列クエリ |
+| `forecast_today_multi` 新設 | Flask: 複数店舗の forecast_today を 1 リクエストで返すバッチ API。ThreadPoolExecutor(12) で並列推論 |
+| Next.js proxy 追加 | `/api/forecast_today_multi/route.ts` — CDN `s-maxage=60` |
+| `/stores` request ordering | 単一 gunicorn worker 対策: ① range_multi await → 部分カード即表示 → ② megribi_score → ③ forecast_today_multi を後続発火。体感 ~1.5s で初期表示 |
+| `/store/[id]` 同時発火 | range + forecast を Promise.all で同時発火（従来は直列） |
+
 ---
 
 ## Round 5（提案: 品質・信頼性の底上げ）
@@ -81,7 +92,7 @@ Target commit: (see git)
 |---|------|-----------|------|
 | 5-1 | デッドコード一括削除 | Sonnet | 機械的削除。STATUS.md 記載の未参照ファイル + .bak ファイル |
 | 5-2 | E2E テスト基盤 | Sonnet | Playwright 導入、主要3ページ（トップ・店舗一覧・レポート統合）のスモークテスト |
-| 5-3 | エラーバウンダリ + ローディング UX | Sonnet | 各ページに `error.tsx` / `loading.tsx` を配置。API エラー時のフォールバック UI |
+| 5-3 | エラーバウンダリ + ローディング UX | Sonnet | 各ページに `error.tsx` / `loading.tsx` を配置。API エラー時のフォールバック UI（**一部実装済み**: Round 5-6 でエラー/ローディングページ追加済み） |
 | 5-4 | Weekly Insights → `/reports/weekly` 統合検討 | Opus | `/insights/weekly` と `/reports/weekly` の重複を整理。データソース統一の設計判断 |
 | 5-5 | GitHub PAT 期限切れ LINE 通知 | Sonnet | 週次 GHA ワークフロー + LINE Push API |
 
@@ -89,8 +100,8 @@ Target commit: (see git)
 
 | # | 項目 | 推奨モデル | 理由 |
 |---|------|-----------|------|
-| 6-1 | PWA 対応（Web App Manifest + Service Worker） | Sonnet | オフライン対応・ホーム画面追加 |
-| 6-2 | OG 画像の動的生成 | Sonnet | `/reports/daily/[store_slug]` の OG 画像にその日の予測サマリを含める |
+| 6-1 | PWA 対応（Web App Manifest + Service Worker） | Sonnet | オフライン対応・ホーム画面追加（**PWA Manifest 実装済み**） |
+| 6-2 | OG 画像の動的生成 | Sonnet | `/reports/daily/[store_slug]` の OG 画像にその日の予測サマリを含める（**OG 画像基盤実装済み**） |
 | 6-3 | 店舗詳細ページの「比較モード」 | Opus | 2-3 店舗を並べて比較するレイアウト設計が必要 |
 | 6-4 | Editorial ブログの運用フロー強化 | Opus | LINE から「月間まとめ」「エリア比較」等の複雑な分析依頼に対応 |
 
@@ -98,7 +109,7 @@ Target commit: (see git)
 
 | # | 項目 | 推奨モデル | 理由 |
 |---|------|-----------|------|
-| 7-1 | アフィリエイト枠 + UTM 計測 | Sonnet | Daily Report / 店舗詳細に予約リンク枠 |
+| 7-1 | アフィリエイト枠 + UTM 計測 | Sonnet | Daily Report / 店舗詳細に予約リンク枠（**UTM + アフィリエイトリンク基盤実装済み**） |
 | 7-2 | 他ブランド対応（JIS・相席屋） | Opus | stores.ts / スクレイパー / UI の大規模拡張設計 |
 | 7-3 | Web Push 通知 | Opus | VAPID 鍵・購読管理・送信ジョブの設計 |
 | 7-4 | ユーザー認証 + プレミアム機能 | Opus | Supabase Auth / Stripe Checkout の設計判断 |
@@ -145,7 +156,7 @@ Target commit: (see git)
 ## スケール・SEO・Cron（方針の要約）
 
 - **SEO（Daily Report）**: `/reports/daily/[store_slug]` は固定 URL（上書き運用）。カニバリゼーション回避・鮮度優先
-- **定時ブログの時計**: **cron-job.org** が正本（JST 18:00 / 21:30）。GHA schedule なし
+- **定時ブログの時計**: **GHA native schedule** が正本（`cron: "0 9 * * *"` JST 18:00、`cron: "30 12 * * *"` JST 21:30）。cron-job.org 不要
 - **Weekly の Git コミット**: Fan-in ジョブが 1回のみ commit（競合なし）
 - **X 自動投稿**: 開始時は人気トップ5＋長崎店に限定（API・シャドウバンリスク回避）
 - **統合レポート一覧**: `/reports` 1 ページに集約。Daily/Weekly はタブで切替（SEO は個別ページで担保）

@@ -1,5 +1,5 @@
 # VISION_AND_FUTURE
-Last updated: 2026-03-26 (Round 4 完了)
+Last updated: 2026-03-28 (Round 4.5 完了)
 Target commit: (see git)
 
 > **このファイルの役割**  
@@ -26,16 +26,16 @@ Target commit: (see git)
 
 ---
 
-## 2. 現状の到達点（Round 4 完了 / 2026-03-26）
+## 2. 現状の到達点（Round 4.5 完了 / 2026-03-28）
 
 詳細は **`plan/STATUS.md`**。
 
 | 領域 | 状態 |
 |------|------|
 | 収集 → Supabase | 本番稼働。cron-job.org → Flask `/tasks/multi_collect`（`CRON_SECRET` 認証）|
-| Flask API | `/api/range` `/api/megribi_score` `/api/forecast_*` 等 11 エンドポイント稼働 |
+| Flask API | `/api/range` `/api/megribi_score` `/api/forecast_*` `/api/forecast_today_multi` 等 12 エンドポイント稼働 |
 | Next.js 画面 | 13 ページルート実装済み（`/` `/stores` `/store/[id]` `/reports` `/reports/*/[store_slug]` `/blog` `/mypage` `/insights/weekly` 等） |
-| Next.js API | 12 API route 稼働（proxy + cron + LINE + SNS） |
+| Next.js API | 13 API route 稼働（proxy + cron + LINE + SNS） |
 | AI 予測レポート | Daily: 38 店舗 × 2 回/日、Weekly: 38 店舗 × 1 回/週。全自動 |
 | Editorial Blog | LINE → Gemini → 承認 → 公開。半自動 |
 | ML 予測 | 店舗別 XGBoost モデル。日次自動学習（GHA `train-ml-model.yml`） |
@@ -43,6 +43,7 @@ Target commit: (see git)
 | マイページ | ダッシュボード化完了（リッチカード・スパークライン・ML 予測・レポートリンク） |
 | X 自動投稿 | OAuth 1.0a 実装済み。Daily Report 後に自動トリガー（dry_run 開始） |
 | Recharts 統合 | Chart.js 完全削除、全チャート Recharts に統一 |
+| パフォーマンス最適化 | ThreadPoolExecutor 並列化 + forecast_today_multi バッチ + request ordering 戦略（sub-3s 初期表示）|
 | CDN キャッシュ | API proxy に `s-maxage` + `stale-while-revalidate` |
 | OGP | 全主要ページに設定済み |
 | Sitemap | 全店舗の Daily/Weekly レポート URL 登録済み |
@@ -56,7 +57,7 @@ Target commit: (see git)
 - **二次会スポット**: map-link が本流（`plan/SECOND_VENUES.md`）
 - **`avoid_time`**: 「窓内で total が最小の時刻」。読者向けには「入店しやすさの目安」
 - **X 自動投稿**: 全店舗一斉ポストは行わない。段階的拡大
-- **cron-job.org**: Daily Report の外部トリガー正本。GHA schedule は削除済み
+- **Daily Report トリガー**: GHA native schedule が正本（`cron: "0 9 * * *"` / `"30 12 * * *"`）。cron-job.org 不要
 - **`/reports` 統合**: 1 ページに Daily/Weekly をタブ切替。個別レポートは SEO 用固定 URL
 
 ---
@@ -101,12 +102,19 @@ Target commit: (see git)
 - **ML 2.0 本番稼働**: 38 店舗別 XGBoost モデル。日次自動学習
 - **`megribi_score`**: 女性比率・占有率・安定性から算出。トップ・マイページで表示
 - **`model_registry.py`**: Supabase Storage からモデルダウンロード・キャッシュ・スキーマ検証
+- **パフォーマンス最適化（Round 4.5 完了）**:
+  - `megribi_score` / `range_multi` / `forecast_today_multi`: ThreadPoolExecutor(12) で並列化
+  - `forecast_today_multi`: 12 店舗の個別 API 呼び出しを 1 バッチに集約
+  - `/stores` ページ: request ordering 戦略で単一 gunicorn worker でも ~1.5s 初期表示
+  - `/store/[id]` ページ: range + forecast を Promise.all で同時発火
+  - Flask プロセス内キャッシュ（TTL 60s）で forecast 結果を個別/バッチ間共有
 
 **残タスク**:
 1. オフライン評価（精度の見える化）
 2. 異常値・欠損時のユーザー向けメッセージ改善
 3. 予測精度の定期レポート（Weekly Report への組み込み等）
 4. ヒートマップ画像生成（将来）
+5. モデルのプリロード（起動時に全店舗モデルをメモリに載せる — GIL ボトルネック軽減）
 
 ### フェーズ D — PWA・通知
 
@@ -179,7 +187,7 @@ Target commit: (see git)
 
 ### 9.2 Cron とスケール
 
-- **Daily**: cron-job.org → GHA `workflow_dispatch` → matrix 38 店舗（`max-parallel: 15`）
+- **Daily**: GHA native schedule → matrix 38 店舗（`max-parallel: 15`）
 - **Weekly**: GHA schedule → Fan-in Matrix（`max-parallel: 10`）
 - **課題**: 店舗数増加時は `max-parallel` 調整。非同期キューは `BLOG_CRON_ASYNC_FUTURE.md`
 

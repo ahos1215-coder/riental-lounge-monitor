@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-03-28 (Batch 5: forecast_today_multi バッチエンドポイント — 12店舗 forecast 10s→~2s)
+Last updated: 2026-03-28 (Round 4.5: パフォーマンス最適化 — ThreadPoolExecutor 並列化 + forecast_today_multi バッチ + request ordering)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -13,6 +13,8 @@ Target commit: (see git)
 - `/api/forecast_today` / `/api/forecast_next_hour`（`ENABLE_FORECAST=1` のときのみ。無効時は 503）
   - **店舗別最適化モデル（ML 2.0）本番稼働中**。全38店舗で固有の重みを使った推論を有効化済み。
   - `model_registry.py` は `metadata.json` の `has_store_models` / `store_models` を検証し、**店舗別モデルを最優先でロード**。不整合時は明示エラー、未対応メタデータ時のみグローバルモデルへフォールバック。
+  - **Flask プロセス内キャッシュ**: TTL 60s（`FORECAST_RESULT_CACHE_TTL`）。CDN キャッシュと合わせ最大遅延 ~2 分
+- `/api/forecast_today_multi`（`?stores=slug1,slug2,...` 最大40店舗。**ThreadPoolExecutor(12) で並列実行** — 12店舗でも ~1-2s。Flask 内キャッシュ共有）
 - `/api/second_venues`（最小応答。未設定時は空配列）
 - `/api/megribi_score`（全店舗 or 指定店舗の megribi_score を返す。`?store=` / `?stores=` 対応。Supabase backend 必須。**ThreadPoolExecutor(12) で並列取得 — 38店舗12s→<1s**）
 - `/tasks/multi_collect` / `/api/tasks/collect_all_once`（本番収集の入口 → Supabase `logs`。デフォルト 202 Accepted + バックグラウンドスレッド実行。`?mode=sync` で旧同期モード。`/tasks/multi_collect/status` でステータス確認）
@@ -27,7 +29,7 @@ Target commit: (see git)
 | パス | 概要 |
 |------|------|
 | `/` | トップ。「今夜のおすすめ」（megribi_score TOP 5）+ Last visited ミニチャート + ブログ新着 + ナビリンク |
-| `/stores` | 全店舗一覧（12件/ページ・地域タブ・テキスト検索・`/api/range_multi` バッチ取得・**`/api/forecast_today_multi` + megribi_score 同時発火 → 12店舗 forecast 10s→~2s**） |
+| `/stores` | 全店舗一覧（12件/ページ・地域タブ・テキスト検索・**request ordering 戦略**: ① `range_multi` 最優先 await → 部分カード即表示 → ② `megribi_score` + ③ `forecast_today_multi` を後続発火。単一 gunicorn worker でも体感 ~1.5s で初期表示） |
 | `/store/[id]` | 店舗詳細（リアルタイムカード・Recharts 時系列・ML 予測・レポート要約カード・関連店舗・**range + forecast 同時発火**） |
 | `/reports` | **AI予測レポート統合一覧**（Daily/Weekly タブ切替・エリアフィルタ・店舗名検索。ヘッダー「AI予測」からリンク） |
 | `/reports/daily` | `/reports` へリダイレクト |
@@ -40,7 +42,7 @@ Target commit: (see git)
 | `/insights/weekly/[store]` | Weekly Insights 店舗別（`WeeklyStoreCharts.tsx`、Recharts `series_compact` 可視化） |
 | `/mypage` | **ダッシュボード型マイページ**: お気に入り店舗リッチカード（リアルタイム人数・男女スパークライン・megribi_score・ML 予測サマリ・Daily/Weekly リンク）+ 閲覧履歴ピルタグ |
 
-#### Next.js API Routes（12本）
+#### Next.js API Routes（13本）
 | パス | 用途 |
 |------|------|
 | `/api/range` | Flask `/api/range` プロキシ（CDN `s-maxage` 付き） |
