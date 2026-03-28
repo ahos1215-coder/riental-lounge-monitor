@@ -8,6 +8,20 @@ loadEnvConfig(repoRoot);
 loadEnvConfig(process.cwd());
 
 const nextConfig: NextConfig = {
+  async redirects() {
+    return [
+      {
+        source: "/insights/weekly/:store",
+        destination: "/reports/weekly/:store",
+        permanent: true,
+      },
+      {
+        source: "/insights/weekly",
+        destination: "/reports?tab=weekly",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       {

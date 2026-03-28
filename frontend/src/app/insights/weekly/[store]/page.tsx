@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { getStoreMetaBySlugStrict } from "@/app/config/stores";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
-import WeeklyStoreCharts from "../WeeklyStoreCharts";
+import WeeklyStoreCharts from "@/components/WeeklyStoreCharts";
 
 export const dynamicParams = false;
 
