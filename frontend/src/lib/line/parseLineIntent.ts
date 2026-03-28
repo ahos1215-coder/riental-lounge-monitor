@@ -9,6 +9,8 @@ function todayYmdTokyo(): string {
   }).format(new Date());
 }
 
+export type AnalysisScope = "single" | "monthly" | "area_compare";
+
 export type ParsedLineIntent =
   | {
       kind: "draft";
@@ -28,6 +30,10 @@ export type ParsedLineIntent =
       dateYmd: string;
       factsId: string;
       topicHint: string;
+      /** 分析スコープ: single（通常）/ monthly（月間まとめ）/ area_compare（エリア比較） */
+      scope: AnalysisScope;
+      /** エリア比較の場合、比較対象の店舗群 */
+      compareStores?: StoreMeta[];
     }
   | {
       /**
@@ -62,7 +68,15 @@ const EDITORIAL_PATTERNS = [
   /まとめて?/,
   /比較して?/,
   /データ(を|で)?見て?/,
+  /月間/,
+  /エリア比較/,
+  /今月/,
+  /先月/,
+  /週間まとめ/,
 ];
+
+const MONTHLY_PATTERNS = [/月間/, /今月/, /先月/, /月次/, /月のまとめ/, /monthly/i];
+const AREA_COMPARE_PATTERNS = [/エリア比較/, /地域比較/, /近く(の店舗)?と比較/, /周辺と比較/];
 
 function isApproveMessage(text: string): { matched: true; slug: string | null } | { matched: false } {
   const t = text.trim();
@@ -123,10 +137,20 @@ export function parseLineIntent(text: string): ParsedLineIntent {
 
   // 分析・編集記事インテント（"分析して" "レポート" 等のキーワードがある）
   if (isEditorialRequest(rest)) {
-    return { kind: "editorial_analysis", store, dateYmd, factsId, topicHint };
+    const scope = detectAnalysisScope(rest);
+    const compareStores = scope === "area_compare"
+      ? STORES.filter((s) => s.regionLabel === store.regionLabel && s.slug !== store.slug).slice(0, 4)
+      : undefined;
+    return { kind: "editorial_analysis", store, dateYmd, factsId, topicHint, scope, compareStores };
   }
 
   return { kind: "draft", store, dateYmd, factsId, topicHint };
+}
+
+function detectAnalysisScope(text: string): AnalysisScope {
+  if (AREA_COMPARE_PATTERNS.some((p) => p.test(text))) return "area_compare";
+  if (MONTHLY_PATTERNS.some((p) => p.test(text))) return "monthly";
+  return "single";
 }
 
 function resolveStoreFromTokens(tokens: string[]): { store: StoreMeta; consumedTokens: string[] } | null {

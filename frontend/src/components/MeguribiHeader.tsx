@@ -46,6 +46,12 @@ export function MeguribiHeader({ showSearchChip }: MeguribiHeaderProps) {
               AI予測
             </Link>
             <Link
+              href="/compare"
+              className="font-medium text-slate-300 transition hover:text-amber-300"
+            >
+              比較
+            </Link>
+            <Link
               href="/blog"
               className="font-medium text-slate-300 transition hover:text-amber-300"
             >

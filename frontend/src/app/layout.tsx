@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
   icons: {
     icon: "/icons/icon.svg",
-    apple: "/icons/icon.svg",
+    apple: "/icons/icon-192.png",
   },
   openGraph: {
     type: "website",
@@ -60,6 +60,11 @@ export default function RootLayout({
         <Suspense>
           <GoogleAnalytics />
         </Suspense>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `if("serviceWorker"in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js")})}`,
+          }}
+        />
         <MeguribiHeader />
         <div className="min-h-screen text-slate-50">{children}</div>
       </body>

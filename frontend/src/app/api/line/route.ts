@@ -109,6 +109,14 @@ function helpText(): string {
     "　「〇〇を分析して」「〇〇のレポート」「〇〇を比較して」",
     "　例: 渋谷 先週と比較して / 福岡を分析して",
     "",
+    "■ 月間まとめ",
+    "　「〇〇 月間まとめ」「〇〇 今月のレポート」",
+    "　例: 渋谷 月間まとめ / 新宿 先月のレポート",
+    "",
+    "■ エリア比較",
+    "　「〇〇 エリア比較」で同地域の店舗と比較分析",
+    "　例: 渋谷 エリア比較",
+    "",
     "■ 分析記事を公開する",
     "　「公開」「ok」「承認」を送ると直近の未公開記事が公開されます。",
     "　例: 公開 / ok / 〇〇-slug を公開",
@@ -169,6 +177,8 @@ async function handleDraftOrEditorialIntent(
     dateYmd: string;
     factsId: string;
     topicHint: string;
+    scope?: import("@/lib/line/parseLineIntent").AnalysisScope;
+    compareStores?: import("@/app/config/stores").StoreMeta[];
   },
 ): Promise<void> {
   const userLimit = await limitLineUserDraft(lineUserId);
@@ -181,14 +191,23 @@ async function handleDraftOrEditorialIntent(
   }
 
   try {
-    console.log("[line] Running pipeline", { kind: intent.kind, slug: intent.store.slug });
+    // スコープに応じた topicHint の拡張
+    let enrichedTopicHint = intent.topicHint;
+    if (intent.scope === "monthly") {
+      enrichedTopicHint = `月間まとめ分析。${intent.topicHint}`.trim();
+    } else if (intent.scope === "area_compare" && intent.compareStores?.length) {
+      const names = intent.compareStores.map((s) => s.label).join("・");
+      enrichedTopicHint = `エリア比較分析（${names}との比較）。${intent.topicHint}`.trim();
+    }
+
+    console.log("[line] Running pipeline", { kind: intent.kind, slug: intent.store.slug, scope: intent.scope });
     const result = await runBlogDraftPipeline({
       backendUrl: BACKEND_URL,
-      rangeLimit: lineRangeLimit(),
+      rangeLimit: intent.scope === "monthly" ? Math.min(lineRangeLimit() * 4, 5000) : lineRangeLimit(),
       store: intent.store,
       dateYmd: intent.dateYmd,
       factsId: intent.factsId,
-      topicHint: intent.topicHint,
+      topicHint: enrichedTopicHint,
       source: "line_webhook",
       lineUserId,
     });
