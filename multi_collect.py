@@ -755,12 +755,14 @@ def _write_results(
 # ========= 38店舗ぶんを一気に送る =========
 
 
-def collect_all_once(*, target_store_id: str | None = None) -> None:
+def collect_all_once(*, target_store_id: str | None = None) -> dict:
     """
     3-phase パイプライン:
       Phase 1 — 天気プリフェッチ (sequential, Open-Meteo rate-limit 遵守)
       Phase 2 — 38 店舗並列スクレイピング (ThreadPoolExecutor)
       Phase 3 — GAS / Supabase 書き込み (sequential)
+
+    Returns dict with keys: stores, success, fail, duration_sec
     """
     print("collect_all_once.start")
     t_start = time.time()
@@ -770,7 +772,7 @@ def collect_all_once(*, target_store_id: str | None = None) -> None:
         stores = [s for s in STORES if s.get("store_id") == target_store_id]
         if not stores:
             print(f"[error] store_id not found: {target_store_id}")
-            return
+            return {"stores": 0, "success": 0, "fail": 0, "duration_sec": 0}
 
     # Phase 1: 天気データ事前取得
     weather_map = _prefetch_weather(stores)
@@ -795,6 +797,8 @@ def collect_all_once(*, target_store_id: str | None = None) -> None:
             f"(失敗率 {fail / total * 100:.0f}% / duration={duration:.1f}s)"
         )
         _send_alert(msg)
+
+    return {"stores": total, "success": success, "fail": fail, "duration_sec": round(duration, 1)}
 
 
 if __name__ == "__main__":

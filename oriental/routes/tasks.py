@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 import time
-from datetime import datetime
+import uuid
+from datetime import datetime, timezone
 from typing import Any, Tuple
 
 from bs4 import BeautifulSoup
@@ -19,6 +21,39 @@ from ..utils import storage, timeutil
 from multi_collect import PREF_COORDS, STORES, collect_all_once
 
 bp = Blueprint("tasks", __name__)
+
+# ---------- Background collect task state (process-local) ----------
+_collect_task: dict[str, Any] = {
+    "task_id": None,
+    "status": "idle",       # idle | running | completed | failed
+    "started_at": None,
+    "completed_at": None,
+    "result": None,
+    "error": None,
+}
+_collect_lock = threading.Lock()
+
+
+def _run_collect_background(task_id: str) -> None:
+    """Background thread target — runs collect_all_once() outside Flask request."""
+    global _collect_task
+    try:
+        result = collect_all_once()
+        with _collect_lock:
+            _collect_task.update(
+                status="completed",
+                completed_at=datetime.now(timezone.utc).isoformat(),
+                result=result,
+                error=None,
+            )
+    except Exception as exc:
+        with _collect_lock:
+            _collect_task.update(
+                status="failed",
+                completed_at=datetime.now(timezone.utc).isoformat(),
+                result=None,
+                error=str(exc),
+            )
 
 
 def _require_cron_secret() -> bool:
@@ -93,25 +128,72 @@ def tasks_multi_collect():
     """
     38 店舗を multi_collect.collect_all_once() で一括収集し、Supabase(public.logs) に保存するタスク。
 
-    正常時: {"ok": true, "stores": 38, "task": "collect_all_once"}
-    異常時: {"ok": false, "error": "..."}（HTTP 200 を維持）
+    デフォルト: 202 Accepted + バックグラウンドスレッド実行。
+    ?mode=sync: 旧互換の同期実行（完了まで HTTP を保持）。
+    既に実行中なら 409 Conflict を返す。
+    ステータス確認: GET /tasks/multi_collect/status
     """
     if _require_cron_secret():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
-    logger = current_app.logger
-    logger.info("collect_all_once.start")
-    started = time.perf_counter()
 
-    try:
-        collect_all_once()
-        store_count = len(STORES)
-        duration = time.perf_counter() - started
-        logger.info("collect_all_once.success stores=%d duration_sec=%.3f", store_count, duration)
-        return jsonify({"ok": True, "task": "collect_all_once", "stores": store_count})
-    except Exception as exc:  # noqa: BLE001
-        duration = time.perf_counter() - started
-        logger.exception("collect_all_once.failed duration_sec=%.3f", duration)
-        return jsonify({"ok": False, "task": "collect_all_once", "error": str(exc)})
+    global _collect_task
+    logger = current_app.logger
+    mode = request.args.get("mode", "async")
+
+    # 同期モード（後方互換）
+    if mode == "sync":
+        logger.info("collect_all_once.start mode=sync")
+        started = time.perf_counter()
+        try:
+            result = collect_all_once()
+            duration = time.perf_counter() - started
+            logger.info("collect_all_once.success mode=sync duration_sec=%.3f", duration)
+            return jsonify({"ok": True, "task": "collect_all_once", **result})
+        except Exception as exc:  # noqa: BLE001
+            duration = time.perf_counter() - started
+            logger.exception("collect_all_once.failed mode=sync duration_sec=%.3f", duration)
+            return jsonify({"ok": False, "task": "collect_all_once", "error": str(exc)})
+
+    # 非同期モード（デフォルト）
+    with _collect_lock:
+        if _collect_task["status"] == "running":
+            return jsonify({
+                "ok": True,
+                "accepted": False,
+                "reason": "already_running",
+                "task_id": _collect_task["task_id"],
+                "started_at": _collect_task["started_at"],
+            }), 409
+
+        task_id = uuid.uuid4().hex[:12]
+        _collect_task = {
+            "task_id": task_id,
+            "status": "running",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "completed_at": None,
+            "result": None,
+            "error": None,
+        }
+
+    logger.info("collect_all_once.start mode=async task_id=%s", task_id)
+    t = threading.Thread(target=_run_collect_background, args=(task_id,), daemon=True)
+    t.start()
+
+    return jsonify({
+        "ok": True,
+        "accepted": True,
+        "task_id": task_id,
+        "status": "running",
+    }), 202
+
+
+@bp.route("/tasks/multi_collect/status", methods=["GET"])
+def tasks_multi_collect_status():
+    """現在（または直前）の collect タスクの実行状態を返す。"""
+    if _require_cron_secret():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+    with _collect_lock:
+        return jsonify({"ok": True, **_collect_task})
 
 
 @bp.route("/api/tasks/collect_all_once", methods=["GET", "POST"])

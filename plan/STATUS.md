@@ -15,7 +15,7 @@ Target commit: (see git)
   - `model_registry.py` は `metadata.json` の `has_store_models` / `store_models` を検証し、**店舗別モデルを最優先でロード**。不整合時は明示エラー、未対応メタデータ時のみグローバルモデルへフォールバック。
 - `/api/second_venues`（最小応答。未設定時は空配列）
 - `/api/megribi_score`（全店舗 or 指定店舗の megribi_score を返す。`?store=` / `?stores=` 対応。Supabase backend 必須）
-- `/tasks/multi_collect` / `/api/tasks/collect_all_once`（本番収集の入口 → Supabase `logs`）
+- `/tasks/multi_collect` / `/api/tasks/collect_all_once`（本番収集の入口 → Supabase `logs`。デフォルト 202 Accepted + バックグラウンドスレッド実行。`?mode=sync` で旧同期モード。`/tasks/multi_collect/status` でステータス確認）
 - `/tasks/tick` / `/tasks/collect` / `/tasks/seed`（レガシー・ローカル向け）
 - `/tasks/update_second_venues`（任意。`GOOGLE_PLACES_API_KEY` がある場合のみ）
 - 全 `/tasks/*` エンドポイントに `CRON_SECRET` 認証追加済み
