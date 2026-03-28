@@ -184,12 +184,5 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 - Daily Report は `/api/cron/blog-draft` の 1リクエスト完了時間が Vercel の制約（~60秒）に近い場合がある。504 再発時は `plan/BLOG_CRON_ASYNC_FUTURE.md`
 - Open-Meteo 天気 API は 429 レート制限あり。リクエスト間隔を十分空けること（天気データは disk cache + TTL で 1 時間に 1 回取得）
 
-## 識別済みデッドコード（未削除）
-- `frontend/src/components/PreviewHeader.tsx` — 未参照
-- `frontend/src/components/home/HomeHeroSection.tsx` — 未参照
-- `frontend/src/app/components/DashboardPreview.tsx` — 未参照
-- `frontend/src/app/components/DebugPanel.tsx` / `DebugSection.tsx` — 相互参照のみ
-- `frontend/src/app/types/range.ts` — 未参照
-- `frontend/src/app/api/forecast_common.ts` — 未参照（レガシー）
-- `frontend/src/app/blog/_data.ts` — 未参照（旧データソース）
-- `frontend/src/app/blog/` 配下の `.bak` ファイル（18件） — バックアップ残骸
+## 識別済みデッドコード
+- ✅ **全て削除済み**（Round 6-1, 2026-03-28 確認）: PreviewHeader, HomeHeroSection, DashboardPreview, DebugPanel/DebugSection, types/range, forecast_common, blog/_data, .bak ファイル群
