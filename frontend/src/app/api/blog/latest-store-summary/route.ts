@@ -1,7 +1,7 @@
 "use server";
 
 import { NextResponse } from "next/server";
-import { fetchLatestAutoBlogDraftByStoreSlug, isBlogDraftsConfigured } from "@/lib/supabase/blogDrafts";
+import { fetchLatestPublishedReportByStore, isBlogDraftsConfigured } from "@/lib/supabase/blogDrafts";
 
 function normalizeStoreSlug(v: string | null): string {
   return (v ?? "").trim().toLowerCase();
@@ -94,7 +94,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: true, hasData: false }, { status: 200 });
   }
 
-  const row = await fetchLatestAutoBlogDraftByStoreSlug(store);
+  const row = await fetchLatestPublishedReportByStore(store, "daily");
   if (!row) return NextResponse.json({ ok: true, hasData: false }, { status: 200 });
 
   const href = `/reports/daily/${encodeURIComponent(row.store_slug)}`;
@@ -111,7 +111,10 @@ export async function GET(req: Request) {
       updatedLabel,
       bullets,
     },
-    { status: 200 },
+    {
+      status: 200,
+      headers: { "cache-control": "public, s-maxage=60, stale-while-revalidate=300" },
+    },
   );
 }
 

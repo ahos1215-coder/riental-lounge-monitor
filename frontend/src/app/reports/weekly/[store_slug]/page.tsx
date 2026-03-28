@@ -10,6 +10,9 @@ import { ReportViewTracker } from "@/components/ReportViewTracker";
 import { fetchLatestPublishedReportByStore } from "@/lib/supabase/blogDrafts";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 
+/** 毎週水曜更新 — 5 分ごとに再検証 */
+export const revalidate = 300;
+
 type Props = {
   params: Promise<{ store_slug: string }>;
 };

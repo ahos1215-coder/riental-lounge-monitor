@@ -12,6 +12,9 @@ import { readPublicFacts } from "@/lib/blog/publicFacts";
 import { fetchLatestPublishedReportByStore } from "@/lib/supabase/blogDrafts";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 
+/** 18:00/21:30 に更新されるので 60 秒ごとに再検証 */
+export const revalidate = 60;
+
 type Props = {
   params: Promise<{ store_slug: string }>;
 };

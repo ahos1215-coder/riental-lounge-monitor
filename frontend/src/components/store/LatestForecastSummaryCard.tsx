@@ -23,7 +23,9 @@ function mlHighlightChips(snapshot: StoreSnapshot): string[] {
   if (peak > 0 && peakTime && peakTime !== "—") {
     const pm = snapshot.peakMen != null ? Math.round(snapshot.peakMen) : null;
     const pw = snapshot.peakWomen != null ? Math.round(snapshot.peakWomen) : null;
-    const detail = pm != null && pw != null ? `男性${pm}名 / 女性${pw}名` : `最大 ${peak} 人`;
+    const detail = pm != null || pw != null
+      ? `男性${pm ?? 0}名 / 女性${pw ?? 0}名`
+      : `最大 ${peak} 人`;
     chips.push(`ピーク目安 ${peakTime}（${detail}）`);
   } else if (peakTime && peakTime !== "—") {
     chips.push(`ピーク目安 ${peakTime}`);

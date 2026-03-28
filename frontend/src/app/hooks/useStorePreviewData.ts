@@ -349,16 +349,15 @@ function pickPeak(series: TimeSeriesPoint[]) {
   let bestMen: number | null = null;
   let bestWomen: number | null = null;
   series.forEach((p) => {
-    const total =
-      (p.menActual ?? 0) +
-      (p.womenActual ?? 0) +
-      (p.menForecast ?? 0) +
-      (p.womenForecast ?? 0);
+    // actual があればそちらを優先、なければ forecast（二重カウント防止）
+    const men = p.menActual ?? p.menForecast ?? 0;
+    const women = p.womenActual ?? p.womenForecast ?? 0;
+    const total = men + women;
     if (total > bestTotal) {
       bestTotal = total;
       bestLabel = p.label;
-      bestMen = p.menActual !== null ? Math.round(p.menActual) : (p.menForecast !== null ? Math.round(p.menForecast) : null);
-      bestWomen = p.womenActual !== null ? Math.round(p.womenActual) : (p.womenForecast !== null ? Math.round(p.womenForecast) : null);
+      bestMen = men > 0 ? Math.round(men) : null;
+      bestWomen = women > 0 ? Math.round(women) : null;
     }
   });
   return { peakTotal: bestTotal, peakTimeLabel: bestLabel || "--:--", peakMen: bestMen, peakWomen: bestWomen };

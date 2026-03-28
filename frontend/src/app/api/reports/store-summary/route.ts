@@ -58,8 +58,8 @@ const EDITION_LABELS: Record<string, string> = {
   weekly: "週報",
 };
 
-/** AIレポートは18:00/21:30のみ更新 → 10分CDNキャッシュ、30分stale-while-revalidate */
-const CACHE_HEADER = "public, s-maxage=600, stale-while-revalidate=1800";
+/** AIレポートは18:00/21:30 更新 — 新着をすぐ反映するため 60s CDN + 5 分 stale */
+const CACHE_HEADER = "public, s-maxage=60, stale-while-revalidate=300";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
