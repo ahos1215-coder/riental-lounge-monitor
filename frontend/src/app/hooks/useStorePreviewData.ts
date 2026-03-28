@@ -27,6 +27,8 @@ export type StoreSnapshot = {
   nowWomen: number;
   peakTimeLabel: string;
   peakTotal: number;
+  peakMen: number | null;
+  peakWomen: number | null;
   recommendation: string;
   forecastUpdatedLabel: string;
   series: TimeSeriesPoint[];
@@ -105,6 +107,8 @@ function buildBaseSnapshot(meta: StoreMeta): StoreSnapshot {
     nowWomen: 0,
     peakTimeLabel: "--:--",
     peakTotal: 0,
+    peakMen: null,
+    peakWomen: null,
     recommendation: "データなし",
     forecastUpdatedLabel: "--:--",
     series: buildEmptySeries(),
@@ -342,6 +346,8 @@ function pickCurrentActual(series: TimeSeriesPoint[]) {
 function pickPeak(series: TimeSeriesPoint[]) {
   let bestLabel = "";
   let bestTotal = 0;
+  let bestMen: number | null = null;
+  let bestWomen: number | null = null;
   series.forEach((p) => {
     const total =
       (p.menActual ?? 0) +
@@ -351,9 +357,11 @@ function pickPeak(series: TimeSeriesPoint[]) {
     if (total > bestTotal) {
       bestTotal = total;
       bestLabel = p.label;
+      bestMen = p.menActual !== null ? Math.round(p.menActual) : (p.menForecast !== null ? Math.round(p.menForecast) : null);
+      bestWomen = p.womenActual !== null ? Math.round(p.womenActual) : (p.womenForecast !== null ? Math.round(p.womenForecast) : null);
     }
   });
-  return { peakTotal: bestTotal, peakTimeLabel: bestLabel || "--:--" };
+  return { peakTotal: bestTotal, peakTimeLabel: bestLabel || "--:--", peakMen: bestMen, peakWomen: bestWomen };
 }
 
 function hasSeriesData(series: TimeSeriesPoint[]) {
@@ -453,7 +461,7 @@ export function useStorePreviewData(
         const current = pickCurrentActual(effectiveActualSeries);
         const nowMen = latestActual?.nowMen ?? current.nowMen;
         const nowWomen = latestActual?.nowWomen ?? current.nowWomen;
-        const { peakTotal, peakTimeLabel } = pickPeak(effectiveActualSeries);
+        const { peakTotal, peakTimeLabel, peakMen: peakMenVal, peakWomen: peakWomenVal } = pickPeak(effectiveActualSeries);
 
         const baseSnapshotResolved: StoreSnapshot = {
           ...baseSnapshot,
@@ -464,6 +472,8 @@ export function useStorePreviewData(
           nowTotal: Math.round(nowMen + nowWomen),
           peakTotal: Math.round(peakTotal),
           peakTimeLabel,
+          peakMen: peakMenVal,
+          peakWomen: peakWomenVal,
           forecastUpdatedLabel: "--:--",
           series: effectiveActualSeries,
           hasData,
@@ -497,6 +507,8 @@ export function useStorePreviewData(
           nowTotal: Math.round(mergedNowMen + mergedNowWomen),
           peakTotal: Math.round(mergedPeak.peakTotal),
           peakTimeLabel: mergedPeak.peakTimeLabel,
+          peakMen: mergedPeak.peakMen,
+          peakWomen: mergedPeak.peakWomen,
           forecastUpdatedLabel: formatNowHmJst(new Date()),
           series: effectiveMergedSeries,
           hasData:

@@ -18,6 +18,9 @@ on:
         options:
           - evening_preview
           - late_update
+  schedule:
+    - cron: "0 9 * * *"    # JST 18:00 → evening_preview
+    - cron: "30 12 * * *"  # JST 21:30 → late_update
 
 jobs:
   trigger:
@@ -76,16 +79,25 @@ jobs:
           INPUT_EDITION: ${{ github.event.inputs.edition }}
         run: |
           set -e
-          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
-            echo "::error::このワークフローは workflow_dispatch 専用です。event: $EVENT_NAME"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ -z "${INPUT_EDITION:-}" ]; then
+              echo "::error::edition が指定されていません。workflow_dispatch inputs.edition を指定してください。"
+              exit 1
+            fi
+            EDITION="${INPUT_EDITION}"
+          elif [ "$EVENT_NAME" = "schedule" ]; then
+            HOUR=$(date -u +%H)
+            if [ "$HOUR" = "12" ]; then
+              EDITION="late_update"
+            else
+              EDITION="evening_preview"
+            fi
+          else
+            echo "::error::Unsupported event: $EVENT_NAME"
             exit 1
           fi
-          if [ -z "${INPUT_EDITION:-}" ]; then
-            echo "::error::edition が指定されていません。workflow_dispatch inputs.edition を指定してください。"
-            exit 1
-          fi
-          echo "edition=${INPUT_EDITION}" >> "$GITHUB_OUTPUT"
-          echo "trigger=workflow_dispatch" >> "$GITHUB_OUTPUT"
+          echo "edition=${EDITION}" >> "$GITHUB_OUTPUT"
+          echo "trigger=${EVENT_NAME}" >> "$GITHUB_OUTPUT"
 
       - name: GET /api/cron/blog-draft
         continue-on-error: true

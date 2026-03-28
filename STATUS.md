@@ -24,11 +24,11 @@
 3. **stores** に、カンマ区切りで slug のみ（例: `nagasaki,fukuoka`）。空白は無視される。
 4. 実行後、再度 **Supabase `blog_drafts`** で当該店舗を確認する。
 
-全 38 店の定時実行は **Blog draft cron (GitHub Actions)**（`.github/workflows/trigger-blog-cron.yml`）のまま。
+全 38 店の定時実行は **Blog draft cron (GitHub Actions)**（`.github/workflows/trigger-blog-cron.yml`）。GHA native schedule（UTC 09:00 / 12:30）で自動起動。cron-job.org は不要。
 
 ## 定時 Cron 実行後のチェックリスト（初回・ワークフロー変更直後）
 
-**いつ**: JST **18:00 便**または **21:30 便**の直後（もしくは **`workflow_dispatch`** で全店を手動実行した直後）。
+**いつ**: JST **18:00 便**または **21:30 便**の直後（GHA schedule 自動起動、もしくは **`workflow_dispatch`** で全店を手動実行した直後）。
 
 1. **GitHub** → **Actions** → **Blog draft cron (GitHub Actions)** → いま完了した **run** を開く。
 2. **ジョブ一覧**で次を確認する。

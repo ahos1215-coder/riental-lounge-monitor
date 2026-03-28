@@ -203,7 +203,7 @@ function buildSystemInstruction(edition: BlogEdition): string {
     "- frontmatter 内の **すべての行**（最初と最後の `---` を含む）も **`title:` / `description:` など、行頭に空白・インデントを付けない**（スペースで字下げしない）。",
     "- frontmatter 終了の `---` の直後から本文（## 見出し以降）。本文の通常の段落インデントは不要（Markdown の標準どおりでよい）。",
     "- frontmatter のキー: title, description, date (YYYY-MM-DD), categoryId (guide|beginner|prediction|column|interview), level (easy|normal|pro), store, facts_id, facts_visibility (show)",
-    "- 本文は ## 見出しで、少なくとも: 『10秒まとめ』『今日の一言』『理由はこれ』『初心者メモ』。",
+    "- 本文は ## 見出しで **『10秒まとめ』のみ**（箇条書き3行以内）。今日の一言・理由はこれ・初心者メモ等の追加セクションは**不要**。",
     "- 『10秒まとめ』のラベル例: 「ピーク時間（賑わいの目安）:」「入店しやすさの目安（待ちにくさ）:」など（「避けたい時間」「ねらい目＝最高」禁止）。",
     "- 文体はです・ます調、読みやすく簡潔に。",
   ].join("\n");

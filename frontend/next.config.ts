@@ -24,16 +24,16 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        // 予測データ: 5分CDNキャッシュ（モデル再計算は15分ごと）
+        // 予測データ: 1分CDNキャッシュ（Flask側キャッシュと合わせて最大2分で更新）
         source: "/api/forecast_today",
         headers: [
-          { key: "Cache-Control", value: "public, s-maxage=300, stale-while-revalidate=900" },
+          { key: "Cache-Control", value: "public, s-maxage=60, stale-while-revalidate=300" },
         ],
       },
       {
         source: "/api/forecast_next_hour",
         headers: [
-          { key: "Cache-Control", value: "public, s-maxage=300, stale-while-revalidate=900" },
+          { key: "Cache-Control", value: "public, s-maxage=60, stale-while-revalidate=300" },
         ],
       },
       {

@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-03-26 (Round 4 完了)
+Last updated: 2026-03-28 (Batch 1: blog cron 常駐化・キャッシュ短縮・ピーク男女表示)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -66,7 +66,7 @@ Target commit: (see git)
 - **Recharts**: 全チャートを Chart.js → Recharts に統一済み（Round 3）。Chart.js 依存は完全削除
 - **StoreCard**: データ未取得時のプレースホルダ（`—`・`0人`）を非表示化（Round 3）
 - **ブログ frontmatter**: Zod 検証（`blogFrontmatter.ts` / `content.ts`）
-- **CDN Cache-Control**: API proxy に `s-maxage` + `stale-while-revalidate` 設定（Round 1 パフォーマンス改善）
+- **CDN Cache-Control**: API proxy に `s-maxage` + `stale-while-revalidate` 設定。予測系（`forecast_today` / `forecast_next_hour`）は `s-maxage=60`（Flask TTL も 60s）、最大遅延 ~2 分
 
 ### Supabase `blog_drafts` スキーマ（2026-03-26 以降）
 
@@ -91,8 +91,8 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 ### Content / Batch
 
 #### Daily Report（`content_type='daily'`, `is_published=true`）
-- **Workflow**: `.github/workflows/trigger-blog-cron.yml`（`workflow_dispatch` 専用・スケジュールなし）
-- **トリガー**: **cron-job.org** が JST 18:00 / 21:30 に GitHub `workflow_dispatch` API を呼び出す（GHA 内部 schedule は削除済み）
+- **Workflow**: `.github/workflows/trigger-blog-cron.yml`（`schedule` 常駐 + `workflow_dispatch` 手動対応）
+- **トリガー**: **GHA native schedule**（`cron: "0 9 * * *"` JST 18:00 → evening_preview、`cron: "30 12 * * *"` JST 21:30 → late_update）。cron-job.org 不要
 - **構成**: 38店舗 × 独立 matrix ジョブ、`max-parallel: 15`、`continue-on-error: true`
 - **エンドポイント**: `GET /api/cron/blog-draft?store=<slug>&edition=<edition>&source=github_actions_cron`
 - **保存**: Supabase `blog_drafts`（`content_type='daily'`, `is_published=true`）
@@ -127,7 +127,7 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 
 | ファイル | 用途 | トリガー |
 |----------|------|----------|
-| `trigger-blog-cron.yml` | Daily Report 38店舗 matrix | `workflow_dispatch`（cron-job.org） |
+| `trigger-blog-cron.yml` | Daily Report 38店舗 matrix | `schedule`（09:00/12:30 UTC）+ `workflow_dispatch` |
 | `generate-weekly-insights.yml` | Weekly Report Fan-in Matrix | `schedule`（水曜 UTC 21:30）+ dispatch |
 | `generate-public-facts.yml` | Public Facts 生成 + Git commit | `schedule`（毎日 UTC 00:30）+ dispatch |
 | `train-ml-model.yml` | ML モデル学習 + Supabase Storage | `schedule`（毎日 UTC 20:30）+ dispatch |
@@ -147,7 +147,7 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 
 | サービス | 対象 | JST | 備考 |
 |----------|------|-----|------|
-| cron-job.org | `trigger-blog-cron.yml` dispatch | 18:00 / 21:30 | GHA schedule 削除済み |
+| GHA schedule | `trigger-blog-cron.yml` | 18:00 / 21:30 | UTC 09:00 / 12:30。cron-job.org 不要 |
 | cron-job.org | `/tasks/multi_collect` | 15分毎（営業時間帯） | `CRON_SECRET` 認証 |
 | GHA schedule | `train-ml-model.yml` | 05:30 | UTC 20:30 |
 | GHA schedule | `generate-public-facts.yml` | 09:30 | UTC 00:30 |

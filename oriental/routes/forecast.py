@@ -6,7 +6,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 # Flask プロセス内でのキャッシュ TTL（秒）
 # ワーカーごとに独立するが、CDN キャッシュと合わせて十分な効果がある
-_FORECAST_CACHE_TTL = int(os.getenv("FORECAST_RESULT_CACHE_TTL", "300"))  # 5 分
+_FORECAST_CACHE_TTL = int(os.getenv("FORECAST_RESULT_CACHE_TTL", "60"))  # 1 分
 
 from ..config import AppConfig
 from ..ml.forecast_service import ForecastService
