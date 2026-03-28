@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
 
@@ -218,8 +219,7 @@ def api_range_multi():
     else:
         start_utc, end_utc = None, None
 
-    by_slug: dict[str, dict] = {}
-    for slug in slugs:
+    def _fetch_slug(slug: str):
         store_id = SLUG_TO_ID[slug]
         try:
             supabase_rows = provider.fetch_range(
@@ -230,11 +230,17 @@ def api_range_multi():
             )
         except SupabaseError as exc:
             logger.warning("api_range_multi.supabase_error slug=%s detail=%s", slug, exc)
-            by_slug[slug] = {"rows": []}
-            continue
+            return slug, {"rows": []}
         deduped = _deduplicate_by_ts(supabase_rows)
         limited = deduped[-query.limit :]
-        by_slug[slug] = {"rows": limited}
+        return slug, {"rows": limited}
+
+    by_slug: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=min(12, len(slugs))) as pool:
+        futures = [pool.submit(_fetch_slug, s) for s in slugs]
+        for fut in as_completed(futures):
+            slug_key, data = fut.result()
+            by_slug[slug_key] = data
 
     logger.info(
         "api_range_multi.success slug_count=%d limit=%d",

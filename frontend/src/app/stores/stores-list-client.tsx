@@ -374,35 +374,37 @@ export default function StoresListClient() {
       }
 
       if (!signal.aborted) {
-        await Promise.all(targets.map((store) => fetchStoreCard(store)));
-      }
+        const forecastPromises = targets.map((store) => fetchStoreCard(store));
 
-      // めぐりびスコアをバッチ取得してカードに反映
-      if (!signal.aborted && targets.length > 0) {
-        try {
-          const slugsCsv = targets.map((t) => t.slug).join(",");
-          const mRes = await fetch(
-            `/api/megribi_score?stores=${encodeURIComponent(slugsCsv)}`,
-            { signal },
-          );
-          if (!signal.aborted && mRes.ok) {
-            const mJson = (await mRes.json()) as Record<string, { score?: number }>;
-            if (!signal.aborted) {
-              setStoreRealtime((prev) => {
-                const next = { ...prev };
-                for (const t of targets) {
-                  const score = mJson[t.slug]?.score ?? null;
-                  if (next[t.slug]) {
-                    next[t.slug] = { ...next[t.slug], megribiScore: score };
+        // めぐりびスコアを forecast と同時にバッチ取得
+        const megribiPromise = (async () => {
+          try {
+            const slugsCsv = targets.map((t) => t.slug).join(",");
+            const mRes = await fetch(
+              `/api/megribi_score?stores=${encodeURIComponent(slugsCsv)}`,
+              { signal },
+            );
+            if (!signal.aborted && mRes.ok) {
+              const mJson = (await mRes.json()) as Record<string, { score?: number }>;
+              if (!signal.aborted) {
+                setStoreRealtime((prev) => {
+                  const next = { ...prev };
+                  for (const t of targets) {
+                    const score = mJson[t.slug]?.score ?? null;
+                    if (next[t.slug]) {
+                      next[t.slug] = { ...next[t.slug], megribiScore: score };
+                    }
                   }
-                }
-                return next;
-              });
+                  return next;
+                });
+              }
             }
+          } catch {
+            // スコア取得失敗は非致命的
           }
-        } catch {
-          // スコア取得失敗は非致命的
-        }
+        })();
+
+        await Promise.all([...forecastPromises, megribiPromise]);
       }
 
       if (!signal.aborted) {

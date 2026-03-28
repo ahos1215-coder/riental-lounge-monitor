@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-03-28 (Batch 1: blog cron 常駐化・キャッシュ短縮・ピーク男女表示)
+Last updated: 2026-03-28 (Batch 4: 全ページ2-3秒表示 — バックエンド並列化 + フロントエンド同時発火)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -8,13 +8,13 @@ Target commit: (see git)
 - `/healthz`（稼働確認）
 - `/api/current`（ローカル保存の最新レコード。Supabase 直取得ではない）
 - `/api/range`（**`store` / `limit` のみ**。Supabase は `ts.desc` 取得 → 返却は `ts.asc`、**サーバ側の夜窓フィルタなし**）
-- `/api/range_multi`（**`stores=slug1,slug2,...` + `limit` 等**。Supabase のみ。店舗一覧の一括 range 取得用）
+- `/api/range_multi`（**`stores=slug1,slug2,...` + `limit` 等**。Supabase のみ。店舗一覧の一括 range 取得用。**ThreadPoolExecutor(12) で並列取得**）
 - `/api/meta`（設定サマリ）
 - `/api/forecast_today` / `/api/forecast_next_hour`（`ENABLE_FORECAST=1` のときのみ。無効時は 503）
   - **店舗別最適化モデル（ML 2.0）本番稼働中**。全38店舗で固有の重みを使った推論を有効化済み。
   - `model_registry.py` は `metadata.json` の `has_store_models` / `store_models` を検証し、**店舗別モデルを最優先でロード**。不整合時は明示エラー、未対応メタデータ時のみグローバルモデルへフォールバック。
 - `/api/second_venues`（最小応答。未設定時は空配列）
-- `/api/megribi_score`（全店舗 or 指定店舗の megribi_score を返す。`?store=` / `?stores=` 対応。Supabase backend 必須）
+- `/api/megribi_score`（全店舗 or 指定店舗の megribi_score を返す。`?store=` / `?stores=` 対応。Supabase backend 必須。**ThreadPoolExecutor(12) で並列取得 — 38店舗12s→<1s**）
 - `/tasks/multi_collect` / `/api/tasks/collect_all_once`（本番収集の入口 → Supabase `logs`。デフォルト 202 Accepted + バックグラウンドスレッド実行。`?mode=sync` で旧同期モード。`/tasks/multi_collect/status` でステータス確認）
 - `/tasks/tick` / `/tasks/collect` / `/tasks/seed`（レガシー・ローカル向け）
 - `/tasks/update_second_venues`（任意。`GOOGLE_PLACES_API_KEY` がある場合のみ）
@@ -27,8 +27,8 @@ Target commit: (see git)
 | パス | 概要 |
 |------|------|
 | `/` | トップ。「今夜のおすすめ」（megribi_score TOP 5）+ Last visited ミニチャート + ブログ新着 + ナビリンク |
-| `/stores` | 全店舗一覧（12件/ページ・地域タブ・テキスト検索・`/api/range_multi` バッチ取得） |
-| `/store/[id]` | 店舗詳細（リアルタイムカード・Recharts 時系列・ML 予測・レポート要約カード・関連店舗） |
+| `/stores` | 全店舗一覧（12件/ページ・地域タブ・テキスト検索・`/api/range_multi` バッチ取得・**forecast + megribi_score 同時発火**） |
+| `/store/[id]` | 店舗詳細（リアルタイムカード・Recharts 時系列・ML 予測・レポート要約カード・関連店舗・**range + forecast 同時発火**） |
 | `/reports` | **AI予測レポート統合一覧**（Daily/Weekly タブ切替・エリアフィルタ・店舗名検索。ヘッダー「AI予測」からリンク） |
 | `/reports/daily` | `/reports` へリダイレクト |
 | `/reports/daily/[store_slug]` | **Daily Report 個別**: 最新 `content_type='daily'`・`is_published=true`。Facts カード表示 |

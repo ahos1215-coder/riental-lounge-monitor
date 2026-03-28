@@ -443,9 +443,13 @@ export function useStorePreviewData(
           `&limit=${rangeLimit}`;
 
         const forecastUrl = `/api/forecast_today?store=${encodeURIComponent(meta.slug)}`;
-        // 初期表示高速化: まず実測(/api/range)だけで描画し、予測は後追いで合流
-        const rangeRes = await fetch(rangeUrl, { signal });
-        const rangeJson = await rangeRes.json().catch(() => ({}));
+        // 高速化: range と forecast を同時発火、range が先に解決したら即描画
+        const rangePromise = fetch(rangeUrl, { signal }).then((r) => r.json().catch(() => ({})));
+        const forecastPromise = rangeMode === "today"
+          ? fetch(forecastUrl, { signal }).then((r) => r.json().catch(() => ({})))
+          : Promise.resolve(null);
+
+        const rangeJson = await rangePromise;
 
         const allRangePoints = parseRangePoints(rangeJson);
         const rangePoints = allRangePoints.filter((p) =>
@@ -483,12 +487,12 @@ export function useStorePreviewData(
           setState({ loading: false, error: null, snapshot: baseSnapshotResolved });
         }
 
-        if (rangeMode !== "today") {
+        // forecast が完了したら合流（range と並行で既にリクエスト済み）
+        const forecastJson = await forecastPromise;
+        if (!forecastJson || rangeMode !== "today") {
           return;
         }
 
-        const forecastRes = await fetch(forecastUrl, { signal });
-        const forecastJson = await forecastRes.json().catch(() => ({}));
         const allForecastPoints = parseForecastPoints(forecastJson);
         const forecastPoints = allForecastPoints.filter((p) =>
           isWithinNight(p.ts, nightWindow),

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Blueprint, current_app, jsonify, request
 
 # Flask プロセス内でのキャッシュ TTL（秒）
@@ -212,32 +213,24 @@ def api_megribi_score():
     if provider is None:
         return jsonify({"ok": False, "error": "supabase-unavailable"}), 502
 
-    results = []
-    for slug in slugs[:40]:
-        store_id = SLUG_TO_ID.get(slug)
-        if not store_id:
-            continue
-        try:
-            rows = provider.fetch_range(store_id=store_id, limit=1)
-        except Exception:
-            continue
-        if not rows:
-            continue
+    valid_slugs = [(s, SLUG_TO_ID[s]) for s in slugs[:40] if s in SLUG_TO_ID]
 
+    def _fetch_one(slug: str, store_id: str):
+        rows = provider.fetch_range(store_id=store_id, limit=1)
+        if not rows:
+            return None
         latest = rows[-1]
         total = float(latest.get("total", 0) or 0)
         men = float(latest.get("men", 0) or 0)
         women = float(latest.get("women", 0) or 0)
-
         capacity = 80.0
         occupancy_rate = min(total / capacity, 1.0) if capacity > 0 else 0.0
         female_ratio = women / total if total > 0 else 0.5
-
         score = calc_megribi_score(
             female_ratio=female_ratio,
             occupancy_rate=occupancy_rate,
         )
-        results.append({
+        return {
             "slug": slug,
             "score": round(score, 3),
             "total": int(total),
@@ -246,7 +239,18 @@ def api_megribi_score():
             "female_ratio": round(female_ratio, 3),
             "occupancy_rate": round(occupancy_rate, 3),
             "ts": latest.get("ts", ""),
-        })
+        }
+
+    results = []
+    with ThreadPoolExecutor(max_workers=min(12, len(valid_slugs) or 1)) as pool:
+        futures = {pool.submit(_fetch_one, s, sid): s for s, sid in valid_slugs}
+        for fut in as_completed(futures):
+            try:
+                item = fut.result()
+                if item:
+                    results.append(item)
+            except Exception:
+                pass
 
     results.sort(key=lambda r: r["score"], reverse=True)
     logger.info("api_megribi_score.success count=%d", len(results))
