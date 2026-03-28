@@ -1,5 +1,5 @@
 # VISION_AND_FUTURE
-Last updated: 2026-03-28 (Round 5 完了)
+Last updated: 2026-03-29 (Round 6 完了)
 Target commit: (see git)
 
 > **このファイルの役割**  
@@ -26,7 +26,7 @@ Target commit: (see git)
 
 ---
 
-## 2. 現状の到達点（Round 5 完了 / 2026-03-28）
+## 2. 現状の到達点（Round 6 完了 / 2026-03-29）
 
 詳細は **`plan/STATUS.md`**。
 
@@ -34,7 +34,7 @@ Target commit: (see git)
 |------|------|
 | 収集 → Supabase | 本番稼働。cron-job.org → Flask `/tasks/multi_collect`（`CRON_SECRET` 認証）|
 | Flask API | `/api/range` `/api/megribi_score` `/api/forecast_*` `/api/forecast_today_multi` `/api/forecast_accuracy` 等 13 エンドポイント稼働 |
-| Next.js 画面 | 13 ページルート実装済み（`/` `/stores` `/store/[id]` `/reports` `/reports/*/[store_slug]` `/blog` `/mypage` `/insights/weekly` 等） |
+| Next.js 画面 | 13 ページルート実装済み（`/` `/stores` `/store/[id]` `/reports` `/reports/*/[store_slug]` `/blog` `/mypage` 等）。`/insights/weekly` は `/reports/weekly` に 301 リダイレクト |
 | Next.js API | 14 API route 稼働（proxy + cron + LINE + SNS） |
 | AI 予測レポート | Daily: 38 店舗 × 2 回/日、Weekly: 38 店舗 × 1 回/週。全自動 |
 | Editorial Blog | LINE → Gemini → 承認 → 公開。半自動 |
@@ -50,6 +50,10 @@ Target commit: (see git)
 | CDN キャッシュ | API proxy に `s-maxage` + `stale-while-revalidate` |
 | OGP | 全主要ページに設定済み |
 | Sitemap | 全店舗の Daily/Weekly レポート URL 登録済み |
+| E2E テスト | Playwright スモークテスト（5 テストグループ）+ CI ワークフロー |
+| エラー/ローディング UX | 全主要ページに `error.tsx` / `loading.tsx` 配置（11 ファイル） |
+| Weekly Insights 統合 | `/reports/weekly` に MDX + 定量データ（チャート・Good Windows・メトリクス）を統合表示 |
+| PAT 期限切れ監視 | 週次 GHA + LINE Push で GitHub PAT 有効期限を通知 |
 
 ---
 
@@ -78,11 +82,11 @@ Target commit: (see git)
 6. ✅ StoreCard UI 改善
 
 **残タスク**:
-- デッドコード削除（STATUS.md 記載の未参照ファイル）
+- ~~デッドコード削除~~ → ✅ Round 6 完了
 - Weekly Insights のパラメータ調整
 - `/api/current` の位置づけ決定
-- `/insights/weekly` と `/reports/weekly` の重複整理
-- E2E テスト / error.tsx / loading.tsx の充実
+- ~~`/insights/weekly` と `/reports/weekly` の重複整理~~ → ✅ Round 6 統合完了（301 リダイレクト + `insight_json` 表示）
+- ~~E2E テスト / error.tsx / loading.tsx の充実~~ → ✅ Round 6 完了
 
 ### フェーズ B — 発信（X / 拡散）✅ 基盤完了
 

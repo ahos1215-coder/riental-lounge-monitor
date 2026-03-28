@@ -1,5 +1,5 @@
 # ROADMAP
-Last updated: 2026-03-28 (Round 5 完了)
+Last updated: 2026-03-29 (Round 6 完了)
 Target commit: (see git)
 
 > **構想・フェーズ順・備忘の全文**は **`plan/VISION_AND_FUTURE.md`**。本ファイルは短いタスク一覧と「当面やらないこと」に絞る。
@@ -93,17 +93,20 @@ Target commit: (see git)
 | ステータス日本語化 | StoreCard の `GO/WAIT/SKIP` → `狙い目/様子見/他店へ` に変更 |
 | X 投稿テンプレート改善 | `x-auto-post.yml` に全38店舗の slug→日本語名マッピング追加。ツイート内容を日本語店舗名で表示 |
 
+### Round 6: 品質・信頼性の底上げ（E2E テスト + UX + 統合 + バグ修正）
+
+| 項目 | 内容 |
+|------|------|
+| デッドコード一括削除 | STATUS.md 記載の未参照ファイル・.bak ファイルを全削除 |
+| E2E テスト基盤（Playwright） | 5 テストグループのスモークテスト + CI ワークフロー `e2e.yml` |
+| エラーバウンダリ + ローディング UX | 全主要ページに `error.tsx` / `loading.tsx` 11 ファイル追加 |
+| Weekly Insights → `/reports/weekly` 統合 | `insight_json` から定量データ（チャート・Good Windows・メトリクス）を Weekly Report ページに統合表示。`/insights/weekly/*` → `/reports/weekly/*` に 301 リダイレクト。`WeeklyStoreCharts.tsx` を共有コンポーネントに移動 |
+| GitHub PAT 期限切れ LINE 通知 | 週次 GHA ワークフロー `check-pat-expiry.yml`。30日以内で LINE Push 通知 |
+| Daily Report 表示バグ修正 | ① ISR `revalidate` 未設定 → 追加、② データソース不整合（`fetchLatestAutoBlogDraftByStoreSlug` → `fetchLatestPublishedReportByStore`）、③ CDN キャッシュ過長 → 60s に統一 |
+| pickPeak 二重カウント修正 | actual + forecast を合算していた → actual 優先フォールバックに変更 |
+| ピーク男女別表示改善 | 片方 null でも男女別を表示するように変更 |
+
 ---
-
-## Round 6（提案: 品質・信頼性の底上げ）
-
-| # | 項目 | 推奨モデル | 理由 |
-|---|------|-----------|------|
-| 6-1 | デッドコード一括削除 | Sonnet | 機械的削除。STATUS.md 記載の未参照ファイル + .bak ファイル |
-| 6-2 | E2E テスト基盤 | Sonnet | Playwright 導入、主要3ページ（トップ・店舗一覧・レポート統合）のスモークテスト |
-| 6-3 | エラーバウンダリ + ローディング UX | Sonnet | 各ページに `error.tsx` / `loading.tsx` を配置。API エラー時のフォールバック UI（**一部実装済み**） |
-| 6-4 | Weekly Insights → `/reports/weekly` 統合検討 | Opus | `/insights/weekly` と `/reports/weekly` の重複を整理。データソース統一の設計判断 |
-| 6-5 | GitHub PAT 期限切れ LINE 通知 | Sonnet | 週次 GHA ワークフロー + LINE Push API |
 
 ## Round 7（提案: ユーザー体験の深化）
 
@@ -127,7 +130,6 @@ Target commit: (see git)
 
 ## P0（直近で着手しやすい項目）
 
-- **デッドコード削除**: STATUS.md に記載の未参照ファイル・.bak ファイルのクリーンアップ
 - **`avoid_time` / プロンプト**: `draftGenerator.ts` の表現精度向上（ズレる場合は人手修正）
 - **主要ドキュメントの継続同期**（`plan/*` と README の整合）
 - **Weekly Insights の品質改善**（score 閾値・最小継続時間の調整。`plan/WEEKLY_INSIGHTS_TUNING.md`）
@@ -135,12 +137,8 @@ Target commit: (see git)
 
 ## P1
 
-- **E2E テスト**: Playwright による主要ページのスモークテスト
-- **エラー UX**: `error.tsx` / `loading.tsx` の充実化
 - Editorial ブログの充実（LINE から定期的に分析記事を作る運用確立）
-- **GitHub PAT 期限切れ通知**（LINE Push API で週次チェック）
 - 監視・運用の可視化（ログの整理、Render/Vercel 運用の整理）
-- **`/insights/weekly` と `/reports/weekly` の重複整理**
 
 ## P2
 

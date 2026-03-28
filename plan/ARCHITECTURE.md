@@ -1,5 +1,5 @@
 # ARCHITECTURE
-Last updated: 2026-03-28 (Round 5: GA4 計測 + forecast_accuracy API)
+Last updated: 2026-03-29 (Round 6: Weekly Insights 統合 + E2E テスト + エラー/ローディング UX)
 Target commit: (see git)
 
 ## Overview
@@ -10,7 +10,7 @@ Target commit: (see git)
 - Insights / Facts は GitHub Actions で生成し、`frontend/content/*` にコミット
 - コンテンツは 3種類に分類（`blog_drafts.content_type`）:
   - **`daily`**: GitHub Actions 定時 → Supabase → `/reports/daily/[store_slug]`
-  - **`weekly`**: GitHub Actions 週次 → Supabase + ファイル → `/reports/weekly/[store_slug]`
+  - **`weekly`**: GitHub Actions 週次 → Supabase（`mdx_content` + `insight_json`）+ ファイル → `/reports/weekly/[store_slug]`（MDX + 定量データ統合表示）
   - **`editorial`**: LINE 指示 → Supabase（未公開）→ LINE 承認 → `/blog/[slug]`
 
 ## Data Flow
@@ -34,8 +34,8 @@ Target commit: (see git)
 | `/stores` | **request ordering 戦略**: ① `/api/range_multi` await → 部分カード即表示 → ② `/api/megribi_score` → ③ `/api/forecast_today_multi`（バッチ）を後続発火。単一 gunicorn worker でも ~1.5s で初期表示 |
 | `/reports` | `/api/reports/list`（Supabase: 全店舗最新 Daily/Weekly メタ） |
 | `/reports/daily/[store_slug]` | Supabase `blog_drafts`（`content_type='daily'`, `is_published=true`） |
-| `/reports/weekly/[store_slug]` | Supabase `blog_drafts`（`content_type='weekly'`, `is_published=true`） |
-| `/insights/weekly/[store]` | `frontend/content/insights/weekly/<store>/<date>.json`（fs） |
+| `/reports/weekly/[store_slug]` | Supabase `blog_drafts`（`content_type='weekly'`, `is_published=true`）— `mdx_content` + `insight_json`（チャート・メトリクス・Good Windows） |
+| `/insights/weekly/[store]` | **→ `/reports/weekly/[store]` に 301 リダイレクト**。旧ページは `frontend/content/insights/weekly/<store>/<date>.json`（fs）を読むが、リダイレクトが優先 |
 | `/blog/[slug]` | Supabase `blog_drafts`（`content_type='editorial'`, `is_published=true`） |
 | `/mypage` | `/api/range` + `/api/forecast_today` + `/api/megribi_score`（お気に入り店舗分） |
 
@@ -163,6 +163,7 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `frontend/src/lib/supabase/blogDrafts.ts`（Supabase CRUD）
 - `frontend/src/app/config/stores.ts`（38 店舗マスタ）
 - `frontend/src/components/StoreCard.tsx`（店舗カード。めぐりびスコアバッジ: 狙い目/様子見/他店へ）
+- `frontend/src/components/WeeklyStoreCharts.tsx`（週次 Recharts チャート: 時系列 + Top Windows バーチャート。`/reports/weekly` と `/insights/weekly` で共有）
 - `frontend/src/components/GoogleAnalytics.tsx`（GA4 Script ローダー + SPA トラッカー）
 - `frontend/src/components/ReportViewTracker.tsx`（サーバーコンポーネント用 GA4 イベント発火）
 - `frontend/src/lib/analytics.ts`（GA4 ヘルパー: sendEvent / sendPageView）
@@ -183,6 +184,8 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `.github/workflows/generate-public-facts.yml`（Facts 生成）
 - `.github/workflows/retry-blog-draft-stores.yml`（Daily 失敗再実行）
 - `.github/workflows/blog-ci.yml`（フロント CI）
+- `.github/workflows/check-pat-expiry.yml`（GitHub PAT 期限チェック + LINE 通知, 週次月曜 09:00 JST）
+- `.github/workflows/e2e.yml`（Playwright E2E スモークテスト, PR + dispatch）
 - `.github/workflows/notify-on-failure.yml`（失敗通知, 再利用ワークフロー）
 - `.github/workflows/blog-request.yml`（手動ブログ依頼）
 

@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-03-28 (Round 5: グロース基盤構築 — GA4 計測 + MAE/MAPE 精度 API + ステータス日本語化 + X 投稿テンプレート改善)
+Last updated: 2026-03-29 (Round 6 完了: 品質・信頼性の底上げ — E2E テスト + エラー/ローディング UX + Weekly Insights 統合 + バグ修正)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -36,11 +36,11 @@ Target commit: (see git)
 | `/reports/daily` | `/reports` へリダイレクト |
 | `/reports/daily/[store_slug]` | **Daily Report 個別**: 最新 `content_type='daily'`・`is_published=true`。Facts カード表示 |
 | `/reports/weekly` | `/reports?tab=weekly` へリダイレクト |
-| `/reports/weekly/[store_slug]` | **Weekly Report 個別**: 最新 `content_type='weekly'`・`is_published=true` |
+| `/reports/weekly/[store_slug]` | **Weekly Report 個別**: 最新 `content_type='weekly'`・`is_published=true`。**MDX プロース + `insight_json` 定量データ（メトリクスカード・時系列チャート・Good Windows）を統合表示** |
 | `/blog` | 編集ブログ一覧。AI予測レポート一覧への誘導バナー付き |
 | `/blog/[slug]` | **editorial（`content_type='editorial'`, `is_published=true`）のみ**表示 |
-| `/insights/weekly` | Weekly Insights インデックス（`index.json` から） |
-| `/insights/weekly/[store]` | Weekly Insights 店舗別（`WeeklyStoreCharts.tsx`、Recharts `series_compact` 可視化） |
+| `/insights/weekly` | **→ `/reports?tab=weekly` に 301 リダイレクト**（統合済み） |
+| `/insights/weekly/[store]` | **→ `/reports/weekly/[store]` に 301 リダイレクト**（統合済み。旧ページは残存するがリダイレクトが優先） |
 | `/mypage` | **ダッシュボード型マイページ**: お気に入り店舗リッチカード（リアルタイム人数・男女スパークライン・megribi_score・ML 予測サマリ・Daily/Weekly リンク）+ 閲覧履歴ピルタグ |
 
 #### Next.js API Routes（14本）
@@ -80,6 +80,9 @@ Target commit: (see git)
 - **StoreCard**: データ未取得時のプレースホルダ（`—`・`0人`）を非表示化（Round 3）。めぐりびスコアバッジ: `狙い目`（≥0.65）/ `様子見`（≥0.40）/ `他店へ`（<0.40）
 - **ブログ frontmatter**: Zod 検証（`blogFrontmatter.ts` / `content.ts`）
 - **CDN Cache-Control**: API proxy に `s-maxage` + `stale-while-revalidate` 設定。予測系（`forecast_today` / `forecast_next_hour`）は `s-maxage=60`（Flask TTL も 60s）、最大遅延 ~2 分
+- **エラーバウンダリ + ローディング UX**: 全主要ページに `error.tsx`（リトライボタン + 一覧戻りリンク）/ `loading.tsx`（パルスアニメーション骨格）を配置。`store/[id]`, `mypage`, `reports/daily/[store_slug]`, `reports/weekly/[store_slug]`, `blog`, `blog/[slug]`, `insights/weekly` の 11 ファイル
+- **E2E テスト基盤**: Playwright 導入。5 テストグループ（トップ・店舗一覧・レポート統合・マイページ・ブログ）のスモークテスト。CI ワークフロー `e2e.yml`
+- **GitHub PAT 期限切れ監視**: 週次 GHA ワークフロー `check-pat-expiry.yml`。GitHub API でトークン有効期限を取得し、30日以内なら LINE Push で通知（7日以内は赤アラート）
 
 ### Supabase `blog_drafts` スキーマ（2026-03-26 以降）
 
@@ -148,6 +151,8 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 | `retry-blog-draft-stores.yml` | Daily 失敗店舗再実行 | `workflow_dispatch` |
 | `blog-request.yml` | 手動ブログ依頼 | `workflow_dispatch` |
 | `blog-ci.yml` | フロント CI（type-check / build） | push |
+| `check-pat-expiry.yml` | GitHub PAT 有効期限チェック + LINE 通知 | `schedule`（月曜 09:00 JST）+ dispatch |
+| `e2e.yml` | Playwright E2E スモークテスト | `pull_request` + dispatch |
 | `notify-on-failure.yml` | 失敗通知（再利用） | `workflow_call` |
 
 ### LINE 下書きパイプライン（要点）
