@@ -1,5 +1,5 @@
 # ROADMAP
-Last updated: 2026-03-29 (Round 6 完了)
+Last updated: 2026-03-29 (Round 7 完了)
 Target commit: (see git)
 
 > **構想・フェーズ順・備忘の全文**は **`plan/VISION_AND_FUTURE.md`**。本ファイルは短いタスク一覧と「当面やらないこと」に絞る。
@@ -106,16 +106,17 @@ Target commit: (see git)
 | pickPeak 二重カウント修正 | actual + forecast を合算していた → actual 優先フォールバックに変更 |
 | ピーク男女別表示改善 | 片方 null でも男女別を表示するように変更 |
 
+### Round 7: ユーザー体験の深化（PWA + OG 画像 + 店舗比較 + Editorial 強化）
+
+| 項目 | 内容 |
+|------|------|
+| PWA 完成 | アイコン PNG (192/512) 生成 + Service Worker（ネットワークファースト + offline fallback）+ apple-touch-icon 設定 |
+| 動的 OG 画像 | `/store/[id]` と `/blog/[slug]` に `opengraph-image.tsx` 追加。全主要ページで動的 OG 画像生成（Edge Runtime） |
+| 店舗比較ページ | `/compare` 新設。最大3店舗を並べてリアルタイム混雑を比較（マージチャート・megribi_score・男女別人数カード）。URL state `?stores=a,b,c` |
+| ヘッダーナビ拡張 | 「比較」リンクを追加 |
+| LINE Editorial 拡張 | 月間まとめ（`月間`/`今月`/`先月`）・エリア比較（同地域店舗の自動選択）スコープ追加。help テキスト更新 |
+
 ---
-
-## Round 7（提案: ユーザー体験の深化）
-
-| # | 項目 | 推奨モデル | 理由 |
-|---|------|-----------|------|
-| 7-1 | PWA 対応（Web App Manifest + Service Worker） | Sonnet | オフライン対応・ホーム画面追加（**PWA Manifest 実装済み**） |
-| 7-2 | OG 画像の動的生成 | Sonnet | `/reports/daily/[store_slug]` の OG 画像にその日の予測サマリを含める（**OG 画像基盤実装済み**） |
-| 7-3 | 店舗詳細ページの「比較モード」 | Opus | 2-3 店舗を並べて比較するレイアウト設計が必要 |
-| 7-4 | Editorial ブログの運用フロー強化 | Opus | LINE から「月間まとめ」「エリア比較」等の複雑な分析依頼に対応 |
 
 ## Round 8（提案: 収益化・拡張）
 

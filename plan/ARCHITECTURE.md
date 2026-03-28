@@ -1,5 +1,5 @@
 # ARCHITECTURE
-Last updated: 2026-03-29 (Round 6: Weekly Insights 統合 + E2E テスト + エラー/ローディング UX)
+Last updated: 2026-03-29 (Round 7: PWA + OG 画像 + 店舗比較 + Editorial 強化)
 Target commit: (see git)
 
 ## Overview
@@ -37,6 +37,7 @@ Target commit: (see git)
 | `/reports/weekly/[store_slug]` | Supabase `blog_drafts`（`content_type='weekly'`, `is_published=true`）— `mdx_content` + `insight_json`（チャート・メトリクス・Good Windows） |
 | `/insights/weekly/[store]` | **→ `/reports/weekly/[store]` に 301 リダイレクト**。旧ページは `frontend/content/insights/weekly/<store>/<date>.json`（fs）を読むが、リダイレクトが優先 |
 | `/blog/[slug]` | Supabase `blog_drafts`（`content_type='editorial'`, `is_published=true`） |
+| `/compare` | `/api/range_multi` + `/api/megribi_score` + `/api/forecast_today_multi`（最大3店舗並列比較） |
 | `/mypage` | `/api/range` + `/api/forecast_today` + `/api/megribi_score`（お気に入り店舗分） |
 
 #### GA4 アナリティクス（`NEXT_PUBLIC_GA_MEASUREMENT_ID` 設定時に有効）
@@ -159,7 +160,7 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `frontend/src/lib/blog/insightFromRange.ts`（LINE 用インサイト・窓計算）
 - `frontend/src/lib/blog/draftGenerator.ts`（Gemini 下書き）
 - `frontend/src/lib/blog/runBlogDraftPipeline.ts`（source → content_type 導出）
-- `frontend/src/lib/line/parseLineIntent.ts`（draft / editorial_analysis / approve）
+- `frontend/src/lib/line/parseLineIntent.ts`（draft / editorial_analysis / approve。scope: single / monthly / area_compare）
 - `frontend/src/lib/supabase/blogDrafts.ts`（Supabase CRUD）
 - `frontend/src/app/config/stores.ts`（38 店舗マスタ）
 - `frontend/src/components/StoreCard.tsx`（店舗カード。めぐりびスコアバッジ: 狙い目/様子見/他店へ）

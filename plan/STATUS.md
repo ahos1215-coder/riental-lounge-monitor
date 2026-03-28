@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-03-29 (Round 6 完了: 品質・信頼性の底上げ — E2E テスト + エラー/ローディング UX + Weekly Insights 統合 + バグ修正)
+Last updated: 2026-03-29 (Round 7 完了: ユーザー体験の深化 — PWA + OG 画像 + 店舗比較 + Editorial 強化)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -41,6 +41,7 @@ Target commit: (see git)
 | `/blog/[slug]` | **editorial（`content_type='editorial'`, `is_published=true`）のみ**表示 |
 | `/insights/weekly` | **→ `/reports?tab=weekly` に 301 リダイレクト**（統合済み） |
 | `/insights/weekly/[store]` | **→ `/reports/weekly/[store]` に 301 リダイレクト**（統合済み。旧ページは残存するがリダイレクトが優先） |
+| `/compare` | **店舗比較**: 最大3店舗を並べてリアルタイム混雑を比較。マージチャート（実測+予測）・megribi_score・男女別人数カード。URL パラメータ `?stores=a,b,c` で状態共有 |
 | `/mypage` | **ダッシュボード型マイページ**: お気に入り店舗リッチカード（リアルタイム人数・男女スパークライン・megribi_score・ML 予測サマリ・Daily/Weekly リンク）+ 閲覧履歴ピルタグ |
 
 #### Next.js API Routes（14本）
@@ -83,6 +84,9 @@ Target commit: (see git)
 - **エラーバウンダリ + ローディング UX**: 全主要ページに `error.tsx`（リトライボタン + 一覧戻りリンク）/ `loading.tsx`（パルスアニメーション骨格）を配置。`store/[id]`, `mypage`, `reports/daily/[store_slug]`, `reports/weekly/[store_slug]`, `blog`, `blog/[slug]`, `insights/weekly` の 11 ファイル
 - **E2E テスト基盤**: Playwright 導入。5 テストグループ（トップ・店舗一覧・レポート統合・マイページ・ブログ）のスモークテスト。CI ワークフロー `e2e.yml`
 - **GitHub PAT 期限切れ監視**: 週次 GHA ワークフロー `check-pat-expiry.yml`。GitHub API でトークン有効期限を取得し、30日以内なら LINE Push で通知（7日以内は赤アラート）
+- **PWA**: Web App Manifest + アイコン PNG (192/512) + Service Worker（ネットワークファースト + stale-while-revalidate）。ホーム画面追加・オフラインフォールバック対応
+- **動的 OG 画像**: `opengraph-image.tsx` を全主要ページに配置（ルート・Daily Report・Weekly Report・店舗詳細・ブログ記事）。Edge Runtime で動的生成
+- **LINE Editorial 拡張**: 月間まとめ（`月間`/`今月`/`先月`）・エリア比較（同地域店舗の自動選択）スコープ対応。topicHint にスコープ情報を埋め込み Gemini に渡す
 
 ### Supabase `blog_drafts` スキーマ（2026-03-26 以降）
 

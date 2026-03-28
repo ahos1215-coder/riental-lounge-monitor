@@ -1,5 +1,5 @@
 # VISION_AND_FUTURE
-Last updated: 2026-03-29 (Round 6 完了)
+Last updated: 2026-03-29 (Round 7 完了)
 Target commit: (see git)
 
 > **このファイルの役割**  
@@ -26,7 +26,7 @@ Target commit: (see git)
 
 ---
 
-## 2. 現状の到達点（Round 6 完了 / 2026-03-29）
+## 2. 現状の到達点（Round 7 完了 / 2026-03-29）
 
 詳細は **`plan/STATUS.md`**。
 
@@ -34,7 +34,7 @@ Target commit: (see git)
 |------|------|
 | 収集 → Supabase | 本番稼働。cron-job.org → Flask `/tasks/multi_collect`（`CRON_SECRET` 認証）|
 | Flask API | `/api/range` `/api/megribi_score` `/api/forecast_*` `/api/forecast_today_multi` `/api/forecast_accuracy` 等 13 エンドポイント稼働 |
-| Next.js 画面 | 13 ページルート実装済み（`/` `/stores` `/store/[id]` `/reports` `/reports/*/[store_slug]` `/blog` `/mypage` 等）。`/insights/weekly` は `/reports/weekly` に 301 リダイレクト |
+| Next.js 画面 | 14 ページルート実装済み（`/` `/stores` `/store/[id]` `/compare` `/reports` `/reports/*/[store_slug]` `/blog` `/mypage` 等）。`/insights/weekly` は `/reports/weekly` に 301 リダイレクト |
 | Next.js API | 14 API route 稼働（proxy + cron + LINE + SNS） |
 | AI 予測レポート | Daily: 38 店舗 × 2 回/日、Weekly: 38 店舗 × 1 回/週。全自動 |
 | Editorial Blog | LINE → Gemini → 承認 → 公開。半自動 |
@@ -54,6 +54,10 @@ Target commit: (see git)
 | エラー/ローディング UX | 全主要ページに `error.tsx` / `loading.tsx` 配置（11 ファイル） |
 | Weekly Insights 統合 | `/reports/weekly` に MDX + 定量データ（チャート・Good Windows・メトリクス）を統合表示 |
 | PAT 期限切れ監視 | 週次 GHA + LINE Push で GitHub PAT 有効期限を通知 |
+| PWA | Manifest + アイコン PNG + Service Worker。ホーム画面追加・オフラインフォールバック |
+| 動的 OG 画像 | 全主要ページに `opengraph-image.tsx` 配置（Edge Runtime 動的生成） |
+| 店舗比較ページ | `/compare` — 最大3店舗を並べてマージチャート + リアルタイム比較 |
+| LINE Editorial 拡張 | 月間まとめ・エリア比較スコープ対応 |
 
 ---
 
@@ -122,11 +126,11 @@ Target commit: (see git)
 4. ヒートマップ画像生成（将来）
 5. モデルのプリロード（起動時に全店舗モデルをメモリに載せる — GIL ボトルネック軽減）
 
-### フェーズ D — PWA・通知
+### フェーズ D — PWA・通知 ⚙️ 部分完了
 
 **ゴール**: ホーム画面追加・リピーター向け通知。
 
-1. Web App Manifest、Service Worker
+1. ✅ Web App Manifest、Service Worker（Round 7 完了）
 2. Web Push（VAPID、購読の保存、送信ジョブ）
 
 ### フェーズ E — 課金・プレミアム
