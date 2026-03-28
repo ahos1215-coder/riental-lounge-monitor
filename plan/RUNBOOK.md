@@ -1,5 +1,5 @@
 # RUNBOOK
-Last updated: 2026-03-25
+Last updated: 2026-03-29 (Round 8 整合)
 Target commit: (see git)
 
 ローカル起動・本番メモ・**初回オンボーディング**・**定期処理（cron）**・トラブルシュート。  
@@ -80,13 +80,17 @@ npm run dev
 
 ---
 
-## ML 2.0 Operational Notes
+## ML 3.0 Operational Notes（Round 8, 2026-03-29）
 
-- **モデル方針**: 本番学習（`scripts/train_ml_model.py`）は `men/women` 回帰モデルを維持しつつ、学習時に「激戦区（`金・土・祝前日の20:00-25:00`）」および「雨天」を重み付けして学習する。`Delta`（増減量）は `scripts/experiments/` で継続検証する。
-- **重み付け学習**: `scripts/train_ml_model.py` は `sample_weight` を使い、`ML_TRAIN_WEIGHT_PEAK` / `ML_TRAIN_WEIGHT_RAIN`（既定 1.8、上限 2.0）を適用する。
-- **正式特徴量**: アナログ特徴量 `days_from_25th`, `minutes_to_midnight`, `precip_mm` と、交互作用特徴量 `feat_payday_night_peak`, `feat_rain_night_exit`, `feat_pre_holiday_surge` を本番 `FEATURE_COLUMNS` として固定。
-- **学習ログ**: 学習完了時は店舗ごとに `overall` と `weekend_night_segment` の `MAE/RMSE` を出力し、精度劣化を監視する。
-- **実験スクリプト配置**: 検証用スクリプトは `scripts/experiments/` に集約（例: `ablation_*`, `delta_*`）。`scripts/` 直下は本番運用用を優先。
+- **モデル方針**: 本番学習（`scripts/train_ml_model.py`）は **店舗別 XGBoost**（38 店舗分の `men/women` 回帰モデル）を日次自動学習。
+- **Optuna HPO**: 店舗ごとに最適なハイパーパラメータを探索（`max_depth`, `learning_rate`, `subsample` 等）。デフォルト 30 trials/店舗。`ML_OPTUNA_ENABLED=1` / `ML_OPTUNA_TRIALS=30` で制御。
+- **Early Stopping**: `n_estimators=300` 上限 + `early_stopping_rounds=15` で最適な木の数を自動決定。
+- **評価基盤**: 時系列 Train/Test Split（80/20）。Holdout Test で真の汎化精度（MAE/RMSE）を測定。`metadata.json` に永続化。
+- **特徴量**: 29→19 に最適化（`FEATURE_COLUMNS`）。推論時 NaN になるラグ系 8 列・重複 `dow`・`gender_diff` を除外。
+- **schema_version**: v2（特徴量 19 列）。Flask / GHA ともに v2 がデフォルト。
+- **重み付け学習**: `sample_weight` で `ML_TRAIN_WEIGHT_PEAK` / `ML_TRAIN_WEIGHT_RAIN`（既定 1.8）を適用。
+- **Feature Importance**: `metadata.json` に店舗別で永続化。`/api/forecast_accuracy` で取得可能。
+- **実験スクリプト配置**: 検証用は `scripts/experiments/` に集約。`scripts/` 直下は本番運用用。
 
 ---
 
@@ -95,11 +99,17 @@ npm run dev
 ### GitHub Actions（リポジトリ管理）
 | 内容 | スケジュール | Workflow ファイル |
 |------|----------------|---------------------|
-| Weekly Insights | `30 15 * * 0` (UTC) = JST 月曜 00:30 | `.github/workflows/generate-weekly-insights.yml` |
-| Public Facts | `30 0 * * *` (UTC) = JST 09:30 | `.github/workflows/generate-public-facts.yml` |
-| Blog CI | push / PR（schedule なし） | `.github/workflows/blog-ci.yml` |
-| **Blog cron（定時・本番）** | `0 9` / `30 12` UTC = JST 18:00 / 21:30 | `.github/workflows/trigger-blog-cron.yml` |
-| **Blog 再実行（失敗店舗のみ・手動）** | なし（`workflow_dispatch` のみ） | `.github/workflows/retry-blog-draft-stores.yml` |
+| **Daily Report（定時・本番）** | `0 9` / `30 12` UTC = JST 18:00 / 21:30 | `trigger-blog-cron.yml` |
+| **Weekly Report** | 水曜 `30 21` UTC = JST 木曜 06:30 | `generate-weekly-insights.yml` |
+| **ML モデル学習** | `30 20` UTC = JST 05:30 | `train-ml-model.yml` |
+| **X 自動投稿** | Daily Report 完了後（`workflow_run`） | `x-auto-post.yml` |
+| Public Facts | `30 0` UTC = JST 09:30 | `generate-public-facts.yml` |
+| PAT 期限チェック | 月曜 `0 0` UTC = JST 09:00 | `check-pat-expiry.yml` |
+| Blog CI | push / PR（schedule なし） | `blog-ci.yml` |
+| E2E テスト | PR + dispatch | `e2e.yml` |
+| Blog 再実行（手動） | `workflow_dispatch` のみ | `retry-blog-draft-stores.yml` |
+| Blog 手動依頼 | `workflow_dispatch` のみ | `blog-request.yml` |
+| 失敗通知（再利用） | `workflow_call` | `notify-on-failure.yml` |
 
 - Weekly: 手動 `workflow_dispatch` で `stores` / threshold 等を指定可能。成果物 `frontend/content/insights/weekly`
 - Public Facts: 成果物 `frontend/content/facts/public`

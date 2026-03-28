@@ -1,5 +1,5 @@
 # INDEX（クイック参照）
-Last updated: 2026-03-26  
+Last updated: 2026-03-29 (Round 8 整合)  
 Target commit: (see git)
 
 **読む順・各ファイルの役割の一覧は [`README.md`](README.md) を正とする。**
@@ -54,9 +54,10 @@ Target commit: (see git)
 | `/reports/weekly/[store_slug]` | `reports/weekly/[store_slug]/page.tsx` | Weekly Report |
 | `/blog` | `blog/page.tsx` | Editorial ブログ一覧 |
 | `/blog/[slug]` | `blog/[slug]/page.tsx` | Editorial 記事（is_published=true のみ）|
-| `/insights/weekly` | `insights/weekly/page.tsx` | Weekly Insights インデックス |
-| `/insights/weekly/[store]` | `insights/weekly/[store]/page.tsx` | Weekly Insights 可視化（Recharts）|
-| `/mypage` | `mypage/page.tsx` | お気に入り・閲覧履歴 |
+| `/compare` | `compare/page.tsx` | 店舗比較（最大3店舗、マージチャート） |
+| `/insights/weekly` | → `/reports?tab=weekly` に 301 リダイレクト | |
+| `/insights/weekly/[store]` | → `/reports/weekly/[store]` に 301 リダイレクト | |
+| `/mypage` | `mypage/page.tsx` | ダッシュボード型マイページ（リッチカード・ML予測・レポートリンク） |
 
 ### Content / Batch
 - Weekly insights: `scripts/generate_weekly_insights.py`（`--skip-index` フラグあり）→ `frontend/content/insights/weekly`（調整ガイド: `plan/WEEKLY_INSIGHTS_TUNING.md`）
@@ -64,10 +65,15 @@ Target commit: (see git)
 - Blog MDX: `frontend/content/blog`
 
 ### Workflows
-- `trigger-blog-cron.yml` — Daily（matrix 38店舗, max-parallel: 15）
-- `generate-weekly-insights.yml` — Weekly（Fan-in Matrix 38店舗, max-parallel: 10）
-- `retry-blog-draft-stores.yml` — Daily 失敗店舗再実行
+- `trigger-blog-cron.yml` — Daily Report（matrix 38店舗, max-parallel: 15）
+- `generate-weekly-insights.yml` — Weekly Report（Fan-in Matrix 38店舗, max-parallel: 10）
+- `train-ml-model.yml` — ML 日次学習（Optuna HPO + Early Stopping）
+- `x-auto-post.yml` — X 自動投稿（Daily 完了後 workflow_run）
 - `generate-public-facts.yml` — Public Facts
+- `retry-blog-draft-stores.yml` — Daily 失敗店舗再実行
+- `blog-request.yml` — 手動ブログ依頼
+- `check-pat-expiry.yml` — PAT 期限チェック + LINE 通知
+- `e2e.yml` — Playwright E2E スモークテスト
 - `blog-ci.yml` — CI
 - `notify-on-failure.yml` — 失敗通知の再利用
 

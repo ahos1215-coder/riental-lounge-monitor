@@ -1,5 +1,5 @@
 # plan/ フォルダ案内（Cursor / AI 向け）
-Last updated: 2026-03-25  
+Last updated: 2026-03-29
 Target commit: (see git)
 
 **迷ったら最初にこのファイルを読む。** 各 `.md` の役割と読了順を固定する。
@@ -57,6 +57,7 @@ Target commit: (see git)
 | `CHECKLISTS.md` | チェックリスト |
 | `BRIEFING_FOR_ADVISOR.md` | 外部 AI 向け要約（相談用） |
 | `ADVISORY_SYNTHESIS.md` | 外部アドバイス（Gemini 等）の整理・要約 |
+| `GEMINI_REVIEW_PROMPT.md` | Gemini レビュー用プロンプト |
 
 **削除・統合済み**: `ONBOARDING.md` → `RUNBOOK.md` / `CRON.md` → `RUNBOOK.md` / `repo_map.txt` → 本 README と `INDEX.md`
 

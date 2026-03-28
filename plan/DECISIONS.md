@@ -1,5 +1,5 @@
 # DECISIONS
-Last updated: 2026-03-25
+Last updated: 2026-03-29 (Round 8 整合)
 Target commit: (see git)
 
 ## Core decisions (keep)
@@ -38,3 +38,9 @@ Target commit: (see git)
 - フロントから Supabase 直アクセス。
 - secrets のハードコード。
 - **n8n に依存した** LINE 受付・ジョブキュー・本番配管。
+
+## ML decisions (keep)
+19) **ML schema_version**: 特徴量変更時は `schema_version` をバンプし、Flask / GHA / `.env.example` のデフォルトを同時に更新する。`model_registry.py` が不一致時に 503 を返す設計を維持。
+20) **FEATURE_COLUMNS**: 推論時に NaN やメジアン充填になる特徴量（ラグ/MA 系等）は `FEATURE_COLUMNS` から除外する。学習中間計算で使う特徴量は `add_time_features()` で生成するが、モデル入力には含めない。
+21) **Train/Test Split**: 時系列データのため **ランダム分割は禁止**。常に時系列順（古い方が Train、新しい方が Test）で分割する。
+22) **本番モデルの学習**: Holdout Test で最適な `n_estimators` を発見した後、**全データで再学習して本番モデルとする**（Early Stopping は評価用のみ）。
