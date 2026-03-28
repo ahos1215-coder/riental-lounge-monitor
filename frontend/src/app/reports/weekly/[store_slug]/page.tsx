@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 
 import { getStoreMetaBySlugStrict } from "@/app/config/stores";
 import { ReservationLinkCard } from "@/components/ReservationLinkCard";
+import { ReportViewTracker } from "@/components/ReportViewTracker";
 import { fetchLatestPublishedReportByStore } from "@/lib/supabase/blogDrafts";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 
@@ -57,6 +58,7 @@ export default async function WeeklyReportStorePage({ params }: Props) {
 
   return (
     <main className="mx-auto w-full max-w-3xl px-4 py-10">
+      <ReportViewTracker storeSlug={store.slug} reportType="weekly" />
       <div className="mb-6 flex flex-wrap gap-4">
         <Link
           href="/reports?tab=weekly"

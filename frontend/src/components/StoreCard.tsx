@@ -28,7 +28,7 @@ type StoreCardProps = {
   /** 一覧などで /api/range だけ先に反映し、予測を後追いするとき */
   forecastPending?: boolean;
   isLoading?: boolean;
-  /** めぐりびスコア 0.0〜1.0。≥0.65 → 緑GO / ≥0.40 → 黄WAIT / <0.40 → 赤SKIP */
+  /** めぐりびスコア 0.0〜1.0。≥0.65 → 緑 狙い目 / ≥0.40 → 黄 様子見 / <0.40 → 赤 他店へ */
   megribiScore?: number | null;
 };
 
@@ -134,18 +134,18 @@ function MegribiScoreBadge({ score }: { score: number | null | undefined }) {
   if (score >= 0.65)
     return (
       <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 ring-1 ring-emerald-500/40">
-        ● GO
+        ● 狙い目
       </span>
     );
   if (score >= 0.40)
     return (
       <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300 ring-1 ring-amber-500/40">
-        ● WAIT
+        ● 様子見
       </span>
     );
   return (
     <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-bold text-rose-300 ring-1 ring-rose-500/40">
-      ● SKIP
+      ● 他店へ
     </span>
   );
 }

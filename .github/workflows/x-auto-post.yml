@@ -81,15 +81,32 @@ jobs:
             exit 0
           fi
 
+          # slug → 日本語店舗名マッピング
+          declare -A STORE_LABELS=(
+            [nagasaki]="長崎" [fukuoka]="福岡" [kokura]="小倉" [oita]="大分"
+            [kumamoto]="熊本" [miyazaki]="宮崎" [kagoshima]="鹿児島" [okinawa_ag]="沖縄"
+            [gangnam]="江南" [sapporo_ag]="札幌" [sendai_ag]="仙台"
+            [shibuya]="渋谷" [ebisu]="恵比寿" [shibuya_ag]="渋谷ANNEX"
+            [shinjuku]="新宿" [ueno]="上野" [ueno_ag]="上野ANNEX"
+            [kashiwa]="柏" [machida]="町田" [yokohama]="横浜" [omiya]="大宮"
+            [utsunomiya]="宇都宮" [takasaki]="高崎"
+            [nagoya_ag]="名古屋ANNEX" [nagoya_nishiki]="名古屋錦" [nagoya_sakae]="名古屋栄"
+            [shizuoka]="静岡" [hamamatsu]="浜松" [kanazawa_ag]="金沢"
+            [osaka_ekimae]="大阪駅前" [umeda_ag]="梅田ANNEX" [tenma]="天満"
+            [shinsaibashi]="心斎橋" [namba]="なんば"
+            [kyoto]="京都" [kobe]="神戸" [okayama]="岡山" [hiroshima_ag]="広島"
+          )
+
           IFS=',' read -ra SLUG_LIST <<< "$STORES"
           SUCCESS=0
           FAIL=0
 
           for SLUG in "${SLUG_LIST[@]}"; do
             SLUG="$(echo "$SLUG" | tr -d ' ')"
+            LABEL="${STORE_LABELS[$SLUG]:-$SLUG}"
             # UTM パラメータ付き URL（X 経由の流入計測）
             BLOG_URL="${SITE_URL}/reports/daily/${SLUG}?utm_source=twitter&utm_medium=social&utm_campaign=daily_report&utm_content=${SLUG}"
-            TITLE="【AI予測】オリエンタルラウンジ ${SLUG} の今夜の混雑予測 #相席ラウンジ #めぐりび"
+            TITLE="【AI予測】オリエンタルラウンジ ${LABEL} の今夜の混雑予測 #相席ラウンジ #めぐりび"
 
             BODY=$(cat <<ENDJSON
           {"store_slug":"${SLUG}","blog_url":"${BLOG_URL}","title":"${TITLE}","dry_run":${DRY_RUN}}

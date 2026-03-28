@@ -10,6 +10,7 @@ import {
   recordStoreVisit,
   toggleFavoriteStore,
 } from "@/lib/browser/meguribiStorage";
+import { sendEvent } from "@/lib/analytics";
 import {
   STORE_CARD_RANGE_LIMIT,
   STORE_CARD_SPARKLINE_POINTS,
@@ -109,6 +110,7 @@ function StorePageInner() {
   useEffect(() => {
     if (!slug) return;
     recordStoreVisit(slug);
+    sendEvent("store_view", { store_slug: slug, store_label: meta.label });
   }, [slug]);
 
   const digestStores = useMemo(
@@ -224,6 +226,7 @@ function StorePageInner() {
       onClick={() => {
         const next = toggleFavoriteStore(slug);
         setFavorite(next);
+        sendEvent(next ? "favorite_add" : "favorite_remove", { store_slug: slug });
       }}
       className="rounded-full border border-amber-400/35 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-100 transition hover:border-amber-300/60 hover:bg-amber-500/20"
       aria-pressed={favorite}

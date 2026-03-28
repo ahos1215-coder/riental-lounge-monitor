@@ -1,6 +1,8 @@
 import "./globals.css";
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { MeguribiHeader } from "@/components/MeguribiHeader";
+import { GoogleAnalytics } from "@/components/GoogleAnalytics";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 
 const base = getMetadataBaseUrl();
@@ -55,6 +57,9 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="めぐりび" />
       </head>
       <body className="bg-black">
+        <Suspense>
+          <GoogleAnalytics />
+        </Suspense>
         <MeguribiHeader />
         <div className="min-h-screen text-slate-50">{children}</div>
       </body>

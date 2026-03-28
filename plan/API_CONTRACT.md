@@ -1,5 +1,5 @@
 # API_CONTRACT
-Last updated: 2026-03-28 (Round 4.5: forecast_today_multi + megribi_score + range_multi 契約追加)
+Last updated: 2026-03-28 (Round 5: forecast_accuracy 追加)
 Target commit: (see git)
 
 MEGRIBI の公開契約。**Flask（Render）** と **Next.js（Vercel）の LINE Webhook** を含む。互換性を壊さないこと。
@@ -235,6 +235,32 @@ Response
 
 Error
 - `501 { ok: false, error: "supabase-required" }` — data_backend が supabase 以外
+
+## GET /api/forecast_accuracy
+店舗別の学習時精度メトリクス（MAE / RMSE）を返す。
+
+Behavior
+- `metadata.json`（学習時に生成）から `metrics` フィールドを読み取り返却。
+- メトリクスは学習後にしか更新されないため、CDN キャッシュを長め（`s-maxage=3600`）に設定。
+
+Response
+```json
+{
+  "ok": true,
+  "trained_at": "2026-03-28T05:30:00+09:00",
+  "metrics": {
+    "ol_nagasaki": {
+      "overall": { "men_mae": 2.34, "women_mae": 1.89, "total_mae": 4.23, "men_rmse": 3.01, "women_rmse": 2.45 },
+      "weekend_night": { "men_mae": 3.10, "total_mae": 5.55 }
+    }
+  }
+}
+```
+
+Error
+- `404 { ok: false, error: "metadata-not-found" }` — metadata.json が存在しない
+- `404 { ok: false, error: "no-metrics-in-metadata" }` — メトリクスフィールドがない
+- `500 { ok: false, error: "metadata-parse-error" }` — JSON パースエラー
 
 ## GET|POST /tasks/collect
 単店舗の legacy 収集（GAS append）。

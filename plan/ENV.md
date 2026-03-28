@@ -1,5 +1,5 @@
 # ENV
-Last updated: 2026-03-25
+Last updated: 2026-03-28
 Target commit: (see git)
 
 値そのものは書かず、環境変数名のみ記載。
@@ -11,6 +11,7 @@ Target commit: (see git)
 - 本番: Vercel Environment Variables
 
 主な変数:
+- `NEXT_PUBLIC_GA_MEASUREMENT_ID`（GA4 測定 ID。例: `G-XXXXXXXXXX`。未設定時は GA4 無効。**Vercel の Environment Variables に設定**）
 - `BACKEND_URL`（Next API routes が backend を呼ぶための base URL）
 - `NEXT_PUBLIC_BASE_URL`（任意。絶対 URL が必要な場面やスクリプトで利用）
 - `NEXT_PUBLIC_SITE_URL`（任意。**OGP・canonical の正本**に使う推奨。末尾スラッシュなし。未設定時は `NEXT_PUBLIC_BASE_URL` → Vercel の `VERCEL_URL` → `localhost`）

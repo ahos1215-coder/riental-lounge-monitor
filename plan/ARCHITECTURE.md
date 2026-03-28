@@ -1,5 +1,5 @@
 # ARCHITECTURE
-Last updated: 2026-03-28 (Round 4.5: パフォーマンス最適化)
+Last updated: 2026-03-28 (Round 5: GA4 計測 + forecast_accuracy API)
 Target commit: (see git)
 
 ## Overview
@@ -19,7 +19,7 @@ Target commit: (see git)
 `multi_collect.py` または `/tasks/multi_collect` が Supabase `logs` に書き込む。cron-job.org が 5 分毎にトリガー（`CRON_SECRET` 認証）。`/tasks/tick` はレガシー。
 
 ### 2) Flask API
-`/api/range` / `/api/current` / `/api/forecast_*` / `/api/forecast_today_multi` / `/api/megribi_score` を提供。`/api/range` は Supabase を `ts.desc` で取得し `ts.asc` で返却。
+`/api/range` / `/api/current` / `/api/forecast_*` / `/api/forecast_today_multi` / `/api/megribi_score` / `/api/forecast_accuracy` を提供。`/api/range` は Supabase を `ts.desc` で取得し `ts.asc` で返却。
 
 **並列化パターン**: `range_multi`・`megribi_score`・`forecast_today_multi` は `ThreadPoolExecutor(max_workers=12)` で Supabase クエリ / ML 推論を並列実行。GIL 下でも I/O 待ち（HTTP）が支配的なため効果大。
 
@@ -38,6 +38,11 @@ Target commit: (see git)
 | `/insights/weekly/[store]` | `frontend/content/insights/weekly/<store>/<date>.json`（fs） |
 | `/blog/[slug]` | Supabase `blog_drafts`（`content_type='editorial'`, `is_published=true`） |
 | `/mypage` | `/api/range` + `/api/forecast_today` + `/api/megribi_score`（お気に入り店舗分） |
+
+#### GA4 アナリティクス（`NEXT_PUBLIC_GA_MEASUREMENT_ID` 設定時に有効）
+- `GoogleAnalytics.tsx`: gtag.js ロード + SPA ページ遷移追跡（`usePathname` / `useSearchParams`）
+- カスタムイベント: `store_view`、`report_read`、`favorite_add` / `favorite_remove`
+- サーバーコンポーネント用: `ReportViewTracker.tsx`（null を返す "use client" ラッパー）
 
 #### `/stores` ページのリクエスト順序（単一 worker 対策）
 
@@ -131,7 +136,7 @@ trigger-blog-cron.yml (Daily Report) 完了
 
 ### Backend (Python / Flask)
 - `oriental/routes/data.py`（/api/range, /api/current, /api/range_multi（ThreadPoolExecutor 並列化）, /api/second_venues）
-- `oriental/routes/forecast.py`（/api/forecast_*, /api/forecast_today_multi, /api/megribi_score — ThreadPoolExecutor 並列化）
+- `oriental/routes/forecast.py`（/api/forecast_*, /api/forecast_today_multi, /api/megribi_score, /api/forecast_accuracy — ThreadPoolExecutor 並列化）
 - `oriental/routes/tasks.py`（/tasks/multi_collect, /tasks/tick, CRON_SECRET 認証）
 - `oriental/data/provider.py`（SupabaseLogsProvider, GoogleSheetProvider）
 - `oriental/ml/forecast_service.py`（ML 推論オーケストレーション）
@@ -141,8 +146,9 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `multi_collect.py`（収集ロジック）
 
 ### Frontend (Next.js)
-- `frontend/src/app/api/*/route.ts`（backend proxy 7本 + SNS + LINE + cron）
+- `frontend/src/app/api/*/route.ts`（backend proxy 8本 + SNS + LINE + cron）
 - `frontend/src/app/api/forecast_today_multi/route.ts`（バッチ forecast proxy、CDN `s-maxage=60`）
+- `frontend/src/app/api/forecast_accuracy/route.ts`（精度メトリクス proxy、CDN `s-maxage=3600`）
 - `frontend/src/app/reports/page.tsx`（統合レポート一覧: reports-client.tsx）
 - `frontend/src/app/reports/daily/[store_slug]/page.tsx`（Daily Report 個別）
 - `frontend/src/app/reports/weekly/[store_slug]/page.tsx`（Weekly Report 個別）
@@ -156,7 +162,10 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `frontend/src/lib/line/parseLineIntent.ts`（draft / editorial_analysis / approve）
 - `frontend/src/lib/supabase/blogDrafts.ts`（Supabase CRUD）
 - `frontend/src/app/config/stores.ts`（38 店舗マスタ）
-- `frontend/src/components/StoreCard.tsx`（店舗カード）
+- `frontend/src/components/StoreCard.tsx`（店舗カード。めぐりびスコアバッジ: 狙い目/様子見/他店へ）
+- `frontend/src/components/GoogleAnalytics.tsx`（GA4 Script ローダー + SPA トラッカー）
+- `frontend/src/components/ReportViewTracker.tsx`（サーバーコンポーネント用 GA4 イベント発火）
+- `frontend/src/lib/analytics.ts`（GA4 ヘルパー: sendEvent / sendPageView）
 - `frontend/src/components/MeguribiHeader.tsx`（グローバルヘッダー）
 
 ### Content / Batch

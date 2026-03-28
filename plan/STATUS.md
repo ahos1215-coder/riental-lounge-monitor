@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-03-28 (Round 4.5: パフォーマンス最適化 — ThreadPoolExecutor 並列化 + forecast_today_multi バッチ + request ordering)
+Last updated: 2026-03-28 (Round 5: グロース基盤構築 — GA4 計測 + MAE/MAPE 精度 API + ステータス日本語化 + X 投稿テンプレート改善)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -17,6 +17,7 @@ Target commit: (see git)
 - `/api/forecast_today_multi`（`?stores=slug1,slug2,...` 最大40店舗。**ThreadPoolExecutor(12) で並列実行** — 12店舗でも ~1-2s。Flask 内キャッシュ共有）
 - `/api/second_venues`（最小応答。未設定時は空配列）
 - `/api/megribi_score`（全店舗 or 指定店舗の megribi_score を返す。`?store=` / `?stores=` 対応。Supabase backend 必須。**ThreadPoolExecutor(12) で並列取得 — 38店舗12s→<1s**）
+- `/api/forecast_accuracy`（`metadata.json` から店舗別 MAE/RMSE メトリクスを返却。学習後にのみ更新）
 - `/tasks/multi_collect` / `/api/tasks/collect_all_once`（本番収集の入口 → Supabase `logs`。デフォルト 202 Accepted + バックグラウンドスレッド実行。`?mode=sync` で旧同期モード。`/tasks/multi_collect/status` でステータス確認）
 - `/tasks/tick` / `/tasks/collect` / `/tasks/seed`（レガシー・ローカル向け）
 - `/tasks/update_second_venues`（任意。`GOOGLE_PLACES_API_KEY` がある場合のみ）
@@ -42,7 +43,7 @@ Target commit: (see git)
 | `/insights/weekly/[store]` | Weekly Insights 店舗別（`WeeklyStoreCharts.tsx`、Recharts `series_compact` 可視化） |
 | `/mypage` | **ダッシュボード型マイページ**: お気に入り店舗リッチカード（リアルタイム人数・男女スパークライン・megribi_score・ML 予測サマリ・Daily/Weekly リンク）+ 閲覧履歴ピルタグ |
 
-#### Next.js API Routes（13本）
+#### Next.js API Routes（14本）
 | パス | 用途 |
 |------|------|
 | `/api/range` | Flask `/api/range` プロキシ（CDN `s-maxage` 付き） |
@@ -57,7 +58,16 @@ Target commit: (see git)
 | `/api/blog/latest-store-summary` | 店舗ごとの最新 Daily Report 要約 |
 | `/api/cron/blog-draft` | Daily Report 生成（GHA matrix → Gemini → Supabase） |
 | `/api/line` | LINE Messaging webhook（下書き/分析/承認） |
+| `/api/forecast_accuracy` | Flask `/api/forecast_accuracy` プロキシ（CDN `s-maxage=3600`） |
 | `/api/sns/post` | X (Twitter) 投稿 API（OAuth 1.0a・dry_run 対応） |
+
+#### GA4 アナリティクス
+- **Google Analytics 4**: `NEXT_PUBLIC_GA_MEASUREMENT_ID` 設定時に自動有効化（未設定時は無効）
+- `next/script` の `afterInteractive` 戦略で gtag.js を非同期ロード
+- SPA ページ遷移追跡: `usePathname` + `useSearchParams` で `sendPageView` を自動発火
+- カスタムイベント: `store_view`（店舗詳細）、`report_read`（Daily/Weekly）、`favorite_add` / `favorite_remove`（お気に入り操作）
+- ヘルパー: `frontend/src/lib/analytics.ts`（`sendEvent` / `sendPageView`）
+- コンポーネント: `GoogleAnalytics.tsx`（Script ローダー + SPA トラッカー）、`ReportViewTracker.tsx`（サーバーコンポーネント用クライアントラッパー）
 
 #### その他フロントエンド機能
 - **LINE Webhook（本番パス）**
@@ -67,7 +77,7 @@ Target commit: (see git)
 - **OGP / メタデータ**: `metadataBase`、動的 OG 画像、全ページの `openGraph` / `twitter` 設定済み
 - **Sitemap**: `/reports`（統合一覧）+ `/reports/daily/[store_slug]`（priority 0.85 / daily）+ `/reports/weekly/[store_slug]`（priority 0.8 / weekly）全店舗分。旧 `/blog/auto-*` は廃止
 - **Recharts**: 全チャートを Chart.js → Recharts に統一済み（Round 3）。Chart.js 依存は完全削除
-- **StoreCard**: データ未取得時のプレースホルダ（`—`・`0人`）を非表示化（Round 3）
+- **StoreCard**: データ未取得時のプレースホルダ（`—`・`0人`）を非表示化（Round 3）。めぐりびスコアバッジ: `狙い目`（≥0.65）/ `様子見`（≥0.40）/ `他店へ`（<0.40）
 - **ブログ frontmatter**: Zod 検証（`blogFrontmatter.ts` / `content.ts`）
 - **CDN Cache-Control**: API proxy に `s-maxage` + `stale-while-revalidate` 設定。予測系（`forecast_today` / `forecast_next_hour`）は `s-maxage=60`（Flask TTL も 60s）、最大遅延 ~2 分
 

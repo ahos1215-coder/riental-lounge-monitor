@@ -1,5 +1,5 @@
 # VISION_AND_FUTURE
-Last updated: 2026-03-28 (Round 4.5 完了)
+Last updated: 2026-03-28 (Round 5 完了)
 Target commit: (see git)
 
 > **このファイルの役割**  
@@ -26,24 +26,27 @@ Target commit: (see git)
 
 ---
 
-## 2. 現状の到達点（Round 4.5 完了 / 2026-03-28）
+## 2. 現状の到達点（Round 5 完了 / 2026-03-28）
 
 詳細は **`plan/STATUS.md`**。
 
 | 領域 | 状態 |
 |------|------|
 | 収集 → Supabase | 本番稼働。cron-job.org → Flask `/tasks/multi_collect`（`CRON_SECRET` 認証）|
-| Flask API | `/api/range` `/api/megribi_score` `/api/forecast_*` `/api/forecast_today_multi` 等 12 エンドポイント稼働 |
+| Flask API | `/api/range` `/api/megribi_score` `/api/forecast_*` `/api/forecast_today_multi` `/api/forecast_accuracy` 等 13 エンドポイント稼働 |
 | Next.js 画面 | 13 ページルート実装済み（`/` `/stores` `/store/[id]` `/reports` `/reports/*/[store_slug]` `/blog` `/mypage` `/insights/weekly` 等） |
-| Next.js API | 13 API route 稼働（proxy + cron + LINE + SNS） |
+| Next.js API | 14 API route 稼働（proxy + cron + LINE + SNS） |
 | AI 予測レポート | Daily: 38 店舗 × 2 回/日、Weekly: 38 店舗 × 1 回/週。全自動 |
 | Editorial Blog | LINE → Gemini → 承認 → 公開。半自動 |
 | ML 予測 | 店舗別 XGBoost モデル。日次自動学習（GHA `train-ml-model.yml`） |
 | megribi_score | Flask + Next.js proxy。トップ「今夜のおすすめ」+ マイページカード |
 | マイページ | ダッシュボード化完了（リッチカード・スパークライン・ML 予測・レポートリンク） |
-| X 自動投稿 | OAuth 1.0a 実装済み。Daily Report 後に自動トリガー（dry_run 開始） |
+| X 自動投稿 | OAuth 1.0a 実装済み。Daily Report 後に自動トリガー。日本語店舗名テンプレート |
 | Recharts 統合 | Chart.js 完全削除、全チャート Recharts に統一 |
 | パフォーマンス最適化 | ThreadPoolExecutor 並列化 + forecast_today_multi バッチ + request ordering 戦略（sub-3s 初期表示）|
+| GA4 アナリティクス | gtag.js + SPA 追跡 + カスタムイベント（store_view, report_read, favorite）。`NEXT_PUBLIC_GA_MEASUREMENT_ID` で制御 |
+| 精度メトリクス API | `/api/forecast_accuracy` — 学習時 MAE/RMSE を metadata.json に永続化し API 提供 |
+| ステータス日本語化 | StoreCard バッジ: 狙い目/様子見/他店へ |
 | CDN キャッシュ | API proxy に `s-maxage` + `stale-while-revalidate` |
 | OGP | 全主要ページに設定済み |
 | Sitemap | 全店舗の Daily/Weekly レポート URL 登録済み |
@@ -91,8 +94,7 @@ Target commit: (see git)
 5. ✅ dry_run / 段階的拡大の仕組み
 
 **残タスク**:
-- X API キーの本番設定と dry_run 解除
-- 投稿効果の計測（UTM パラメータ付与）
+- X API キーの本番設定と dry_run 解除（コード側は準備完了。Vercel/GHA に環境変数設定後、`workflow_dispatch` で dry_run=true テスト → false で解除）
 - OG 画像の動的生成（予測サマリ入り）
 - アフィリエイト枠の検討（予約リンク + UTM）
 
@@ -110,7 +112,7 @@ Target commit: (see git)
   - Flask プロセス内キャッシュ（TTL 60s）で forecast 結果を個別/バッチ間共有
 
 **残タスク**:
-1. オフライン評価（精度の見える化）
+1. ~~オフライン評価（精度の見える化）~~ → ✅ MAE/RMSE の metadata.json 永続化 + API 完了。**フロントエンド表示は未着手**
 2. 異常値・欠損時のユーザー向けメッセージ改善
 3. 予測精度の定期レポート（Weekly Report への組み込み等）
 4. ヒートマップ画像生成（将来）

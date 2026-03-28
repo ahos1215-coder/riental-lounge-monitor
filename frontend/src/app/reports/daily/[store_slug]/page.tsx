@@ -7,6 +7,7 @@ import remarkGfm from "remark-gfm";
 import { getStoreMetaBySlugStrict } from "@/app/config/stores";
 import { FactsSummaryCard } from "@/components/blog/FactsSummaryCard";
 import { ReservationLinkCard } from "@/components/ReservationLinkCard";
+import { ReportViewTracker } from "@/components/ReportViewTracker";
 import { readPublicFacts } from "@/lib/blog/publicFacts";
 import { fetchLatestPublishedReportByStore } from "@/lib/supabase/blogDrafts";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
@@ -62,6 +63,7 @@ export default async function DailyReportStorePage({ params }: Props) {
 
   return (
     <main className="mx-auto w-full max-w-3xl px-4 py-10">
+      <ReportViewTracker storeSlug={store.slug} reportType="daily" />
       <div className="mb-6 flex flex-wrap gap-4">
         <Link
           href="/reports"

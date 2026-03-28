@@ -1,5 +1,5 @@
 # ROADMAP
-Last updated: 2026-03-28 (Round 4.5 完了)
+Last updated: 2026-03-28 (Round 5 完了)
 Target commit: (see git)
 
 > **構想・フェーズ順・備忘の全文**は **`plan/VISION_AND_FUTURE.md`**。本ファイルは短いタスク一覧と「当面やらないこと」に絞る。
@@ -84,35 +84,44 @@ Target commit: (see git)
 | `/stores` request ordering | 単一 gunicorn worker 対策: ① range_multi await → 部分カード即表示 → ② megribi_score → ③ forecast_today_multi を後続発火。体感 ~1.5s で初期表示 |
 | `/store/[id]` 同時発火 | range + forecast を Promise.all で同時発火（従来は直列） |
 
+### Round 5: グロース基盤構築（GA4 計測 + 精度可視化 + UX 改善）
+
+| 項目 | 内容 |
+|------|------|
+| GA4 導入 | `layout.tsx` に gtag.js 追加。SPA ページ遷移追跡 + カスタムイベント（`store_view`, `report_read`, `favorite_add/remove`）。`NEXT_PUBLIC_GA_MEASUREMENT_ID` で制御 |
+| MAE/MAPE 永続化 | `train_ml_model.py` で学習時のメトリクスを `metadata.json` に含める。Flask `/api/forecast_accuracy` + Next.js proxy 追加 |
+| ステータス日本語化 | StoreCard の `GO/WAIT/SKIP` → `狙い目/様子見/他店へ` に変更 |
+| X 投稿テンプレート改善 | `x-auto-post.yml` に全38店舗の slug→日本語名マッピング追加。ツイート内容を日本語店舗名で表示 |
+
 ---
 
-## Round 5（提案: 品質・信頼性の底上げ）
+## Round 6（提案: 品質・信頼性の底上げ）
 
 | # | 項目 | 推奨モデル | 理由 |
 |---|------|-----------|------|
-| 5-1 | デッドコード一括削除 | Sonnet | 機械的削除。STATUS.md 記載の未参照ファイル + .bak ファイル |
-| 5-2 | E2E テスト基盤 | Sonnet | Playwright 導入、主要3ページ（トップ・店舗一覧・レポート統合）のスモークテスト |
-| 5-3 | エラーバウンダリ + ローディング UX | Sonnet | 各ページに `error.tsx` / `loading.tsx` を配置。API エラー時のフォールバック UI（**一部実装済み**: Round 5-6 でエラー/ローディングページ追加済み） |
-| 5-4 | Weekly Insights → `/reports/weekly` 統合検討 | Opus | `/insights/weekly` と `/reports/weekly` の重複を整理。データソース統一の設計判断 |
-| 5-5 | GitHub PAT 期限切れ LINE 通知 | Sonnet | 週次 GHA ワークフロー + LINE Push API |
+| 6-1 | デッドコード一括削除 | Sonnet | 機械的削除。STATUS.md 記載の未参照ファイル + .bak ファイル |
+| 6-2 | E2E テスト基盤 | Sonnet | Playwright 導入、主要3ページ（トップ・店舗一覧・レポート統合）のスモークテスト |
+| 6-3 | エラーバウンダリ + ローディング UX | Sonnet | 各ページに `error.tsx` / `loading.tsx` を配置。API エラー時のフォールバック UI（**一部実装済み**） |
+| 6-4 | Weekly Insights → `/reports/weekly` 統合検討 | Opus | `/insights/weekly` と `/reports/weekly` の重複を整理。データソース統一の設計判断 |
+| 6-5 | GitHub PAT 期限切れ LINE 通知 | Sonnet | 週次 GHA ワークフロー + LINE Push API |
 
-## Round 6（提案: ユーザー体験の深化）
-
-| # | 項目 | 推奨モデル | 理由 |
-|---|------|-----------|------|
-| 6-1 | PWA 対応（Web App Manifest + Service Worker） | Sonnet | オフライン対応・ホーム画面追加（**PWA Manifest 実装済み**） |
-| 6-2 | OG 画像の動的生成 | Sonnet | `/reports/daily/[store_slug]` の OG 画像にその日の予測サマリを含める（**OG 画像基盤実装済み**） |
-| 6-3 | 店舗詳細ページの「比較モード」 | Opus | 2-3 店舗を並べて比較するレイアウト設計が必要 |
-| 6-4 | Editorial ブログの運用フロー強化 | Opus | LINE から「月間まとめ」「エリア比較」等の複雑な分析依頼に対応 |
-
-## Round 7（提案: 収益化・拡張）
+## Round 7（提案: ユーザー体験の深化）
 
 | # | 項目 | 推奨モデル | 理由 |
 |---|------|-----------|------|
-| 7-1 | アフィリエイト枠 + UTM 計測 | Sonnet | Daily Report / 店舗詳細に予約リンク枠（**UTM + アフィリエイトリンク基盤実装済み**） |
-| 7-2 | 他ブランド対応（JIS・相席屋） | Opus | stores.ts / スクレイパー / UI の大規模拡張設計 |
-| 7-3 | Web Push 通知 | Opus | VAPID 鍵・購読管理・送信ジョブの設計 |
-| 7-4 | ユーザー認証 + プレミアム機能 | Opus | Supabase Auth / Stripe Checkout の設計判断 |
+| 7-1 | PWA 対応（Web App Manifest + Service Worker） | Sonnet | オフライン対応・ホーム画面追加（**PWA Manifest 実装済み**） |
+| 7-2 | OG 画像の動的生成 | Sonnet | `/reports/daily/[store_slug]` の OG 画像にその日の予測サマリを含める（**OG 画像基盤実装済み**） |
+| 7-3 | 店舗詳細ページの「比較モード」 | Opus | 2-3 店舗を並べて比較するレイアウト設計が必要 |
+| 7-4 | Editorial ブログの運用フロー強化 | Opus | LINE から「月間まとめ」「エリア比較」等の複雑な分析依頼に対応 |
+
+## Round 8（提案: 収益化・拡張）
+
+| # | 項目 | 推奨モデル | 理由 |
+|---|------|-----------|------|
+| 8-1 | アフィリエイト枠 + UTM 計測 | Sonnet | Daily Report / 店舗詳細に予約リンク枠（**UTM + アフィリエイトリンク基盤実装済み**） |
+| 8-2 | 他ブランド対応（JIS・相席屋） | Opus | stores.ts / スクレイパー / UI の大規模拡張設計 |
+| 8-3 | Web Push 通知 | Opus | VAPID 鍵・購読管理・送信ジョブの設計 |
+| 8-4 | ユーザー認証 + プレミアム機能 | Opus | Supabase Auth / Stripe Checkout の設計判断 |
 
 ---
 

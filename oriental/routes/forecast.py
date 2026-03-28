@@ -317,3 +317,32 @@ def api_megribi_score():
     results.sort(key=lambda r: r["score"], reverse=True)
     logger.info("api_megribi_score.success count=%d", len(results))
     return jsonify({"ok": True, "data": results})
+
+
+@bp.get("/forecast_accuracy")
+def api_forecast_accuracy():
+    """Return per-store training accuracy metrics from metadata.json."""
+    import json
+    from pathlib import Path
+
+    cfg = _config()
+    cache_dir = Path(cfg.forecast_model_cache_dir)
+    metadata_path = cache_dir / "metadata.json"
+
+    if not metadata_path.exists():
+        return jsonify({"ok": False, "error": "metadata-not-found"}), 404
+
+    try:
+        meta = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception:
+        return jsonify({"ok": False, "error": "metadata-parse-error"}), 500
+
+    metrics = meta.get("metrics")
+    if not metrics:
+        return jsonify({"ok": False, "error": "no-metrics-in-metadata"}), 404
+
+    return jsonify({
+        "ok": True,
+        "trained_at": meta.get("trained_at"),
+        "metrics": metrics,
+    })

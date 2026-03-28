@@ -212,10 +212,14 @@ def _evaluate_rows(df: pd.DataFrame, pred_men: np.ndarray, pred_women: np.ndarra
     }
 
 
-def _log_metrics_by_store(df: pd.DataFrame, model_men: XGBRegressor, model_women: XGBRegressor) -> None:
+def _log_metrics_by_store(
+    df: pd.DataFrame, model_men: XGBRegressor, model_women: XGBRegressor
+) -> dict[str, dict[str, Any]]:
+    """Evaluate per-store metrics and return them for metadata embedding."""
     pred_men_all = model_men.predict(df[FEATURE_COLUMNS])
     pred_women_all = model_women.predict(df[FEATURE_COLUMNS])
     stores = sorted(df["store_id"].dropna().unique().tolist()) if "store_id" in df.columns else ["all"]
+    all_metrics: dict[str, dict[str, Any]] = {}
     for store in stores:
         if store == "all":
             sdf = df
@@ -241,19 +245,16 @@ def _log_metrics_by_store(df: pd.DataFrame, model_men: XGBRegressor, model_women
             )
         else:
             segment = {}
-        print(
-            "[train-ml][metrics]",
-            json.dumps(
-                {
-                    "store_id": store,
-                    "rows": int(len(sdf)),
-                    "overall": overall,
-                    "weekend_night_segment_rows": int(peak_mask.sum()),
-                    "weekend_night_segment": segment,
-                },
-                ensure_ascii=True,
-            ),
-        )
+        entry = {
+            "store_id": store,
+            "rows": int(len(sdf)),
+            "overall": overall,
+            "weekend_night_segment_rows": int(peak_mask.sum()),
+            "weekend_night_segment": segment,
+        }
+        print("[train-ml][metrics]", json.dumps(entry, ensure_ascii=True))
+        all_metrics[store] = entry
+    return all_metrics
 
 
 def _build_metadata(
@@ -263,8 +264,9 @@ def _build_metadata(
     trained_at: str,
     date_tag: str,
     store_models: dict[str, dict[str, Any]],
+    metrics: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    return {
+    meta: dict[str, Any] = {
         "schema_version": cfg.schema_version,
         "feature_columns": FEATURE_COLUMNS,
         "model_men": "model_men.json",  # backward compatibility
@@ -283,6 +285,9 @@ def _build_metadata(
         "python_version": platform.python_version(),
         "xgboost_version": xgb.__version__,
     }
+    if metrics:
+        meta["metrics"] = metrics
+    return meta
 
 
 def _upload_file(
@@ -338,6 +343,7 @@ def main() -> int:
     trained_at = datetime.now(timezone.utc).isoformat()
     date_tag = datetime.now(timezone.utc).strftime("%Y%m%d")
     store_models: dict[str, dict[str, Any]] = {}
+    all_metrics: dict[str, dict[str, Any]] = {}
 
     with tempfile.TemporaryDirectory(prefix="train-ml-") as tmp:
         work_dir = Path(tmp)
@@ -351,7 +357,8 @@ def main() -> int:
                 print(f"[train-ml][skip] store_id={store_id} rows={len(sdf)} (<200)")
                 continue
             model_men_path, model_women_path, model_men, model_women = _train_models(sdf, work_dir, cfg, store_id, date_tag)
-            _log_metrics_by_store(sdf, model_men, model_women)
+            store_metrics = _log_metrics_by_store(sdf, model_men, model_women)
+            all_metrics.update(store_metrics)
 
             # Latest alias for simpler rollback/fallback
             alias_men_path = work_dir / f"model_{store_id}_men.json"
@@ -385,6 +392,7 @@ def main() -> int:
             trained_at=trained_at,
             date_tag=date_tag,
             store_models=store_models,
+            metrics=all_metrics if all_metrics else None,
         )
         metadata_path = work_dir / "metadata.json"
         metadata_path.write_text(json.dumps(metadata, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
