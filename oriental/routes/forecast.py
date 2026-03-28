@@ -184,6 +184,68 @@ def forecast_today():
     return jsonify(result)
 
 
+@bp.get("/forecast_today_multi")
+def forecast_today_multi():
+    """複数店舗の forecast_today を1リクエストで返す。
+    ?stores=slug1,slug2,... で最大40店舗。
+    ThreadPoolExecutor で並列実行 — 12店舗でも ~1-2s。
+    """
+    guard = _guard()
+    if guard:
+        return guard
+
+    from ..utils.stores import SLUG_TO_ID
+
+    cfg = _config()
+    logger = current_app.logger
+
+    raw_stores = request.args.get("stores") or ""
+    slugs = [s.strip().lower() for s in raw_stores.split(",") if s.strip()]
+    valid = [(s, SLUG_TO_ID[s]) for s in slugs if s in SLUG_TO_ID][:40]
+
+    if not valid:
+        return jsonify({"ok": False, "error": "no-valid-stores"}), 422
+
+    freq = max(1, int(os.getenv("FORECAST_FREQ_MIN", "15")))
+    start_h = int(os.getenv("NIGHT_START_H", "19"))
+    end_h = int(os.getenv("NIGHT_END_H", "5"))
+
+    # Flask コンテキスト外のスレッドで使えるよう、参照を先に取得
+    service = _service()
+    cache = _forecast_cache()
+
+    def _fetch_one(slug: str, store_id: str):
+        cache_key = f"today:{store_id}"
+        entry = cache.get(cache_key)
+        if entry and time.time() - entry["at"] <= _FORECAST_CACHE_TTL:
+            return slug, entry["data"]
+
+        raw = service.forecast_today(
+            store_id=store_id, freq_min=freq, start_h=start_h, end_h=end_h
+        )
+        if not raw.get("ok", True):
+            return slug, {"ok": False, "data": []}
+
+        data = raw.get("data")
+        points = [d for d in data if isinstance(d, dict) and "ts" in d] if isinstance(data, list) else []
+        result = {"ok": True, "data": points}
+        cache[cache_key] = {"at": time.time(), "data": result}
+        return slug, result
+
+    by_slug: dict = {}
+    with ThreadPoolExecutor(max_workers=min(12, len(valid))) as pool:
+        futures = {pool.submit(_fetch_one, s, sid): s for s, sid in valid}
+        for fut in as_completed(futures):
+            try:
+                slug_key, data = fut.result()
+                by_slug[slug_key] = data
+            except Exception:
+                by_slug[futures[fut]] = {"ok": False, "data": []}
+
+    logger.info("api_forecast_today_multi.success count=%d", len(by_slug))
+    return jsonify({"ok": True, "by_slug": by_slug})
+
+
 @bp.get("/megribi_score")
 def api_megribi_score():
     """各店舗の最新データから megribi_score を計算して返す。

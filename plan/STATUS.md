@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-03-28 (Batch 4: 全ページ2-3秒表示 — バックエンド並列化 + フロントエンド同時発火)
+Last updated: 2026-03-28 (Batch 5: forecast_today_multi バッチエンドポイント — 12店舗 forecast 10s→~2s)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -27,7 +27,7 @@ Target commit: (see git)
 | パス | 概要 |
 |------|------|
 | `/` | トップ。「今夜のおすすめ」（megribi_score TOP 5）+ Last visited ミニチャート + ブログ新着 + ナビリンク |
-| `/stores` | 全店舗一覧（12件/ページ・地域タブ・テキスト検索・`/api/range_multi` バッチ取得・**forecast + megribi_score 同時発火**） |
+| `/stores` | 全店舗一覧（12件/ページ・地域タブ・テキスト検索・`/api/range_multi` バッチ取得・**`/api/forecast_today_multi` + megribi_score 同時発火 → 12店舗 forecast 10s→~2s**） |
 | `/store/[id]` | 店舗詳細（リアルタイムカード・Recharts 時系列・ML 予測・レポート要約カード・関連店舗・**range + forecast 同時発火**） |
 | `/reports` | **AI予測レポート統合一覧**（Daily/Weekly タブ切替・エリアフィルタ・店舗名検索。ヘッダー「AI予測」からリンク） |
 | `/reports/daily` | `/reports` へリダイレクト |
@@ -46,6 +46,7 @@ Target commit: (see git)
 | `/api/range` | Flask `/api/range` プロキシ（CDN `s-maxage` 付き） |
 | `/api/range_multi` | Flask `/api/range_multi` プロキシ |
 | `/api/forecast_today` | Flask `/api/forecast_today` プロキシ（CDN キャッシュ） |
+| `/api/forecast_today_multi` | Flask `/api/forecast_today_multi` プロキシ（`?stores=slug1,slug2,...`、CDN `s-maxage=60`） |
 | `/api/forecast_next_hour` | Flask `/api/forecast_next_hour` プロキシ |
 | `/api/megribi_score` | Flask `/api/megribi_score` プロキシ（CDN `s-maxage=120`） |
 | `/api/second_venues` | Flask `/api/second_venues` プロキシ |

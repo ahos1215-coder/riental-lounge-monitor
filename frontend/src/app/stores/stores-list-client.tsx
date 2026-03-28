@@ -194,10 +194,20 @@ export default function StoresListClient() {
     void (async () => {
       const rangeBySlug = new Map<string, ReturnType<typeof parseRangeResponse>>();
       let batchOk = false;
+      const slugsCsv = targets.map((t) => t.slug).join(",");
+
+      // forecast_today_multi を range_multi と同時発火（最大のボトルネック解消）
+      type ForecastBatchBody = { ok?: boolean; by_slug?: Record<string, { data?: ForecastPoint[] }> };
+      const forecastBatchPromise: Promise<ForecastBatchBody | null> = fetch(
+        `/api/forecast_today_multi?stores=${encodeURIComponent(slugsCsv)}`,
+        { signal },
+      )
+        .then((r) => (r.ok ? (r.json() as Promise<ForecastBatchBody>) : null))
+        .catch(() => null);
+
       try {
-        const slugs = targets.map((t) => t.slug).join(",");
         const r = await fetch(
-          `/api/range_multi?stores=${encodeURIComponent(slugs)}&limit=${STORE_CARD_RANGE_LIMIT}`,
+          `/api/range_multi?stores=${encodeURIComponent(slugsCsv)}&limit=${STORE_CARD_RANGE_LIMIT}`,
           { signal },
         );
         if (signal.aborted) return;
@@ -220,7 +230,7 @@ export default function StoresListClient() {
         }
       }
 
-      async function fetchStoreCard(store: StoreMeta): Promise<void> {
+      async function fetchStoreCard(store: StoreMeta, fBatch?: Promise<ForecastBatchBody | null>): Promise<void> {
         let menNow = 0;
         let womenNow = 0;
         let nowTotal = 0;
@@ -282,41 +292,63 @@ export default function StoresListClient() {
         }
 
         try {
-          const forecastRes = await fetch(
-            `/api/forecast_today?store=${encodeURIComponent(store.slug)}`,
-            { signal },
-          );
-          if (signal.aborted) return;
-          if (!forecastRes.ok) {
-            const unavailable = forecastRes.status === 503;
-            setStoreRealtime((prev) => {
-              const cur = prev[store.slug];
-              if (!cur) return prev;
-              return {
-                ...prev,
-                [store.slug]: {
-                  ...cur,
-                  stats: {
-                    ...cur.stats,
-                    peakPredTotal: 0,
-                    crowdLevel: unavailable ? "予測なし" : "確認中",
-                    recommendLabel: unavailable
-                      ? "現在ご利用いただけません"
-                      : "確認中",
+          // バッチ forecast があればそれを使い、なければ個別フォールバック
+          let forecastRows: ForecastPoint[] = [];
+          if (fBatch) {
+            const batchBody = await fBatch;
+            if (signal.aborted) return;
+            const batchData = batchBody?.by_slug?.[store.slug]?.data;
+            if (Array.isArray(batchData)) {
+              forecastRows = batchData;
+            } else {
+              // batch 失敗 → 個別フォールバック
+              const fallbackRes = await fetch(
+                `/api/forecast_today?store=${encodeURIComponent(store.slug)}`,
+                { signal },
+              ).catch(() => null);
+              if (signal.aborted) return;
+              if (fallbackRes?.ok) {
+                const fb = (await fallbackRes.json().catch(() => ({}))) as { data?: ForecastPoint[] };
+                forecastRows = Array.isArray(fb?.data) ? fb.data : [];
+              }
+            }
+          } else {
+            const forecastRes = await fetch(
+              `/api/forecast_today?store=${encodeURIComponent(store.slug)}`,
+              { signal },
+            );
+            if (signal.aborted) return;
+            if (!forecastRes.ok) {
+              const unavailable = forecastRes.status === 503;
+              setStoreRealtime((prev) => {
+                const cur = prev[store.slug];
+                if (!cur) return prev;
+                return {
+                  ...prev,
+                  [store.slug]: {
+                    ...cur,
+                    stats: {
+                      ...cur.stats,
+                      peakPredTotal: 0,
+                      crowdLevel: unavailable ? "予測なし" : "確認中",
+                      recommendLabel: unavailable ? "現在ご利用いただけません" : "確認中",
+                    },
+                    sparkline: cur.sparkline,
+                    sparklineMen: cur.sparklineMen,
+                    sparklineWomen: cur.sparklineWomen,
+                    forecastPending: false,
                   },
-                  sparkline: cur.sparkline,
-                  sparklineMen: cur.sparklineMen,
-                  sparklineWomen: cur.sparklineWomen,
-                  forecastPending: false,
-                },
-              };
-            });
-            return;
+                };
+              });
+              return;
+            }
+            const forecastBody = (await forecastRes.json()) as { data?: ForecastPoint[] };
+            if (signal.aborted) return;
+            forecastRows = Array.isArray(forecastBody?.data) ? forecastBody.data : [];
           }
-          const forecastBody = (await forecastRes.json()) as { data?: ForecastPoint[] };
+
           if (signal.aborted) return;
 
-          const forecastRows = Array.isArray(forecastBody?.data) ? forecastBody.data : [];
           const totals = forecastRows
             .map((r) => Math.max(0, Math.round(Number(r.total_pred ?? 0))))
             .filter((n) => Number.isFinite(n));
@@ -374,7 +406,7 @@ export default function StoresListClient() {
       }
 
       if (!signal.aborted) {
-        const forecastPromises = targets.map((store) => fetchStoreCard(store));
+        const forecastPromises = targets.map((store) => fetchStoreCard(store, forecastBatchPromise));
 
         // めぐりびスコアを forecast と同時にバッチ取得
         const megribiPromise = (async () => {
