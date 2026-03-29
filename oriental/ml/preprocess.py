@@ -31,6 +31,8 @@ FEATURE_COLUMNS = [
     # Lag/MA features removed: NaN at inference time → median-filled → constant noise
     # "men_lag_12", "men_lag_24", "men_ma_2", "men_ma_4",
     # "women_lag_12", "women_lag_24", "women_ma_2", "women_ma_4",
+    # v3: 同曜日先週の実測値（推論時にも利用可能 — 7日分の履歴から算出）
+    "same_dow_last_week_total",
 ]
 
 
@@ -147,6 +149,31 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
         df["men_ma_4"] = df["men"].rolling(4, min_periods=1).mean()
         df["women_ma_2"] = df["women"].rolling(2, min_periods=1).mean()
         df["women_ma_4"] = df["women"].rolling(4, min_periods=1).mean()
+
+    # --- 同曜日先週の実測 total（v3 feature） ---
+    # 各行の ts を15分単位に丸め、7日前の同スロットの total を参照する。
+    # 学習時: DataFrame 内の過去データから自動算出。
+    # 推論時: 7日分の history が concat されているため future 行でも算出可能。
+    # マッチしなければ NaN — XGBoost は NaN を native に処理する。
+    _ts_rounded = ts_local.dt.floor("15min")
+    _valid_mask = df["total"].notna()
+    _lookup_df = pd.DataFrame({
+        "_future_ts": _ts_rounded[_valid_mask] + pd.Timedelta(days=7),
+        "_total": df.loc[_valid_mask, "total"].values,
+    })
+    if group_keys:
+        for gk in group_keys:
+            _lookup_df[gk] = df.loc[_valid_mask, gk].values
+        _lookup_df = _lookup_df.groupby(group_keys + ["_future_ts"], dropna=False).agg({"_total": "mean"}).reset_index()
+        _merge_df = pd.DataFrame({"_future_ts": _ts_rounded.values})
+        for gk in group_keys:
+            _merge_df[gk] = df[gk].values
+        _merged = _merge_df.merge(_lookup_df, on=group_keys + ["_future_ts"], how="left")
+    else:
+        _lookup_df = _lookup_df.groupby("_future_ts", dropna=False).agg({"_total": "mean"}).reset_index()
+        _merge_df = pd.DataFrame({"_future_ts": _ts_rounded.values})
+        _merged = _merge_df.merge(_lookup_df, on="_future_ts", how="left")
+    df["same_dow_last_week_total"] = _merged["_total"].values
 
     df["gender_diff"] = (df["men"] - df["women"]).astype(float)
     df["minutes_to_midnight"] = (24 * 60 - (df["hour"] * 60 + df["minute"])).astype(float)
