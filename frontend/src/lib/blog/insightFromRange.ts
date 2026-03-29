@@ -23,6 +23,21 @@ export type Insight = {
 /** 18時台便（事前の見通し） vs 21時半便（実測に基づく修正・実況） */
 export type BlogEdition = "evening_preview" | "late_update";
 
+export type DayContext = {
+  day_name_ja: string;
+  day_of_week: number;
+  is_weekend: boolean;
+  is_friday: boolean;
+};
+
+export type WeekComparison = {
+  available: boolean;
+  same_weekday_count: number;
+  same_weekday_avg_peak: number | null;
+  today_peak: number | null;
+  trend_note: string;
+};
+
 export type DraftContext = {
   edition: BlogEdition;
   /** avoid_time は「待ち時間が短い」目安であり、相席の質の最高値とは限らない */
@@ -36,6 +51,10 @@ export type DraftContext = {
   data_health: { level: "ok" | "sparse" | "concerning"; notes: string[] };
   /** AI 向け短い一行（時間帯別の傾き） */
   hourly_hint: string;
+  /** 曜日コンテキスト（SEO差別化用） */
+  day_context?: DayContext;
+  /** 同曜日の過去データとの比較（SEO差別化用） */
+  week_comparison?: WeekComparison;
 };
 
 export type InsightBuildResult = {
@@ -244,12 +263,97 @@ function sumHourlyTotals(points: PointWithGender[]): Map<number, number> {
   return m;
 }
 
+const DAY_NAMES_JA = ["日曜日", "月曜日", "火曜日", "水曜日", "木曜日", "金曜日", "土曜日"] as const;
+
+function computeDayContext(dateYmd: string): DayContext {
+  const d = new Date(`${dateYmd}T12:00:00+09:00`);
+  const dow = d.getDay();
+  return {
+    day_name_ja: DAY_NAMES_JA[dow],
+    day_of_week: dow,
+    is_weekend: dow === 5 || dow === 6,
+    is_friday: dow === 5,
+  };
+}
+
+/**
+ * 既にフェッチ済みの range rows から同曜日の過去データを抽出し、
+ * 今日のピークとの比較を算出する（追加 API コールなし）。
+ */
+function computeWeekComparison(
+  rangeRows: unknown[],
+  todayYmd: string,
+  todayPeakTotal: number | null,
+  opts: CollectOptions,
+): WeekComparison {
+  const targetDate = new Date(`${todayYmd}T12:00:00+09:00`);
+  const targetDow = targetDate.getDay();
+
+  const byDate = new Map<string, number[]>();
+  for (const r of rangeRows) {
+    if (!r || typeof r !== "object") continue;
+    const row = r as Record<string, unknown>;
+    const dt = parseTimestamp(row);
+    if (!dt) continue;
+    const ymd = fmtYmdTokyo(dt);
+    const total = computeTotal(row, opts.totalKeys, opts.menKeys, opts.womenKeys);
+    if (total == null) continue;
+    if (!byDate.has(ymd)) byDate.set(ymd, []);
+    byDate.get(ymd)!.push(total);
+  }
+
+  const sameWeekdayPeaks: number[] = [];
+  for (const [ymd, totals] of byDate) {
+    if (ymd === todayYmd) continue;
+    const d = new Date(`${ymd}T12:00:00+09:00`);
+    if (d.getDay() !== targetDow) continue;
+    sameWeekdayPeaks.push(Math.max(...totals));
+  }
+
+  if (sameWeekdayPeaks.length === 0) {
+    return {
+      available: false,
+      same_weekday_count: 0,
+      same_weekday_avg_peak: null,
+      today_peak: todayPeakTotal,
+      trend_note: "同じ曜日の過去データが不足しているため、比較できません。",
+    };
+  }
+
+  const avg = sameWeekdayPeaks.reduce((s, v) => s + v, 0) / sameWeekdayPeaks.length;
+  const dayName = DAY_NAMES_JA[targetDow];
+
+  let trend_note: string;
+  if (todayPeakTotal == null) {
+    trend_note = `過去${sameWeekdayPeaks.length}週の${dayName}ピーク平均: 約${Math.round(avg)}人。`;
+  } else if (todayPeakTotal > avg * 1.15) {
+    trend_note = `過去${sameWeekdayPeaks.length}週の${dayName}平均（約${Math.round(avg)}人）を上回る傾向。`;
+  } else if (todayPeakTotal < avg * 0.85) {
+    trend_note = `過去${sameWeekdayPeaks.length}週の${dayName}平均（約${Math.round(avg)}人）を下回る傾向。`;
+  } else {
+    trend_note = `過去${sameWeekdayPeaks.length}週の${dayName}ピーク平均（約${Math.round(avg)}人）とほぼ同水準。`;
+  }
+
+  return {
+    available: true,
+    same_weekday_count: sameWeekdayPeaks.length,
+    same_weekday_avg_peak: Math.round(avg * 10) / 10,
+    today_peak: todayPeakTotal,
+    trend_note,
+  };
+}
+
 function computeDraftContext(
   detailed: PointWithGender[],
   insight: Insight,
   edition: BlogEdition,
   extraQualityNotes: string[],
-  options?: { mlInferenceMode?: DraftContext["ml_inference_mode"]; mlSignalNotes?: string[] }
+  options?: {
+    mlInferenceMode?: DraftContext["ml_inference_mode"];
+    mlSignalNotes?: string[];
+    dayContext?: DayContext;
+    weekComparison?: WeekComparison;
+  },
 ): DraftContext {
   const notes: string[] = [...extraQualityNotes];
   let gender_note =
@@ -323,6 +427,8 @@ function computeDraftContext(
     secondary_wave: secondaryWave,
     data_health: { level, notes },
     hourly_hint,
+    day_context: options?.dayContext,
+    week_comparison: options?.weekComparison,
   };
 }
 
@@ -548,9 +654,19 @@ export async function buildInsightFromBackend(
   const detailed = collectPointsWithGender(rowsForGender, range.from, range.to, genderOpts);
 
   const edition = options?.edition ?? inferBlogEditionFromJstNow();
+  const dayContext = computeDayContext(dateYmd);
+  const todayPeak = points.length > 0 ? Math.max(...points.map((p) => p.total)) : null;
+  const rangeOpts: CollectOptions = {
+    totalKeys: ["total"],
+    menKeys: ["men", "male", "m"],
+    womenKeys: ["women", "female", "f"],
+  };
+  const weekComparison = computeWeekComparison(rangeRows, dateYmd, todayPeak, rangeOpts);
   const draft_context = computeDraftContext(detailed, insight, edition, notes, {
     mlInferenceMode: source === "api/forecast_today" ? "store_specific_or_forecast" : "range_only",
     mlSignalNotes: forecastReasoningNotes,
+    dayContext,
+    weekComparison,
   });
 
   return {

@@ -189,6 +189,15 @@ function buildSystemInstruction(edition: BlogEdition): string {
     "- この文脈では、**『一次会終わりの二次会層が合流し、最も質の高い出会いが期待できるゴールデンタイム』**といった表現を**使ってよい**（データがその解釈を支えるとき）。",
     "- ただし**個人の結果を保証する**ような表現（必ず成功する、など）は禁止。`secondary_wave.detected` が false / データが薄いときは**無理にゴールデンタイムを書かない**。",
     "",
+    "■ 曜日コンテキストと週次比較（draft_context.day_context, draft_context.week_comparison）",
+    "- `day_context.day_name_ja` を活用し、**曜日に合った文脈**を1文添えてください。",
+    "  - 金曜・土曜: 「週末の夜は賑わいやすい傾向」など（データと矛盾しない範囲で）。",
+    "  - 日〜木: 「平日は比較的落ち着いている傾向」など。",
+    "- `week_comparison.available` が true なら、**過去の同曜日との比較**を `trend_note` をもとに1文で触れてよい。",
+    "  - 例: 「過去3週の金曜平均（約65人）を上回る傾向です」",
+    "- week_comparison が unavailable（データ不足）なら無理に書かない。",
+    "- **注意**: 曜日言及は1〜2文で十分。長い曜日分析は不要。",
+    "",
     "■ データが薄い日・厳しい日（draft_context.data_health）",
     "- level が sparse または concerning のときは、冒頭や「今日の一言」で**正直に**、サンプル不足・偏り・閑散など**データ上の限界**を伝える。",
     "- **正直さ:** 人数が極端に少ない、男性に偏っている等がデータで読めるときは、**期待を過度に持たせない**書き方をする。「ダメ」と決めつけるのではなく、**判断材料としての弱さ**を明示。",
@@ -225,6 +234,8 @@ function buildUserPrompt(input: DraftGeneratorInput): string {
     quality_notes: quality_flags.notes,
     draft_context,
     hourly_hint_excerpt: draft_context.hourly_hint,
+    day_context: draft_context.day_context ?? null,
+    week_comparison: draft_context.week_comparison ?? null,
     user_topic_hint: hint || null,
   };
 
@@ -240,6 +251,7 @@ function buildUserPrompt(input: DraftGeneratorInput): string {
     "- **draft_context.edition**: `evening_preview` なら今夜の**見通し・作戦**（未来のピークは予想）、`late_update` なら**実測に近い実況・答え合わせ**（断定しすぎない）。",
     "- **draft_context.secondary_wave.detected** が true なら、21〜22時台の急増を踏まえ**ゴールデンタイム**の紹介が可能（個人への結果保証はしない）。false なら無理に書かない。",
     "- **data_health** が厳しければサンプル不足・偏りを**正直に**書く。",
+    "- **day_context** が存在する場合、曜日名を自然に記事へ反映し、**week_comparison** が available なら同曜日比較を1文で触れる。",
     "",
     JSON.stringify(payload, null, 2),
   ].join("\n");
@@ -443,7 +455,11 @@ export function buildFallbackBlogDraftMdx(input: DraftGeneratorInput): string {
   const peak = insight.peak_time || "—";
   const avoid = insight.avoid_time || "—";
   const crowd = insight.crowd_label || "—";
+  const dayLabel = draft_context?.day_context?.day_name_ja ?? "";
+  const weekNote = draft_context?.week_comparison?.available ? draft_context.week_comparison.trend_note : "";
   const noteLines = [
+    dayLabel ? `- ${dayLabel}の傾向データをもとにした自動生成です。` : null,
+    weekNote ? `- ${weekNote}` : null,
     draft_context?.hourly_hint ? `- ${draft_context.hourly_hint}` : null,
     draft_context?.gender_note ? `- ${draft_context.gender_note}` : null,
   ].filter(Boolean) as string[];
