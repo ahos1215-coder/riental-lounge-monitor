@@ -4,10 +4,9 @@
 alter table public.blog_drafts
   add column if not exists updated_at timestamptz not null default now();
 
--- Backfill: set updated_at = created_at for existing rows
+-- Backfill: set updated_at = created_at for all existing rows
 update public.blog_drafts
-set updated_at = created_at
-where updated_at = now();
+set updated_at = created_at;
 
 -- Auto-update trigger: set updated_at on every UPDATE
 create or replace function public.set_updated_at()
