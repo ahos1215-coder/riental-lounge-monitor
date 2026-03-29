@@ -89,7 +89,16 @@ export function LatestForecastSummaryCard({
   }
 
   const p = state.payload;
-  if (!p || !p.ok) return null;
+  if (!p || (!p.ok && "error" in p)) {
+    return (
+      <section className="rounded-2xl border border-white/5 bg-white/[0.02] px-4 py-3">
+        <p className="text-[11px] text-white/30">
+          予測レポートを取得できませんでした。しばらくすると自動的に更新されます。
+        </p>
+      </section>
+    );
+  }
+  if (!p.ok) return null;
   if (!p.hasData) return null;
 
   const bullets = Array.isArray(p.bullets) ? p.bullets.filter(Boolean).slice(0, 3) : [];

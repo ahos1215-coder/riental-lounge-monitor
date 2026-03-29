@@ -4,7 +4,7 @@ import { GenderRatioBar } from "@/components/home/GenderRatioBar";
 import type { StoreSnapshot } from "@/app/hooks/useStorePreviewData";
 
 function crowdHintFromTotals(nowTotal: number, peakTotal: number): string {
-  if (peakTotal <= 0) return "混雑の目安を計算できません";
+  if (peakTotal <= 0) return "予測データ待ち";
   const r = nowTotal / peakTotal;
   if (r >= 0.85) return "混雑に近い目安";
   if (r >= 0.45) return "ほどよい目安";

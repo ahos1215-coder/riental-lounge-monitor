@@ -324,8 +324,8 @@ export default function StoresListClient() {
                     stats: {
                       ...cur.stats,
                       peakPredTotal: 0,
-                      crowdLevel: unavailable ? "予測なし" : "確認中",
-                      recommendLabel: unavailable ? "現在ご利用いただけません" : "確認中",
+                      crowdLevel: unavailable ? "予測なし" : "予測準備中",
+                      recommendLabel: unavailable ? "モデル準備中" : "予測準備中",
                     },
                     sparkline: cur.sparkline,
                     sparklineMen: cur.sparklineMen,
@@ -386,8 +386,8 @@ export default function StoresListClient() {
                 stats: {
                   ...cur.stats,
                   peakPredTotal: 0,
-                  crowdLevel: "確認中",
-                  recommendLabel: "確認中",
+                  crowdLevel: "予測準備中",
+                  recommendLabel: "予測準備中",
                 },
                 sparkline: cur.sparkline,
                 sparklineMen: cur.sparklineMen,

@@ -5,6 +5,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { getStoreMetaBySlugStrict } from "@/app/config/stores";
+import { ForecastAccuracyCard } from "@/components/ForecastAccuracyCard";
 import { ReservationLinkCard } from "@/components/ReservationLinkCard";
 import { ReportViewTracker } from "@/components/ReportViewTracker";
 import WeeklyStoreCharts from "@/components/WeeklyStoreCharts";
@@ -209,6 +210,10 @@ export default async function WeeklyReportStorePage({ params }: Props) {
           )}
         </>
       )}
+
+      <div className="mt-10 max-w-xs">
+        <ForecastAccuracyCard storeSlug={store.slug} />
+      </div>
 
       <div className="mt-10">
         <ReservationLinkCard
