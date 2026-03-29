@@ -88,7 +88,7 @@ export default async function DailyReportStorePage({ params }: Props) {
           {store.label} Daily Report
         </h1>
         <p className="mt-2 text-sm text-white/60">
-          {row.target_date} / 最新更新: {row.created_at ?? "-"}
+          {row.target_date} / 最新更新: {row.updated_at ?? row.created_at ?? "-"}
         </p>
         <p className="mt-4 text-base text-white/75">
           18:00/21:30 の自動生成結果のうち、最新1件を表示しています。

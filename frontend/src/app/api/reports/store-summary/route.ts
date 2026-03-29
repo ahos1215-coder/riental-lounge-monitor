@@ -88,7 +88,7 @@ export async function GET(req: Request) {
     ? {
         bullets: extractBullets(dailyRow.mdx_content, 3),
         heading: extractFirstHeading(dailyRow.mdx_content),
-        updatedAt: formatJstLabel(dailyRow.created_at),
+        updatedAt: formatJstLabel(dailyRow.updated_at ?? dailyRow.created_at),
         targetDate: dailyRow.target_date ?? "—",
         editionLabel: EDITION_LABELS[dailyRow.edition ?? ""] ?? dailyRow.edition ?? "",
       }
@@ -98,7 +98,7 @@ export async function GET(req: Request) {
     ? {
         bullets: extractBullets(weeklyRow.mdx_content, 3),
         heading: extractFirstHeading(weeklyRow.mdx_content),
-        updatedAt: formatJstLabel(weeklyRow.created_at),
+        updatedAt: formatJstLabel(weeklyRow.updated_at ?? weeklyRow.created_at),
         targetDate: weeklyRow.target_date ?? "—",
       }
     : null;

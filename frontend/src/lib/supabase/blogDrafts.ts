@@ -42,6 +42,7 @@ export type PublishedReportRow = {
   edition?: string;
   public_slug?: string;
   created_at?: string;
+  updated_at?: string;
 };
 
 export type PublishedEditorialRow = {
@@ -295,7 +296,7 @@ export async function fetchLatestPublishedReportByStore(
   if (!conf || !slug) return null;
   const { endpoint, key } = conf;
   const url =
-    `${endpoint}?select=facts_id,store_slug,target_date,mdx_content,insight_json,source,content_type,edition,public_slug,created_at` +
+    `${endpoint}?select=facts_id,store_slug,target_date,mdx_content,insight_json,source,content_type,edition,public_slug,created_at,updated_at` +
     `&store_slug=eq.${encodeURIComponent(slug)}` +
     `&content_type=eq.${encodeURIComponent(contentType)}` +
     `&is_published=eq.true&error_message=is.null` +
@@ -327,6 +328,7 @@ export async function fetchLatestPublishedReportByStore(
       edition: typeof v.edition === "string" ? v.edition : undefined,
       public_slug: typeof v.public_slug === "string" ? v.public_slug : undefined,
       created_at: typeof v.created_at === "string" ? v.created_at : undefined,
+      updated_at: typeof v.updated_at === "string" ? v.updated_at : undefined,
     };
     return row.facts_id && row.store_slug ? row : null;
   } catch {

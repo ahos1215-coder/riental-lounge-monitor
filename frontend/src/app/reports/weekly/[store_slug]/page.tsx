@@ -123,7 +123,7 @@ export default async function WeeklyReportStorePage({ params }: Props) {
           {store.label} Weekly Report
         </h1>
         <p className="mt-2 text-sm text-white/60">
-          {row.target_date} / 最新更新: {row.created_at ?? "-"}
+          {row.target_date} / 最新更新: {row.updated_at ?? row.created_at ?? "-"}
         </p>
         <p className="mt-4 text-base text-white/75">
           毎週水曜の自動生成で更新される最新週報です。
