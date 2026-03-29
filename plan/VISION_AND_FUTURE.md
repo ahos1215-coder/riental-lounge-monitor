@@ -123,7 +123,7 @@ Target commit: (see git)
   - Flask プロセス内キャッシュ（TTL 60s）で forecast 結果を個別/バッチ間共有
 
 **残タスク**:
-1. ~~オフライン評価（精度の見える化）~~ → ✅ MAE/RMSE の metadata.json 永続化 + API 完了。**フロントエンド表示は未着手**
+1. ~~オフライン評価（精度の見える化）~~ → ✅ MAE/RMSE の metadata.json 永続化 + API + フロントエンド表示完了（`ForecastAccuracyCard` — `/store/[id]` ページ）
 2. 異常値・欠損時のユーザー向けメッセージ改善
 3. 予測精度の定期レポート（Weekly Report への組み込み等）
 4. ヒートマップ画像生成（将来）

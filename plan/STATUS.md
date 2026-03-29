@@ -80,6 +80,7 @@ Target commit: (see git)
 - **Sitemap**: `/reports`（統合一覧）+ `/reports/daily/[store_slug]`（priority 0.85 / daily）+ `/reports/weekly/[store_slug]`（priority 0.8 / weekly）全店舗分。旧 `/blog/auto-*` は廃止
 - **Recharts**: 全チャートを Chart.js → Recharts に統一済み（Round 3）。Chart.js 依存は完全削除
 - **StoreCard**: データ未取得時のプレースホルダ（`—`・`0人`）を非表示化（Round 3）。めぐりびスコアバッジ: `狙い目`（≥0.65）/ `様子見`（≥0.40）/ `他店へ`（<0.40）
+- **ForecastAccuracyCard**: `/store/[id]` ページに予測モデル精度カード表示（MAE / 週末夜 MAE / グレード表示）。`/api/forecast_accuracy` からクライアントサイドでフェッチ（モジュールレベルキャッシュ）
 - **ブログ frontmatter**: Zod 検証（`blogFrontmatter.ts` / `content.ts`）
 - **CDN Cache-Control**: API proxy に `s-maxage` + `stale-while-revalidate` 設定。予測系（`forecast_today` / `forecast_next_hour`）は `s-maxage=60`（Flask TTL も 60s）、最大遅延 ~2 分
 - **エラーバウンダリ + ローディング UX**: 全主要ページに `error.tsx`（リトライボタン + 一覧戻りリンク）/ `loading.tsx`（パルスアニメーション骨格）を配置。`store/[id]`, `mypage`, `reports/daily/[store_slug]`, `reports/weekly/[store_slug]`, `blog`, `blog/[slug]`, `insights/weekly` の 11 ファイル
@@ -162,7 +163,7 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 
 ### LINE 下書きパイプライン（要点）
 - **n8n は使わない（廃止）**。司令塔は Next.js のみ
-- インサイト: `frontend/src/lib/blog/insightFromRange.ts`（今夜窓 → 全日フォールバック）
+- インサイト: `frontend/src/lib/blog/insightFromRange.ts`（今夜窓 → 全日フォールバック）。**曜日コンテキスト（`day_context`）+ 同曜日過去比較（`week_comparison`）** を `DraftContext` に追加済み（SEO 差別化用。既存 range データから算出、追加 API コール不要）
 - 下書き生成: `frontend/src/lib/blog/draftGenerator.ts`（既定 Gemini モデルは **`gemini-2.5-flash`**）
 - 意図解析: `frontend/src/lib/line/parseLineIntent.ts`（`draft` / `editorial_analysis` / `approve`）
 
