@@ -19,6 +19,7 @@ import {
   parseRangeResponse,
   pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
+import { ForecastAccuracyCard } from "@/components/ForecastAccuracyCard";
 import { DEFAULT_STORE, STORES, getStoreMetaBySlug, getStoreMetaBySlugStrict } from "../../config/stores";
 
 type ReportSummaryItem = {
@@ -328,6 +329,12 @@ function StorePageInner() {
           </div>
         </section>
       )}
+
+      <section className="mx-auto w-full max-w-6xl px-4">
+        <div className="max-w-xs">
+          <ForecastAccuracyCard storeSlug={slug} />
+        </div>
+      </section>
 
       <section className="mx-auto w-full max-w-6xl space-y-3 px-4">
         <h2 className="text-sm font-semibold text-slate-100">ほかの店舗を見る</h2>
