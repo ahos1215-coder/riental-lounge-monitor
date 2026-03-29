@@ -155,23 +155,23 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     # 学習時: DataFrame 内の過去データから自動算出。
     # 推論時: 7日分の history が concat されているため future 行でも算出可能。
     # マッチしなければ NaN — XGBoost は NaN を native に処理する。
-    _ts_rounded = ts_local.dt.floor("15min")
+    _ts_rounded = ts_local.dt.floor("15min").dt.tz_localize(None)
     _valid_mask = df["total"].notna()
     _lookup_df = pd.DataFrame({
-        "_future_ts": _ts_rounded[_valid_mask] + pd.Timedelta(days=7),
-        "_total": df.loc[_valid_mask, "total"].values,
+        "_future_ts": (_ts_rounded[_valid_mask] + pd.Timedelta(days=7)).reset_index(drop=True),
+        "_total": df.loc[_valid_mask, "total"].reset_index(drop=True),
     })
     if group_keys:
         for gk in group_keys:
-            _lookup_df[gk] = df.loc[_valid_mask, gk].values
+            _lookup_df[gk] = df.loc[_valid_mask, gk].reset_index(drop=True)
         _lookup_df = _lookup_df.groupby(group_keys + ["_future_ts"], dropna=False).agg({"_total": "mean"}).reset_index()
-        _merge_df = pd.DataFrame({"_future_ts": _ts_rounded.values})
+        _merge_df = pd.DataFrame({"_future_ts": _ts_rounded.reset_index(drop=True)})
         for gk in group_keys:
-            _merge_df[gk] = df[gk].values
+            _merge_df[gk] = df[gk].reset_index(drop=True)
         _merged = _merge_df.merge(_lookup_df, on=group_keys + ["_future_ts"], how="left")
     else:
         _lookup_df = _lookup_df.groupby("_future_ts", dropna=False).agg({"_total": "mean"}).reset_index()
-        _merge_df = pd.DataFrame({"_future_ts": _ts_rounded.values})
+        _merge_df = pd.DataFrame({"_future_ts": _ts_rounded.reset_index(drop=True)})
         _merged = _merge_df.merge(_lookup_df, on="_future_ts", how="left")
     df["same_dow_last_week_total"] = _merged["_total"].values
 
