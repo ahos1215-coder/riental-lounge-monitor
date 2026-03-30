@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { TrendingUp, Clock, MapPin, ChevronRight, Sparkles, BookOpen } from "lucide-react";
+import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/FadeIn";
 import {
   DEFAULT_STORE,
   STORES,
@@ -291,27 +293,35 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
 
       <div className="relative z-10">
         <main className="mx-auto flex max-w-6xl flex-col gap-10 px-4 py-6 pb-24 md:pb-6">
-          <section>
+          <FadeIn direction="none" duration={0.6}>
             <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-black">
               <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(129,140,248,0.45)_0%,transparent_42%),radial-gradient(circle_at_80%_80%,rgba(248,113,113,0.4)_0%,transparent_42%)] opacity-80" />
               <div className="relative z-10 flex flex-col justify-center px-8 py-8 md:px-10 md:py-10">
-                <p className="text-[11px] font-semibold tracking-[0.25em] text-indigo-200">
-                  NIGHT MAP FOR ORIENTAL LOUNGE
-                </p>
-                <h1 className="mt-3 text-3xl font-bold leading-tight tracking-[-0.04em] md:text-4xl">
-                  今夜の一軒を、
-                  <br />
-                  やさしく照らす案内灯。
-                </h1>
-                <p className="mt-4 max-w-xl text-sm text-slate-100/80">
-                  オリエンタルラウンジを中心に、各店舗の男女比や混雑の予測をまとめてチェック。
-                  「いま行くならどこ？」を、感覚ではなくデータで選べるようにします。
-                </p>
+                <FadeIn delay={0.1} direction="left">
+                  <p className="text-[11px] font-semibold tracking-[0.25em] text-indigo-200">
+                    NIGHT MAP FOR ORIENTAL LOUNGE
+                  </p>
+                </FadeIn>
+                <FadeIn delay={0.2}>
+                  <h1 className="mt-3 text-3xl font-bold leading-tight tracking-[-0.04em] md:text-4xl">
+                    今夜の一軒を、
+                    <br />
+                    やさしく照らす案内灯。
+                  </h1>
+                </FadeIn>
+                <FadeIn delay={0.35}>
+                  <p className="mt-4 max-w-xl text-sm text-slate-100/80">
+                    オリエンタルラウンジを中心に、各店舗の男女比や混雑の予測をまとめてチェック。
+                    「いま行くならどこ？」を、感覚ではなくデータで選べるようにします。
+                  </p>
+                </FadeIn>
+                <FadeIn delay={0.5}>
                 <div className="mt-5 flex flex-wrap gap-3 text-sm">
                   <Link
                     href="/stores"
-                    className="inline-flex items-center justify-center rounded-md bg-indigo-500 px-4 py-2 font-semibold text-white shadow-sm shadow-black/40 hover:bg-indigo-400"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-500 px-5 py-2.5 font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:bg-indigo-400 hover:shadow-indigo-400/30"
                   >
+                    <Sparkles size={16} />
                     今夜の予測を見る
                   </Link>
                   <Link
@@ -341,12 +351,16 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                 <p className="mt-3 max-w-2xl text-[11px] leading-relaxed text-slate-400">
                   表示は参考情報です。実測は取得タイミングにより遅れる場合があります。予測はモデルによる推定であり、実際の混雑や席状況とは異なることがあります。
                 </p>
+                </FadeIn>
               </div>
             </div>
-          </section>
+          </FadeIn>
 
-          <section id="last-visited" className="scroll-mt-24 space-y-3">
-            <h2 className="text-sm font-semibold text-slate-100">Last visited store</h2>
+          <FadeIn delay={0.3} id="last-visited" className="scroll-mt-24 space-y-3">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+              <Clock size={14} className="text-slate-400" />
+              Last visited store
+            </h2>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/80 px-4 py-4">
               <div className="grid gap-4 md:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] md:items-center">
                 <div>
@@ -405,14 +419,17 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                 </div>
               </div>
             </div>
-          </section>
+          </FadeIn>
 
           {/* 今夜のおすすめ TOP 5 */}
-          <section className="scroll-mt-24 space-y-3">
+          <FadeIn delay={0.2} className="scroll-mt-24 space-y-3">
             <div className="flex items-end justify-between gap-3">
-              <h2 className="text-sm font-semibold text-slate-100">今夜のおすすめ</h2>
-              <Link href="/stores" className="text-xs text-indigo-300 hover:text-indigo-200">
-                全店舗スコアを見る →
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+                <TrendingUp size={14} className="text-emerald-400" />
+                今夜のおすすめ
+              </h2>
+              <Link href="/stores" className="flex items-center gap-1 text-xs text-indigo-300 transition hover:text-indigo-200">
+                全店舗スコアを見る <ChevronRight size={12} />
               </Link>
             </div>
             <p className="text-[11px] text-slate-500">
@@ -459,10 +476,13 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                 })}
               </div>
             )}
-          </section>
+          </FadeIn>
 
-          <section id="store-directory" className="scroll-mt-24 space-y-3">
-            <h2 className="text-sm font-semibold text-slate-100">店舗の男女比・予測を見る</h2>
+          <FadeIn delay={0.15} id="store-directory" className="scroll-mt-24 space-y-3">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+              <MapPin size={14} className="text-amber-400" />
+              店舗の男女比・予測を見る
+            </h2>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-sm leading-relaxed text-slate-100/85">
               <p>
                 オリエンタルラウンジ{" "}
@@ -483,13 +503,16 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                 </Link>
               </div>
             </div>
-          </section>
+          </FadeIn>
 
-          <section className="space-y-3">
+          <FadeIn delay={0.2} className="space-y-3">
             <div className="flex flex-wrap items-end justify-between gap-3">
-              <h2 className="text-sm font-semibold text-slate-100">ブログ新着</h2>
-              <Link href="/blog" className="text-xs text-indigo-300 hover:text-indigo-200">
-                記事一覧へ →
+              <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
+                <BookOpen size={14} className="text-indigo-400" />
+                ブログ新着
+              </h2>
+              <Link href="/blog" className="flex items-center gap-1 text-xs text-indigo-300 transition hover:text-indigo-200">
+                記事一覧へ <ChevronRight size={12} />
               </Link>
             </div>
             {latestBlogPosts.length === 0 ? (
@@ -526,9 +549,9 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                 ))}
               </div>
             )}
-          </section>
+          </FadeIn>
 
-          <section className="space-y-3">
+          <FadeIn delay={0.1} className="space-y-3">
             <h2 className="text-sm font-semibold text-slate-100">めぐりびとは</h2>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-sm leading-relaxed text-slate-100/80">
               <p>
@@ -539,7 +562,7 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                 まずはオリエンタルラウンジから対応し、今後は他ブランドや二次会スポットにも広げていく予定です。
               </p>
             </div>
-          </section>
+          </FadeIn>
         </main>
 
         <div
