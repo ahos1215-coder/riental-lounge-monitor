@@ -186,6 +186,12 @@ def _sample_weights(df: pd.DataFrame, cfg: TrainingConfig) -> np.ndarray:
     # 激戦区と雨天の重みを 1.5-2.0 に引き上げる
     weights[peak_mask.to_numpy()] = np.maximum(weights[peak_mask.to_numpy()], min(2.0, cfg.sample_weight_peak))
     weights[rain_mask.to_numpy()] = np.maximum(weights[rain_mask.to_numpy()], min(2.0, cfg.sample_weight_rain))
+    # 時間減衰: 直近データを重視（90日で半減する指数減衰）
+    if "ts" in df.columns:
+        max_ts = df["ts"].max()
+        days_ago = (max_ts - df["ts"]).dt.total_seconds() / 86400.0
+        recency = 0.5 + 0.5 * np.exp(-days_ago.to_numpy() / 90.0)
+        weights *= recency
     return weights
 
 
@@ -319,6 +325,27 @@ def _evaluate_rows(df: pd.DataFrame, pred_men: np.ndarray, pred_women: np.ndarra
     }
 
 
+def _daily_accuracy(
+    sdf: pd.DataFrame, pred_men: np.ndarray, pred_women: np.ndarray,
+) -> list[dict[str, Any]]:
+    """Compute per-date MAE within a store's test data."""
+    if sdf.empty or "ts" not in sdf.columns:
+        return []
+    sdf = sdf.copy()
+    sdf["_pred_total"] = np.maximum(pred_men, 0.0) + np.maximum(pred_women, 0.0)
+    sdf["_date"] = sdf["ts"].dt.date.astype(str)
+    daily = []
+    for dt, g in sdf.groupby("_date"):
+        true_t = g["total"].astype(float).to_numpy()
+        pred_t = g["_pred_total"].to_numpy()
+        daily.append({
+            "date": str(dt),
+            "rows": int(len(g)),
+            "total_mae": round(float(np.mean(np.abs(pred_t - true_t))), 2),
+        })
+    return sorted(daily, key=lambda x: x["date"])
+
+
 def _log_metrics_by_store(
     test_df: pd.DataFrame, model_men: XGBRegressor, model_women: XGBRegressor
 ) -> dict[str, dict[str, Any]]:
@@ -355,6 +382,7 @@ def _log_metrics_by_store(
             )
         else:
             segment = {}
+        daily = _daily_accuracy(sdf, pred_men_all[idx], pred_women_all[idx])
         entry = {
             "store_id": store,
             "rows_test": int(len(sdf)),
@@ -362,6 +390,7 @@ def _log_metrics_by_store(
             "weekend_night_segment_rows": int(peak_mask.sum()),
             "weekend_night_segment": segment,
             "evaluation": "holdout_test_20pct",
+            "daily_accuracy": daily,
         }
         print("[train-ml][metrics]", json.dumps(entry, ensure_ascii=True))
         all_metrics[store] = entry

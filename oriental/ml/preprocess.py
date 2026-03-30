@@ -33,6 +33,8 @@ FEATURE_COLUMNS = [
     # "women_lag_12", "women_lag_24", "women_ma_2", "women_ma_4",
     # v3: 同曜日先週の実測値（推論時にも利用可能 — 7日分の履歴から算出）
     "same_dow_last_week_total",
+    # v4: 直近30分の人数変化速度（6行分の差分）。推論時は history の末尾から算出
+    "total_slope_30min",
 ]
 
 
@@ -174,6 +176,14 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
         _merge_df = pd.DataFrame({"_future_ts": _ts_rounded.reset_index(drop=True)})
         _merged = _merge_df.merge(_lookup_df, on="_future_ts", how="left")
     df["same_dow_last_week_total"] = _merged["_total"].values
+
+    # --- 直近30分の人数変化速度（v4 feature） ---
+    # 5分間隔のデータで6行前との差 = 30分間の変化量。
+    # 学習時: 連続データから自動算出。推論時: history の末尾から future の先頭行に引き継がれる。
+    if group_keys:
+        df["total_slope_30min"] = df.groupby(group_keys, dropna=False)["total"].diff(6)
+    else:
+        df["total_slope_30min"] = df["total"].diff(6)
 
     df["gender_diff"] = (df["men"] - df["women"]).astype(float)
     df["minutes_to_midnight"] = (24 * 60 - (df["hour"] * 60 + df["minute"])).astype(float)
