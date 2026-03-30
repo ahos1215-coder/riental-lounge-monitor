@@ -2,7 +2,14 @@
 
 import type { ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import PreviewMainSection from "./PreviewMainSection";
+import dynamic from "next/dynamic";
+
+const PreviewMainSection = dynamic(() => import("./PreviewMainSection"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-80 w-full animate-pulse rounded-2xl bg-slate-800/60" />
+  ),
+});
 import { useStorePreviewData } from "../app/hooks/useStorePreviewData";
 import {
   DEFAULT_STORE,
