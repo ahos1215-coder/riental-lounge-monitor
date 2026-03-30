@@ -1,0 +1,60 @@
+name: Cleanup Old Logs
+
+# 毎週月曜 07:00 JST (UTC 日曜 22:00) に自動実行
+# 手動実行も可能（dry_run で確認してから execute）
+on:
+  workflow_dispatch:
+    inputs:
+      execute:
+        description: "実行する (false = dry-run で確認のみ)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      max_rows:
+        description: "行数上限 (デフォルト: 3000000)"
+        required: false
+        default: "3000000"
+  schedule:
+    # 毎週月曜 07:00 JST = UTC 日曜 22:00
+    - cron: "0 22 * * 0"
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run cleanup
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          LOGS_MAX_ROWS: ${{ github.event.inputs.max_rows || '3000000' }}
+        run: |
+          EXECUTE_FLAG=""
+          if [ "${{ github.event.inputs.execute || 'false' }}" = "true" ]; then
+            EXECUTE_FLAG="--execute"
+          fi
+          # schedule トリガーでは自動実行（execute）
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            EXECUTE_FLAG="--execute"
+          fi
+          python scripts/cleanup_old_logs.py $EXECUTE_FLAG --max-rows "$LOGS_MAX_ROWS"
+
+  notify-on-failure:
+    needs: [cleanup]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
