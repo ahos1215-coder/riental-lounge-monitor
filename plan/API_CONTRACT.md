@@ -1,5 +1,5 @@
 # API_CONTRACT
-Last updated: 2026-03-29 (Round 8 整合: ML 3.0 / schema v2)
+Last updated: 2026-03-30 (Round 8.5 整合: ML 3.0 / schema v3)
 Target commit: (see git)
 
 MEGRIBI の公開契約。**Flask（Render）** と **Next.js（Vercel）の LINE Webhook** を含む。互換性を壊さないこと。

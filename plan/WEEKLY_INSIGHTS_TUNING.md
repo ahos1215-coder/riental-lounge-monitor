@@ -1,5 +1,5 @@
 # Weekly Insights の調整ガイド
-Last updated: 2026-03-23
+Last updated: 2026-03-30 (デフォルト値をGHA本番値に統一)
 
 > **いつ触るか**: パイプライン稼働後、**数日〜1週間分の JSON が溜まってから**閾値や説明文をいじると、実データに基づいて判断しやすい（`plan/VISION_AND_FUTURE.md` フェーズ A）。
 
@@ -26,7 +26,7 @@ Last updated: 2026-03-23
 | 変数 | 意味 | スクリプト既定 | GHA 例 |
 |------|------|----------------|--------|
 | `INSIGHTS_STORES` | 対象店舗スラグ（カンマ/スペース区切り） | （必須） | `shibuya` |
-| `INSIGHTS_THRESHOLD` | Good Window のスコア閾値 | `0.80` | `0.4` |
+| `INSIGHTS_THRESHOLD` | Good Window のスコア閾値 | `0.40`（スクリプト/GHA 統一済み） | `0.4` |
 | `INSIGHTS_MIN_DURATION_MINUTES` | 最小連続分数 | `120` | `60` |
 | `INSIGHTS_IDEAL` | 理想占有率 | `0.7` | 既定 |
 | `INSIGHTS_GENDER_WEIGHT` | 男女比の重み | `1.5` | 既定 |

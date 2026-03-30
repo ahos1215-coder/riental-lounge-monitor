@@ -1,5 +1,5 @@
 # RUNBOOK
-Last updated: 2026-03-29 (Round 8 整合)
+Last updated: 2026-03-30 (Round 8.5 整合)
 Target commit: (see git)
 
 ローカル起動・本番メモ・**初回オンボーディング**・**定期処理（cron）**・トラブルシュート。  
@@ -86,8 +86,8 @@ npm run dev
 - **Optuna HPO**: 店舗ごとに最適なハイパーパラメータを探索（`max_depth`, `learning_rate`, `subsample` 等）。デフォルト 30 trials/店舗。`ML_OPTUNA_ENABLED=1` / `ML_OPTUNA_TRIALS=30` で制御。
 - **Early Stopping**: `n_estimators=300` 上限 + `early_stopping_rounds=15` で最適な木の数を自動決定。
 - **評価基盤**: 時系列 Train/Test Split（80/20）。Holdout Test で真の汎化精度（MAE/RMSE）を測定。`metadata.json` に永続化。
-- **特徴量**: 29→19 に最適化（`FEATURE_COLUMNS`）。推論時 NaN になるラグ系 8 列・重複 `dow`・`gender_diff` を除外。
-- **schema_version**: v2（特徴量 19 列）。Flask / GHA ともに v2 がデフォルト。
+- **特徴量**: 20 列（`FEATURE_COLUMNS`）。v2 の 19 列 + `same_dow_last_week_total`（同曜日先週の同時刻 total）。推論時にも 7 日分の履歴から算出可能。
+- **schema_version**: v3（特徴量 20 列）。Flask / GHA ともに v3 がデフォルト。
 - **重み付け学習**: `sample_weight` で `ML_TRAIN_WEIGHT_PEAK` / `ML_TRAIN_WEIGHT_RAIN`（既定 1.8）を適用。
 - **Feature Importance**: `metadata.json` に店舗別で永続化。`/api/forecast_accuracy` で取得可能。
 - **実験スクリプト配置**: 検証用は `scripts/experiments/` に集約。`scripts/` 直下は本番運用用。

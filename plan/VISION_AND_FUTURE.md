@@ -1,5 +1,5 @@
 # VISION_AND_FUTURE
-Last updated: 2026-03-29 (Round 8 完了)
+Last updated: 2026-03-30 (Round 8.5: ML v3 + GA4 有効化 + SEO 強化 + UX 改善)
 Target commit: (see git)
 
 > **このファイルの役割**  
@@ -44,7 +44,7 @@ Target commit: (see git)
 | X 自動投稿 | OAuth 1.0a 実装済み。Daily Report 後に自動トリガー。日本語店舗名テンプレート |
 | Recharts 統合 | Chart.js 完全削除、全チャート Recharts に統一 |
 | パフォーマンス最適化 | ThreadPoolExecutor 並列化 + forecast_today_multi バッチ + request ordering 戦略（sub-3s 初期表示）|
-| GA4 アナリティクス | gtag.js + SPA 追跡 + カスタムイベント（store_view, report_read, favorite）。`NEXT_PUBLIC_GA_MEASUREMENT_ID` で制御 |
+| GA4 アナリティクス | gtag.js + SPA 追跡 + カスタムイベント（store_view, report_read, favorite）。**本番有効化済み**（`G-F85T4M53MJ`） |
 | 精度メトリクス API | `/api/forecast_accuracy` — 学習時 MAE/RMSE を metadata.json に永続化し API 提供 |
 | ステータス日本語化 | StoreCard バッジ: 狙い目/様子見/他店へ |
 | CDN キャッシュ | API proxy に `s-maxage` + `stale-while-revalidate` |
@@ -110,7 +110,7 @@ Target commit: (see git)
 
 **現状の技術的事実**:
 - **ML 3.0 本番稼働**: 38 店舗別 XGBoost モデル。Optuna HPO + Early Stopping。日次自動学習
-- **特徴量**: 29→19 に最適化（推論時 NaN のラグ系・重複 `dow`・`gender_diff` を除外）
+- **特徴量**: 20 列（schema v3）。v2 の 19 列 + `same_dow_last_week_total`（同曜日先週の同時刻 total）
 - **評価基盤**: 時系列 Train/Test Split（80/20）。Holdout Test で真の汎化精度を測定
 - **Feature Importance**: metadata.json に店舗別で永続化
 - **`megribi_score`**: 女性比率・占有率・安定性から算出。トップ・マイページで表示

@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-03-29 (Round 8: ML 最適化 — Train/Test Split + Optuna + Early Stopping + Feature Pruning)
+Last updated: 2026-03-30 (Round 8.5: ML v3 + GA4 有効化 + SEO 強化 + UX 改善)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -13,7 +13,7 @@ Target commit: (see git)
 - `/api/forecast_today` / `/api/forecast_next_hour`（`ENABLE_FORECAST=1` のときのみ。無効時は 503）
   - **店舗別最適化モデル（ML 3.0）本番稼働中**。全38店舗で Optuna HPO + Early Stopping による個別最適化モデル。
   - `model_registry.py` は `metadata.json` の `has_store_models` / `store_models` を検証し、**店舗別モデルを最優先でロード**。不整合時は明示エラー、未対応メタデータ時のみグローバルモデルへフォールバック。
-  - **schema_version v2**: 特徴量を 29→19 に削減（推論時 NaN になるラグ系・重複 `dow` を除外）
+  - **schema_version v3**: 特徴量 20 列（v2 の 19 列 + `same_dow_last_week_total`）。同曜日先週の同時刻 total を参照する特徴量を追加。推論時にも 7 日分の履歴から算出可能
   - **Flask プロセス内キャッシュ**: TTL 60s（`FORECAST_RESULT_CACHE_TTL`）。CDN キャッシュと合わせ最大遅延 ~2 分
 - `/api/forecast_today_multi`（`?stores=slug1,slug2,...` 最大40店舗。**ThreadPoolExecutor(12) で並列実行** — 12店舗でも ~1-2s。Flask 内キャッシュ共有）
 - `/api/second_venues`（最小応答。未設定時は空配列）
@@ -64,7 +64,7 @@ Target commit: (see git)
 | `/api/sns/post` | X (Twitter) 投稿 API（OAuth 1.0a・dry_run 対応） |
 
 #### GA4 アナリティクス
-- **Google Analytics 4**: `NEXT_PUBLIC_GA_MEASUREMENT_ID` 設定時に自動有効化（未設定時は無効）
+- **Google Analytics 4**: `NEXT_PUBLIC_GA_MEASUREMENT_ID=G-F85T4M53MJ` で **本番有効化済み**（2026-03-29）
 - `next/script` の `afterInteractive` 戦略で gtag.js を非同期ロード
 - SPA ページ遷移追跡: `usePathname` + `useSearchParams` で `sendPageView` を自動発火
 - カスタムイベント: `store_view`（店舗詳細）、`report_read`（Daily/Weekly）、`favorite_add` / `favorite_remove`（お気に入り操作）

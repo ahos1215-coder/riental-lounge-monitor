@@ -1,5 +1,5 @@
 # DECISIONS
-Last updated: 2026-03-29 (Round 8 整合)
+Last updated: 2026-03-30 (Round 8.5 整合)
 Target commit: (see git)
 
 ## Core decisions (keep)
@@ -44,3 +44,4 @@ Target commit: (see git)
 20) **FEATURE_COLUMNS**: 推論時に NaN やメジアン充填になる特徴量（ラグ/MA 系等）は `FEATURE_COLUMNS` から除外する。学習中間計算で使う特徴量は `add_time_features()` で生成するが、モデル入力には含めない。
 21) **Train/Test Split**: 時系列データのため **ランダム分割は禁止**。常に時系列順（古い方が Train、新しい方が Test）で分割する。
 22) **本番モデルの学習**: Holdout Test で最適な `n_estimators` を発見した後、**全データで再学習して本番モデルとする**（Early Stopping は評価用のみ）。
+23) **推論時利用可能な特徴量のみ追加**: 新しい特徴量は「推論時に 7 日分の history から算出可能」であることが必須条件。`same_dow_last_week_total`（v3）はこの基準を満たす。

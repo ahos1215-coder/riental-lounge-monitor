@@ -1,5 +1,5 @@
 # ROADMAP
-Last updated: 2026-03-29 (Round 8 完了)
+Last updated: 2026-03-30 (Round 8.5 完了)
 Target commit: (see git)
 
 > **構想・フェーズ順・備忘の全文**は **`plan/VISION_AND_FUTURE.md`**。本ファイルは短いタスク一覧と「当面やらないこと」に絞る。
@@ -126,6 +126,18 @@ Target commit: (see git)
 | Optuna HPO | 店舗別ハイパーパラメータ最適化（`max_depth`, `learning_rate`, `subsample`, `colsample_bytree`, `min_child_weight`, `reg_alpha`, `reg_lambda`）。デフォルト 30 trials / 店舗 |
 | Feature Importance 永続化 | `metadata.json` に店舗別の feature_importance_men / feature_importance_women を記録 |
 | schema_version v2 | 特徴量変更に伴い v1→v2 にバンプ。Flask / GHA の両方でデフォルト更新 |
+
+### Round 8.5: SEO 強化 + GA4 有効化 + ML v3 + UX 改善
+
+| 項目 | 内容 |
+|------|------|
+| SEO: 曜日コンテキスト | Daily Report の `DraftContext` に `day_context`（曜日名・週末フラグ）+ `week_comparison`（同曜日過去ピーク比較）を追加。既存 range データから算出、追加 API コールなし |
+| GA4 本番有効化 | GA4 プロパティ作成 → `NEXT_PUBLIC_GA_MEASUREMENT_ID=G-F85T4M53MJ` を Vercel に設定。PV + カスタムイベント計測稼働中 |
+| ForecastAccuracyCard | `/store/[id]` と `/reports/weekly/[store_slug]` に予測精度カード追加（MAE / 週末夜 MAE / グレード表示） |
+| ML v3: 同曜日先週特徴量 | `same_dow_last_week_total`（7日前同時刻の total）を `FEATURE_COLUMNS` に追加（19→20列）。schema v2→v3 |
+| Weekly Insights デフォルト調整 | スクリプトデフォルトを GHA 本番値に統一（threshold 0.80→0.40、min_duration 120→60） |
+| UX: エラーメッセージ改善 | 「確認中」→「予測準備中」、予測カード失敗時に説明文表示、「混雑の目安を計算できません」→「予測データ待ち」 |
+| updated_at 修正 | `blog_drafts` に `updated_at` カラム + トリガー追加。upsert 時の日時表示バグを修正 |
 
 ---
 

@@ -1,5 +1,5 @@
 # ARCHITECTURE
-Last updated: 2026-03-29 (Round 8: ML 最適化 — Optuna HPO + Early Stopping + Feature Pruning)
+Last updated: 2026-03-30 (Round 8.5: ML v3 + GA4 有効化 + SEO 強化)
 Target commit: (see git)
 
 ## Overview
@@ -147,7 +147,7 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `oriental/ml/forecast_service.py`（ML 推論オーケストレーション）
 - `oriental/ml/megribi_score.py`（スコア算出 + good_windows）
 - `oriental/ml/model_registry.py`（Supabase Storage からモデルロード）
-- `oriental/ml/preprocess.py`（特徴量エンジニアリング — 19 FEATURE_COLUMNS、schema v2）
+- `oriental/ml/preprocess.py`（特徴量エンジニアリング — 20 FEATURE_COLUMNS、schema v3。v2 の 19 列 + `same_dow_last_week_total`）
 - `multi_collect.py`（収集ロジック）
 
 ### Frontend (Next.js)

@@ -1,5 +1,5 @@
 # INDEX（クイック参照）
-Last updated: 2026-03-29 (Round 8 整合)  
+Last updated: 2026-03-30 (Round 8.5 整合)  
 Target commit: (see git)
 
 **読む順・各ファイルの役割の一覧は [`README.md`](README.md) を正とする。**
