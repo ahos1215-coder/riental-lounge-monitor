@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-03-30 (Round 8.5: ML v3 + GA4 有効化 + SEO 強化 + UX 改善)
+Last updated: 2026-03-30 (Round 9: ML v4 + GA4 + SEO + UX + パフォーマンス + セキュリティ + 容量管理)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -13,7 +13,9 @@ Target commit: (see git)
 - `/api/forecast_today` / `/api/forecast_next_hour`（`ENABLE_FORECAST=1` のときのみ。無効時は 503）
   - **店舗別最適化モデル（ML 3.0）本番稼働中**。全38店舗で Optuna HPO + Early Stopping による個別最適化モデル。
   - `model_registry.py` は `metadata.json` の `has_store_models` / `store_models` を検証し、**店舗別モデルを最優先でロード**。不整合時は明示エラー、未対応メタデータ時のみグローバルモデルへフォールバック。
-  - **schema_version v3**: 特徴量 20 列（v2 の 19 列 + `same_dow_last_week_total`）。同曜日先週の同時刻 total を参照する特徴量を追加。推論時にも 7 日分の履歴から算出可能
+  - **schema_version v4**: 特徴量 21 列。v2 の 19 + `same_dow_last_week_total`（同曜日先週）+ `total_slope_30min`（30分間の変化速度）。推論時にも履歴から算出可能
+  - **時間減衰ウェイト**: 学習時のサンプル重み付けに指数減衰（90日半減期）を追加。直近データを重視
+  - **日次精度トラッキング**: `metadata.json` に店舗別・日別の MAE を自動記録
   - **Flask プロセス内キャッシュ**: TTL 60s（`FORECAST_RESULT_CACHE_TTL`）。CDN キャッシュと合わせ最大遅延 ~2 分
 - `/api/forecast_today_multi`（`?stores=slug1,slug2,...` 最大40店舗。**ThreadPoolExecutor(12) で並列実行** — 12店舗でも ~1-2s。Flask 内キャッシュ共有）
 - `/api/second_venues`（最小応答。未設定時は空配列）
@@ -84,7 +86,13 @@ Target commit: (see git)
 - **ブログ frontmatter**: Zod 検証（`blogFrontmatter.ts` / `content.ts`）
 - **CDN Cache-Control**: API proxy に `s-maxage` + `stale-while-revalidate` 設定。予測系（`forecast_today` / `forecast_next_hour`）は `s-maxage=60`（Flask TTL も 60s）、最大遅延 ~2 分
 - **エラーバウンダリ + ローディング UX**: 全主要ページに `error.tsx`（リトライボタン + 一覧戻りリンク）/ `loading.tsx`（パルスアニメーション骨格）を配置。`store/[id]`, `mypage`, `reports/daily/[store_slug]`, `reports/weekly/[store_slug]`, `blog`, `blog/[slug]`, `insights/weekly` の 11 ファイル
-- **E2E テスト基盤**: Playwright 導入。5 テストグループ（トップ・店舗一覧・レポート統合・マイページ・ブログ）のスモークテスト。CI ワークフロー `e2e.yml`
+- **E2E テスト基盤**: Playwright 導入。9 テストグループ（トップ・店舗一覧・店舗詳細・レポート統合・比較・マイページ・ブログ・ナビゲーション・エラー処理）のスモークテスト。CI ワークフロー `e2e.yml`
+- **公開 API レート制限**: 全 proxy API route に IP ベースのスライディングウィンドウ制限（デフォルト 60 req/min、batch 系は 20-30 req/min）。`apiRateLimit.ts`
+- **ML モデルプリロード**: Flask 起動時にバックグラウンドスレッドで全 38 店舗のモデルをメモリに先読み。初回リクエストの 5s/店舗 の遅延を解消
+- **Recharts 遅延読み込み**: `next/dynamic` で PreviewMainSection / CompareClient を lazy load。初期バンドル ~200KB 削減
+- **Supabase 容量管理**: `cleanup-old-logs.yml`（週次 cron）。1年超データのダウンサンプリング + 300万行上限の緊急削除。Free Tier 500MB を超えない安全弁
+- **SHAP 分析スクリプト**: `scripts/shap_analysis.py` — 店舗別の特徴量寄与度を SHAP TreeExplainer で診断
+- **UI 強化**: lucide-react アイコン、framer-motion フェードインアニメーション、モバイルハンバーガーメニュー、アクティブページハイライト
 - **GitHub PAT 期限切れ監視**: 週次 GHA ワークフロー `check-pat-expiry.yml`。GitHub API でトークン有効期限を取得し、30日以内なら LINE Push で通知（7日以内は赤アラート）
 - **PWA**: Web App Manifest + アイコン PNG (192/512) + Service Worker（ネットワークファースト + stale-while-revalidate）。ホーム画面追加・オフラインフォールバック対応
 - **動的 OG 画像**: `opengraph-image.tsx` を全主要ページに配置（ルート・Daily Report・Weekly Report・店舗詳細・ブログ記事）。Edge Runtime で動的生成
@@ -159,6 +167,7 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 | `blog-ci.yml` | フロント CI（type-check / build） | push |
 | `check-pat-expiry.yml` | GitHub PAT 有効期限チェック + LINE 通知 | `schedule`（月曜 09:00 JST）+ dispatch |
 | `e2e.yml` | Playwright E2E スモークテスト | `pull_request` + dispatch |
+| `cleanup-old-logs.yml` | Supabase logs 容量管理（ダウンサンプリング + 緊急削除） | `schedule`（月曜 07:00 JST）+ dispatch |
 | `notify-on-failure.yml` | 失敗通知（再利用） | `workflow_call` |
 
 ### LINE 下書きパイプライン（要点）

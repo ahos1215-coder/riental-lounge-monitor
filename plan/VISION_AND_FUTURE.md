@@ -1,5 +1,5 @@
 # VISION_AND_FUTURE
-Last updated: 2026-03-30 (Round 8.5: ML v3 + GA4 有効化 + SEO 強化 + UX 改善)
+Last updated: 2026-03-30 (Round 9 完了)
 Target commit: (see git)
 
 > **このファイルの役割**  
@@ -110,7 +110,7 @@ Target commit: (see git)
 
 **現状の技術的事実**:
 - **ML 3.0 本番稼働**: 38 店舗別 XGBoost モデル。Optuna HPO + Early Stopping。日次自動学習
-- **特徴量**: 20 列（schema v3）。v2 の 19 列 + `same_dow_last_week_total`（同曜日先週の同時刻 total）
+- **特徴量**: 21 列（schema v4）。`same_dow_last_week_total` + `total_slope_30min`。時間減衰ウェイト + 日次精度トラッキング
 - **評価基盤**: 時系列 Train/Test Split（80/20）。Holdout Test で真の汎化精度を測定
 - **Feature Importance**: metadata.json に店舗別で永続化
 - **`megribi_score`**: 女性比率・占有率・安定性から算出。トップ・マイページで表示

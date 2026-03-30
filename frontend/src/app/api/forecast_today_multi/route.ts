@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit/apiRateLimit";
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:5000";
 
@@ -12,6 +13,8 @@ type ErrorBody = {
 };
 
 export async function GET(req: NextRequest) {
+  const rl = await rateLimit(req, "forecast_multi", 20);
+  if (!rl.success) return new NextResponse("Too Many Requests", { status: 429, headers: rateLimitHeaders(rl) });
   const { searchParams } = new URL(req.url);
   const stores = searchParams.get("stores") ?? "";
 

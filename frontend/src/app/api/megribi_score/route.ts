@@ -1,10 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit/apiRateLimit";
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:5000";
 
 const CACHE_HEADER = "public, s-maxage=120, stale-while-revalidate=600";
 
 export async function GET(req: NextRequest) {
+  const rl = await rateLimit(req, "megribi_score", 30);
+  if (!rl.success) return new NextResponse("Too Many Requests", { status: 429, headers: rateLimitHeaders(rl) });
   const base = BACKEND_URL.replace(/\/+$/, "");
   const search = req.nextUrl.searchParams.toString();
   const targetUrl = search

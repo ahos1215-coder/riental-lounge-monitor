@@ -131,17 +131,32 @@ Target commit: (see git)
 
 | 項目 | 内容 |
 |------|------|
-| SEO: 曜日コンテキスト | Daily Report の `DraftContext` に `day_context`（曜日名・週末フラグ）+ `week_comparison`（同曜日過去ピーク比較）を追加。既存 range データから算出、追加 API コールなし |
-| GA4 本番有効化 | GA4 プロパティ作成 → `NEXT_PUBLIC_GA_MEASUREMENT_ID=G-F85T4M53MJ` を Vercel に設定。PV + カスタムイベント計測稼働中 |
-| ForecastAccuracyCard | `/store/[id]` と `/reports/weekly/[store_slug]` に予測精度カード追加（MAE / 週末夜 MAE / グレード表示） |
-| ML v3: 同曜日先週特徴量 | `same_dow_last_week_total`（7日前同時刻の total）を `FEATURE_COLUMNS` に追加（19→20列）。schema v2→v3 |
-| Weekly Insights デフォルト調整 | スクリプトデフォルトを GHA 本番値に統一（threshold 0.80→0.40、min_duration 120→60） |
-| UX: エラーメッセージ改善 | 「確認中」→「予測準備中」、予測カード失敗時に説明文表示、「混雑の目安を計算できません」→「予測データ待ち」 |
-| updated_at 修正 | `blog_drafts` に `updated_at` カラム + トリガー追加。upsert 時の日時表示バグを修正 |
+| SEO: 曜日コンテキスト | Daily Report の `DraftContext` に `day_context`（曜日名・週末フラグ）+ `week_comparison`（同曜日過去ピーク比較）を追加 |
+| GA4 本番有効化 | `NEXT_PUBLIC_GA_MEASUREMENT_ID=G-F85T4M53MJ` を Vercel に設定。PV + カスタムイベント計測稼働中 |
+| ForecastAccuracyCard | `/store/[id]` と `/reports/weekly/[store_slug]` に予測精度カード追加 |
+| ML v3: 同曜日先週特徴量 | `same_dow_last_week_total` 追加（19→20列）。schema v2→v3 |
+| Weekly Insights デフォルト調整 | threshold 0.80→0.40、min_duration 120→60 |
+| UX: エラーメッセージ改善 | 「確認中」→「予測準備中」等 |
+| updated_at 修正 | `blog_drafts` に `updated_at` カラム + トリガー追加 |
+
+### Round 9: ML v4 + パフォーマンス + セキュリティ + UI + 容量管理
+
+| 項目 | 内容 |
+|------|------|
+| ML v4: 傾き特徴量 | `total_slope_30min`（30分間の変化速度）追加。21 特徴量。schema v3→v4 |
+| ML: 時間減衰ウェイト | サンプル重み付けに指数減衰（90日半減期）追加。直近データをより重視 |
+| ML: 日次精度トラッキング | `metadata.json` の `daily_accuracy` に店舗別・日別 MAE を自動記録 |
+| SHAP 分析 | `scripts/shap_analysis.py` — TreeExplainer で特徴量寄与度を診断 |
+| Flask モデルプリロード | 起動時にバックグラウンドスレッドで全 38 店舗のモデルをメモリに先読み |
+| Recharts 遅延読み込み | `next/dynamic` で PreviewMainSection / CompareClient を lazy load |
+| 公開 API レート制限 | 全 proxy route に IP ベースのスライディングウィンドウ（60 req/min） |
+| Supabase 容量管理 | `cleanup-old-logs.yml` 週次 cron。1年超ダウンサンプリング + 300万行上限 |
+| UI: Lucide + Framer Motion | アイコン、フェードインアニメーション、モバイルハンバーガーメニュー |
+| E2E テスト拡充 | 7→16 テストケース。店舗詳細・比較・ナビフロー・エラーハンドリング追加 |
 
 ---
 
-## Round 9（提案: 収益化・拡張）
+## Round 10（提案: 収益化・拡張）
 
 | # | 項目 | 推奨モデル | 理由 |
 |---|------|-----------|------|

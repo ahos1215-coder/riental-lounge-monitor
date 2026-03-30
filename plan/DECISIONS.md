@@ -1,5 +1,5 @@
 # DECISIONS
-Last updated: 2026-03-30 (Round 8.5 整合)
+Last updated: 2026-03-30 (Round 9 整合)
 Target commit: (see git)
 
 ## Core decisions (keep)
