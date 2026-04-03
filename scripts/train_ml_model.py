@@ -437,6 +437,7 @@ def _upload_file(
     local_path: Path,
     remote_name: str,
     content_type: str,
+    max_retries: int = 3,
 ) -> None:
     object_path = f"{cfg.prefix}/{remote_name}".strip("/")
     endpoint = f"{cfg.supabase_url}/storage/v1/object/{cfg.bucket}/{object_path}"
@@ -446,9 +447,23 @@ def _upload_file(
         "x-upsert": "true",
         "Content-Type": content_type,
     }
-    response = session.post(endpoint, headers=headers, data=local_path.read_bytes(), timeout=30)
-    if not response.ok:
-        raise SystemExit(f"upload failed: {remote_name} status={response.status_code} body={response.text[:300]}")
+    data = local_path.read_bytes()
+    last_err = ""
+    for attempt in range(1, max_retries + 1):
+        try:
+            response = session.post(endpoint, headers=headers, data=data, timeout=30)
+            if response.ok:
+                return
+            last_err = f"status={response.status_code} body={response.text[:200]}"
+            if response.status_code < 500 and response.status_code != 400:
+                break  # 4xx (except 400) は再試行しない
+        except Exception as exc:
+            last_err = str(exc)[:200]
+        if attempt < max_retries:
+            wait = 5 * attempt
+            print(f"[train-ml] upload retry {attempt}/{max_retries} for {remote_name} (wait {wait}s): {last_err}")
+            time.sleep(wait)
+    raise SystemExit(f"upload failed after {max_retries} attempts: {remote_name} {last_err}")
 
 
 def main() -> int:
