@@ -497,18 +497,99 @@ def _extract_count(
     return None
 
 
+# --- Bot 検知回避: User-Agent ローテーション ---
+_USER_AGENTS = [
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (Linux; Android 15; SM-S928B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+]
+
+# --- データ検証: 店舗あたりの人数上限 ---
+MAX_PEOPLE_PER_GENDER = 500  # 1店舗の男女それぞれの上限（定員超過の異常値を弾く）
+
+# --- サイレント・フェイル検知: メンテナンス画面のキーワード ---
+_MAINTENANCE_KEYWORDS = [
+    "メンテナンス", "maintenance", "ただいま", "しばらくお待ち",
+    "アクセスが集中", "503", "Service Unavailable", "一時的に",
+    "お知らせ", "システム障害", "復旧",
+]
+
+# --- リトライ設定 ---
+SCRAPE_MAX_RETRIES = int(os.getenv("SCRAPE_MAX_RETRIES", "3"))
+SCRAPE_RETRY_BASE_SEC = float(os.getenv("SCRAPE_RETRY_BASE_SEC", "2.0"))
+
+
+def _pick_user_agent() -> str:
+    import random
+    return random.choice(_USER_AGENTS)
+
+
+def _detect_maintenance(html: str) -> bool:
+    """200 OK だがメンテナンス画面を返しているか検知。"""
+    # 人数データの存在を先にチェック（正常ページなら男性/女性の数字がある）
+    if re.search(r"男性|女性|GENTLEMEN|LADIES|num-male|num-female", html):
+        return False
+    # 人数データがなく、メンテナンスキーワードがある → メンテナンス
+    lower = html.lower()
+    for kw in _MAINTENANCE_KEYWORDS:
+        if kw.lower() in lower:
+            return True
+    # 人数データもメンテナンスキーワードもない → HTML 構造変更の可能性
+    if len(html) < 1000:
+        return True  # 極端に短いレスポンスは異常
+    return False
+
+
+def _validate_count(value: int | None, label: str, url: str) -> int | None:
+    """人数データのバリデーション。異常値は None にして弾く。"""
+    if value is None:
+        return None
+    if value < 0:
+        print(f"[warn] negative count {label}={value} url={url}")
+        return None
+    if value > MAX_PEOPLE_PER_GENDER:
+        print(f"[warn] abnormal count {label}={value} (>{MAX_PEOPLE_PER_GENDER}) url={url}")
+        return None
+    return value
+
+
 def scrape_store(url: str) -> tuple[int | None, int | None]:
+    last_err = None
+    for attempt in range(1, SCRAPE_MAX_RETRIES + 1):
+        try:
+            return _scrape_store_once(url)
+        except Exception as e:
+            last_err = e
+            if attempt < SCRAPE_MAX_RETRIES:
+                wait = SCRAPE_RETRY_BASE_SEC * (2 ** (attempt - 1))
+                print(f"[scrape] retry {attempt}/{SCRAPE_MAX_RETRIES} url={url} err={e} wait={wait:.1f}s")
+                time.sleep(wait)
+    print(f"[error] scrape exhausted retries url={url} last_err={last_err}")
+    return None, None
+
+
+def _scrape_store_once(url: str) -> tuple[int | None, int | None]:
     headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
-            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 "
-            "Mobile/15E148 Safari/604.1"
-        )
+        "User-Agent": _pick_user_agent(),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Cache-Control": "no-cache",
     }
 
     resp = requests.get(url, headers=headers, timeout=10)
     resp.raise_for_status()
-    soup = BeautifulSoup(resp.text, "html.parser")
+    html = resp.text
+
+    # サイレント・フェイル検知
+    if _detect_maintenance(html):
+        print(f"[warn] maintenance/anomaly detected url={url} html_len={len(html)}")
+        return None, None
+
+    soup = BeautifulSoup(html, "html.parser")
 
     # 1. 新デザイン（現在の来客者数セクション）を最優先で読む
     men_node = soup.select_one(
@@ -522,10 +603,12 @@ def scrape_store(url: str) -> tuple[int | None, int | None]:
         try:
             men = int(re.search(r"\d+", men_node.get_text(strip=True)).group())
             women = int(re.search(r"\d+", women_node.get_text(strip=True)).group())
-            print(f"[scrape] (new) url={url} men={men} women={women}")
-            return men, women
+            men = _validate_count(men, "men", url)
+            women = _validate_count(women, "women", url)
+            if men is not None and women is not None:
+                print(f"[scrape] (new) url={url} men={men} women={women}")
+                return men, women
         except Exception:
-            # 何かおかしくても下のフォールバックに回す
             pass
 
     # 2. 旧デザイン or 予備パターン（今後の変更に備えて残しておく）
@@ -555,6 +638,8 @@ def scrape_store(url: str) -> tuple[int | None, int | None]:
 
     men = _extract_count(soup, patterns_men, selectors_men)
     women = _extract_count(soup, patterns_women, selectors_women)
+    men = _validate_count(men, "men", url)
+    women = _validate_count(women, "women", url)
 
     print(f"[scrape] (fallback) url={url} men={men} women={women}")
     return men, women
