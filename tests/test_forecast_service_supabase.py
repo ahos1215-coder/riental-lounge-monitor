@@ -1,5 +1,7 @@
 import logging
 
+import numpy as np
+
 from oriental.data.provider import SupabaseError
 from oriental.ml.forecast_service import ForecastService
 
@@ -20,6 +22,27 @@ class _FallbackProvider:
     def get_records(self, store_id: str, **_kwargs):
         self.called = True
         return [{"ts": "2024-11-01T00:00:00Z", "men": 1, "women": 2, "total": 3}]
+
+
+class _StubModel:
+    """Minimal model used by tests that exercise the supabase→legacy fallback
+    path without depending on real XGBoost artifacts."""
+
+    def predict(self, features):
+        n = len(features)
+        return np.zeros(n, dtype=float), np.zeros(n, dtype=float)
+
+
+class _StubBundle:
+    def __init__(self):
+        self.model = _StubModel()
+        self.metadata = {}
+        self.loaded_at_unix = 0.0
+
+
+class _StubModelRegistry:
+    def get_bundle(self, store_id: str):
+        return _StubBundle()
 
 
 def test_forecast_supabase_error_surfaces_when_no_fallback():
@@ -47,6 +70,7 @@ def test_forecast_supabase_fallback_uses_legacy_provider():
         backend="supabase",
         history_days=1,
         history_limit=10,
+        model_registry=_StubModelRegistry(),
     )
 
     result = service.forecast_next_hour(store_id="ol_test", freq_min=15)

@@ -76,7 +76,7 @@ Target commit: (see git)
 
 #### その他フロントエンド機能
 - **LINE Webhook（本番パス）**
-  - `POST /api/line`: 署名検証 → **レート制限**（Upstash。グローバル/分＋ユーザーあたり下書き/時）→ テキスト解析 → 3 インテント:
+  - `POST /api/line`: 署名検証 → **レート制限**（Upstash。グローバル/分＋ユーザーあたり下書き/時。**Upstash 障害時は in-memory フォールバック + 5 分の circuit breaker** で webhook を継続稼働 — 2026-04-12〜）→ テキスト解析 → 3 インテント:
     - **`draft` / `editorial_analysis`**: Flask `/api/range` + `/api/forecast_today` → `insightFromRange.ts` → Gemini MDX → Supabase `blog_drafts`（`content_type='editorial'`, `is_published=false`）
     - **`approve`**: 最新の未公開 editorial を `is_published=true` に更新 → `/blog/[public_slug]` URL を返信
 - **OGP / メタデータ**: `metadataBase`、動的 OG 画像、全ページの `openGraph` / `twitter` 設定済み

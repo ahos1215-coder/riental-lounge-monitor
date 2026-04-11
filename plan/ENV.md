@@ -24,7 +24,7 @@ Target commit: (see git)
 LINE Webhook（`frontend/src/app/api/line/route.ts`）:
 - `LINE_RANGE_LIMIT`（任意。`/api/range` の `limit`。**未設定時は 500**（定時の `BLOG_CRON_RANGE_LIMIT` 既定と整合）。旧 20 は偏りやすい）
 - **レート制限**（`frontend/src/lib/rateLimit/lineWebhookLimits.ts`）: Webhook は LINE サーバー経由のため **IP ではなく**（1）署名成功後の **全体スループット**（2）**ユーザー ID あたりの下書きパイプライン**を制限する。
-  - `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`（**本番必須推奨**。Upstash Redis。未設定時はプロセス内メモリのみでサーバレスでは揮発しやすく、実運用のレート制限は弱い）
+  - `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`（**本番必須推奨**。Upstash Redis。未設定時はプロセス内メモリのみでサーバレスでは揮発しやすく、実運用のレート制限は弱い。**Upstash インスタンスが archive / 削除された場合でも `rl.limit()` 呼び出しを try/catch で吸収し、5 分間 in-memory フォールバックに切り替える circuit breaker を内蔵（2026-04-12〜）**。長期障害時は env から両変数を削除すること）
   - `LINE_WEBHOOK_GLOBAL_PER_MINUTE`（任意。全体上限／分。**既定 200**）
   - `LINE_WEBHOOK_DRAFT_PER_USER_HOUR`（任意。同一 LINE ユーザーあたり下書き生成／時。**既定 20**）
   - `LINE_RATE_LIMIT_DISABLED`（`"1"` のとき制限オフ。ローカル検証のみ推奨）
