@@ -17,6 +17,18 @@ export type TimeSeriesPoint = {
   womenForecast: number | null;
 };
 
+/**
+ * 予測データの取得状態。一過性の Supabase Storage 障害などで `/api/forecast_today`
+ * が空配列を返した場合、フックが自動再試行する。UI 側はこの値を見て
+ * 「予測を再取得しています」等のヒントを出せる。
+ *
+ * - `idle`: まだ予測リクエストを行っていない（today モード以外）
+ * - `ok`: 予測データを取得できた
+ * - `retrying`: 予測が空だったため自動再試行中
+ * - `unavailable`: 自動再試行の上限に達してもデータが取れなかった
+ */
+export type ForecastStatus = "idle" | "ok" | "retrying" | "unavailable";
+
 export type StoreSnapshot = {
   slug: string;
   name: string;
@@ -33,6 +45,7 @@ export type StoreSnapshot = {
   forecastUpdatedLabel: string;
   series: TimeSeriesPoint[];
   hasData: boolean;
+  forecastStatus: ForecastStatus;
 };
 
 type RangePoint = {
@@ -69,6 +82,12 @@ export type StorePreviewControls = {
 };
 
 const FORECAST_REFRESH_MS = 15 * 60 * 1000;
+
+// 予測 API が空応答だった場合の自動再試行設定。
+// 一過性の Supabase Storage 接続リセットや ML モデルプリロード待ちを想定し、
+// 段階的に間隔を広げて最大 3 回まで再試行する。
+const FORECAST_RETRY_DELAYS_MS: readonly number[] = [5_000, 15_000, 45_000];
+const FORECAST_MAX_RETRIES = FORECAST_RETRY_DELAYS_MS.length;
 
 const RANGE_LIMIT_BY_MODE: Record<PreviewRangeMode, number> = {
   // today は初速重視で軽めにして表示開始を早める
@@ -113,6 +132,7 @@ function buildBaseSnapshot(meta: StoreMeta): StoreSnapshot {
     forecastUpdatedLabel: "--:--",
     series: buildEmptySeries(),
     hasData: false,
+    forecastStatus: "idle",
   };
 }
 
@@ -424,9 +444,13 @@ export function useStorePreviewData(
     let cancelled = false;
     const controller = new AbortController();
     const signal = controller.signal;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    async function run() {
-      setState({ loading: true, error: null, snapshot: baseSnapshot });
+    async function run(forecastRetryAttempt = 0) {
+      // 初回 or パラメータ変更時は loading から始める。再試行時はチャートを消さない。
+      if (forecastRetryAttempt === 0) {
+        setState({ loading: true, error: null, snapshot: baseSnapshot });
+      }
       try {
         const now = new Date();
         const baseDate = computeSelectedNightBaseDate(rangeMode, customDate, now);
@@ -466,6 +490,14 @@ export function useStorePreviewData(
         const nowWomen = latestActual?.nowWomen ?? current.nowWomen;
         const { peakTotal, peakTimeLabel, peakMen: peakMenVal, peakWomen: peakWomenVal } = pickPeak(effectiveActualSeries);
 
+        // 再試行中は forecastStatus を引き継ぎ、それ以外は loading 段階の "idle" を維持
+        const initialForecastStatus: ForecastStatus =
+          rangeMode !== "today"
+            ? "idle"
+            : forecastRetryAttempt > 0
+              ? "retrying"
+              : "idle";
+
         const baseSnapshotResolved: StoreSnapshot = {
           ...baseSnapshot,
           level: hasData ? "データ取得済み" : "データなし",
@@ -480,6 +512,7 @@ export function useStorePreviewData(
           forecastUpdatedLabel: "--:--",
           series: effectiveActualSeries,
           hasData,
+          forecastStatus: initialForecastStatus,
         };
 
         if (!cancelled) {
@@ -493,6 +526,34 @@ export function useStorePreviewData(
         }
 
         const allForecastPoints = parseForecastPoints(forecastJson);
+
+        // 予測が空 → ML モデルロード失敗 / Supabase Storage の一過性障害の可能性が高い。
+        // 段階的バックオフで自動再試行する。
+        if (allForecastPoints.length === 0) {
+          if (forecastRetryAttempt < FORECAST_MAX_RETRIES) {
+            if (cancelled) return;
+            setState((prev) => ({
+              ...prev,
+              snapshot: { ...prev.snapshot, forecastStatus: "retrying" },
+            }));
+            const delay = FORECAST_RETRY_DELAYS_MS[forecastRetryAttempt] ?? 45_000;
+            retryTimer = setTimeout(() => {
+              if (!cancelled) {
+                run(forecastRetryAttempt + 1);
+              }
+            }, delay);
+            return;
+          }
+          // 再試行上限到達 → unavailable
+          if (!cancelled) {
+            setState((prev) => ({
+              ...prev,
+              snapshot: { ...prev.snapshot, forecastStatus: "unavailable" },
+            }));
+          }
+          return;
+        }
+
         const forecastPoints = allForecastPoints.filter((p) =>
           isWithinNight(p.ts, nightWindow),
         );
@@ -517,6 +578,7 @@ export function useStorePreviewData(
           hasData:
             hasSeriesData(mergedSeries) ||
             baseSnapshotResolved.hasData,
+          forecastStatus: "ok",
         };
         if (!cancelled) {
           setState({ loading: false, error: null, snapshot: mergedSnapshot });
@@ -528,7 +590,12 @@ export function useStorePreviewData(
           setState({
             loading: false,
             error: detail,
-            snapshot: { ...baseSnapshot, hasData: false, level: "データなし" },
+            snapshot: {
+              ...baseSnapshot,
+              hasData: false,
+              level: "データなし",
+              forecastStatus: rangeMode === "today" ? "unavailable" : "idle",
+            },
           });
         }
         // eslint-disable-next-line no-console
@@ -550,6 +617,7 @@ export function useStorePreviewData(
       cancelled = true;
       controller.abort();
       if (timer) clearInterval(timer);
+      if (retryTimer) clearTimeout(retryTimer);
     };
   }, [meta, baseSnapshot, rangeMode, customDate]);
 

@@ -231,6 +231,16 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
                 データがまだありません。計測待ちか、閉店時間帯の可能性があります。
               </p>
             )}
+            {!loading && !error && hasData && snapshot.forecastStatus === "retrying" && (
+              <p className="max-w-[16rem] text-[10px] text-sky-300">
+                予測データを再取得しています…
+              </p>
+            )}
+            {!loading && !error && hasData && snapshot.forecastStatus === "unavailable" && (
+              <p className="max-w-[16rem] text-[10px] text-amber-300">
+                予測データを取得できませんでした。実測グラフのみ表示しています。
+              </p>
+            )}
           </div>
         </div>
 

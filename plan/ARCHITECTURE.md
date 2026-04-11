@@ -1,5 +1,5 @@
 # ARCHITECTURE
-Last updated: 2026-03-30 (Round 9: ML v4 + パフォーマンス + セキュリティ)
+Last updated: 2026-04-12 (Round 9 + ML レジリエンス: disk cache fallback / 予測 UX 自動再試行)
 Target commit: (see git)
 
 ## Overview
@@ -25,12 +25,18 @@ Target commit: (see git)
 
 **Flask プロセス内キャッシュ**: `forecast_today` / `forecast_today_multi` は TTL 60s のインメモリキャッシュを共有。CDN `s-maxage=60` と組み合わせ、最大遅延 ~2 分。
 
+**ML モデルレジリエンス (2026-04-12〜)**: `model_registry.py` は 2 段階のフォールバックで Supabase Storage の一過性障害（接続リセット等）を吸収する:
+1. **Disk cache fallback**: `_download_to_cache` がリトライ全敗した場合、`forecast_model_cache_dir` 上の既存ファイルが `FORECAST_MODEL_CACHE_MAX_AGE_SEC`（既定 7 日 = 604800）以内であれば fallback として採用し、警告ログ `model download failed; using existing disk cache as fallback` を出して継続する
+2. **In-memory stale fallback**: `get_bundle` の TTL 切れリフレッシュが失敗しても、`self._bundles[store_key]` に前回の bundle が残っていればそれを返し続ける（`refresh_failed_using_stale_in_memory` 警告）。次回リフレッシュは `refresh_sec / 4`（最低 60s）に短縮して早期復旧を試みる
+
+両 fallback の有効期限を超えた場合のみ本来の例外を伝播させる。
+
 ### 3) Next.js ページ・API Routes
 
 | パス | データ取得元 |
 |------|--------------|
 | `/` | `/api/range` + `/api/megribi_score`（TOP 5 今夜のおすすめ）+ `getAllPostMetas()`（静的 MDX） |
-| `/store/[id]` | `/api/range` + `/api/forecast_today`（**Promise.all 同時発火**）+ `/api/reports/store-summary` |
+| `/store/[id]` | `/api/range` + `/api/forecast_today`（**Promise.all 同時発火**。`useStorePreviewData.ts` は `forecast_today` が空配列だった場合 5s/15s/45s のバックオフで最大 3 回自動再試行し、`forecastStatus` を UI に伝える）+ `/api/reports/store-summary` |
 | `/stores` | **request ordering 戦略**: ① `/api/range_multi` await → 部分カード即表示 → ② `/api/megribi_score` → ③ `/api/forecast_today_multi`（バッチ）を後続発火。単一 gunicorn worker でも ~1.5s で初期表示 |
 | `/reports` | `/api/reports/list`（Supabase: 全店舗最新 Daily/Weekly メタ） |
 | `/reports/daily/[store_slug]` | Supabase `blog_drafts`（`content_type='daily'`, `is_published=true`） |

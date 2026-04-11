@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-03-30 (Round 9: ML v4 + GA4 + SEO + UX + パフォーマンス + セキュリティ + 容量管理)
+Last updated: 2026-04-12 (Round 9 + ML レジリエンス: disk cache fallback / 予測 UX 自動再試行)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -17,6 +17,7 @@ Target commit: (see git)
   - **時間減衰ウェイト**: 学習時のサンプル重み付けに指数減衰（90日半減期）を追加。直近データを重視
   - **日次精度トラッキング**: `metadata.json` に店舗別・日別の MAE を自動記録
   - **Flask プロセス内キャッシュ**: TTL 60s（`FORECAST_RESULT_CACHE_TTL`）。CDN キャッシュと合わせ最大遅延 ~2 分
+  - **Disk cache fallback (2026-04-12〜)**: `model_registry.py` は Supabase Storage からの DL が `download_retry` 回失敗しても、`forecast_model_cache_dir` 上の既存ファイルが `FORECAST_MODEL_CACHE_MAX_AGE_SEC`（既定 7 日）以内なら fallback として採用。さらに、TTL 切れの refresh 中に DL が失敗した場合はメモリ内の前回バンドルを継続使用（`refresh_failed_using_stale_in_memory` 警告）。一過性の Supabase Storage 接続リセット（`Connection reset by peer`）で予測 API が止まるのを防ぐ
 - `/api/forecast_today_multi`（`?stores=slug1,slug2,...` 最大40店舗。**ThreadPoolExecutor(12) で並列実行** — 12店舗でも ~1-2s。Flask 内キャッシュ共有）
 - `/api/second_venues`（最小応答。未設定時は空配列）
 - `/api/megribi_score`（全店舗 or 指定店舗の megribi_score を返す。`?store=` / `?stores=` 対応。Supabase backend 必須。**ThreadPoolExecutor(12) で並列取得 — 38店舗12s→<1s**）
@@ -83,6 +84,7 @@ Target commit: (see git)
 - **Recharts**: 全チャートを Chart.js → Recharts に統一済み（Round 3）。Chart.js 依存は完全削除
 - **StoreCard**: データ未取得時のプレースホルダ（`—`・`0人`）を非表示化（Round 3）。めぐりびスコアバッジ: `狙い目`（≥0.65）/ `様子見`（≥0.40）/ `他店へ`（<0.40）
 - **ForecastAccuracyCard**: `/store/[id]` ページに予測モデル精度カード表示（MAE / 週末夜 MAE / グレード表示）。`/api/forecast_accuracy` からクライアントサイドでフェッチ（モジュールレベルキャッシュ）
+- **予測自動再試行 UX (2026-04-12〜)**: `useStorePreviewData.ts` は `/api/forecast_today` が空配列を返した場合（ML モデル一過性ロード失敗の典型症状）、5s → 15s → 45s のバックオフで最大 3 回自動再試行する。`StoreSnapshot.forecastStatus` に `idle` / `ok` / `retrying` / `unavailable` を出力し、`PreviewMainSection.tsx` が「予測データを再取得しています…」「予測データを取得できませんでした。実測グラフのみ表示しています。」のヒントを表示
 - **ブログ frontmatter**: Zod 検証（`blogFrontmatter.ts` / `content.ts`）
 - **CDN Cache-Control**: API proxy に `s-maxage` + `stale-while-revalidate` 設定。予測系（`forecast_today` / `forecast_next_hour`）は `s-maxage=60`（Flask TTL も 60s）、最大遅延 ~2 分
 - **エラーバウンダリ + ローディング UX**: 全主要ページに `error.tsx`（リトライボタン + 一覧戻りリンク）/ `loading.tsx`（パルスアニメーション骨格）を配置。`store/[id]`, `mypage`, `reports/daily/[store_slug]`, `reports/weekly/[store_slug]`, `blog`, `blog/[slug]`, `insights/weekly` の 11 ファイル

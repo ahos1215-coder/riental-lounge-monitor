@@ -99,6 +99,7 @@ Forecast:
 - `FORECAST_MODEL_SCHEMA_VERSION`（`metadata.json` の `schema_version` と一致必須。不一致時は 503）
 - `FORECAST_MODEL_REFRESH_SEC`（モデル再取得の TTL 秒。既定 900）
 - `FORECAST_MODEL_CACHE_DIR`（Render ローカルキャッシュ先。既定 `data/ml_models`）
+- `FORECAST_MODEL_CACHE_MAX_AGE_SEC`（int, 既定 `604800` = 7 日。Supabase Storage からの DL が失敗した際、`FORECAST_MODEL_CACHE_DIR` 上の既存ファイルを fallback として採用できる最大有効期限。これを超えた古いキャッシュは fallback として使わず、本来の例外を伝播させる）
 - `ML_TRAIN_LIMIT`（int, 既定 `120000`。学習で使用する最大ログ件数。大きいほど網羅性は上がるが、学習時間・メモリ使用量も増える）
 - `ML_TRAIN_WEIGHT_PEAK`（float, 既定 `1.8`。金・土・祝前日の 20:00-25:00 セグメントの学習重み）
 - `ML_TRAIN_WEIGHT_RAIN`（float, 既定 `1.8`。雨天データの学習重み）

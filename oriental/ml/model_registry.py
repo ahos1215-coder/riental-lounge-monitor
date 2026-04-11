@@ -14,6 +14,15 @@ from .model_xgb import ForecastModel
 from .preprocess import FEATURE_COLUMNS
 
 
+def _safe_int(raw: str | None, *, fallback: int) -> int:
+    if raw is None:
+        return fallback
+    try:
+        return int(str(raw).strip())
+    except (TypeError, ValueError):
+        return fallback
+
+
 class ModelRegistryError(RuntimeError):
     pass
 
@@ -45,6 +54,7 @@ class ForecastModelRegistry:
         request_timeout_sec: float,
         download_retry: int,
         logger,
+        cache_max_age_sec: int = 7 * 86400,
     ) -> None:
         self.supabase_url = supabase_url.rstrip("/")
         self.service_role_key = service_role_key
@@ -56,6 +66,9 @@ class ForecastModelRegistry:
         self.request_timeout_sec = max(3.0, float(request_timeout_sec))
         self.download_retry = max(1, int(download_retry))
         self.logger = logger
+        # Disk cache fallback の最大有効期限。これを超えた古いキャッシュは
+        # ネットワーク障害時でも fallback として使わない（例外を伝播）。
+        self.cache_max_age_sec = max(60, int(cache_max_age_sec))
 
         self._lock = threading.Lock()
         self._bundles: dict[str, LoadedModelBundle] = {}
@@ -70,7 +83,13 @@ class ForecastModelRegistry:
 
     @classmethod
     def from_app(cls, app) -> "ForecastModelRegistry":
+        import os
+
         cfg = app.config["APP_CONFIG"]
+        cache_max_age_sec = _safe_int(
+            os.getenv("FORECAST_MODEL_CACHE_MAX_AGE_SEC"),
+            fallback=7 * 86400,
+        )
         return cls(
             supabase_url=cfg.supabase_url,
             service_role_key=cfg.supabase_service_role_key,
@@ -82,6 +101,7 @@ class ForecastModelRegistry:
             request_timeout_sec=cfg.http_timeout,
             download_retry=cfg.http_retry,
             logger=app.logger,
+            cache_max_age_sec=cache_max_age_sec,
         )
 
     def get_bundle(self, store_id: str) -> LoadedModelBundle:
@@ -97,6 +117,21 @@ class ForecastModelRegistry:
             except Exception as exc:  # noqa: BLE001
                 self._last_error = str(exc)
                 self._last_error_at_unix = time.time()
+                # Graceful degradation: refresh が失敗しても、メモリに前回の bundle が
+                # あればそれを使い続ける（一過性の Supabase Storage 障害でユーザーの
+                # 予測グラフが消えるのを防ぐ）。次の refresh は早めに再試行する。
+                stale = self._bundles.get(store_key)
+                if stale is not None:
+                    age_sec = max(0.0, time.time() - stale.loaded_at_unix)
+                    self.logger.warning(
+                        "forecast.model_registry.refresh_failed_using_stale_in_memory "
+                        "store=%s age_sec=%.0f detail=%s",
+                        store_key,
+                        age_sec,
+                        exc,
+                    )
+                    self._next_refresh_unix = now + max(60, self.refresh_sec // 4)
+                    return stale
                 raise
             self._bundles[store_key] = bundle
             self._next_refresh_unix = now + self.refresh_sec
@@ -252,6 +287,7 @@ class ForecastModelRegistry:
             "Authorization": f"Bearer {self.service_role_key}",
         }
         last_exc: Exception | None = None
+        last_status: int | None = None
         for attempt in range(1, self.download_retry + 1):
             try:
                 response = self._session.get(url, headers=headers, timeout=self.request_timeout_sec)
@@ -260,6 +296,7 @@ class ForecastModelRegistry:
                     dst.write_bytes(response.content)
                     return
 
+                last_status = response.status_code
                 # 5xx / 429 は一時障害としてリトライ
                 if response.status_code in {429, 500, 502, 503, 504} and attempt < self.download_retry:
                     self.logger.warning(
@@ -272,9 +309,14 @@ class ForecastModelRegistry:
                     time.sleep(min(1.5 * attempt, 5.0))
                     continue
 
+                # Non-retryable HTTP — disk cache fallback を試す
+                if self._use_disk_fallback(object_name, dst, reason=f"status={response.status_code}"):
+                    return
                 raise ModelRegistryError(
                     f"model download failed: object={object_name} url={url} status={response.status_code}"
                 )
+            except ModelRegistryError:
+                raise
             except Exception as exc:  # noqa: BLE001
                 last_exc = exc
                 if attempt < self.download_retry:
@@ -287,10 +329,51 @@ class ForecastModelRegistry:
                     )
                     time.sleep(min(1.5 * attempt, 5.0))
                     continue
-                raise ModelRegistryError(f"model download failed: object={object_name} url={url}") from exc
+                # 全リトライ枯渇 — disk cache fallback を試す
+                if self._use_disk_fallback(object_name, dst, reason=str(exc)):
+                    return
+                raise ModelRegistryError(
+                    f"model download failed: object={object_name} url={url}"
+                ) from exc
 
-        # Defensive: 通常到達しないが、型安全のため明示
-        raise ModelRegistryError(f"model download failed: object={object_name} url={url}") from last_exc
+        # Defensive: ループから break せず抜けたケース
+        if self._use_disk_fallback(object_name, dst, reason="all-attempts-exhausted"):
+            return
+        raise ModelRegistryError(
+            f"model download failed: object={object_name} url={url} status={last_status}"
+        ) from last_exc
+
+    def _use_disk_fallback(self, object_name: str, dst: Path, *, reason: str) -> bool:
+        """既存のディスクキャッシュが新しければ fallback として採用する。
+
+        一過性のネットワーク障害（Supabase Storage 接続リセット等）で予測 API が
+        止まるのを防ぐためのセーフティネット。`cache_max_age_sec` を超えていれば
+        fallback は無効化し、本来の例外を呼び出し元に伝播させる。
+        """
+        if not dst.exists():
+            return False
+        try:
+            age_sec = time.time() - dst.stat().st_mtime
+        except OSError:
+            return False
+        if age_sec > self.cache_max_age_sec:
+            self.logger.warning(
+                "model download failed and disk cache too old to use: "
+                "object=%s age_sec=%.0f max_age_sec=%d reason=%s",
+                object_name,
+                age_sec,
+                self.cache_max_age_sec,
+                reason,
+            )
+            return False
+        self.logger.warning(
+            "model download failed; using existing disk cache as fallback: "
+            "object=%s age_sec=%.0f reason=%s",
+            object_name,
+            age_sec,
+            reason,
+        )
+        return True
 
     def _load_metadata(self, path: Path) -> dict[str, Any]:
         try:
