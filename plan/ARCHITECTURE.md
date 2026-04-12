@@ -146,6 +146,7 @@ trigger-blog-cron.yml (Daily Report) 完了
 ## Key Files
 
 ### Backend (Python / Flask)
+- `oriental/routes/common.py`（共通ヘルパー: `get_config` / `get_supabase_provider` / `resolve_store_id`）
 - `oriental/routes/data.py`（/api/range, /api/current, /api/range_multi（ThreadPoolExecutor 並列化）, /api/second_venues）
 - `oriental/routes/forecast.py`（/api/forecast_*, /api/forecast_today_multi, /api/megribi_score, /api/forecast_accuracy — ThreadPoolExecutor 並列化）
 - `oriental/routes/tasks.py`（/tasks/multi_collect, /tasks/tick, CRON_SECRET 認証）
@@ -172,6 +173,7 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `frontend/src/lib/blog/runBlogDraftPipeline.ts`（source → content_type 導出）
 - `frontend/src/lib/line/parseLineIntent.ts`（draft / editorial_analysis / approve。scope: single / monthly / area_compare）
 - `frontend/src/lib/supabase/blogDrafts.ts`（Supabase CRUD）
+- `frontend/src/lib/dateFormat.ts`（JST 日時フォーマット共通ユーティリティ — レポートページ / API / チャートで共用）
 - `frontend/src/app/config/stores.ts`（38 店舗マスタ）
 - `frontend/src/components/StoreCard.tsx`（店舗カード。めぐりびスコアバッジ: 狙い目/様子見/他店へ）
 - `frontend/src/components/WeeklyStoreCharts.tsx`（週次 Recharts チャート: 時系列 + Top Windows バーチャート。`/reports/weekly` と `/insights/weekly` で共有）
@@ -202,3 +204,4 @@ trigger-blog-cron.yml (Daily Report) 完了
 
 ### Supabase
 - `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
+- `supabase/migrations/20260412000000_blog_drafts_indexes.sql`（`updated_at DESC` + `(store_slug, created_at DESC)` インデックス）

@@ -169,7 +169,7 @@ Target commit: (see git)
 
 ## P0（直近で着手しやすい項目）
 
-- **`avoid_time` / プロンプト**: `draftGenerator.ts` の表現精度向上（ズレる場合は人手修正）
+- ~~**`avoid_time` / プロンプト**~~: ✅ 完了（2026-04-12）。`avoid_time` は記事出力から完全削除。`peak_time` と `crowd_label` のみ出力する方針に確定
 - **主要ドキュメントの継続同期**（`plan/*` と README の整合）
 - **Weekly Insights の品質改善**（score 閾値・最小継続時間の調整。`plan/WEEKLY_INSIGHTS_TUNING.md`）
 - **`/api/current`**: 当面は Flask 実装維持（`plan/API_CURRENT.md`）
