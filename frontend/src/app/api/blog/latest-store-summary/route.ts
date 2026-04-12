@@ -39,31 +39,28 @@ function pickFirstNonEmptyLine(md: string, maxLen = 120): string | null {
   return line.length > maxLen ? `${line.slice(0, maxLen - 1)}…` : line;
 }
 
-function extractSummary(mdx: string): { bullets: string[]; peakHint?: string; avoidHint?: string } {
+function extractSummary(mdx: string): { bullets: string[]; peakHint?: string } {
   const body = stripFrontmatter(mdx);
   const concl = pickSectionLines(body, "今日の結論", 4);
-  const times = pickSectionLines(body, "混みやすい時間 / 避けたい時間", 4);
 
   const bullets: string[] = [];
-  if (concl[0]) bullets.push(concl[0]);
-  // 「ピーク」「避けたい」を拾えれば優先して入れる（なければ次の結論行）
-  const peak = concl.find((s) => s.includes("ピーク"));
-  const avoid = concl.find((s) => s.includes("避け"));
-  if (peak) bullets.push(peak);
-  else if (concl[1]) bullets.push(concl[1]);
+  for (const line of concl) {
+    // avoid_time 由来の行はスキップ（入店のおすすめ / 入店しやすさ 等）
+    if (/入店の(おすすめ|しやすさ)|待ちにくさ/.test(line)) continue;
+    bullets.push(line);
+    if (bullets.length >= 3) break;
+  }
 
-  if (avoid) bullets.push(avoid);
-  else if (times[0]) bullets.push(times[0]);
-  else if (concl[2]) bullets.push(concl[2]);
-  if (bullets.length < 3) {
+  if (bullets.length === 0) {
     const extra = pickFirstNonEmptyLine(body);
     if (extra) bullets.push(extra);
   }
 
+  const peakHint = concl.find((s) => s.includes("ピーク"));
+
   return {
     bullets: bullets.slice(0, 3),
-    peakHint: peak,
-    avoidHint: avoid,
+    peakHint,
   };
 }
 

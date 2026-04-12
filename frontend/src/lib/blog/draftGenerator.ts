@@ -171,15 +171,16 @@ function buildSystemInstruction(edition: BlogEdition): string {
     "",
     buildEditionBlock(edition),
     "",
-    "■ `insight.avoid_time` の意味（「ねらい目」の再定義・必ず守る）",
-    "- これは分析窓内で total が**最も小さい**サンプル時刻です。**待ちにくく入店しやすい時間帯の目安**、**店内が比較的落ち着いている時間の目安**として使ってください。",
-    "- **禁止:** avoid_time を「ねらい目＝相席がいちばんうまくいく最高の時間」と**断定**すること。早い時間帯は人数が少なく見えても、**ご飯目的・別の用事の待ち・出勤前**など多様で、**来店目的や相席の質まではデータからは測れません**。",
-    "- **提案型で書く:** 例）**活気・賑わいを楽しみたい**読者にはピーク付近（`peak_time` 等）の傾向を、**スムーズに入店して落ち着いて席につきたい**読者には `avoid_time` 付近の目安を、など**一つの正解にしない**。",
-    "- **『10秒まとめ』のラベル（この表現を優先）:**",
-    "  - ピーク側: 「**ピーク時間（賑わいの目安）:**」＋ `peak_time` 前後の読み。",
-    "  - 入店しやすさ側: 「**入店しやすさの目安（待ちにくさ）:**」＋ `avoid_time` 前後を、**スムーズに入店しやすい時間帯の参考**として書く（「最高のねらい目」とは書かない）。",
-    "  - 両方を箇条書きで並べ、**読者の目的が違えば選び方も違う**ことを一文で補足してよい。",
-    "- 「避けたい時間」「混雑の罠」などのネガティブラベルは禁止。description にも使わない。",
+    "■ `insight.avoid_time` について（**記事には書かない**）",
+    "- JSON に `avoid_time` が含まれていますが、これは**人数が最も少ない時刻**に過ぎません。",
+    "- 開店直後（19時台）は人数が少なく見えても、**食事目的・出勤前の層**など多様で、**相席の質とは無関係**です。",
+    "- **記事には `avoid_time` を一切使わない**。「入店のおすすめ」「入店しやすさの目安」「ねらい目」等の表現も禁止。",
+    "- 記事で伝えるのは **`peak_time`（ピーク時間）と `crowd_label`（混雑度）のみ**。",
+    "",
+    "■ ピーク時間の書き方",
+    "- ラベル: 「**ピーク時間:**」＋ `peak_time` 前後",
+    "- 意味: この時間帯が最も人が多く、以降は減り始める傾向",
+    "- 「避けたい時間」「混雑の罠」などのネガティブラベルは禁止。",
     "",
     "■ 男女比（JSON の draft_context.gender_note を尊重）",
     "- カウントが取れている場合のみ**客観的に軽く**触れる。推測で盛らない。取れない場合は無理に書かない。",
@@ -216,9 +217,9 @@ function buildSystemInstruction(edition: BlogEdition): string {
     "- 必ず含める情報（この順番で箇条書き）:",
     "  1. **混雑度**（空き / ほどよい / 混み）+ 曜日",
     "  2. **ピーク時間**: `peak_time` 前後 — 「この時間以降、人が減り始める傾向です」",
-    "  3. **入店のおすすめ**: `avoid_time` 前後 — 「比較的スムーズに入店しやすい時間帯です」",
-    "  4. 二次会ウェーブがある場合のみ: 21〜22時帯の傾向を 1 文",
-    "- description も「ピーク○○前後、入店おすすめ○○前後」のように結論を入れる。",
+    "  3. 二次会ウェーブがある場合のみ: 21〜22時帯の傾向を 1 文",
+    "- **avoid_time は書かない**（理由はシステム指示の avoid_time 節を参照）。",
+    "- description も「ピーク○○前後」のように結論を入れる。",
     "- 文体はです・ます調、読みやすく簡潔に。長い説明や解説は書かない。",
   ].join("\n");
 }
@@ -250,9 +251,9 @@ function buildUserPrompt(input: DraftGeneratorInput): string {
     "執筆前の再確認:",
     "- **出力の先頭は必ず `---`（frontmatter 開始）から。** その前に1文字も書かない（挨拶・リード禁止）。**`---` と `title:` 等の行頭にスペースを入れない。**",
     "- 業態は**相席ラウンジ**。キャバクラ・**キャスト・指名**など接客クラブの語は**一切使わない**。",
-    "- **avoid_time** は「待ちにくい・落ち着いている時間の目安」であり、「相席が最高にうまくいくねらい目」とは**断定しない**。ピーク重視と入店しやすさ重視を**提案型**で並べる。",
+    "- **avoid_time は記事に書かない**。開店直後の人数最小は食事目的・出勤前層が含まれ、相席の質とは無関係なため。",
     "- **ML 2.0 推論由来の情報を優先**: `data_source=api/forecast_today` の場合、`draft_context.ml_signal_notes` は店舗別モデル推論の補助根拠。数値の言い換えではなく、来店判断のヒントとして短く反映する。",
-    "- **10秒まとめ**では上記の固定ラベル（ピーク／入店しやすさ）を使い、**一つの正解にしない**書き方にする。",
+    "- **「今日の結論」**ではピーク時間と混雑度を伝える。入店のおすすめ・入店しやすさの目安は**書かない**。",
     "- **draft_context.edition**: `evening_preview` なら今夜の**見通し・作戦**（未来のピークは予想）、`late_update` なら**実測に近い実況・答え合わせ**（断定しすぎない）。",
     "- **draft_context.secondary_wave.detected** が true なら、21〜22時台の急増を踏まえ**ゴールデンタイム**の紹介が可能（個人への結果保証はしない）。false なら無理に書かない。",
     "- **data_health** が厳しければサンプル不足・偏りを**正直に**書く。",
@@ -457,19 +458,15 @@ export function buildFallbackBlogDraftMdx(input: DraftGeneratorInput): string {
   const { insight, draft_context } = input.insightResult;
   const title = `${input.storeLabel}｜今日の傾向まとめ（${input.dateYmd}）`;
   const peak = insight.peak_time || "—";
-  const avoid = insight.avoid_time || "—";
   const crowd = insight.crowd_label || "—";
   const dayLabel = draft_context?.day_context?.day_name_ja ?? "";
   const wave = draft_context?.secondary_wave?.detected
     ? `二次会帯（21〜22時頃）に人が増える傾向${draft_context.secondary_wave.note ? `（${draft_context.secondary_wave.note}）` : ""}`
     : null;
 
-  // ユーザーが本当に知りたいのは「いつ行けばいいか」と「ピークはいつか」。
-  // 冗長な 4 セクション構成を廃止し、3 行で結論を出す。
   const bullets: string[] = [
     `混雑度（目安）: ${crowd}${dayLabel ? `（${dayLabel}）` : ""}`,
     `ピーク時間: ${peak} 前後 — この時間以降、人が減り始める傾向です`,
-    `入店のおすすめ: ${avoid} 前後 — 比較的スムーズに入店しやすい時間帯です`,
   ];
   if (wave) {
     bullets.push(wave);
@@ -478,7 +475,7 @@ export function buildFallbackBlogDraftMdx(input: DraftGeneratorInput): string {
   return [
     "---",
     `title: "${title}"`,
-    `description: "${input.storeLabel}の今夜の混雑予測。ピーク${peak}前後、入店のおすすめは${avoid}前後。"`,
+    `description: "${input.storeLabel}の今夜の混雑予測。ピーク${peak}前後。"`,
     `date: "${input.dateYmd}"`,
     "categoryId: prediction",
     "level: easy",
