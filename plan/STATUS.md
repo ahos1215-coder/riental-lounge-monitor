@@ -162,7 +162,7 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 | `trigger-blog-cron.yml` | Daily Report 38店舗 matrix | `schedule`（09:00/12:30 UTC）+ `workflow_dispatch` |
 | `generate-weekly-insights.yml` | Weekly Report Fan-in Matrix | `schedule`（水曜 UTC 21:30）+ dispatch |
 | `generate-public-facts.yml` | Public Facts 生成 + Git commit | `schedule`（毎日 UTC 00:30）+ dispatch |
-| `train-ml-model.yml` | ML モデル学習 + Supabase Storage | `schedule`（毎日 UTC 20:30）+ dispatch |
+| `train-ml-model.yml` | ML モデル学習 + Supabase Storage | `schedule`（**日次** UTC 20:30 = JST 05:30 Optuna なし + **週次** 月曜 UTC 18:00 = JST 03:00 Optuna あり）+ dispatch |
 | `x-auto-post.yml` | X 自動投稿 | `workflow_run`（Daily 完了後）+ dispatch |
 | `retry-blog-draft-stores.yml` | Daily 失敗店舗再実行 | `workflow_dispatch` |
 | `blog-request.yml` | 手動ブログ依頼 | `workflow_dispatch` |

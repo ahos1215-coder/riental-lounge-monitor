@@ -13,8 +13,10 @@ on:
         description: "対象店舗ID（空なら全店舗）"
         required: false
   schedule:
-    # UTC 20:30 = JST 05:30
+    # 日次: UTC 20:30 = JST 05:30（Optuna なし、固定パラメータで再学習のみ）
     - cron: "30 20 * * *"
+    # 週次: 毎週月曜 UTC 18:00 = JST 03:00（Optuna HPO あり）
+    - cron: "0 18 * * 1"
 
 jobs:
   train:
@@ -35,6 +37,23 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
 
+      # 週次スケジュール (cron "0 18 * * 1") の場合のみ Optuna を有効化。
+      # 日次スケジュールでは固定パラメータで再学習のみ（GHA 実行時間 90% 削減）。
+      # workflow_dispatch（手動実行）時は vars.ML_OPTUNA_ENABLED をそのまま使う。
+      - name: Determine Optuna mode
+        id: optuna
+        run: |
+          if [ "${{ github.event.schedule }}" = "0 18 * * 1" ]; then
+            echo "enabled=1" >> "$GITHUB_OUTPUT"
+            echo "[train-ml] Weekly HPO run — Optuna ENABLED"
+          elif [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "enabled=0" >> "$GITHUB_OUTPUT"
+            echo "[train-ml] Daily retrain — Optuna DISABLED (fixed params)"
+          else
+            echo "enabled=${{ vars.ML_OPTUNA_ENABLED || '1' }}" >> "$GITHUB_OUTPUT"
+            echo "[train-ml] Manual dispatch — Optuna=${{ vars.ML_OPTUNA_ENABLED || '1' }}"
+          fi
+
       - name: Train and upload model artifacts
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -48,7 +67,7 @@ jobs:
           ML_TRAIN_STORE_ID: ""
           ML_TRAIN_WEIGHT_PEAK: ${{ vars.ML_TRAIN_WEIGHT_PEAK }}
           ML_TRAIN_WEIGHT_RAIN: ${{ vars.ML_TRAIN_WEIGHT_RAIN }}
-          ML_OPTUNA_ENABLED: ${{ vars.ML_OPTUNA_ENABLED }}
+          ML_OPTUNA_ENABLED: ${{ steps.optuna.outputs.enabled }}
           ML_OPTUNA_TRIALS: ${{ vars.ML_OPTUNA_TRIALS }}
         run: |
           set -euo pipefail

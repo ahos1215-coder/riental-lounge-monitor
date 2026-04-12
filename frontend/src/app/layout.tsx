@@ -67,6 +67,17 @@ export default function RootLayout({
         />
         <MeguribiHeader />
         <div className="min-h-screen text-slate-50">{children}</div>
+        <footer className="border-t border-white/5 bg-black px-4 py-6 text-center text-[11px] text-white/30">
+          <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-center gap-x-4 gap-y-1">
+            <span>&copy; {new Date().getFullYear()} めぐりび (MEGRIBI)</span>
+            <a href="/disclaimer" className="underline hover:text-white/60">
+              免責事項・ご利用にあたって
+            </a>
+          </div>
+          <p className="mt-2">
+            本サービスは各相席ブランドの公式サービスではありません。表示データは参考値です。
+          </p>
+        </footer>
       </body>
     </html>
   );
