@@ -747,7 +747,101 @@ def _prefetch_weather(
     return result
 
 
-# ========= Phase 2: 並列スクレイピング =========
+# ========= Phase 2: トップページ一括取得 (推奨) / 並列個別フォールバック =========
+
+TOP_PAGE_URL = "https://oriental-lounge.com/"
+
+# ページ ID → store_id のマッピング（stores.json の url から自動構築）
+_PAGE_ID_TO_STORE_ID: dict[int, str] = {}
+for _s in STORES:
+    _m = re.search(r"/stores/(\d+)", _s.get("url", ""))
+    if _m:
+        _PAGE_ID_TO_STORE_ID[int(_m.group(1))] = _s["store_id"]
+
+
+def _scrape_top_page(
+    stores: list[dict],
+) -> dict[str, tuple[int | None, int | None]] | None:
+    """
+    トップページ (oriental-lounge.com/) を 1 回のリクエストで取得し、
+    全店舗の男女別人数を一括抽出する。
+
+    38 店舗 × 個別リクエスト → 1 リクエストに最適化。
+    失敗時は None を返し、呼び出し元が _parallel_scrape にフォールバックする。
+    """
+    try:
+        headers = {
+            "User-Agent": _pick_user_agent(),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Cache-Control": "no-cache",
+        }
+        resp = requests.get(TOP_PAGE_URL, headers=headers, timeout=15)
+        resp.raise_for_status()
+        html = resp.text
+
+        if _detect_maintenance(html):
+            print("[top_page] maintenance detected, falling back to individual scraping")
+            return None
+
+        soup = BeautifulSoup(html, "html.parser")
+
+        # トップページの店舗カード: <a href="/stores/{id}"> 内にデータが含まれる
+        cards = soup.select("a[href^='/stores/']")
+        if not cards:
+            print("[top_page] no store cards found, falling back to individual scraping")
+            return None
+
+        # 対象 store_id のセット（フィルタ用）
+        target_ids = {s["store_id"] for s in stores}
+        results: dict[str, tuple[int | None, int | None]] = {}
+
+        for card in cards:
+            href = card.get("href", "")
+            id_match = re.search(r"/stores/(\d+)", href)
+            if not id_match:
+                continue
+
+            page_id = int(id_match.group(1))
+            store_id = _PAGE_ID_TO_STORE_ID.get(page_id)
+            if not store_id or store_id not in target_ids:
+                continue
+
+            # カード内テキストを平坦化して正規表現で抽出 (DOM 変更に強い)
+            card_text = card.get_text(separator=" ", strip=True)
+            men_match = re.search(r"(\d+)\s*GENTLEMEN", card_text, re.IGNORECASE)
+            women_match = re.search(r"(\d+)\s*LADIES", card_text, re.IGNORECASE)
+
+            men = int(men_match.group(1)) if men_match else None
+            women = int(women_match.group(1)) if women_match else None
+
+            men = _validate_count(men, "men", TOP_PAGE_URL)
+            women = _validate_count(women, "women", TOP_PAGE_URL)
+
+            results[store_id] = (men, women)
+
+        ok = sum(1 for m, w in results.values() if m is not None and w is not None)
+        total = len(target_ids)
+        print(f"[top_page] extracted {ok}/{total} stores from single request")
+
+        # 50% 未満しか取れなかった場合はフォールバック
+        if ok < total * 0.5:
+            print(f"[top_page] low hit rate ({ok}/{total}), falling back to individual scraping")
+            return None
+
+        # 取得できなかった店舗は (None, None) で埋める
+        for s in stores:
+            sid = s["store_id"]
+            if sid not in results:
+                results[sid] = (None, None)
+
+        return results
+
+    except Exception as e:
+        print(f"[top_page] failed: {e}, falling back to individual scraping")
+        return None
 
 
 def _parallel_scrape(
@@ -996,8 +1090,11 @@ def collect_all_once(*, target_store_id: str | None = None) -> dict:
     # Phase 1: 天気データ事前取得
     weather_map = _prefetch_weather(stores)
 
-    # Phase 2: 並列スクレイピング
-    scrape_results = _parallel_scrape(stores)
+    # Phase 2: トップページ一括取得 → 失敗時は個別スクレイピングにフォールバック
+    scrape_results = _scrape_top_page(stores)
+    if scrape_results is None:
+        print("[collect] top-page failed, using parallel individual scraping")
+        scrape_results = _parallel_scrape(stores)
 
     # Phase 2.5: DOM 構造変更チェック（全店舗分のスクレイプ完了後）
     _check_dom_health(stores, scrape_results)
