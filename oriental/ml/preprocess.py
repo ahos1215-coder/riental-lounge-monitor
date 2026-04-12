@@ -35,6 +35,8 @@ FEATURE_COLUMNS = [
     "same_dow_last_week_total",
     # v4: 直近30分の人数変化速度（6行分の差分）。推論時は history の末尾から算出
     "total_slope_30min",
+    # v5: 極端な天候（猛暑 35°C+ / 極寒 5°C-）→ 外出意欲が急減
+    "extreme_weather",
 ]
 
 
@@ -200,6 +202,10 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     minutes = df["hour"] * 60 + df["minute"]
     df["sin_time"] = np.sin(2 * np.pi * minutes / 1440)
     df["cos_time"] = np.cos(2 * np.pi * minutes / 1440)
+
+    # v5: 極端な天候（猛暑 35°C+ or 極寒 5°C-）
+    temp = pd.to_numeric(df.get("temp_c", pd.Series(dtype=float)), errors="coerce")
+    df["extreme_weather"] = ((temp >= 35) | (temp <= 5)).astype(int).fillna(0)
 
     numeric_cols = [c for c in FEATURE_COLUMNS if c in df.columns]
     for col in numeric_cols:

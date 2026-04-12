@@ -97,7 +97,7 @@ class AppConfig:
             forecast_model_prefix=os.getenv("FORECAST_MODEL_PREFIX", "forecast/latest"),
             forecast_model_cache_dir=forecast_model_cache_dir,
             forecast_model_refresh_sec=forecast_model_refresh_sec,
-            forecast_model_schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v4"),
+            forecast_model_schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v5"),
             enable_forecast=enable_forecast,
         )
 
