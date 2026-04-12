@@ -299,22 +299,41 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
               <div className="relative z-10 flex flex-col justify-center px-8 py-8 md:px-10 md:py-10">
                 <FadeIn delay={0.1} direction="left">
                   <p className="text-[11px] font-semibold tracking-[0.25em] text-indigo-200">
-                    NIGHT MAP FOR ORIENTAL LOUNGE
+                    MEGRIBI — 相席ラウンジの混雑予測
                   </p>
                 </FadeIn>
                 <FadeIn delay={0.2}>
                   <h1 className="mt-3 text-3xl font-bold leading-tight tracking-[-0.04em] md:text-4xl">
-                    今夜の一軒を、
+                    いつ行けば空いてる？
                     <br />
-                    やさしく照らす案内灯。
+                    <span className="text-indigo-300">AI が教えます。</span>
                   </h1>
                 </FadeIn>
                 <FadeIn delay={0.35}>
                   <p className="mt-4 max-w-xl text-sm text-slate-100/80">
-                    オリエンタルラウンジを中心に、各店舗の男女比や混雑の予測をまとめてチェック。
-                    「いま行くならどこ？」を、感覚ではなくデータで選べるようにします。
+                    全国 38 店舗の相席ラウンジの混雑状況をリアルタイムで収集。
+                    AI が今夜のピーク時間を予測して、ベストな来店タイミングの参考をお届けします。
                   </p>
                 </FadeIn>
+
+                {/* 3つの特徴 — 初見ユーザー向け */}
+                <FadeIn delay={0.4}>
+                  <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 px-4 py-3">
+                      <p className="text-xs font-bold text-indigo-200">リアルタイム混雑</p>
+                      <p className="mt-1 text-[11px] text-slate-400">男女別の人数を 5 分ごとに更新</p>
+                    </div>
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+                      <p className="text-xs font-bold text-amber-200">AI ピーク予測</p>
+                      <p className="mt-1 text-[11px] text-slate-400">今夜何時が一番混むかを予測</p>
+                    </div>
+                    <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
+                      <p className="text-xs font-bold text-emerald-200">毎日自動レポート</p>
+                      <p className="mt-1 text-[11px] text-slate-400">38 店舗の傾向を毎日 AI が分析</p>
+                    </div>
+                  </div>
+                </FadeIn>
+
                 <FadeIn delay={0.5}>
                 <div className="mt-5 flex flex-wrap gap-3 text-sm">
                   <Link
@@ -322,34 +341,17 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                     className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-500 px-5 py-2.5 font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:bg-indigo-400 hover:shadow-indigo-400/30"
                   >
                     <Sparkles size={16} />
-                    今夜の予測を見る
+                    今すぐ混雑をチェック
                   </Link>
                   <Link
-                    href="#store-directory"
+                    href="/reports"
                     className="inline-flex items-center justify-center rounded-md border border-slate-500/60 bg-black/40 px-4 py-2 text-slate-100/80 hover:border-amber-300/80 hover:bg-slate-900"
                   >
-                    店舗一覧の案内へ
+                    AI 予測レポートを見る
                   </Link>
                 </div>
-                <nav
-                  className="mt-4 flex flex-wrap gap-x-5 gap-y-2 border-t border-white/10 pt-4 text-xs"
-                  aria-label="主要ページへのショートカット"
-                >
-                  <Link href="/stores" className="text-indigo-300 hover:text-indigo-200">
-                    店舗一覧
-                  </Link>
-                  <Link href="/reports" className="text-indigo-300 hover:text-indigo-200">
-                    AI予測レポート
-                  </Link>
-                  <Link href="/blog" className="text-indigo-300 hover:text-indigo-200">
-                    ブログ
-                  </Link>
-                  <Link href="/mypage" className="text-indigo-300 hover:text-indigo-200">
-                    マイページ
-                  </Link>
-                </nav>
                 <p className="mt-3 max-w-2xl text-[11px] leading-relaxed text-slate-400">
-                  表示は参考情報です。実測は取得タイミングにより遅れる場合があります。予測はモデルによる推定であり、実際の混雑や席状況とは異なることがあります。
+                  表示は参考情報です。予測はモデルによる推定であり、実際の混雑や席状況とは異なることがあります。
                 </p>
                 </FadeIn>
               </div>
