@@ -28,8 +28,7 @@ class RangeQueryError(ValueError):
     pass
 
 
-def _config() -> AppConfig:
-    return current_app.config["APP_CONFIG"]
+from .common import get_config as _config, get_supabase_provider, resolve_store_id
 
 
 @bp.get("/")
@@ -342,17 +341,8 @@ def _deduplicate_by_ts(rows: list[dict]) -> list[dict]:
     return uniq
 
 
-def _supabase_provider(cfg: AppConfig) -> SupabaseLogsProvider | None:
-    if not (cfg.supabase_url and cfg.supabase_service_role_key):
-        return None
-    if "SUPABASE_PROVIDER" not in current_app.config:
-        current_app.config["SUPABASE_PROVIDER"] = SupabaseLogsProvider(
-            base_url=cfg.supabase_url,
-            api_key=cfg.supabase_service_role_key,
-            session=current_app.config.get("HTTP_SESSION"),
-            logger=current_app.logger,
-        )
-    return current_app.config["SUPABASE_PROVIDER"]
+_supabase_provider = get_supabase_provider
+_resolve_store_id = resolve_store_id
 
 
 def _range_bounds_to_utc(start: date, end: date, tz_name: str) -> tuple[datetime, datetime]:
@@ -360,14 +350,6 @@ def _range_bounds_to_utc(start: date, end: date, tz_name: str) -> tuple[datetime
     start_dt = datetime.combine(start, time.min, tzinfo=tz)
     end_dt = datetime.combine(end, time.max, tzinfo=tz)
     return start_dt.astimezone(timezone.utc), end_dt.astimezone(timezone.utc)
-
-
-def _resolve_store_id(cfg: AppConfig) -> str:
-    from ..utils.stores import resolve_store_identifier
-
-    store_arg = request.args.get("store_id") or request.args.get("store")
-    store_id, _ = resolve_store_identifier(store_arg, cfg.store_id)
-    return store_id
 
 
 def _forecast_model_status() -> dict:

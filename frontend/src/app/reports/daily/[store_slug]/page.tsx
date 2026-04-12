@@ -11,26 +11,10 @@ import { ReportViewTracker } from "@/components/ReportViewTracker";
 import { readPublicFacts } from "@/lib/blog/publicFacts";
 import { fetchLatestPublishedReportByStore } from "@/lib/supabase/blogDrafts";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { formatJstTimestamp } from "@/lib/dateFormat";
 
 /** 18:00/21:30 に更新されるので 60 秒ごとに再検証 */
 export const revalidate = 60;
-
-function formatJstTimestamp(iso: string | undefined | null): string {
-  const raw = iso?.trim();
-  if (!raw) return "-";
-  try {
-    return new Intl.DateTimeFormat("ja-JP", {
-      timeZone: "Asia/Tokyo",
-      month: "long",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(new Date(raw));
-  } catch {
-    return raw.slice(0, 16).replace("T", " ");
-  }
-}
 
 type Props = {
   params: Promise<{ store_slug: string }>;

@@ -275,8 +275,7 @@ def tasks_update_second_venues():
         return jsonify({"ok": True, "updated": 0, "stores": len(stores)})
 
 
-def _config() -> AppConfig:
-    return current_app.config["APP_CONFIG"]
+from .common import get_config as _config
 
 
 def _session():

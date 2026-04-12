@@ -64,22 +64,13 @@ function extractSummary(mdx: string): { bullets: string[]; peakHint?: string } {
   };
 }
 
+import { formatJstLabel } from "@/lib/dateFormat";
+
 function formatUpdatedLabel(updatedIso: string | undefined, targetDate: string): string {
   const raw = updatedIso?.trim() || "";
   if (!raw) return targetDate;
-  try {
-    return new Intl.DateTimeFormat("ja-JP", {
-      timeZone: "Asia/Tokyo",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(new Date(raw));
-  } catch {
-    return targetDate;
-  }
+  const formatted = formatJstLabel(raw);
+  return formatted === "-" ? targetDate : formatted;
 }
 
 export async function GET(req: Request) {

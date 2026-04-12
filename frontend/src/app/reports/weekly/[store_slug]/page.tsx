@@ -12,47 +12,10 @@ import WeeklyStoreCharts from "@/components/WeeklyStoreCharts";
 import type { SeriesCompactPoint, TopWindowChart } from "@/components/WeeklyStoreCharts";
 import { fetchLatestPublishedReportByStore } from "@/lib/supabase/blogDrafts";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { formatJstTimestamp, formatWindowTime } from "@/lib/dateFormat";
 
 /** 毎週水曜更新 — 5 分ごとに再検証 */
 export const revalidate = 300;
-
-function formatJstTimestamp(iso: string | undefined | null): string {
-  const raw = iso?.trim();
-  if (!raw) return "-";
-  try {
-    return new Intl.DateTimeFormat("ja-JP", {
-      timeZone: "Asia/Tokyo",
-      month: "long",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(new Date(raw));
-  } catch {
-    return raw.slice(0, 16).replace("T", " ");
-  }
-}
-
-function formatWindowTime(iso: string | undefined): string {
-  if (!iso) return "-";
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "-";
-    const dow = ["日", "月", "火", "水", "木", "金", "土"];
-    const jst = new Date(d.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
-    const dayOfWeek = dow[jst.getDay()];
-    return new Intl.DateTimeFormat("ja-JP", {
-      timeZone: "Asia/Tokyo",
-      month: "numeric",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(d) + `(${dayOfWeek})`;
-  } catch {
-    return iso.slice(0, 16).replace("T", " ");
-  }
-}
 
 type Props = {
   params: Promise<{ store_slug: string }>;

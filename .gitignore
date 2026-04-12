@@ -59,6 +59,7 @@ MEGRIBI_repo_*.zip
 # --- Project artifacts ---
 artifacts/
 data/ml_models/
+supabase/.temp/
 
 # Open-Meteo weather cache (multi_collect.py)
 .cache/

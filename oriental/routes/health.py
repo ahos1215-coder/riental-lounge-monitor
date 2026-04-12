@@ -4,13 +4,9 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, jsonify
 
-from ..config import AppConfig
+from .common import get_config as _config
 
 bp = Blueprint("health", __name__)
-
-
-def _config() -> AppConfig:
-    return current_app.config["APP_CONFIG"]
 
 
 @bp.get("/healthz")

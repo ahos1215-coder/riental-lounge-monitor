@@ -14,6 +14,8 @@ import {
   Cell,
 } from "recharts";
 
+import { formatAxisDate, formatTooltipTime, formatWindowTime } from "@/lib/dateFormat";
+
 export type SeriesCompactPoint = {
   t: string;
   occupancy: number;
@@ -34,65 +36,6 @@ type Props = {
   scoreThreshold: number;
 };
 
-function formatAxisDate(iso: string): string {
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "";
-    return new Intl.DateTimeFormat("ja-JP", {
-      timeZone: "Asia/Tokyo",
-      month: "numeric",
-      day: "numeric",
-    }).format(d);
-  } catch {
-    return "";
-  }
-}
-
-function formatTooltipTime(iso: string): string {
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "";
-    const dow = ["日", "月", "火", "水", "木", "金", "土"];
-    const jst = new Date(d.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
-    const dayOfWeek = dow[jst.getDay()];
-    return (
-      new Intl.DateTimeFormat("ja-JP", {
-        timeZone: "Asia/Tokyo",
-        month: "numeric",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }).format(d) + `(${dayOfWeek})`
-    );
-  } catch {
-    return iso.slice(0, 16);
-  }
-}
-
-function formatWindowLabel(iso?: string): string {
-  if (!iso) return "-";
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "-";
-    const dow = ["日", "月", "火", "水", "木", "金", "土"];
-    const jst = new Date(d.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
-    const dayOfWeek = dow[jst.getDay()];
-    return (
-      new Intl.DateTimeFormat("ja-JP", {
-        timeZone: "Asia/Tokyo",
-        month: "numeric",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }).format(d) + `(${dayOfWeek})`
-    );
-  } catch {
-    return iso.slice(0, 16);
-  }
-}
-
 export default function WeeklyStoreCharts({ series, topWindows, scoreThreshold }: Props) {
   const lineData = series.map((p) => ({
     ts: new Date(p.t).getTime(),
@@ -103,7 +46,7 @@ export default function WeeklyStoreCharts({ series, topWindows, scoreThreshold }
 
   const barData = topWindows.map((w, i) => ({
     name: `#${i + 1}`,
-    label: `${formatWindowLabel(w.start)} 〜`,
+    label: `${formatWindowTime(w.start)} 〜`,
     score: w.avg_score ?? 0,
     duration: w.duration_minutes != null ? Math.round(w.duration_minutes) : null,
   }));

@@ -12,6 +12,7 @@ _FORECAST_CACHE_TTL = int(os.getenv("FORECAST_RESULT_CACHE_TTL", "60"))  # 1 分
 from ..config import AppConfig
 from ..ml.forecast_service import ForecastService
 from ..ml.megribi_score import megribi_score as calc_megribi_score
+from .common import get_config as _config, get_supabase_provider, resolve_store_id
 
 bp = Blueprint("forecast", __name__, url_prefix="/api")
 
@@ -26,10 +27,6 @@ def _guard():
     if not _config().enable_forecast:
         return jsonify({"ok": False, "error": "forecast-disabled"}), 503
     return None
-
-
-def _config() -> AppConfig:
-    return current_app.config["APP_CONFIG"]
 
 
 def _error_status(raw: dict) -> int:
@@ -62,26 +59,8 @@ def _set_cached(key: str, data: dict) -> None:
     _forecast_cache()[key] = {"at": time.time(), "data": data}
 
 
-def _supabase_provider(cfg: AppConfig):
-    from ..data.provider import SupabaseLogsProvider
-    if not (cfg.supabase_url and cfg.supabase_service_role_key):
-        return None
-    if "SUPABASE_PROVIDER" not in current_app.config:
-        current_app.config["SUPABASE_PROVIDER"] = SupabaseLogsProvider(
-            base_url=cfg.supabase_url,
-            api_key=cfg.supabase_service_role_key,
-            session=current_app.config.get("HTTP_SESSION"),
-            logger=current_app.logger,
-        )
-    return current_app.config["SUPABASE_PROVIDER"]
-
-
-def _resolve_store_id(cfg: AppConfig) -> str:
-    from ..utils.stores import resolve_store_identifier
-
-    store_arg = request.args.get("store_id") or request.args.get("store")
-    store_id, _ = resolve_store_identifier(store_arg, cfg.store_id)
-    return store_id
+_supabase_provider = get_supabase_provider
+_resolve_store_id = resolve_store_id
 
 
 def _normalize_points(result: dict) -> list[dict]:

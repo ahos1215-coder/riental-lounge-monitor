@@ -36,20 +36,12 @@ function extractFirstHeading(mdx: string): string | null {
   return null;
 }
 
+import { formatJstLabel as _fmtJst } from "@/lib/dateFormat";
+
 function formatJstLabel(iso: string | undefined): string {
   if (!iso) return "—";
-  try {
-    return new Intl.DateTimeFormat("ja-JP", {
-      timeZone: "Asia/Tokyo",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(new Date(iso));
-  } catch {
-    return iso;
-  }
+  const r = _fmtJst(iso);
+  return r === "-" ? "—" : r;
 }
 
 const EDITION_LABELS: Record<string, string> = {
