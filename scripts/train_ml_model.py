@@ -16,7 +16,7 @@ import pandas as pd
 import requests
 import xgboost as xgb
 from dotenv import load_dotenv
-from xgboost import XGBRegressor
+import lightgbm as lgb
 
 try:
     import optuna
@@ -62,17 +62,19 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def _build_xgb_model(**overrides: Any) -> XGBRegressor:
+def _build_lgb_model(**overrides: Any) -> lgb.LGBMRegressor:
     params: dict[str, Any] = {
         "n_estimators": 300,
         "max_depth": 4,
         "learning_rate": 0.1,
         "subsample": 0.8,
-        "objective": "reg:squarederror",
-        "early_stopping_rounds": 15,
+        "colsample_bytree": 0.8,
+        "objective": "regression",
+        "metric": "mae",
+        "verbosity": -1,
     }
     params.update(overrides)
-    return XGBRegressor(**params)
+    return lgb.LGBMRegressor(**params)
 
 
 @dataclass(slots=True)
@@ -213,11 +215,16 @@ def _optuna_objective(
         "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
         "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
         "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
-        "objective": "reg:squarederror",
-        "early_stopping_rounds": 15,
+        "objective": "regression",
+        "metric": "mae",
+        "verbosity": -1,
     }
-    model = XGBRegressor(**params)
-    model.fit(x_train, y_train, sample_weight=weights, eval_set=[(x_test, y_test)], verbose=False)
+    model = lgb.LGBMRegressor(**params)
+    model.fit(
+        x_train, y_train, sample_weight=weights,
+        eval_set=[(x_test, y_test)],
+        callbacks=[lgb.early_stopping(15, verbose=False), lgb.log_evaluation(0)],
+    )
     pred = model.predict(x_test)
     return float(np.mean(np.abs(pred - y_test.to_numpy())))
 
@@ -259,7 +266,7 @@ def _time_series_split(df: pd.DataFrame, test_ratio: float = 0.2) -> tuple[pd.Da
 def _train_models(
     df: pd.DataFrame, work_dir: Path, cfg: TrainingConfig, store_id: str, date_tag: str,
     hpo_params: dict[str, Any] | None = None,
-) -> tuple[Path, Path, XGBRegressor, XGBRegressor, pd.DataFrame, dict[str, float], dict[str, float]]:
+) -> tuple[Path, Path, lgb.LGBMRegressor, lgb.LGBMRegressor, pd.DataFrame, dict[str, float], dict[str, float]]:
     train_df, test_df = _time_series_split(df, test_ratio=0.2)
     x_train = train_df[FEATURE_COLUMNS]
     y_men_train = train_df["men"].astype(float)
@@ -271,33 +278,33 @@ def _train_models(
     y_women_test = test_df["women"].astype(float)
 
     extra = dict(hpo_params) if hpo_params else {}
-    model_men = _build_xgb_model(**extra)
-    model_women = _build_xgb_model(**extra)
+    callbacks = [lgb.early_stopping(15, verbose=False), lgb.log_evaluation(0)]
+    model_men = _build_lgb_model(**extra)
+    model_women = _build_lgb_model(**extra)
     model_men.fit(
         x_train, y_men_train, sample_weight=weights,
-        eval_set=[(x_test, y_men_test)], verbose=False,
+        eval_set=[(x_test, y_men_test)], callbacks=callbacks,
     )
     model_women.fit(
         x_train, y_women_train, sample_weight=weights,
-        eval_set=[(x_test, y_women_test)], verbose=False,
+        eval_set=[(x_test, y_women_test)], callbacks=callbacks,
     )
-    best_men_rounds = getattr(model_men, "best_iteration", model_men.n_estimators) + 1
-    best_women_rounds = getattr(model_women, "best_iteration", model_women.n_estimators) + 1
+    best_men_rounds = model_men.best_iteration_ if model_men.best_iteration_ > 0 else model_men.n_estimators
+    best_women_rounds = model_women.best_iteration_ if model_women.best_iteration_ > 0 else model_women.n_estimators
     print(f"[train-ml][early_stop] store={store_id} best_rounds men={best_men_rounds} women={best_women_rounds}")
 
     # Retrain on full data using the discovered optimal n_estimators
     full_weights = _sample_weights(df, cfg)
-    prod_extra = {**extra}
-    prod_extra.pop("early_stopping_rounds", None)
-    prod_model_men = _build_xgb_model(n_estimators=best_men_rounds, early_stopping_rounds=None, **prod_extra)
-    prod_model_women = _build_xgb_model(n_estimators=best_women_rounds, early_stopping_rounds=None, **prod_extra)
+    prod_model_men = _build_lgb_model(n_estimators=best_men_rounds, **extra)
+    prod_model_women = _build_lgb_model(n_estimators=best_women_rounds, **extra)
     prod_model_men.fit(df[FEATURE_COLUMNS], df["men"].astype(float), sample_weight=full_weights)
     prod_model_women.fit(df[FEATURE_COLUMNS], df["women"].astype(float), sample_weight=full_weights)
 
-    model_men_path = work_dir / f"model_{store_id}_{date_tag}_men.json"
-    model_women_path = work_dir / f"model_{store_id}_{date_tag}_women.json"
-    prod_model_men.save_model(str(model_men_path))
-    prod_model_women.save_model(str(model_women_path))
+    # LightGBM は .txt 形式で保存（XGBoost の .json より軽量）
+    model_men_path = work_dir / f"model_{store_id}_{date_tag}_men.txt"
+    model_women_path = work_dir / f"model_{store_id}_{date_tag}_women.txt"
+    prod_model_men.booster_.save_model(str(model_men_path))
+    prod_model_women.booster_.save_model(str(model_women_path))
 
     # Feature importance (from production models trained on full data)
     fi_men = dict(zip(FEATURE_COLUMNS, prod_model_men.feature_importances_.tolist()))
@@ -347,7 +354,7 @@ def _daily_accuracy(
 
 
 def _log_metrics_by_store(
-    test_df: pd.DataFrame, model_men: XGBRegressor, model_women: XGBRegressor
+    test_df: pd.DataFrame, model_men: lgb.LGBMRegressor, model_women: lgb.LGBMRegressor,
 ) -> dict[str, dict[str, Any]]:
     """Evaluate per-store metrics on held-out test data and return for metadata."""
     if test_df.empty:
@@ -409,8 +416,9 @@ def _build_metadata(
     meta: dict[str, Any] = {
         "schema_version": cfg.schema_version,
         "feature_columns": FEATURE_COLUMNS,
-        "model_men": "model_men.json",  # backward compatibility
-        "model_women": "model_women.json",  # backward compatibility
+        "model_men": "model_men.txt",
+        "model_women": "model_women.txt",
+        "model_format": "lightgbm",
         "has_store_models": True,
         "trained_at": trained_at,
         "artifacts_date": date_tag,
@@ -535,8 +543,8 @@ def main() -> int:
             all_metrics.update(store_metrics)
 
             # Latest alias for simpler rollback/fallback
-            alias_men_path = work_dir / f"model_{store_id}_men.json"
-            alias_women_path = work_dir / f"model_{store_id}_women.json"
+            alias_men_path = work_dir / f"model_{store_id}_men.txt"
+            alias_women_path = work_dir / f"model_{store_id}_women.txt"
             alias_men_path.write_bytes(model_men_path.read_bytes())
             alias_women_path.write_bytes(model_women_path.read_bytes())
 
@@ -546,7 +554,7 @@ def main() -> int:
                     session=session,
                     local_path=p,
                     remote_name=p.name,
-                    content_type="application/json",
+                    content_type="text/plain",
                 )
             store_models[store_id] = {
                 "model_men": alias_men_path.name,
@@ -575,8 +583,8 @@ def main() -> int:
         default_store = cfg.store_id if cfg.store_id in store_models else sorted(store_models.keys())[0]
         default_men = work_dir / store_models[default_store]["model_men"]
         default_women = work_dir / store_models[default_store]["model_women"]
-        global_men = work_dir / "model_men.json"
-        global_women = work_dir / "model_women.json"
+        global_men = work_dir / "model_men.txt"
+        global_women = work_dir / "model_women.txt"
         global_men.write_bytes(default_men.read_bytes())
         global_women.write_bytes(default_women.read_bytes())
         _upload_file(
@@ -584,14 +592,14 @@ def main() -> int:
             session=session,
             local_path=global_men,
             remote_name=global_men.name,
-            content_type="application/json",
+            content_type="text/plain",
         )
         _upload_file(
             cfg=cfg,
             session=session,
             local_path=global_women,
             remote_name=global_women.name,
-            content_type="application/json",
+            content_type="text/plain",
         )
         _upload_file(
             cfg=cfg,
