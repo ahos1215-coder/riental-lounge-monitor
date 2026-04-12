@@ -92,6 +92,14 @@ ALERT_WEBHOOK_URL = os.environ.get("ALERT_WEBHOOK_URL", "").strip()
 # 収集失敗率がこの値以上になったらアラートを送る（0.5 = 50%以上失敗）
 ALERT_FAIL_RATIO_THRESHOLD = float(os.environ.get("ALERT_FAIL_RATIO_THRESHOLD", "0.5"))
 
+# ---------- LINE Push（DOM 構造変更アラート用） ----------
+LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "").strip()
+LINE_USER_ID = os.environ.get("LINE_USER_ID", "").strip()
+
+# DOM アラートのクールダウン（秒）。デフォルト 6 時間
+DOM_ALERT_COOLDOWN_SEC = int(os.environ.get("DOM_ALERT_COOLDOWN_SEC", str(6 * 3600)))
+_DOM_ALERT_FLAG_PATH = _root / "data" / "dom_alert_sent.txt"
+
 # 基準地点（とりあえず長崎市近辺）
 WEATHER_LAT = float(os.environ.get("WEATHER_LAT", "32.75"))
 WEATHER_LON = float(os.environ.get("WEATHER_LON", "129.87"))
@@ -837,6 +845,132 @@ def _write_results(
     return success, fail
 
 
+# ========= DOM 構造変更モニタリング =========
+
+
+def _send_line_push(message: str) -> None:
+    """LINE Messaging API で Push メッセージを送信する。"""
+    if not LINE_CHANNEL_ACCESS_TOKEN or not LINE_USER_ID:
+        print("[dom-health] LINE credentials not set, skipping push")
+        return
+    url = "https://api.line.me/v2/bot/message/push"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {LINE_CHANNEL_ACCESS_TOKEN}",
+    }
+    body = {
+        "to": LINE_USER_ID,
+        "messages": [{"type": "text", "text": message}],
+    }
+    try:
+        resp = requests.post(url, json=body, headers=headers, timeout=10)
+        print(f"[dom-health] LINE push status={resp.status_code} body={resp.text[:200]}")
+    except Exception as e:
+        print(f"[dom-health][error] LINE push failed: {e}")
+
+
+def _dom_alert_in_cooldown() -> bool:
+    """クールダウン期間内かどうかを判定する。"""
+    try:
+        if _DOM_ALERT_FLAG_PATH.is_file():
+            ts_str = _DOM_ALERT_FLAG_PATH.read_text(encoding="utf-8").strip()
+            last_sent = float(ts_str)
+            if time.time() - last_sent < DOM_ALERT_COOLDOWN_SEC:
+                return True
+    except Exception as e:
+        print(f"[dom-health] cooldown check error: {e}")
+    return False
+
+
+def _mark_dom_alert_sent() -> None:
+    """クールダウンフラグファイルにタイムスタンプを書き込む。"""
+    try:
+        _DOM_ALERT_FLAG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _DOM_ALERT_FLAG_PATH.write_text(str(time.time()), encoding="utf-8")
+    except Exception as e:
+        print(f"[dom-health] failed to write cooldown flag: {e}")
+
+
+def _check_dom_health(
+    stores: list[dict],
+    scrape_results: dict[str, tuple[int | None, int | None]],
+) -> None:
+    """
+    スクレイピング結果の失敗パターンから DOM 構造変更を検知する。
+
+    検知条件:
+      1. 50% 以上の店舗で men=None かつ women=None
+      2. サンプル店舗ページで主要 CSS セレクタが存在しない
+
+    条件を満たした場合は LINE Push で通知する（6時間クールダウン付き）。
+    """
+    if not stores or not scrape_results:
+        return
+
+    total = len(scrape_results)
+    both_none = sum(
+        1 for m, w in scrape_results.values()
+        if m is None and w is None
+    )
+
+    ratio = both_none / total if total > 0 else 0.0
+    print(
+        f"[dom-health] check: both_none={both_none}/{total} "
+        f"ratio={ratio:.2f} threshold=0.50"
+    )
+
+    if ratio < 0.50:
+        return  # 正常範囲
+
+    # 追加確認: サンプル店舗ページの DOM を直接チェック
+    sample_url = None
+    for entry in stores:
+        if entry.get("url"):
+            sample_url = entry["url"]
+            break
+
+    dom_selector_missing = False
+    if sample_url:
+        try:
+            headers = {
+                "User-Agent": _pick_user_agent(),
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            }
+            resp = requests.get(sample_url, headers=headers, timeout=10)
+            resp.raise_for_status()
+            soup = BeautifulSoup(resp.text, "html.parser")
+            section = soup.select_one("section[aria-label='現在の来客者数']")
+            if section is None:
+                dom_selector_missing = True
+                print(f"[dom-health] primary CSS selector MISSING in {sample_url}")
+            else:
+                print(f"[dom-health] primary CSS selector found in {sample_url}")
+        except Exception as e:
+            print(f"[dom-health] sample page fetch error: {e}")
+            # フェッチ失敗時は高失敗率だけで判断を続行する
+
+    if not dom_selector_missing:
+        # セレクタが存在する場合、DOM 変更ではなく一時的な問題の可能性
+        print("[dom-health] selector present — likely transient issue, skipping alert")
+        return
+
+    # クールダウン確認
+    if _dom_alert_in_cooldown():
+        print("[dom-health] alert in cooldown, skipping")
+        return
+
+    # LINE Push 送信
+    message = (
+        f"[MEGRIBI] スクレイピング構造変更の可能性\n"
+        f"{both_none}/{total}店舗でデータ取得失敗\n"
+        f"確認してください: https://oriental-lounge.com/stores/38"
+    )
+    _send_line_push(message)
+    _mark_dom_alert_sent()
+    print(f"[dom-health] DOM breakage alert sent: {both_none}/{total} stores failed")
+
+
 # ========= 38店舗ぶんを一気に送る =========
 
 
@@ -864,6 +998,9 @@ def collect_all_once(*, target_store_id: str | None = None) -> dict:
 
     # Phase 2: 並列スクレイピング
     scrape_results = _parallel_scrape(stores)
+
+    # Phase 2.5: DOM 構造変更チェック（全店舗分のスクレイプ完了後）
+    _check_dom_health(stores, scrape_results)
 
     # Phase 3: 結果書き込み
     success, fail = _write_results(stores, scrape_results, weather_map)
