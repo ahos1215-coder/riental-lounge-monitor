@@ -15,8 +15,8 @@ on:
   schedule:
     # 日次: UTC 20:30 = JST 05:30（Optuna なし、固定パラメータで再学習のみ）
     - cron: "30 20 * * *"
-    # 週次: 毎週月曜 UTC 18:00 = JST 03:00（Optuna HPO あり）
-    - cron: "0 18 * * 1"
+    # 週次: 毎週月曜 UTC 22:00 (日曜) = JST 月曜 07:00（営業終了後・Optuna HPO あり）
+    - cron: "0 22 * * 0"
 
 jobs:
   train:
@@ -43,7 +43,7 @@ jobs:
       - name: Determine Optuna mode
         id: optuna
         run: |
-          if [ "${{ github.event.schedule }}" = "0 18 * * 1" ]; then
+          if [ "${{ github.event.schedule }}" = "0 22 * * 0" ]; then
             echo "enabled=1" >> "$GITHUB_OUTPUT"
             echo "[train-ml] Weekly HPO run — Optuna ENABLED"
           elif [ "${{ github.event_name }}" = "schedule" ]; then
