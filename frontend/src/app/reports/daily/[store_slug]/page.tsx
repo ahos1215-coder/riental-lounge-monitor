@@ -15,6 +15,23 @@ import { getMetadataBaseUrl } from "@/lib/siteUrl";
 /** 18:00/21:30 に更新されるので 60 秒ごとに再検証 */
 export const revalidate = 60;
 
+function formatJstTimestamp(iso: string | undefined | null): string {
+  const raw = iso?.trim();
+  if (!raw) return "-";
+  try {
+    return new Intl.DateTimeFormat("ja-JP", {
+      timeZone: "Asia/Tokyo",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(new Date(raw));
+  } catch {
+    return raw.slice(0, 16).replace("T", " ");
+  }
+}
+
 type Props = {
   params: Promise<{ store_slug: string }>;
 };
@@ -88,10 +105,7 @@ export default async function DailyReportStorePage({ params }: Props) {
           {store.label} Daily Report
         </h1>
         <p className="mt-2 text-sm text-white/60">
-          {row.target_date} / 最新更新: {row.updated_at ?? row.created_at ?? "-"}
-        </p>
-        <p className="mt-4 text-base text-white/75">
-          18:00/21:30 の自動生成結果のうち、最新1件を表示しています。
+          {row.target_date} / {formatJstTimestamp(row.updated_at ?? row.created_at)} 更新
         </p>
       </header>
 

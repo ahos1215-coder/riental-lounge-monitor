@@ -212,9 +212,14 @@ function buildSystemInstruction(edition: BlogEdition): string {
     "- frontmatter 内の **すべての行**（最初と最後の `---` を含む）も **`title:` / `description:` など、行頭に空白・インデントを付けない**（スペースで字下げしない）。",
     "- frontmatter 終了の `---` の直後から本文（## 見出し以降）。本文の通常の段落インデントは不要（Markdown の標準どおりでよい）。",
     "- frontmatter のキー: title, description, date (YYYY-MM-DD), categoryId (guide|beginner|prediction|column|interview), level (easy|normal|pro), store, facts_id, facts_visibility (show)",
-    "- 本文は ## 見出しで **『10秒まとめ』のみ**（箇条書き3行以内）。今日の一言・理由はこれ・初心者メモ等の追加セクションは**不要**。",
-    "- 『10秒まとめ』のラベル例: 「ピーク時間（賑わいの目安）:」「入店しやすさの目安（待ちにくさ）:」など（「避けたい時間」「ねらい目＝最高」禁止）。",
-    "- 文体はです・ます調、読みやすく簡潔に。",
+    "- 本文は ## 見出し 1 つ（「## 今日の結論」）のみ。箇条書き 3〜4 行。今日の一言・理由はこれ・初心者メモ・混みやすい時間 / 避けたい時間・補足メモ等の追加セクションは**すべて不要**。",
+    "- 必ず含める情報（この順番で箇条書き）:",
+    "  1. **混雑度**（空き / ほどよい / 混み）+ 曜日",
+    "  2. **ピーク時間**: `peak_time` 前後 — 「この時間以降、人が減り始める傾向です」",
+    "  3. **入店のおすすめ**: `avoid_time` 前後 — 「比較的スムーズに入店しやすい時間帯です」",
+    "  4. 二次会ウェーブがある場合のみ: 21〜22時帯の傾向を 1 文",
+    "- description も「ピーク○○前後、入店おすすめ○○前後」のように結論を入れる。",
+    "- 文体はです・ます調、読みやすく簡潔に。長い説明や解説は書かない。",
   ].join("\n");
 }
 
@@ -449,25 +454,31 @@ async function generateStructuredWithRateLimitRetries(
 }
 
 export function buildFallbackBlogDraftMdx(input: DraftGeneratorInput): string {
-  const edition = input.insightResult.draft_context?.edition ?? "evening_preview";
   const { insight, draft_context } = input.insightResult;
   const title = `${input.storeLabel}｜今日の傾向まとめ（${input.dateYmd}）`;
   const peak = insight.peak_time || "—";
   const avoid = insight.avoid_time || "—";
   const crowd = insight.crowd_label || "—";
   const dayLabel = draft_context?.day_context?.day_name_ja ?? "";
-  const weekNote = draft_context?.week_comparison?.available ? draft_context.week_comparison.trend_note : "";
-  const noteLines = [
-    dayLabel ? `- ${dayLabel}の傾向データをもとにした自動生成です。` : null,
-    weekNote ? `- ${weekNote}` : null,
-    draft_context?.hourly_hint ? `- ${draft_context.hourly_hint}` : null,
-    draft_context?.gender_note ? `- ${draft_context.gender_note}` : null,
-  ].filter(Boolean) as string[];
+  const wave = draft_context?.secondary_wave?.detected
+    ? `二次会帯（21〜22時頃）に人が増える傾向${draft_context.secondary_wave.note ? `（${draft_context.secondary_wave.note}）` : ""}`
+    : null;
+
+  // ユーザーが本当に知りたいのは「いつ行けばいいか」と「ピークはいつか」。
+  // 冗長な 4 セクション構成を廃止し、3 行で結論を出す。
+  const bullets: string[] = [
+    `混雑度（目安）: ${crowd}${dayLabel ? `（${dayLabel}）` : ""}`,
+    `ピーク時間: ${peak} 前後 — この時間以降、人が減り始める傾向です`,
+    `入店のおすすめ: ${avoid} 前後 — 比較的スムーズに入店しやすい時間帯です`,
+  ];
+  if (wave) {
+    bullets.push(wave);
+  }
 
   return [
     "---",
     `title: "${title}"`,
-    `description: "本日の混雑傾向を短く要約。ピーク時間（賑わいの目安）と入店しやすさの目安を3行で。"` ,
+    `description: "${input.storeLabel}の今夜の混雑予測。ピーク${peak}前後、入店のおすすめは${avoid}前後。"`,
     `date: "${input.dateYmd}"`,
     "categoryId: prediction",
     "level: easy",
@@ -477,17 +488,7 @@ export function buildFallbackBlogDraftMdx(input: DraftGeneratorInput): string {
     "---",
     "",
     "## 今日の結論",
-    `- 混雑度（目安）: ${crowd}`,
-    `- ピーク時間（賑わいの目安）: ${peak} 前後`,
-    `- 入店しやすさの目安（待ちにくさ）: ${avoid} 前後`,
-    "",
-    "## 混みやすい時間 / 避けたい時間",
-    `- 混みやすい時間: ${peak} 前後（賑わいが出やすい目安）`,
-    `- 入店しやすい時間: ${avoid} 前後（待ちにくさの目安）`,
-    "",
-    "## 今日の一言",
-    `- 本記事は自動生成です（${edition}）。タイムラインの点線（予測）も合わせて確認するのがおすすめです。`,
-    ...(noteLines.length ? ["", "## 補足メモ", ...noteLines] : []),
+    ...bullets.map((b) => `- ${b}`),
     "",
   ].join("\n");
 }

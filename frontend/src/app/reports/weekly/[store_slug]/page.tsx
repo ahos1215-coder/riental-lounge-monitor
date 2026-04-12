@@ -16,6 +16,44 @@ import { getMetadataBaseUrl } from "@/lib/siteUrl";
 /** 毎週水曜更新 — 5 分ごとに再検証 */
 export const revalidate = 300;
 
+function formatJstTimestamp(iso: string | undefined | null): string {
+  const raw = iso?.trim();
+  if (!raw) return "-";
+  try {
+    return new Intl.DateTimeFormat("ja-JP", {
+      timeZone: "Asia/Tokyo",
+      month: "long",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(new Date(raw));
+  } catch {
+    return raw.slice(0, 16).replace("T", " ");
+  }
+}
+
+function formatWindowTime(iso: string | undefined): string {
+  if (!iso) return "-";
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "-";
+    const dow = ["日", "月", "火", "水", "木", "金", "土"];
+    const jst = new Date(d.toLocaleString("en-US", { timeZone: "Asia/Tokyo" }));
+    const dayOfWeek = dow[jst.getDay()];
+    return new Intl.DateTimeFormat("ja-JP", {
+      timeZone: "Asia/Tokyo",
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(d) + `(${dayOfWeek})`;
+  } catch {
+    return iso.slice(0, 16).replace("T", " ");
+  }
+}
+
 type Props = {
   params: Promise<{ store_slug: string }>;
 };
@@ -25,6 +63,27 @@ function stripFrontmatter(raw: string): string {
   const end = raw.indexOf("\n---\n", 4);
   if (end < 0) return raw;
   return raw.slice(end + 5).trimStart();
+}
+
+/** 自動生成 MDX に含まれるメタデータ行（generated_at, source 等）を除去 */
+function stripMetadataLines(body: string): string {
+  return body
+    .split("\n")
+    .filter((line) => {
+      const t = line.trim();
+      if (t.startsWith("- generated_at:")) return false;
+      if (t.startsWith("- source:")) return false;
+      if (t.startsWith("generated_at:")) return false;
+      if (t.startsWith("source:")) return false;
+      // "# Weekly Report: slug" → 非表示（ヘッダーで既に店舗名を表示）
+      if (/^#\s+Weekly Report:/i.test(t)) return false;
+      // "Weekly Report: slug" without heading marker
+      if (/^Weekly Report:\s/i.test(t)) return false;
+      return true;
+    })
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -60,7 +119,7 @@ export default async function WeeklyReportStorePage({ params }: Props) {
   const row = await fetchLatestPublishedReportByStore(store.slug, "weekly");
   if (!row) notFound();
 
-  const content = stripFrontmatter(row.mdx_content);
+  const content = stripMetadataLines(stripFrontmatter(row.mdx_content));
 
   // insight_json から定量データを抽出
   const ij = row.insight_json ?? {};
@@ -124,10 +183,10 @@ export default async function WeeklyReportStorePage({ params }: Props) {
           {store.label} Weekly Report
         </h1>
         <p className="mt-2 text-sm text-white/60">
-          {row.target_date} / 最新更新: {row.updated_at ?? row.created_at ?? "-"}
+          {row.target_date} / {formatJstTimestamp(row.updated_at ?? row.created_at)} 更新
         </p>
         <p className="mt-4 text-base text-white/75">
-          毎週水曜の自動生成で更新される最新週報です。
+          毎週水曜に更新される AI 週報です。この 1 週間の混雑傾向と、賑わいやすい時間帯を分析しています。
         </p>
       </header>
 
@@ -140,7 +199,7 @@ export default async function WeeklyReportStorePage({ params }: Props) {
           <hr className="my-10 border-white/10" />
 
           <section>
-            <h2 className="text-xl font-bold text-white">週次データ分析</h2>
+            <h2 className="text-xl font-bold text-white">今週の分析</h2>
             <p className="mt-2 text-sm text-white/60">
               集計期間: {typeof period.start === "string" ? period.start.slice(0, 10) : "-"} 〜{" "}
               {typeof period.end === "string" ? period.end.slice(0, 10) : "-"}
@@ -148,19 +207,19 @@ export default async function WeeklyReportStorePage({ params }: Props) {
 
             <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
               <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                <p className="text-xs font-medium text-white/70">使用サンプル数</p>
-                <p className="mt-2 text-2xl font-black">{typeof metrics.points_used === "number" ? metrics.points_used : 0}</p>
-                <p className="mt-1 text-[11px] text-white/40">分析に使ったデータ点数</p>
+                <p className="text-xs font-medium text-white/70">分析データ量</p>
+                <p className="mt-2 text-2xl font-black">{typeof metrics.points_used === "number" ? metrics.points_used : 0}<span className="text-base font-medium text-white/50"> 件</span></p>
+                <p className="mt-1 text-[11px] text-white/40">多いほど分析の精度が上がります</p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                <p className="text-xs font-medium text-white/70">ベースライン（p95）</p>
-                <p className="mt-2 text-2xl font-black">{formatNumber(metrics.baseline_p95_total, 1)}</p>
-                <p className="mt-1 text-[11px] text-white/40">混雑目安の基準値</p>
+                <p className="text-xs font-medium text-white/70">混み具合の基準</p>
+                <p className="mt-2 text-2xl font-black">{formatNumber(metrics.baseline_p95_total, 0)}<span className="text-base font-medium text-white/50"> 人</span></p>
+                <p className="mt-1 text-[11px] text-white/40">この人数以上なら「混んでいる」目安</p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
-                <p className="text-xs font-medium text-white/70">信頼度スコア</p>
-                <p className="mt-2 text-2xl font-black">{formatNumber(metrics.reliability_score, 2)}</p>
-                <p className="mt-1 text-[11px] text-white/40">200点以上で 1.0</p>
+                <p className="text-xs font-medium text-white/70">データの信頼度</p>
+                <p className="mt-2 text-2xl font-black">{reliability >= 1 ? "高い" : reliability >= 0.5 ? "普通" : "低い"}</p>
+                <p className="mt-1 text-[11px] text-white/40">{reliability >= 1 ? "十分なデータで分析しています" : "データが少なめのため参考値です"}</p>
                 <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-white/10">
                   <div
                     className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-emerald-400 transition-all"
@@ -182,29 +241,30 @@ export default async function WeeklyReportStorePage({ params }: Props) {
 
           {topWindows.length > 0 && (
             <section className="mt-8">
-              <h2 className="text-lg font-bold text-white">検出された時間帯（Good Window）</h2>
+              <h2 className="text-lg font-bold text-white">賑わいやすい時間帯</h2>
               <p className="mt-2 text-xs text-white/50">
-                スコアが {threshold} 以上が {minDuration} 分続く区間として検出しています。
+                過去 1 週間で、混雑度が高く安定していた時間帯を検出しています。入店タイミングの参考にどうぞ。
               </p>
               <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                {topWindows.map((w, idx) => (
-                  <div key={`${w.start ?? "window"}-${idx}`} className="rounded-2xl border border-white/10 bg-black/40 p-5">
-                    <p className="text-xs text-white/50">候補 {idx + 1}</p>
-                    <p className="mt-2 text-sm text-white/70">
-                      <span className="text-white/45">開始:</span> {w.start ?? "-"}
-                    </p>
-                    <p className="text-sm text-white/70">
-                      <span className="text-white/45">終了:</span> {w.end ?? "-"}
-                    </p>
-                    <p className="mt-2 text-sm text-white/70">
-                      <span className="text-white/45">継続時間:</span>{" "}
-                      {w.duration_minutes != null ? `${Math.round(w.duration_minutes)} 分` : "-"}
-                    </p>
-                    <p className="text-sm text-white/70">
-                      <span className="text-white/45">平均スコア:</span> {formatNumber(w.avg_score, 3)}
-                    </p>
-                  </div>
-                ))}
+                {topWindows.map((w, idx) => {
+                  const scoreLabel = (w.avg_score ?? 0) >= 0.6 ? "とても賑わう" : (w.avg_score ?? 0) >= 0.45 ? "賑わいあり" : "やや混む";
+                  return (
+                    <div key={`${w.start ?? "window"}-${idx}`} className="rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-amber-200/80">#{idx + 1}</p>
+                        <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-200">
+                          {scoreLabel}
+                        </span>
+                      </div>
+                      <p className="mt-3 text-sm font-semibold text-white">
+                        {formatWindowTime(w.start)} 〜 {formatWindowTime(w.end)}
+                      </p>
+                      <p className="mt-1 text-xs text-white/50">
+                        約 {w.duration_minutes != null ? Math.round(w.duration_minutes) : "-"} 分間
+                      </p>
+                    </div>
+                  );
+                })}
               </div>
             </section>
           )}

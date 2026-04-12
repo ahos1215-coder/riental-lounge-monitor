@@ -99,7 +99,7 @@ export async function GET(req: Request) {
 
   const href = `/reports/daily/${encodeURIComponent(row.store_slug)}`;
   const title = `今日の傾向まとめ`;
-  const updatedLabel = formatUpdatedLabel(row.created_at, row.target_date);
+  const updatedLabel = formatUpdatedLabel(row.updated_at ?? row.created_at, row.target_date);
   const { bullets } = extractSummary(row.mdx_content);
 
   return NextResponse.json(

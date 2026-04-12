@@ -312,10 +312,9 @@ def _upsert_weekly_report_to_supabase(
         "target_date": date_label,
         "facts_id": facts_id,
         "mdx_content": (
-            f"# Weekly Report: {store}\n\n"
-            f"- generated_at: {generated_at}\n"
-            f"- source: {source}\n\n"
-            "このレポートは週次の自動生成データです。"
+            "毎週水曜に更新される AI 週報です。"
+            "この 1 週間の混雑傾向と、賑わいやすい時間帯をデータから分析しています。\n\n"
+            "グラフと「賑わいやすい時間帯」を参考に、来店タイミングを検討してみてください。"
         ),
         "insight_json": payload,
         "source": source,
