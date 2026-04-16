@@ -54,6 +54,28 @@ print(
 # Supabase logs.src_brand に入れるブランド名
 SUPABASE_BRAND = "oriental"
 
+# ---------- 相席屋 (aiseki-ya.com) ----------
+# SSR でパーセンテージが初期 HTML に埋め込まれている。
+# 実人数は公開されていないため、座席数 × % で逆算する。
+AISEKIYA_BRAND = "aisekiya"
+AISEKIYA_TOP_URL = "https://aiseki-ya.com/"
+
+AISEKIYA_STORES: dict[str, dict] = {
+    "shibuya2":              {"name": "渋谷店",     "store_id": "ay_shibuya",     "pref": "tokyo",     "tables": 16, "vip": 3},
+    "ikebukurohigashiguchi": {"name": "池袋東口店", "store_id": "ay_ikebukuro",   "pref": "tokyo",     "tables": 11, "vip": 3},
+    "ueno":                  {"name": "上野店",     "store_id": "ay_ueno",        "pref": "tokyo",     "tables": 14, "vip": 1},
+    "chibachuo":             {"name": "千葉中央店", "store_id": "ay_chiba",       "pref": "chiba",     "tables": 19, "vip": 3},
+    "yokonishi":             {"name": "横浜西口店", "store_id": "ay_yokohama",    "pref": "kanagawa",  "tables": 10, "vip": 7},
+    "nigatabandai":          {"name": "新潟万代店", "store_id": "ay_niigata",     "pref": "niigata",   "tables": 13, "vip": 2},
+}
+
+# 男女別の最大収容枠 = (テーブル数 + VIP数) × 2名
+def _aisekiya_capacity(slug: str) -> int:
+    info = AISEKIYA_STORES.get(slug)
+    if not info:
+        return 0
+    return (info["tables"] + info["vip"]) * 2
+
 # 店舗を回す間隔（秒）— 書き込みフェーズで使用
 BETWEEN_STORES_SEC = float(os.environ.get("BETWEEN_STORES_SEC", "0.0"))
 
@@ -129,6 +151,7 @@ PREF_COORDS: dict[str, tuple[float, float]] = {
     "hyogo": (34.6901, 135.1955),
     "okayama": (34.6551, 133.9195),
     "hiroshima": (34.3853, 132.4553),
+    "niigata": (37.9161, 139.0364),
     "seoul": (37.5665, 126.9780),
 }
 
@@ -400,6 +423,8 @@ def insert_supabase_log(
     weather_label: str | None,
     temp_c: float | None,
     precip_mm: float | None,
+    *,
+    brand: str = SUPABASE_BRAND,
 ) -> None:
     if not HAS_SUPABASE:
         return
@@ -414,7 +439,7 @@ def insert_supabase_log(
         "men": int(men),
         "women": int(women),
         "total": total,
-        "src_brand": SUPABASE_BRAND,
+        "src_brand": brand,
     }
 
     # logs テーブルに weather / 気温 / 降水量 カラムがある前提
@@ -844,6 +869,140 @@ def _scrape_top_page(
         return None
 
 
+def _scrape_aisekiya() -> dict[str, tuple[int | None, int | None]]:
+    """
+    相席屋トップページ (aiseki-ya.com/) を 1 リクエストで取得し、
+    各店舗の男女パーセンテージを抽出 → 座席数から推定人数を逆算する。
+
+    返値: {store_id: (men, women)}
+    """
+    try:
+        headers = {
+            "User-Agent": _pick_user_agent(),
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+        }
+        resp = requests.get(AISEKIYA_TOP_URL, headers=headers, timeout=15)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "html.parser")
+
+        results: dict[str, tuple[int | None, int | None]] = {}
+        cards = soup.select("li.p-congestionList__item")
+
+        if not cards:
+            print("[aisekiya] no store cards found")
+            return results
+
+        for card in cards:
+            link = card.select_one("a.p-storeCard")
+            if not link:
+                continue
+            href = link.get("href", "")
+
+            # href から slug を抽出: https://aiseki-ya.com/shop/shibuya2/ → shibuya2
+            slug_match = re.search(r"/shop/([^/]+)/?", href)
+            if not slug_match:
+                continue
+            slug = slug_match.group(1)
+
+            if slug not in AISEKIYA_STORES:
+                continue
+
+            # 男性 % を抽出
+            men_node = card.select_one("dt.c-storeData__term--men")
+            women_node = card.select_one("dt.c-storeData__term--women")
+
+            men_pct = None
+            women_pct = None
+
+            if men_node:
+                dd = men_node.find_next_sibling("dd")
+                if dd:
+                    num = dd.select_one("span.c-storeData__now")
+                    if num:
+                        try:
+                            men_pct = int(num.get_text(strip=True))
+                        except ValueError:
+                            pass
+
+            if women_node:
+                dd = women_node.find_next_sibling("dd")
+                if dd:
+                    num = dd.select_one("span.c-storeData__now")
+                    if num:
+                        try:
+                            women_pct = int(num.get_text(strip=True))
+                        except ValueError:
+                            pass
+
+            capacity = _aisekiya_capacity(slug)
+            store_id = AISEKIYA_STORES[slug]["store_id"]
+
+            if men_pct is not None and capacity > 0:
+                men = round(capacity * men_pct / 100)
+            else:
+                men = None
+
+            if women_pct is not None and capacity > 0:
+                women = round(capacity * women_pct / 100)
+            else:
+                women = None
+
+            results[store_id] = (men, women)
+            print(f"[aisekiya] {slug} men_pct={men_pct}% women_pct={women_pct}% → men={men} women={women}")
+
+        ok = sum(1 for m, w in results.values() if m is not None and w is not None)
+        print(f"[aisekiya] extracted {ok}/{len(AISEKIYA_STORES)} stores")
+        return results
+
+    except Exception as e:
+        print(f"[aisekiya] scrape failed: {e}")
+        return {}
+
+
+def _write_aisekiya_results(
+    scrape_results: dict[str, tuple[int | None, int | None]],
+    weather_map: dict[str, tuple[int | None, str | None, float | None, float | None]],
+) -> tuple[int, int]:
+    """相席屋のスクレイピング結果を Supabase に書き込む。"""
+    success = 0
+    fail = 0
+
+    for slug, info in AISEKIYA_STORES.items():
+        store_id = info["store_id"]
+        men, women = scrape_results.get(store_id, (None, None))
+
+        if men is None or women is None:
+            fail += 1
+            continue
+
+        # 天気は pref で引く
+        pref = info.get("pref", "")
+        weather_code, weather_label, temp_c, precip_mm = (None, None, None, None)
+        for sid, wdata in weather_map.items():
+            # Oriental Lounge の同じ pref の天気を流用
+            entry = next((s for s in STORES if s.get("store_id") == sid and s.get("pref") == pref), None)
+            if entry:
+                weather_code, weather_label, temp_c, precip_mm = wdata
+                break
+
+        insert_supabase_log(
+            store_id,
+            int(men),
+            int(women),
+            weather_code,
+            weather_label,
+            temp_c,
+            precip_mm,
+            brand=AISEKIYA_BRAND,
+        )
+        success += 1
+
+    return success, fail
+
+
 def _parallel_scrape(
     stores: list[dict],
 ) -> dict[str, tuple[int | None, int | None]]:
@@ -1099,11 +1258,19 @@ def collect_all_once(*, target_store_id: str | None = None) -> dict:
     # Phase 2.5: DOM 構造変更チェック（全店舗分のスクレイプ完了後）
     _check_dom_health(stores, scrape_results)
 
-    # Phase 3: 結果書き込み
+    # Phase 2b: 相席屋トップページ一括取得 (SSR, パーセンテージ → 逆算)
+    aisekiya_results = _scrape_aisekiya()
+
+    # Phase 3: 結果書き込み (Oriental Lounge)
     success, fail = _write_results(stores, scrape_results, weather_map)
 
+    # Phase 3b: 相席屋の結果書き込み
+    ay_success, ay_fail = _write_aisekiya_results(aisekiya_results, weather_map)
+    success += ay_success
+    fail += ay_fail
+
     duration = time.time() - t_start
-    total = len(stores)
+    total = len(stores) + len(AISEKIYA_STORES)
     print(
         f"collect_all_once.done stores={total} success={success} fail={fail} "
         f"duration={duration:.1f}s"
