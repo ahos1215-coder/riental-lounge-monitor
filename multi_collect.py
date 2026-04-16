@@ -881,7 +881,8 @@ def _scrape_aisekiya() -> dict[str, tuple[int | None, int | None]]:
             "User-Agent": _pick_user_agent(),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-            "Accept-Encoding": "gzip, deflate, br",
+            # br (Brotli) を含めると requests がデコードできず HTML が壊れるため除外
+            "Accept-Encoding": "gzip, deflate",
             "Connection": "keep-alive",
         }
         resp = requests.get(AISEKIYA_TOP_URL, headers=headers, timeout=15)
