@@ -18,6 +18,12 @@ Target commit: (see git)
 ### 1) 収集
 `multi_collect.py` または `/tasks/multi_collect` が Supabase `logs` に書き込む。cron-job.org が 5 分毎にトリガー（`CRON_SECRET` 認証）。`/tasks/tick` はレガシー。
 
+**マルチブランド対応 (2026-04-17〜)**:
+- **Oriental Lounge + ag (38店舗)**: `oriental-lounge.com/` トップページから 1 リクエストで全店舗の人数を SSR 抽出 (`src_brand="oriental"`)
+- **相席屋 (6店舗)**: `aiseki-ya.com/` トップページから SSR でパーセンテージを抽出 → `(座席+VIP)×2 × %` で逆算 (`src_brand="aisekiya"`)
+- 1 サイクル合計 **2 リクエストで全 44 店舗**を収集。リクエスト数 97% 削減 (旧: 38 個別リクエスト)
+- 店舗マスタは `frontend/src/data/stores.json` を Python/Frontend 共通で参照（`brand` フィールドで分離）
+
 ### 2) Flask API
 `/api/range` / `/api/current` / `/api/forecast_*` / `/api/forecast_today_multi` / `/api/megribi_score` / `/api/forecast_accuracy` を提供。`/api/range` は Supabase を `ts.desc` で取得し `ts.asc` で返却。
 
@@ -154,8 +160,9 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `oriental/ml/forecast_service.py`（ML 推論オーケストレーション）
 - `oriental/ml/megribi_score.py`（スコア算出 + good_windows）
 - `oriental/ml/model_registry.py`（Supabase Storage からモデルロード）
-- `oriental/ml/preprocess.py`（特徴量エンジニアリング — 21 FEATURE_COLUMNS、schema v4。`same_dow_last_week_total` + `total_slope_30min`）
-- `multi_collect.py`（収集ロジック）
+- `oriental/ml/preprocess.py`（特徴量エンジニアリング — **22 FEATURE_COLUMNS、schema v5**。v4 の 21 + `extreme_weather`）
+- `oriental/ml/model_xgb.py`（**LightGBM 優先ロード** + XGBoost フォールバック。ファイル名は import 互換のため維持）
+- `multi_collect.py`（収集ロジック。Oriental Lounge トップページ + 相席屋トップページの2リクエストで全44店舗を取得）
 
 ### Frontend (Next.js)
 - `frontend/src/app/api/*/route.ts`（backend proxy 8本 + SNS + LINE + cron）

@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { StoreCard } from "@/components/StoreCard";
 import {
+  BRAND_DISPLAY_LABEL,
   STORES,
   STORE_REGION_BUTTON_LABEL,
   STORE_REGION_FILTER_ORDER,
+  buildStoreFullName,
   type StoreMeta,
 } from "../config/stores";
 import {
@@ -87,11 +89,8 @@ export default function StoresListClient() {
   const filteredStores: StoreMeta[] = useMemo(() => {
     let list = [...STORES];
 
-    if (brandFilter === "oriental") {
-      list = list.filter((s) => s.brand === "oriental");
-    }
-    if (brandFilter === "jis" || brandFilter === "aisekiya") {
-      list = [];
+    if (brandFilter !== "all") {
+      list = list.filter((s) => s.brand === brandFilter);
     }
 
     if (regionFilter !== null) {
@@ -453,8 +452,8 @@ export default function StoresListClient() {
     };
   }, [pagedStores]);
 
-  const isComingSoonBrand =
-    brandFilter === "jis" || brandFilter === "aisekiya";
+  // JIS は未実装 (スクレイピング未対応)。相席屋は対応済み
+  const isComingSoonBrand = brandFilter === "jis";
 
   const registeredCount = STORES.length;
   const regionCount = useMemo(
@@ -586,8 +585,8 @@ export default function StoresListClient() {
                     <StoreCard
                       key={store.slug}
                       slug={store.slug}
-                      label={`オリエンタルラウンジ ${store.label}`}
-                      brandLabel="ORIENTAL LOUNGE"
+                      label={buildStoreFullName(store)}
+                      brandLabel={BRAND_DISPLAY_LABEL[store.brand]}
                       areaLabel={store.areaLabel}
                       isHighlight={idx === 0}
                       stats={storeRealtime[store.slug]?.stats}

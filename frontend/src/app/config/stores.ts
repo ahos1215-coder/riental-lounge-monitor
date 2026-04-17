@@ -2,6 +2,8 @@ import rawStores from "@/data/stores.json";
 
 export type StoreOption = { value: string; label: string };
 
+export type BrandId = "oriental" | "aisekiya" | "jis";
+
 export type StoreMeta = {
   slug: string;
   storeId: string;
@@ -9,19 +11,39 @@ export type StoreMeta = {
   areaLabel: string;
   regionLabel: string;
   mapsQueryBase: string;
-  brand: "oriental";
+  brand: BrandId;
 };
 
+/** ブランドの表示ラベル (StoreCard 等で使用) */
+export const BRAND_DISPLAY_LABEL: Record<BrandId, string> = {
+  oriental: "ORIENTAL LOUNGE",
+  aisekiya: "相席屋",
+  jis: "JIS",
+};
+
+/** 店舗名表示のフルネーム生成 (例: "オリエンタルラウンジ 渋谷本店") */
+export function buildStoreFullName(meta: StoreMeta): string {
+  if (meta.brand === "oriental") return `オリエンタルラウンジ ${meta.label}`;
+  if (meta.brand === "aisekiya") return `相席屋 ${meta.label}`;
+  if (meta.brand === "jis") return `JIS ${meta.label}`;
+  return meta.label;
+}
+
 // Source of truth: frontend/src/data/stores.json (shared with Python backend)
-export const STORES: StoreMeta[] = rawStores.map((s) => ({
-  slug: s.slug,
-  storeId: s.store_id,
-  label: s.label,
-  areaLabel: s.area_label,
-  regionLabel: s.region_label,
-  mapsQueryBase: s.maps_query_base,
-  brand: "oriental" as const,
-}));
+export const STORES: StoreMeta[] = rawStores.map((s) => {
+  const rawBrand = (s as { brand?: string }).brand ?? "oriental";
+  const brand: BrandId =
+    rawBrand === "aisekiya" ? "aisekiya" : rawBrand === "jis" ? "jis" : "oriental";
+  return {
+    slug: s.slug,
+    storeId: s.store_id,
+    label: s.label,
+    areaLabel: s.area_label,
+    regionLabel: s.region_label,
+    mapsQueryBase: s.maps_query_base,
+    brand,
+  };
+});
 
 /** 店舗一覧の地域ボタン表示順（各店の `regionLabel` と一致） */
 export const STORE_REGION_FILTER_ORDER: readonly string[] = [

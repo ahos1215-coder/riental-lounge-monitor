@@ -10,7 +10,8 @@
     "url": "https://oriental-lounge.com/stores/38",
     "pref": "nagasaki",
     "lat": 32.744,
-    "lon": 129.873
+    "lon": 129.873,
+    "brand": "oriental"
   },
   {
     "slug": "fukuoka",
@@ -23,7 +24,8 @@
     "url": "https://oriental-lounge.com/stores/15",
     "pref": "fukuoka",
     "lat": 33.5902,
-    "lon": 130.4017
+    "lon": 130.4017,
+    "brand": "oriental"
   },
   {
     "slug": "kokura",
@@ -34,7 +36,8 @@
     "region_label": "九州・沖縄",
     "maps_query_base": "小倉 北九州",
     "url": "https://oriental-lounge.com/stores/16",
-    "pref": "fukuoka"
+    "pref": "fukuoka",
+    "brand": "oriental"
   },
   {
     "slug": "oita",
@@ -45,7 +48,8 @@
     "region_label": "九州・沖縄",
     "maps_query_base": "大分",
     "url": "https://oriental-lounge.com/stores/40",
-    "pref": "oita"
+    "pref": "oita",
+    "brand": "oriental"
   },
   {
     "slug": "kumamoto",
@@ -56,7 +60,8 @@
     "region_label": "九州・沖縄",
     "maps_query_base": "熊本",
     "url": "https://oriental-lounge.com/stores/22",
-    "pref": "kumamoto"
+    "pref": "kumamoto",
+    "brand": "oriental"
   },
   {
     "slug": "miyazaki",
@@ -67,7 +72,8 @@
     "region_label": "九州・沖縄",
     "maps_query_base": "宮崎",
     "url": "https://oriental-lounge.com/stores/18",
-    "pref": "miyazaki"
+    "pref": "miyazaki",
+    "brand": "oriental"
   },
   {
     "slug": "kagoshima",
@@ -78,7 +84,8 @@
     "region_label": "九州・沖縄",
     "maps_query_base": "鹿児島",
     "url": "https://oriental-lounge.com/stores/19",
-    "pref": "kagoshima"
+    "pref": "kagoshima",
+    "brand": "oriental"
   },
   {
     "slug": "okinawa_ag",
@@ -89,7 +96,8 @@
     "region_label": "九州・沖縄",
     "maps_query_base": "沖縄 国際通り",
     "url": "https://oriental-lounge.com/stores/20",
-    "pref": "okinawa"
+    "pref": "okinawa",
+    "brand": "oriental"
   },
   {
     "slug": "gangnam",
@@ -100,7 +108,8 @@
     "region_label": "海外",
     "maps_query_base": "ソウル 江南",
     "url": "https://oriental-lounge.com/stores/34",
-    "pref": "seoul"
+    "pref": "seoul",
+    "brand": "oriental"
   },
   {
     "slug": "sapporo_ag",
@@ -111,7 +120,8 @@
     "region_label": "北海道・東北",
     "maps_query_base": "札幌",
     "url": "https://oriental-lounge.com/stores/1",
-    "pref": "hokkaido"
+    "pref": "hokkaido",
+    "brand": "oriental"
   },
   {
     "slug": "sendai_ag",
@@ -122,7 +132,8 @@
     "region_label": "北海道・東北",
     "maps_query_base": "仙台",
     "url": "https://oriental-lounge.com/stores/2",
-    "pref": "miyagi"
+    "pref": "miyagi",
+    "brand": "oriental"
   },
   {
     "slug": "shibuya",
@@ -133,7 +144,8 @@
     "region_label": "関東",
     "maps_query_base": "渋谷",
     "url": "https://oriental-lounge.com/stores/4",
-    "pref": "tokyo"
+    "pref": "tokyo",
+    "brand": "oriental"
   },
   {
     "slug": "ebisu",
@@ -144,7 +156,8 @@
     "region_label": "関東",
     "maps_query_base": "恵比寿",
     "url": "https://oriental-lounge.com/stores/35",
-    "pref": "tokyo"
+    "pref": "tokyo",
+    "brand": "oriental"
   },
   {
     "slug": "shibuya_ag",
@@ -155,7 +168,8 @@
     "region_label": "関東",
     "maps_query_base": "渋谷",
     "url": "https://oriental-lounge.com/stores/27",
-    "pref": "tokyo"
+    "pref": "tokyo",
+    "brand": "oriental"
   },
   {
     "slug": "shinjuku",
@@ -166,7 +180,8 @@
     "region_label": "関東",
     "maps_query_base": "新宿",
     "url": "https://oriental-lounge.com/stores/3",
-    "pref": "tokyo"
+    "pref": "tokyo",
+    "brand": "oriental"
   },
   {
     "slug": "ueno",
@@ -177,7 +192,8 @@
     "region_label": "関東",
     "maps_query_base": "上野",
     "url": "https://oriental-lounge.com/stores/33",
-    "pref": "tokyo"
+    "pref": "tokyo",
+    "brand": "oriental"
   },
   {
     "slug": "ueno_ag",
@@ -188,7 +204,8 @@
     "region_label": "関東",
     "maps_query_base": "上野",
     "url": "https://oriental-lounge.com/stores/28",
-    "pref": "tokyo"
+    "pref": "tokyo",
+    "brand": "oriental"
   },
   {
     "slug": "kashiwa",
@@ -199,7 +216,8 @@
     "region_label": "関東",
     "maps_query_base": "柏",
     "url": "https://oriental-lounge.com/stores/42",
-    "pref": "chiba"
+    "pref": "chiba",
+    "brand": "oriental"
   },
   {
     "slug": "machida",
@@ -210,7 +228,8 @@
     "region_label": "関東",
     "maps_query_base": "町田",
     "url": "https://oriental-lounge.com/stores/6",
-    "pref": "tokyo"
+    "pref": "tokyo",
+    "brand": "oriental"
   },
   {
     "slug": "yokohama",
@@ -221,7 +240,8 @@
     "region_label": "関東",
     "maps_query_base": "横浜",
     "url": "https://oriental-lounge.com/stores/23",
-    "pref": "kanagawa"
+    "pref": "kanagawa",
+    "brand": "oriental"
   },
   {
     "slug": "omiya",
@@ -232,7 +252,8 @@
     "region_label": "関東",
     "maps_query_base": "大宮 埼玉",
     "url": "https://oriental-lounge.com/stores/24",
-    "pref": "saitama"
+    "pref": "saitama",
+    "brand": "oriental"
   },
   {
     "slug": "utsunomiya",
@@ -243,7 +264,8 @@
     "region_label": "関東",
     "maps_query_base": "宇都宮",
     "url": "https://oriental-lounge.com/stores/26",
-    "pref": "tochigi"
+    "pref": "tochigi",
+    "brand": "oriental"
   },
   {
     "slug": "takasaki",
@@ -254,7 +276,8 @@
     "region_label": "関東",
     "maps_query_base": "高崎",
     "url": "https://oriental-lounge.com/stores/37",
-    "pref": "gunma"
+    "pref": "gunma",
+    "brand": "oriental"
   },
   {
     "slug": "nagoya_ag",
@@ -265,7 +288,8 @@
     "region_label": "中部",
     "maps_query_base": "名古屋",
     "url": "https://oriental-lounge.com/stores/32",
-    "pref": "aichi"
+    "pref": "aichi",
+    "brand": "oriental"
   },
   {
     "slug": "nagoya_nishiki",
@@ -276,7 +300,8 @@
     "region_label": "中部",
     "maps_query_base": "名古屋 錦",
     "url": "https://oriental-lounge.com/stores/25",
-    "pref": "aichi"
+    "pref": "aichi",
+    "brand": "oriental"
   },
   {
     "slug": "nagoya_sakae",
@@ -287,7 +312,8 @@
     "region_label": "中部",
     "maps_query_base": "名古屋 栄",
     "url": "https://oriental-lounge.com/stores/8",
-    "pref": "aichi"
+    "pref": "aichi",
+    "brand": "oriental"
   },
   {
     "slug": "shizuoka",
@@ -298,7 +324,8 @@
     "region_label": "中部",
     "maps_query_base": "静岡",
     "url": "https://oriental-lounge.com/stores/7",
-    "pref": "shizuoka"
+    "pref": "shizuoka",
+    "brand": "oriental"
   },
   {
     "slug": "hamamatsu",
@@ -309,7 +336,8 @@
     "region_label": "中部",
     "maps_query_base": "浜松",
     "url": "https://oriental-lounge.com/stores/31",
-    "pref": "shizuoka"
+    "pref": "shizuoka",
+    "brand": "oriental"
   },
   {
     "slug": "kanazawa_ag",
@@ -320,7 +348,8 @@
     "region_label": "中部",
     "maps_query_base": "金沢",
     "url": "https://oriental-lounge.com/stores/36",
-    "pref": "ishikawa"
+    "pref": "ishikawa",
+    "brand": "oriental"
   },
   {
     "slug": "osaka_ekimae",
@@ -331,7 +360,8 @@
     "region_label": "近畿",
     "maps_query_base": "大阪駅 梅田",
     "url": "https://oriental-lounge.com/stores/41",
-    "pref": "osaka"
+    "pref": "osaka",
+    "brand": "oriental"
   },
   {
     "slug": "umeda_ag",
@@ -342,7 +372,8 @@
     "region_label": "近畿",
     "maps_query_base": "梅田",
     "url": "https://oriental-lounge.com/stores/10",
-    "pref": "osaka"
+    "pref": "osaka",
+    "brand": "oriental"
   },
   {
     "slug": "tenma",
@@ -353,7 +384,8 @@
     "region_label": "近畿",
     "maps_query_base": "天満",
     "url": "https://oriental-lounge.com/stores/39",
-    "pref": "osaka"
+    "pref": "osaka",
+    "brand": "oriental"
   },
   {
     "slug": "shinsaibashi",
@@ -364,7 +396,8 @@
     "region_label": "近畿",
     "maps_query_base": "心斎橋",
     "url": "https://oriental-lounge.com/stores/11",
-    "pref": "osaka"
+    "pref": "osaka",
+    "brand": "oriental"
   },
   {
     "slug": "namba",
@@ -375,7 +408,8 @@
     "region_label": "近畿",
     "maps_query_base": "難波",
     "url": "https://oriental-lounge.com/stores/12",
-    "pref": "osaka"
+    "pref": "osaka",
+    "brand": "oriental"
   },
   {
     "slug": "kyoto",
@@ -386,7 +420,8 @@
     "region_label": "近畿",
     "maps_query_base": "京都 河原町",
     "url": "https://oriental-lounge.com/stores/9",
-    "pref": "kyoto"
+    "pref": "kyoto",
+    "brand": "oriental"
   },
   {
     "slug": "kobe",
@@ -397,7 +432,8 @@
     "region_label": "近畿",
     "maps_query_base": "神戸 三宮",
     "url": "https://oriental-lounge.com/stores/13",
-    "pref": "hyogo"
+    "pref": "hyogo",
+    "brand": "oriental"
   },
   {
     "slug": "okayama",
@@ -408,7 +444,8 @@
     "region_label": "中国・四国",
     "maps_query_base": "岡山",
     "url": "https://oriental-lounge.com/stores/29",
-    "pref": "okayama"
+    "pref": "okayama",
+    "brand": "oriental"
   },
   {
     "slug": "hiroshima_ag",
@@ -419,6 +456,91 @@
     "region_label": "中国・四国",
     "maps_query_base": "広島 流川",
     "url": "https://oriental-lounge.com/stores/14",
-    "pref": "hiroshima"
+    "pref": "hiroshima",
+    "brand": "oriental"
+  },
+  {
+    "slug": "ay_shibuya",
+    "store_id": "ay_shibuya",
+    "store": "渋谷店",
+    "label": "渋谷店",
+    "area_label": "東京・渋谷",
+    "region_label": "関東",
+    "maps_query_base": "相席屋 渋谷",
+    "url": "https://aiseki-ya.com/shop/shibuya2/",
+    "pref": "tokyo",
+    "lat": 35.661,
+    "lon": 139.704,
+    "brand": "aisekiya"
+  },
+  {
+    "slug": "ay_ikebukuro",
+    "store_id": "ay_ikebukuro",
+    "store": "池袋東口店",
+    "label": "池袋東口店",
+    "area_label": "東京・池袋",
+    "region_label": "関東",
+    "maps_query_base": "相席屋 池袋",
+    "url": "https://aiseki-ya.com/shop/ikebukurohigashiguchi/",
+    "pref": "tokyo",
+    "lat": 35.729,
+    "lon": 139.711,
+    "brand": "aisekiya"
+  },
+  {
+    "slug": "ay_ueno",
+    "store_id": "ay_ueno",
+    "store": "上野店",
+    "label": "上野店",
+    "area_label": "東京・上野",
+    "region_label": "関東",
+    "maps_query_base": "相席屋 上野",
+    "url": "https://aiseki-ya.com/shop/ueno/",
+    "pref": "tokyo",
+    "lat": 35.713,
+    "lon": 139.777,
+    "brand": "aisekiya"
+  },
+  {
+    "slug": "ay_chiba",
+    "store_id": "ay_chiba",
+    "store": "千葉中央店",
+    "label": "千葉中央店",
+    "area_label": "千葉・中央",
+    "region_label": "関東",
+    "maps_query_base": "相席屋 千葉",
+    "url": "https://aiseki-ya.com/shop/chibachuo/",
+    "pref": "chiba",
+    "lat": 35.607,
+    "lon": 140.106,
+    "brand": "aisekiya"
+  },
+  {
+    "slug": "ay_yokohama",
+    "store_id": "ay_yokohama",
+    "store": "横浜西口店",
+    "label": "横浜西口店",
+    "area_label": "神奈川・横浜",
+    "region_label": "関東",
+    "maps_query_base": "相席屋 横浜",
+    "url": "https://aiseki-ya.com/shop/yokonishi/",
+    "pref": "kanagawa",
+    "lat": 35.466,
+    "lon": 139.622,
+    "brand": "aisekiya"
+  },
+  {
+    "slug": "ay_niigata",
+    "store_id": "ay_niigata",
+    "store": "新潟万代店",
+    "label": "新潟万代店",
+    "area_label": "新潟・万代",
+    "region_label": "中部",
+    "maps_query_base": "相席屋 新潟",
+    "url": "https://aiseki-ya.com/shop/nigatabandai/",
+    "pref": "niigata",
+    "lat": 37.916,
+    "lon": 139.064,
+    "brand": "aisekiya"
   }
 ]

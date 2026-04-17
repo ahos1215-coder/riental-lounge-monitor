@@ -1,5 +1,5 @@
 # DECISIONS
-Last updated: 2026-03-30 (Round 9 整合)
+Last updated: 2026-04-18 (Round 10: マルチブランド + LightGBM + schema v5)
 Target commit: (see git)
 
 ## Core decisions (keep)
@@ -44,4 +44,16 @@ Target commit: (see git)
 20) **FEATURE_COLUMNS**: 推論時に NaN やメジアン充填になる特徴量（ラグ/MA 系等）は `FEATURE_COLUMNS` から除外する。学習中間計算で使う特徴量は `add_time_features()` で生成するが、モデル入力には含めない。
 21) **Train/Test Split**: 時系列データのため **ランダム分割は禁止**。常に時系列順（古い方が Train、新しい方が Test）で分割する。
 22) **本番モデルの学習**: Holdout Test で最適な `n_estimators` を発見した後、**全データで再学習して本番モデルとする**（Early Stopping は評価用のみ）。
-23) **推論時利用可能な特徴量のみ追加**: 新しい特徴量は「推論時に 7 日分の history から算出可能」であることが必須条件。`same_dow_last_week_total`（v3）はこの基準を満たす。
+23) **推論時利用可能な特徴量のみ追加**: 新しい特徴量は「推論時に 7 日分の history から算出可能」であることが必須条件。`same_dow_last_week_total`（v3）、`extreme_weather`（v5）はこの基準を満たす。
+24) **モデルライブラリ**: **LightGBM が本番ロード優先** (2026-04-12〜)。XGBoost はフォールバック保持（ローカル開発・テスト用）。`oriental/ml/model_xgb.py` のファイル名は import 互換のため変更しない。
+
+## Multi-brand decisions (Round 10)
+25) **店舗マスタの単一ソース**: `frontend/src/data/stores.json` に全ブランド（`brand` フィールド付き）を持つ。Python 側 (`multi_collect.py`) は読み込み時に `brand="oriental"` だけ `STORES` 変数に入れて従来の Oriental Lounge 処理パイプラインと互換性を保つ。相席屋は別途 `AISEKIYA_STORES` dict を持つ（座席数情報のため）。
+26) **`src_brand` カラム**: Supabase `logs` の `src_brand` でブランドを区別。`'oriental'`（Oriental + ag）/ `'aisekiya'`（相席屋）/ 将来 `'jis'` 等を追加予定。
+27) **相席屋の人数推計**: 相席屋は人数ではなくパーセンテージ表示のため、`(座席数+VIP)×2 × %` で逆算した推定人数を保存・表示する。**「※推計値」を免責ページで明示**。実測との乖離が判明したら係数を調整する。
+28) **新ブランド追加の手順**:
+    1. `multi_collect.py` にスクレイピング関数 + 店舗マスタを追加
+    2. `frontend/src/data/stores.json` に `brand="新ブランド"` で店舗エントリ追加
+    3. Supabase `stores` テーブルに INSERT
+    4. `BrandId` 型と `BRAND_DISPLAY_LABEL` を `frontend/src/app/config/stores.ts` に追加
+    5. ML モデルは「データが 1 ヶ月以上溜まってから」追加（リアルタイム表示優先）

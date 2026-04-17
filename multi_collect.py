@@ -155,11 +155,17 @@ PREF_COORDS: dict[str, tuple[float, float]] = {
     "seoul": (37.5665, 126.9780),
 }
 
-# ---------- 全38店舗 (frontend/src/data/stores.json が単一ソース) ----------
+# ---------- 店舗マスタ (frontend/src/data/stores.json が単一ソース) ----------
+# stores.json には全ブランド (oriental + aisekiya) が brand フィールド付きで含まれる。
+# Oriental Lounge のスクレイピングパイプラインは brand="oriental" のみを対象とするため、
+# STORES 変数は oriental のみにフィルタしておく。Aisekiya は AISEKIYA_STORES dict を参照。
 
 _STORES_JSON_PATH = _root / "frontend" / "src" / "data" / "stores.json"
 with _STORES_JSON_PATH.open(encoding="utf-8") as _f:
-    STORES: list[dict] = json.load(_f)
+    _ALL_STORES: list[dict] = json.load(_f)
+
+# 後方互換: 既存コードが期待する STORES は oriental + ag (brand="oriental") のみ
+STORES: list[dict] = [s for s in _ALL_STORES if s.get("brand", "oriental") == "oriental"]
 
 
 # ========= 天気ユーティリティ =========

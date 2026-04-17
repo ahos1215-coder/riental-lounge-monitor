@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-04-12 (Round 9 + ML レジリエンス: disk cache fallback / 予測 UX 自動再試行)
+Last updated: 2026-04-18 (Round 10: LightGBM 移行 + 相席屋マルチブランド対応 + schema v5)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -12,8 +12,9 @@ Target commit: (see git)
 - `/api/meta`（設定サマリ）
 - `/api/forecast_today` / `/api/forecast_next_hour`（`ENABLE_FORECAST=1` のときのみ。無効時は 503）
   - **店舗別最適化モデル（ML 3.0）本番稼働中**。全38店舗で Optuna HPO + Early Stopping による個別最適化モデル。
+  - **LightGBM 移行完了 (2026-04-12〜)**: 推論メモリを XGBoost の約半分に削減。モデルファイル 179KB → 97KB (46% 削減)。学習時間も 30-40分 → 5分11秒に短縮。`model_xgb.py` は LightGBM を優先ロード、XGBoost フォールバック保持。
   - `model_registry.py` は `metadata.json` の `has_store_models` / `store_models` を検証し、**店舗別モデルを最優先でロード**。不整合時は明示エラー、未対応メタデータ時のみグローバルモデルへフォールバック。
-  - **schema_version v4**: 特徴量 21 列。v2 の 19 + `same_dow_last_week_total`（同曜日先週）+ `total_slope_30min`（30分間の変化速度）。推論時にも履歴から算出可能
+  - **schema_version v5 (2026-04-13〜)**: 特徴量 22 列。v4 の 21 + `extreme_weather`（猛暑 35°C+ / 極寒 5°C- の極端天候フラグ）
   - **時間減衰ウェイト**: 学習時のサンプル重み付けに指数減衰（90日半減期）を追加。直近データを重視
   - **日次精度トラッキング**: `metadata.json` に店舗別・日別の MAE を自動記録
   - **Flask プロセス内キャッシュ**: TTL 60s（`FORECAST_RESULT_CACHE_TTL`）。CDN キャッシュと合わせ最大遅延 ~2 分
@@ -23,6 +24,9 @@ Target commit: (see git)
 - `/api/megribi_score`（全店舗 or 指定店舗の megribi_score を返す。`?store=` / `?stores=` 対応。Supabase backend 必須。**ThreadPoolExecutor(12) で並列取得 — 38店舗12s→<1s**）
 - `/api/forecast_accuracy`（`metadata.json` から店舗別 MAE/RMSE メトリクスを返却。**Holdout Test（直近20%）による真の汎化精度**。Feature importance も含む）
 - `/tasks/multi_collect` / `/api/tasks/collect_all_once`（本番収集の入口 → Supabase `logs`。デフォルト 202 Accepted + バックグラウンドスレッド実行。`?mode=sync` で旧同期モード。`/tasks/multi_collect/status` でステータス確認）
+  - **Phase 2 (Oriental Lounge)**: トップページ一括取得 (1 リクエストで 38 店舗、`src_brand="oriental"`)
+  - **Phase 2b (相席屋)**: トップページから 6 店舗のパーセンテージを抽出 → 座席数 × % で逆算 (`src_brand="aisekiya"`、2026-04-17〜)
+  - 1 サイクル合計 1+1=2 リクエストで全 44 店舗のデータを収集
 - `/tasks/tick` / `/tasks/collect` / `/tasks/seed`（レガシー・ローカル向け）
 - `/tasks/update_second_venues`（任意。`GOOGLE_PLACES_API_KEY` がある場合のみ）
 - 全 `/tasks/*` エンドポイントに `CRON_SECRET` 認証追加済み
