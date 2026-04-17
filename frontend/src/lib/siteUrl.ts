@@ -6,6 +6,7 @@ export function getMetadataBaseUrl(): URL {
   const raw =
     process.env.NEXT_PUBLIC_SITE_URL?.trim() ||
     process.env.NEXT_PUBLIC_BASE_URL?.trim() ||
+    (process.env.NODE_ENV === "production" ? "https://www.meguribi.jp" : "") ||
     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "") ||
     "http://localhost:3000";
   const normalized = raw.replace(/\/+$/, "");
