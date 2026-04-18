@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-04-18 (Round 10: LightGBM 移行 + 相席屋マルチブランド対応 + schema v5)
+Last updated: 2026-04-19 (Round 10.5: Google Search Console 登録 + robots.txt + canonical www 統一)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -83,8 +83,9 @@ Target commit: (see git)
   - `POST /api/line`: 署名検証 → **レート制限**（Upstash。グローバル/分＋ユーザーあたり下書き/時。**Upstash 障害時は in-memory フォールバック + 5 分の circuit breaker** で webhook を継続稼働 — 2026-04-12〜）→ テキスト解析 → 3 インテント:
     - **`draft` / `editorial_analysis`**: Flask `/api/range` + `/api/forecast_today` → `insightFromRange.ts` → Gemini MDX → Supabase `blog_drafts`（`content_type='editorial'`, `is_published=false`）
     - **`approve`**: 最新の未公開 editorial を `is_published=true` に更新 → `/blog/[public_slug]` URL を返信
-- **OGP / メタデータ**: `metadataBase`、動的 OG 画像、全ページの `openGraph` / `twitter` 設定済み
-- **Sitemap**: `/reports`（統合一覧）+ `/reports/daily/[store_slug]`（priority 0.85 / daily）+ `/reports/weekly/[store_slug]`（priority 0.8 / weekly）全店舗分。旧 `/blog/auto-*` は廃止
+- **OGP / メタデータ**: `metadataBase`、動的 OG 画像、全ページの `openGraph` / `twitter` 設定済み。canonical は **`https://www.meguribi.jp`** に統一（2026-04-19〜。`meguribi.jp` → 307 リダイレクト）
+- **Sitemap**: `/reports`（統合一覧）+ `/reports/daily/[store_slug]`（priority 0.85 / daily）+ `/reports/weekly/[store_slug]`（priority 0.8 / weekly）全店舗分。旧 `/blog/auto-*` は廃止。**Google Search Console 登録済み (2026-04-19)**: 145 ページ検出成功
+- **robots.txt** (`frontend/src/app/robots.ts`, 2026-04-19〜): `/api/` と `/mypage` を Disallow、`Sitemap:` 行で sitemap.xml の場所を明示
 - **Recharts**: 全チャートを Chart.js → Recharts に統一済み（Round 3）。Chart.js 依存は完全削除
 - **StoreCard**: データ未取得時のプレースホルダ（`—`・`0人`）を非表示化（Round 3）。めぐりびスコアバッジ: `狙い目`（≥0.65）/ `様子見`（≥0.40）/ `他店へ`（<0.40）
 - **ForecastAccuracyCard**: `/store/[id]` ページに予測モデル精度カード表示（MAE / 週末夜 MAE / グレード表示）。`/api/forecast_accuracy` からクライアントサイドでフェッチ（モジュールレベルキャッシュ）
