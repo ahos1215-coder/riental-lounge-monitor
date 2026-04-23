@@ -357,35 +357,35 @@ function computeDraftContext(
 ): DraftContext {
   const notes: string[] = [...extraQualityNotes];
   let gender_note =
-    "男女別のカウントが十分に取れないため、性別構成については断定しません（データに men/women が無い、または不足）。";
+    "男女別のカウントが十分に取れていない。";
 
   const withBoth = detailed.filter((p) => p.men != null && p.women != null && p.men! >= 0 && p.women! >= 0);
   if (withBoth.length >= 3) {
     const avgMen = withBoth.reduce((s, p) => s + (p.men as number), 0) / withBoth.length;
     const avgWo = withBoth.reduce((s, p) => s + (p.women as number), 0) / withBoth.length;
     if (avgWo > avgMen * 1.2) {
-      gender_note = `サンプル平均では女性のカウントが男性よりやや多めに見える傾向です（参考・推測過多は避けること）。`;
+      gender_note = `サンプル平均では女性のカウントが男性よりやや多めに見える傾向。`;
     } else if (avgMen > avgWo * 1.2) {
-      gender_note = `サンプル平均では男性のカウントが女性よりやや多めに見える傾向です。相席の成立は人数バランスにも左右されるため、過度に楽観・悲観しない説明にしてください。`;
+      gender_note = `サンプル平均では男性のカウントが女性よりやや多めに見える傾向。`;
     } else {
-      gender_note = `サンプル平均では男女のカウントのバランスはおおむね近い範囲に見えます（参考）。`;
+      gender_note = `サンプル平均では男女のカウントのバランスはおおむね近い範囲。`;
     }
   }
 
   const hourly = sumHourlyTotals(detailed);
   const e19 = (hourly.get(19) ?? 0) + (hourly.get(20) ?? 0);
   const e21 = (hourly.get(21) ?? 0) + (hourly.get(22) ?? 0);
-  let secondaryWave = { detected: false, note: "21〜22時台の急増パターンは検出できませんでした（サンプル数・時間粒度の制約あり）。" };
+  let secondaryWave = { detected: false, note: "21〜22時台の急増パターンは今日のデータでは顕著ではない。" };
   if (detailed.length >= 8 && e19 > 0 && e21 / e19 >= 1.25) {
     secondaryWave = {
       detected: true,
       note:
-        "19〜20時台合計と比べて21〜22時台の合計が大きい傾向です。一次会後の合流・二次会層の流入が考えられる時間帯として、**控えめに**言及してよい（断定禁止）。",
+        "19〜20時台より21〜22時台のほうが人数が多い傾向。一次会後の合流や二次会の流入が重なる時間帯と見られる。",
     };
   } else if (detailed.length >= 8 && e21 > 0 && e19 === 0) {
     secondaryWave = {
       detected: true,
-      note: "21〜22時台にサンプルが集中しているため、深夜帯の盛り上がりが読み取れます（控えめに）。",
+      note: "21〜22時台に人が集まりやすく、深夜帯の盛り上がりが読み取れる。",
     };
   }
 

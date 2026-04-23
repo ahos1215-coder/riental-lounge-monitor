@@ -237,55 +237,18 @@ function StorePageInner() {
     </button>
   );
 
-  const hasAnyReport = reportSummary.daily || reportSummary.weekly;
+  // Daily Report は「今日の傾向まとめ」カードと内容が重複するため、このページでは Weekly のみ表示する
+  const hasWeeklyReport = Boolean(reportSummary.weekly);
 
   return (
     <div className="space-y-8">
       <MeguribiDashboardPreview headerActions={favoriteButton} />
 
-      {/* AI レポート要約セクション */}
-      {hasAnyReport && (
+      {/* AI レポート要約セクション（Weekly Report のみ） */}
+      {hasWeeklyReport && (
         <section className="mx-auto w-full max-w-6xl px-4">
           <h2 className="mb-3 text-sm font-semibold text-slate-100">AI 予測レポート</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {/* Daily Report */}
-            {reportSummary.daily && (
-              <div className="rounded-2xl border border-indigo-500/30 bg-indigo-500/5 p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center rounded-md bg-indigo-500/20 px-2 py-0.5 text-[11px] font-bold text-indigo-200">
-                      Daily Report
-                    </span>
-                    {reportSummary.daily.editionLabel && (
-                      <span className="text-[11px] text-indigo-300/70">{reportSummary.daily.editionLabel}</span>
-                    )}
-                  </div>
-                  <span className="text-[11px] text-white/40">{reportSummary.daily.updatedAt} 更新</span>
-                </div>
-                {reportSummary.daily.heading && (
-                  <p className="mt-2 text-sm font-bold leading-snug text-white line-clamp-2">
-                    {reportSummary.daily.heading}
-                  </p>
-                )}
-                {reportSummary.daily.bullets.length > 0 && (
-                  <ul className="mt-2 space-y-1">
-                    {reportSummary.daily.bullets.map((b, i) => (
-                      <li key={i} className="flex items-start gap-1.5 text-xs text-white/75">
-                        <span className="mt-0.5 shrink-0 text-indigo-300">▸</span>
-                        <span className="line-clamp-2">{b}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <Link
-                  href={`/reports/daily/${encodeURIComponent(slug)}`}
-                  className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-indigo-300 hover:text-indigo-200"
-                >
-                  詳しく見る <span aria-hidden>→</span>
-                </Link>
-              </div>
-            )}
-
+          <div className="grid gap-3">
             {/* Weekly Report */}
             {reportSummary.weekly && (
               <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
