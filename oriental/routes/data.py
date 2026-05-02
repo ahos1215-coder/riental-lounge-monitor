@@ -257,6 +257,60 @@ def api_meta():
     return jsonify({"ok": True, "data": data})
 
 
+@bp.get("/api/holiday_status")
+def api_holiday_status():
+    """連休判定 API。フロントの連休バナー表示などに使う。
+
+    Query:
+        date (optional, YYYY-MM-DD): 判定対象日。省略時は JST の今日。
+
+    Response:
+        {
+          "ok": true,
+          "date": "2026-05-03",
+          "block_length": 5,         # 連続休業ブロックの全長 (0=平日)
+          "block_position": 0.25,    # ブロック内位置 (0.0=初日, 1.0=最終日)、平日のときは 0.5
+          "is_long_holiday": true,   # block_length >= 4
+          "label": "連休中 (2/5日目)" # 表示用ラベル
+        }
+    """
+    from datetime import date as date_cls
+
+    from ..ml.holiday_calendar import get_holiday_block, is_long_holiday
+
+    raw = (request.args.get("date") or "").strip()
+    if raw:
+        try:
+            target = date_cls.fromisoformat(raw)
+        except ValueError:
+            return jsonify({"ok": False, "error": "invalid date format (expected YYYY-MM-DD)"}), 400
+    else:
+        # JST の今日 (00:00 区切り)
+        target = timeutil.now("Asia/Tokyo").date()
+
+    block_length, block_position = get_holiday_block(target)
+    long_flag = is_long_holiday(target)
+
+    if block_length == 0:
+        label = "平日"
+    elif block_length == 1:
+        label = "単発の祝日"
+    elif block_length == 2:
+        label = "通常の週末"
+    else:
+        # block_position が None なら 0.5、ブロック内日数 (1-indexed) を出す
+        pos = block_position if block_position is not None else 0.5
+        day_in_block = round(pos * (block_length - 1)) + 1
+        label = f"{block_length}連休 ({day_in_block}/{block_length}日目)"
+
+    return jsonify({
+        "ok": True,
+        "date": target.isoformat(),
+        "block_length": block_length,
+        "block_position": block_position if block_position is not None else 0.5,
+        "is_long_holiday": long_flag,
+        "label": label,
+    })
 
 
 @bp.get("/api/second_venues")

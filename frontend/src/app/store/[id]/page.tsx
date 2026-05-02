@@ -20,6 +20,7 @@ import {
   pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
 import { ForecastAccuracyCard } from "@/components/ForecastAccuracyCard";
+import { LongHolidayBanner } from "@/components/store/LongHolidayBanner";
 import { DEFAULT_STORE, STORES, getStoreMetaBySlug, getStoreMetaBySlugStrict } from "../../config/stores";
 
 type ReportSummaryItem = {
@@ -242,6 +243,7 @@ function StorePageInner() {
 
   return (
     <div className="space-y-8">
+      <LongHolidayBanner />
       <MeguribiDashboardPreview headerActions={favoriteButton} />
 
       {/* AI レポート要約セクション（Weekly Report のみ） */}

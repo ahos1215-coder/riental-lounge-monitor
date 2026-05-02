@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-04-19 (Round 10.5: Google Search Console 登録 + robots.txt + canonical www 統一)
+Last updated: 2026-05-03 (Round 11: 連休クラスタ特徴量 + schema v6 + 連休バナー UI)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -14,6 +14,7 @@ Target commit: (see git)
   - **店舗別最適化モデル（ML 3.0）本番稼働中**。全38店舗で Optuna HPO + Early Stopping による個別最適化モデル。
   - **LightGBM 移行完了 (2026-04-12〜)**: 推論メモリを XGBoost の約半分に削減。モデルファイル 179KB → 97KB (46% 削減)。学習時間も 30-40分 → 5分11秒に短縮。`model_xgb.py` は LightGBM を優先ロード、XGBoost フォールバック保持。
   - `model_registry.py` は `metadata.json` の `has_store_models` / `store_models` を検証し、**店舗別モデルを最優先でロード**。不整合時は明示エラー、未対応メタデータ時のみグローバルモデルへフォールバック。
+  - **schema_version v6 (2026-05-03〜)**: 特徴量 24 列。v5 の 22 + `holiday_block_length` / `holiday_block_position` (連休クラスタ判定 — `oriental/ml/holiday_calendar.py`)。GW・お盆・年末年始など連続休業期間を検出し、連休内位置 (初日/中日/最終日) を ML に伝える。お盆 8/13-15・年末年始 12/29-1/3 を慣習的休業日として扱う
   - **schema_version v5 (2026-04-13〜)**: 特徴量 22 列。v4 の 21 + `extreme_weather`（猛暑 35°C+ / 極寒 5°C- の極端天候フラグ）
   - **時間減衰ウェイト**: 学習時のサンプル重み付けに指数減衰（90日半減期）を追加。直近データを重視
   - **日次精度トラッキング**: `metadata.json` に店舗別・日別の MAE を自動記録

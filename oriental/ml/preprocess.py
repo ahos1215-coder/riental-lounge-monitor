@@ -37,6 +37,13 @@ FEATURE_COLUMNS = [
     "total_slope_30min",
     # v5: 極端な天候（猛暑 35°C+ / 極寒 5°C-）→ 外出意欲が急減
     "extreme_weather",
+    # v6: 連休クラスタ特徴量 (oriental/ml/holiday_calendar.py)
+    # holiday_block_length: 当日を含む連続休業ブロック (土日+祝日+振替+お盆+年末年始) の全長
+    #   平日=0, 単発祝日=1, 通常週末=2, 3連休=3, GW=5-9, 年末年始=5-9
+    "holiday_block_length",
+    # holiday_block_position: ブロック内の相対位置 (0.0=初日, 1.0=最終日)
+    #   平日のときは中立値 0.5 でフィル
+    "holiday_block_position",
 ]
 
 
@@ -206,6 +213,22 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     # v5: 極端な天候（猛暑 35°C+ or 極寒 5°C-）
     temp = pd.to_numeric(df.get("temp_c", pd.Series(dtype=float)), errors="coerce")
     df["extreme_weather"] = ((temp >= 35) | (temp <= 5)).astype(int).fillna(0)
+
+    # v6: 連休クラスタ特徴量
+    # 同じ日付に対して get_holiday_block を毎行呼ぶと O(N * 14日探索) で重いため、
+    # ユニークな日付だけ計算してマップする。
+    from .holiday_calendar import get_holiday_block
+
+    unique_dates = pd.Series(row_dates.unique())
+    block_map: dict = {}
+    for d in unique_dates:
+        if pd.isna(d):
+            continue
+        length, position = get_holiday_block(d)
+        block_map[d] = (length, position if position is not None else 0.5)
+
+    df["holiday_block_length"] = row_dates.map(lambda d: block_map.get(d, (0, 0.5))[0]).astype(int)
+    df["holiday_block_position"] = row_dates.map(lambda d: block_map.get(d, (0, 0.5))[1]).astype(float)
 
     numeric_cols = [c for c in FEATURE_COLUMNS if c in df.columns]
     for col in numeric_cols:
