@@ -126,6 +126,9 @@ jobs:
           INSIGHTS_HTTP_TIMEOUT_SECONDS: "90"
           INSIGHTS_HTTP_RETRIES: "4"
           INSIGHTS_SYNC_SUPABASE: "1"
+          # AI 自然文解説 (last_week_summary / next_week_forecast) を生成する
+          INSIGHTS_GENERATE_AI_COMMENTARY: "1"
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: |
