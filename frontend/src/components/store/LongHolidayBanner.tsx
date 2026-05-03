@@ -35,18 +35,16 @@ export function LongHolidayBanner() {
   if (!status || !status.ok || !status.is_long_holiday) return null;
 
   return (
-    <div className="mx-auto w-full max-w-6xl px-4">
-      <div className="rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-[12px] leading-relaxed text-amber-100">
-        <div className="flex items-start gap-2">
-          <span className="mt-0.5 text-amber-300" aria-hidden>
-            ⚠
+    <div className="rounded-xl border border-amber-400/40 bg-amber-500/10 px-4 py-3 text-[12px] leading-relaxed text-amber-100">
+      <div className="flex items-start gap-2">
+        <span className="mt-0.5 text-amber-300" aria-hidden>
+          ⚠
+        </span>
+        <div>
+          <span className="mr-1 inline-flex items-center rounded-md bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
+            {status.label}
           </span>
-          <div>
-            <span className="mr-1 inline-flex items-center rounded-md bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-200">
-              {status.label}
-            </span>
-            連休中は普段と異なる人の流れが起きるため、予測との乖離が大きくなる傾向があります。
-          </div>
+          連休中は普段と異なる人の流れが起きるため、予測との乖離が大きくなる傾向があります。
         </div>
       </div>
     </div>

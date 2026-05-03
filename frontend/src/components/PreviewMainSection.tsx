@@ -21,6 +21,7 @@ import {
 import SecondVenuesList from "./SecondVenuesList";
 import { StoreRealtimeStatusCard } from "./store/StoreRealtimeStatusCard";
 import { LatestForecastSummaryCard } from "./store/LatestForecastSummaryCard";
+import { LongHolidayBanner } from "./store/LongHolidayBanner";
 import type {
   PreviewRangeMode,
   StoreSnapshot,
@@ -425,6 +426,7 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
           </div>
         )}
 
+        <LongHolidayBanner />
         <LatestForecastSummaryCard storeSlug={storeSlug} snapshot={snapshot} />
       </section>
 
