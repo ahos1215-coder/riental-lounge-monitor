@@ -2,6 +2,12 @@ from __future__ import annotations
 
 """
 週次 Good Window JSON 生成。閾値・運用の調整は plan/WEEKLY_INSIGHTS_TUNING.md を参照。
+
+v2 (2026-05): 4 Phase 改善
+- Phase A: metric_interpretations (数値の意味付け、e.g. "1日平均 142 件")
+- Phase B: day_hour_heatmap (曜日 × 時間帯の混雑ヒートマップ)
+- Phase C: ai_commentary (Gemini 2.5 Flash による自然文解説)
+- Phase D: next_week_recommendations (来週の狙い目時間 TOP 3)
 """
 
 import argparse
@@ -12,7 +18,7 @@ import os
 import sys
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlencode
@@ -306,16 +312,18 @@ def _upsert_weekly_report_to_supabase(
     base, key = conf
     endpoint = f"{base}/rest/v1/blog_drafts"
     facts_id = f"weekly_{store}"
+    # v2: ai_commentary があれば本文として使う。なければページが直接ヒートマップ等を描画するため空に近い文に。
+    commentary = payload.get("ai_commentary")
+    if isinstance(commentary, str) and commentary.strip():
+        mdx_body = commentary.strip()
+    else:
+        mdx_body = "ヒートマップと「賑わいやすい時間帯」を参考に、来週の来店タイミングを検討してみてください。"
     body = {
         "store_id": f"ol_{store}",
         "store_slug": store,
         "target_date": date_label,
         "facts_id": facts_id,
-        "mdx_content": (
-            "毎週水曜に更新される AI 週報です。"
-            "この 1 週間の混雑傾向と、賑わいやすい時間帯をデータから分析しています。\n\n"
-            "グラフと「賑わいやすい時間帯」を参考に、来店タイミングを検討してみてください。"
-        ),
+        "mdx_content": mdx_body,
         "insight_json": payload,
         "source": source,
         "content_type": "weekly",
@@ -358,6 +366,250 @@ def _upsert_weekly_report_to_supabase(
     )
     with urlopen(insert_req, timeout=30):
         pass
+
+
+# ---------------------------------------------------------------------------
+# v2: 4 Phase 改善用ヘルパー
+# ---------------------------------------------------------------------------
+
+JST_OFFSET = timezone(timedelta(hours=9))
+DAY_LABELS_JA = ["月", "火", "水", "木", "金", "土", "日"]
+# 相席ラウンジの営業時間 (JST 19:00-04:59)。配列順は時系列。
+HEATMAP_HOURS = [19, 20, 21, 22, 23, 0, 1, 2, 3, 4]
+
+
+def _build_day_hour_heatmap(points: list[dict[str, Any]]) -> dict[str, Any]:
+    """曜日 × 時間帯の平均混雑度ヒートマップを構築する。
+
+    各セルは JST の dayofweek (0=月, 6=日) × hour (19-23, 0-4) で集計。
+    Phase B のフロントエンド HeatmapChart が直接消費できる形で返す。
+    """
+    bucket: dict[tuple[int, int], list[tuple[float, float]]] = {}
+    for p in points:
+        ts = p.get("timestamp")
+        if not isinstance(ts, datetime):
+            continue
+        ts_jst = ts.astimezone(JST_OFFSET)
+        day = ts_jst.weekday()  # 0=Mon
+        hour = ts_jst.hour
+        if hour not in HEATMAP_HOURS:
+            continue
+        occ = float(p.get("occupancy_rate") or 0.0)
+        fr = float(p.get("female_ratio") or 0.0)
+        bucket.setdefault((day, hour), []).append((occ, fr))
+
+    cells: list[dict[str, Any]] = []
+    max_occ = 0.0
+    for day in range(7):
+        for hour in HEATMAP_HOURS:
+            samples = bucket.get((day, hour), [])
+            if samples:
+                avg_occ = sum(o for o, _ in samples) / len(samples)
+                avg_fr = sum(f for _, f in samples) / len(samples)
+                count = len(samples)
+            else:
+                avg_occ = 0.0
+                avg_fr = 0.0
+                count = 0
+            cells.append(
+                {
+                    "day": day,
+                    "hour": hour,
+                    "avg_occupancy": round(avg_occ, 4),
+                    "avg_female_ratio": round(avg_fr, 4),
+                    "sample_count": count,
+                }
+            )
+            if avg_occ > max_occ:
+                max_occ = avg_occ
+
+    return {
+        "cells": cells,
+        "hour_range": HEATMAP_HOURS,
+        "day_labels_ja": DAY_LABELS_JA,
+        "max_avg_occupancy": round(max_occ, 4),
+    }
+
+
+def _derive_next_week_recommendations(heatmap: dict[str, Any], top_n: int = 3) -> list[dict[str, Any]]:
+    """ヒートマップ上位 N セルを「来週の狙い目時間」として推奨する。
+
+    Phase D。「先週このパターンだったから、来週も同じ時間帯が狙い目」という
+    意思決定材料を提供する。あくまで先週のデータに基づく経験則であり、
+    今週の特異事象は反映されない点を UI 側で明示する想定。
+    """
+    cells = heatmap.get("cells") or []
+    # サンプル数が少ないセル (n<2) はノイズとして除外
+    filtered = [c for c in cells if (c.get("sample_count") or 0) >= 2 and (c.get("avg_occupancy") or 0) > 0]
+    sorted_cells = sorted(filtered, key=lambda c: c.get("avg_occupancy") or 0, reverse=True)
+    top = sorted_cells[:top_n]
+    out: list[dict[str, Any]] = []
+    for c in top:
+        day = c["day"]
+        hour = c["hour"]
+        end_hour = (hour + 1) % 24
+        out.append(
+            {
+                "day": day,
+                "day_label_ja": DAY_LABELS_JA[day],
+                "hour": hour,
+                "hour_label": f"{hour:02d}:00-{end_hour:02d}:00",
+                "avg_occupancy": c.get("avg_occupancy"),
+                "avg_female_ratio": c.get("avg_female_ratio"),
+            }
+        )
+    return out
+
+
+def _compute_metric_interpretations(
+    points_count: int,
+    period_start: datetime | None,
+    period_end: datetime | None,
+    baseline: float,
+) -> dict[str, Any]:
+    """既存メトリクスに「だから何?」の解釈を添える (Phase A)。
+
+    フロントの数値カードに「平常」「やや少なめ」などのラベルを表示するための情報。
+    """
+    days = 7
+    if period_start and period_end:
+        days = max(1, (period_end - period_start).days + 1)
+
+    daily_avg = points_count / days if days > 0 else 0
+    # 1 日平均 100+ 件で「平常」、50-100 で「やや少なめ」、< 50 で「少ない」
+    if daily_avg >= 100:
+        volume_label = "平常"
+    elif daily_avg >= 50:
+        volume_label = "やや少なめ"
+    else:
+        volume_label = "少ない"
+
+    # 混み具合の基準 (P95) の解釈: 大型店 70+, 中規模 30-70, 小規模 <30
+    if baseline >= 70:
+        baseline_label = "大型店レベル"
+    elif baseline >= 30:
+        baseline_label = "中規模店レベル"
+    else:
+        baseline_label = "小規模店または閑散時間が多め"
+
+    return {
+        "daily_avg_count": round(daily_avg, 1),
+        "volume_label": volume_label,
+        "baseline_label": baseline_label,
+        "period_days": days,
+    }
+
+
+def _generate_ai_commentary(
+    *,
+    store_label: str,
+    metrics_interp: dict[str, Any],
+    heatmap: dict[str, Any],
+    top_windows: list[dict[str, Any]],
+    next_week_recs: list[dict[str, Any]],
+) -> str | None:
+    """Gemini REST API で週報の自然文解説を生成する (Phase C)。
+
+    `INSIGHTS_GENERATE_AI_COMMENTARY=1` かつ `GEMINI_API_KEY` 設定時のみ動作。
+    失敗時は None を返してフロントに「コメントなし」を表示させる。
+    """
+    if not _env_bool("INSIGHTS_GENERATE_AI_COMMENTARY", False):
+        return None
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return None
+
+    # ヒートマップ最上位セル 3 件を要約として渡す
+    cells = heatmap.get("cells") or []
+    top_cells = sorted(
+        [c for c in cells if (c.get("sample_count") or 0) >= 2],
+        key=lambda c: c.get("avg_occupancy") or 0,
+        reverse=True,
+    )[:3]
+
+    payload_for_ai = {
+        "store": store_label,
+        "metrics": metrics_interp,
+        "top_heatmap_cells": [
+            {
+                "day": DAY_LABELS_JA[c["day"]],
+                "hour": c["hour"],
+                "occupancy_pct": round((c.get("avg_occupancy") or 0) * 100, 1),
+                "female_pct": round((c.get("avg_female_ratio") or 0) * 100, 1),
+            }
+            for c in top_cells
+        ],
+        "next_week_recommendations": [
+            {
+                "day": r["day_label_ja"],
+                "time": r["hour_label"],
+                "occupancy_pct": round((r.get("avg_occupancy") or 0) * 100, 1),
+            }
+            for r in next_week_recs
+        ],
+    }
+
+    system_instruction = (
+        "あなたは MEGRIBI の観測者。相席ラウンジの混雑データを毎週眺めてきた人で、"
+        "数字の奥にある夜の流れを読む。店のスタッフでも営業マンでもない。"
+        "データを見ながら友人にぽつりとつぶやく、そういう距離感で書く。\n\n"
+        "■ 視点\n"
+        "Daily Report が「点 (今夜)」、Weekly Report は「線 (1 週間のパターン)」を見せる役割。"
+        "曜日横断のリズムや、いつが安定して賑わうかを語る。\n\n"
+        "■ トーン\n"
+        "断定と過剰演出をしない。「〜の傾向」「〜らしい」「〜っぽい」のような観測者の距離を保つ。\n\n"
+        "■ 業態\n"
+        "対象は相席ラウンジ。キャバクラ・クラブ (接客型) ではない。"
+        "キャバクラ、キャスト、指名、同伴、シャンパンなどの語は禁止。\n\n"
+        "■ 書くもの\n"
+        "- 先週の店内のリズム (どの曜日 / 時間帯が賑わっていたか)\n"
+        "- 先週ならではのパターン (普段と違う点があれば)\n"
+        "- 来週どの曜日 / 時間帯が狙い目になりそうか (推量形で)\n\n"
+        "■ 書かないもの\n"
+        "- 箇条書き (自然文で書く)\n"
+        "- 営業文句 (「ぜひお越しください」等)\n"
+        "- 店や客層の良し悪しの評価\n"
+        "- 挨拶やリード文\n\n"
+        "■ 構造と文量\n"
+        "200〜400 字の自然文。1〜2 段落で。\n\n"
+        "■ 出力\n"
+        "本文のみ。挨拶や見出しは不要。"
+    )
+
+    user_prompt = (
+        "次の JSON は 1 週間分の混雑データの要約です。読者は来週どの曜日 / 時間帯に行くか"
+        "迷っている人を想定し、200〜400 字の観測コメントを書いてください。\n\n"
+        + json.dumps(payload_for_ai, ensure_ascii=False, indent=2)
+    )
+
+    body = {
+        "system_instruction": {"parts": [{"text": system_instruction}]},
+        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 800},
+    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
+    req = Request(
+        url,
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[weekly-insights] gemini commentary failed: {exc}", file=sys.stderr)
+        return None
+
+    try:
+        candidates = payload.get("candidates") or []
+        if not candidates:
+            return None
+        parts = (candidates[0].get("content") or {}).get("parts") or []
+        text = "".join(p.get("text", "") for p in parts).strip()
+        return text if text else None
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _call_find_good_windows(points: list[dict[str, Any]], **kwargs: Any) -> list[dict[str, Any]]:
@@ -463,6 +715,16 @@ def main() -> int:
             reverse=True,
         )[:3]
 
+        # v2: Phase A/B/D の追加データを構築
+        heatmap = _build_day_hour_heatmap(points)
+        next_week_recs = _derive_next_week_recommendations(heatmap)
+        metrics_interp = _compute_metric_interpretations(
+            points_count=len(points),
+            period_start=period_start,
+            period_end=period_end,
+            baseline=baseline,
+        )
+
         payload = {
             "analysis_id": f"weekly:{store}:{date_label}",
             "type": "weekly",
@@ -481,10 +743,27 @@ def main() -> int:
                 "baseline_p95_total": baseline,
                 "reliability_score": min(1.0, len(points) / 200.0),
             },
+            # v2: Phase A
+            "metric_interpretations": metrics_interp,
             "windows": serialized_windows,
             "top_windows": top_windows,
             "series_compact": _series_compact_points(points),
+            # v2: Phase B
+            "day_hour_heatmap": heatmap,
+            # v2: Phase D
+            "next_week_recommendations": next_week_recs,
         }
+
+        # v2: Phase C — AI 自然文解説 (Gemini API key + フラグ ON のときのみ)
+        commentary = _generate_ai_commentary(
+            store_label=store,
+            metrics_interp=metrics_interp,
+            heatmap=heatmap,
+            top_windows=top_windows,
+            next_week_recs=next_week_recs,
+        )
+        if commentary:
+            payload["ai_commentary"] = commentary
 
         store_dir = base_dir / store
         _ensure_dir(store_dir)

@@ -10,6 +10,8 @@ import { ReservationLinkCard } from "@/components/ReservationLinkCard";
 import { ReportViewTracker } from "@/components/ReportViewTracker";
 import WeeklyStoreCharts from "@/components/WeeklyStoreCharts";
 import type { SeriesCompactPoint, TopWindowChart } from "@/components/WeeklyStoreCharts";
+import WeeklyHeatmap from "@/components/WeeklyHeatmap";
+import type { DayHourHeatmap, HeatmapCell } from "@/components/WeeklyHeatmap";
 import { fetchLatestPublishedReportByStore } from "@/lib/supabase/blogDrafts";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { formatJstTimestamp, formatWindowTime } from "@/lib/dateFormat";
@@ -115,7 +117,64 @@ export default async function WeeklyReportStorePage({ params }: Props) {
     )
     .map((p) => ({ t: p.t, occupancy: p.occupancy, female_ratio: p.female_ratio }));
 
-  const hasInsightData = seriesCompact.length > 0 || topWindows.length > 0;
+  // v2: Phase B 用ヒートマップ
+  const rawHeatmap = (ij.day_hour_heatmap ?? null) as Record<string, unknown> | null;
+  const heatmap: DayHourHeatmap | null = (() => {
+    if (!rawHeatmap || !Array.isArray(rawHeatmap.cells)) return null;
+    const cells = (rawHeatmap.cells as unknown[])
+      .filter(
+        (c): c is HeatmapCell =>
+          !!c &&
+          typeof c === "object" &&
+          typeof (c as HeatmapCell).day === "number" &&
+          typeof (c as HeatmapCell).hour === "number" &&
+          typeof (c as HeatmapCell).avg_occupancy === "number" &&
+          typeof (c as HeatmapCell).avg_female_ratio === "number" &&
+          typeof (c as HeatmapCell).sample_count === "number",
+      )
+      .map((c) => ({
+        day: c.day,
+        hour: c.hour,
+        avg_occupancy: c.avg_occupancy,
+        avg_female_ratio: c.avg_female_ratio,
+        sample_count: c.sample_count,
+      }));
+    if (cells.length === 0) return null;
+    return {
+      cells,
+      hour_range: Array.isArray(rawHeatmap.hour_range)
+        ? (rawHeatmap.hour_range as number[])
+        : [19, 20, 21, 22, 23, 0, 1, 2, 3, 4],
+      day_labels_ja: Array.isArray(rawHeatmap.day_labels_ja)
+        ? (rawHeatmap.day_labels_ja as string[])
+        : ["月", "火", "水", "木", "金", "土", "日"],
+      max_avg_occupancy: typeof rawHeatmap.max_avg_occupancy === "number" ? rawHeatmap.max_avg_occupancy : 0,
+    };
+  })();
+
+  // v2: Phase A 用メトリクス解釈
+  const interp = (ij.metric_interpretations ?? null) as {
+    daily_avg_count?: number;
+    volume_label?: string;
+    baseline_label?: string;
+  } | null;
+
+  // v2: Phase D 用 来週の狙い目 TOP 3
+  const rawRecs = Array.isArray(ij.next_week_recommendations) ? ij.next_week_recommendations : [];
+  const nextWeekRecs = rawRecs
+    .filter((r): r is Record<string, unknown> => Boolean(r && typeof r === "object"))
+    .map((r) => ({
+      day_label_ja: typeof r.day_label_ja === "string" ? r.day_label_ja : "",
+      hour_label: typeof r.hour_label === "string" ? r.hour_label : "",
+      avg_occupancy: typeof r.avg_occupancy === "number" ? r.avg_occupancy : 0,
+      avg_female_ratio: typeof r.avg_female_ratio === "number" ? r.avg_female_ratio : 0,
+    }))
+    .filter((r) => r.day_label_ja && r.hour_label);
+
+  // v2: Phase C 用 AI 自然文解説
+  const aiCommentary = typeof ij.ai_commentary === "string" ? ij.ai_commentary.trim() : "";
+
+  const hasInsightData = seriesCompact.length > 0 || topWindows.length > 0 || heatmap !== null;
 
   function formatNumber(value: unknown, digits = 2): string {
     if (typeof value !== "number" || Number.isNaN(value)) return "-";
@@ -148,14 +207,25 @@ export default async function WeeklyReportStorePage({ params }: Props) {
         <p className="mt-2 text-sm text-white/60">
           {row.target_date} / {formatJstTimestamp(row.updated_at ?? row.created_at)} 更新
         </p>
-        <p className="mt-4 text-base text-white/75">
-          毎週水曜に更新される AI 週報です。この 1 週間の混雑傾向と、賑わいやすい時間帯を分析しています。
+        <p className="mt-3 text-xs text-white/45">
+          毎週水曜に更新される AI 週報です。曜日 × 時間帯のリズム、賑わいやすい時間帯、来週の狙い目をデータから読み解きます。
         </p>
       </header>
 
-      <article className="prose prose-invert mt-10 max-w-none prose-headings:text-white prose-p:text-white/80 prose-li:text-white/80">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-      </article>
+      {/* v2: Phase C — AI 自然文解説 (ai_commentary が無いときは mdx_content 本文を表示) */}
+      {aiCommentary ? (
+        <section className="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-5 md:p-6">
+          <h2 className="mb-2 inline-flex items-center gap-2 text-xs font-bold text-indigo-200">
+            <span className="rounded bg-indigo-500/30 px-1.5 py-0.5 text-[10px] text-indigo-100">AI 観測</span>
+            今週のリズムまとめ
+          </h2>
+          <p className="text-sm leading-relaxed text-white/85 whitespace-pre-line">{aiCommentary}</p>
+        </section>
+      ) : content ? (
+        <article className="prose prose-invert max-w-none prose-headings:text-white prose-p:text-white/80 prose-li:text-white/80">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+        </article>
+      ) : null}
 
       {hasInsightData && (
         <>
@@ -172,12 +242,20 @@ export default async function WeeklyReportStorePage({ params }: Props) {
               <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
                 <p className="text-xs font-medium text-white/70">分析データ量</p>
                 <p className="mt-2 text-2xl font-black">{typeof metrics.points_used === "number" ? metrics.points_used : 0}<span className="text-base font-medium text-white/50"> 件</span></p>
-                <p className="mt-1 text-[11px] text-white/40">多いほど分析の精度が上がります</p>
+                {/* v2: Phase A */}
+                <p className="mt-1 text-[11px] text-white/40">
+                  {interp && typeof interp.daily_avg_count === "number"
+                    ? `1 日平均 ${interp.daily_avg_count} 件・${interp.volume_label ?? "—"}`
+                    : "多いほど分析の精度が上がります"}
+                </p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
                 <p className="text-xs font-medium text-white/70">混み具合の基準</p>
                 <p className="mt-2 text-2xl font-black">{formatNumber(metrics.baseline_p95_total, 0)}<span className="text-base font-medium text-white/50"> 人</span></p>
-                <p className="mt-1 text-[11px] text-white/40">この人数以上なら「混んでいる」目安</p>
+                {/* v2: Phase A */}
+                <p className="mt-1 text-[11px] text-white/40">
+                  {interp?.baseline_label ?? "この人数以上なら「混んでいる」目安"}
+                </p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
                 <p className="text-xs font-medium text-white/70">データの信頼度</p>
@@ -192,6 +270,44 @@ export default async function WeeklyReportStorePage({ params }: Props) {
               </div>
             </div>
           </section>
+
+          {/* v2: Phase B — 曜日 × 時間帯ヒートマップ (旧: 折れ線グラフ) */}
+          {heatmap && (
+            <div className="mt-8">
+              <WeeklyHeatmap heatmap={heatmap} />
+            </div>
+          )}
+
+          {/* v2: Phase D — 来週の狙い目 TOP 3 */}
+          {nextWeekRecs.length > 0 && (
+            <section className="mt-8 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5 md:p-6">
+              <h2 className="text-lg font-bold text-white">来週の狙い目時間 TOP 3</h2>
+              <p className="mt-1 text-xs text-white/50">
+                先週同じ時間帯が安定して賑わっていたため、来週も似たパターンになりやすい時間帯です (経験則)。
+              </p>
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {nextWeekRecs.map((r, idx) => (
+                  <div
+                    key={`rec-${idx}`}
+                    className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-emerald-200/80">#{idx + 1}</span>
+                      <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-200">
+                        混雑度 {(r.avg_occupancy * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                    <p className="mt-3 text-sm font-semibold text-white">
+                      {r.day_label_ja}曜 {r.hour_label}
+                    </p>
+                    <p className="mt-1 text-[11px] text-white/50">
+                      女性比 {(r.avg_female_ratio * 100).toFixed(0)}%
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           <div className="mt-8">
             <WeeklyStoreCharts
