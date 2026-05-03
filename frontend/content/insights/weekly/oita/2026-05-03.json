@@ -1,0 +1,1812 @@
+{
+  "analysis_id": "weekly:oita:2026-05-03",
+  "type": "weekly",
+  "store": "oita",
+  "generated_at": "2026-05-03T00:51:01.696771+00:00",
+  "period": {
+    "start": "2026-04-24T16:35:08.911873+00:00",
+    "end": "2026-05-02T19:55:10.825664+00:00"
+  },
+  "params": {
+    "threshold": 0.4,
+    "min_duration_minutes": 60,
+    "ideal": 0.7,
+    "gender_weight": 1.5,
+    "occupancy_baseline": 79.04999999999995
+  },
+  "metrics": {
+    "points_used": 1000,
+    "baseline_p95_total": 79.04999999999995,
+    "reliability_score": 1.0
+  },
+  "metric_interpretations": {
+    "daily_avg_count": 111.1,
+    "volume_label": "\u5e73\u5e38",
+    "baseline_label": "\u5927\u578b\u5e97\u30ec\u30d9\u30eb",
+    "period_days": 9
+  },
+  "windows": [
+    {
+      "start": "2026-04-25T17:10:27.264576+00:00",
+      "end": "2026-04-25T18:30:18.034811+00:00",
+      "duration_minutes": 79.84617058333333,
+      "avg_score": 0.5252487262871737
+    },
+    {
+      "start": "2026-04-28T13:20:12.401925+00:00",
+      "end": "2026-04-28T15:00:51.863466+00:00",
+      "duration_minutes": 100.65769234999999,
+      "avg_score": 0.48879766960547694
+    },
+    {
+      "start": "2026-05-01T11:20:12.659793+00:00",
+      "end": "2026-05-01T12:30:16.864987+00:00",
+      "duration_minutes": 70.07008656666667,
+      "avg_score": 0.5005873317068766
+    }
+  ],
+  "top_windows": [
+    {
+      "start": "2026-04-25T17:10:27.264576+00:00",
+      "end": "2026-04-25T18:30:18.034811+00:00",
+      "duration_minutes": 79.84617058333333,
+      "avg_score": 0.5252487262871737
+    },
+    {
+      "start": "2026-05-01T11:20:12.659793+00:00",
+      "end": "2026-05-01T12:30:16.864987+00:00",
+      "duration_minutes": 70.07008656666667,
+      "avg_score": 0.5005873317068766
+    },
+    {
+      "start": "2026-04-28T13:20:12.401925+00:00",
+      "end": "2026-04-28T15:00:51.863466+00:00",
+      "duration_minutes": 100.65769234999999,
+      "avg_score": 0.48879766960547694
+    }
+  ],
+  "series_compact": [
+    {
+      "t": "2026-04-24T16:35:08.911873+00:00",
+      "occupancy": 0.506,
+      "female_ratio": 0.575
+    },
+    {
+      "t": "2026-04-24T16:55:08.749370+00:00",
+      "occupancy": 0.4934,
+      "female_ratio": 0.5385
+    },
+    {
+      "t": "2026-04-24T17:15:13.094920+00:00",
+      "occupancy": 0.506,
+      "female_ratio": 0.575
+    },
+    {
+      "t": "2026-04-24T17:40:11.909358+00:00",
+      "occupancy": 0.4681,
+      "female_ratio": 0.5135
+    },
+    {
+      "t": "2026-04-24T18:00:46.705403+00:00",
+      "occupancy": 0.4934,
+      "female_ratio": 0.4872
+    },
+    {
+      "t": "2026-04-24T18:20:11.801367+00:00",
+      "occupancy": 0.4807,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-24T18:40:12.567966+00:00",
+      "occupancy": 0.3289,
+      "female_ratio": 0.5769
+    },
+    {
+      "t": "2026-04-24T19:03:07.357714+00:00",
+      "occupancy": 0.3036,
+      "female_ratio": 0.625
+    },
+    {
+      "t": "2026-04-24T19:20:10.878389+00:00",
+      "occupancy": 0.3036,
+      "female_ratio": 0.625
+    },
+    {
+      "t": "2026-04-24T19:45:15.335781+00:00",
+      "occupancy": 0.2404,
+      "female_ratio": 0.5263
+    },
+    {
+      "t": "2026-04-25T10:05:23.830129+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-25T10:25:08.038457+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.75
+    },
+    {
+      "t": "2026-04-25T10:45:11.798944+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.75
+    },
+    {
+      "t": "2026-04-25T11:05:24.804329+00:00",
+      "occupancy": 0.1392,
+      "female_ratio": 0.6364
+    },
+    {
+      "t": "2026-04-25T11:30:21.413836+00:00",
+      "occupancy": 0.2657,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-25T11:50:13.938980+00:00",
+      "occupancy": 0.3163,
+      "female_ratio": 0.72
+    },
+    {
+      "t": "2026-04-25T12:10:26.321537+00:00",
+      "occupancy": 0.3795,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-25T12:30:19.920596+00:00",
+      "occupancy": 0.4934,
+      "female_ratio": 0.641
+    },
+    {
+      "t": "2026-04-25T12:50:10.860408+00:00",
+      "occupancy": 0.5946,
+      "female_ratio": 0.5106
+    },
+    {
+      "t": "2026-04-25T13:10:25.100093+00:00",
+      "occupancy": 0.6578,
+      "female_ratio": 0.4038
+    },
+    {
+      "t": "2026-04-25T13:35:08.394050+00:00",
+      "occupancy": 0.6831,
+      "female_ratio": 0.5185
+    },
+    {
+      "t": "2026-04-25T13:55:08.561069+00:00",
+      "occupancy": 0.797,
+      "female_ratio": 0.4921
+    },
+    {
+      "t": "2026-04-25T14:15:12.079871+00:00",
+      "occupancy": 0.8982,
+      "female_ratio": 0.4648
+    },
+    {
+      "t": "2026-04-25T14:35:09.272502+00:00",
+      "occupancy": 1.0,
+      "female_ratio": 0.4494
+    },
+    {
+      "t": "2026-04-25T14:55:11.479327+00:00",
+      "occupancy": 1.0,
+      "female_ratio": 0.4762
+    },
+    {
+      "t": "2026-04-25T15:15:12.134046+00:00",
+      "occupancy": 0.9235,
+      "female_ratio": 0.4932
+    },
+    {
+      "t": "2026-04-25T15:40:11.166959+00:00",
+      "occupancy": 0.9994,
+      "female_ratio": 0.4557
+    },
+    {
+      "t": "2026-04-25T16:03:08.106690+00:00",
+      "occupancy": 0.9488,
+      "female_ratio": 0.4533
+    },
+    {
+      "t": "2026-04-25T16:20:11.269793+00:00",
+      "occupancy": 0.8982,
+      "female_ratio": 0.4225
+    },
+    {
+      "t": "2026-04-25T16:40:11.593337+00:00",
+      "occupancy": 0.759,
+      "female_ratio": 0.4333
+    },
+    {
+      "t": "2026-04-25T17:00:42.834724+00:00",
+      "occupancy": 0.5946,
+      "female_ratio": 0.4681
+    },
+    {
+      "t": "2026-04-25T17:25:08.712659+00:00",
+      "occupancy": 0.6072,
+      "female_ratio": 0.5625
+    },
+    {
+      "t": "2026-04-25T17:45:13.032988+00:00",
+      "occupancy": 0.6325,
+      "female_ratio": 0.54
+    },
+    {
+      "t": "2026-04-25T18:05:27.535646+00:00",
+      "occupancy": 0.6958,
+      "female_ratio": 0.5636
+    },
+    {
+      "t": "2026-04-25T18:25:08.782923+00:00",
+      "occupancy": 0.6072,
+      "female_ratio": 0.5417
+    },
+    {
+      "t": "2026-04-25T18:45:12.160467+00:00",
+      "occupancy": 0.4807,
+      "female_ratio": 0.5789
+    },
+    {
+      "t": "2026-04-25T19:05:29.440806+00:00",
+      "occupancy": 0.3669,
+      "female_ratio": 0.5172
+    },
+    {
+      "t": "2026-04-25T19:30:18.285586+00:00",
+      "occupancy": 0.2657,
+      "female_ratio": 0.619
+    },
+    {
+      "t": "2026-04-25T19:50:11.363383+00:00",
+      "occupancy": 0.291,
+      "female_ratio": 0.5217
+    },
+    {
+      "t": "2026-04-26T10:10:38.745887+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-26T10:30:17.505820+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-26T10:50:10.928058+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-26T11:15:12.307880+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.75
+    },
+    {
+      "t": "2026-04-26T11:35:08.803999+00:00",
+      "occupancy": 0.1265,
+      "female_ratio": 0.8
+    },
+    {
+      "t": "2026-04-26T11:55:08.750993+00:00",
+      "occupancy": 0.1518,
+      "female_ratio": 0.8333
+    },
+    {
+      "t": "2026-04-26T12:15:13.004781+00:00",
+      "occupancy": 0.1518,
+      "female_ratio": 0.8333
+    },
+    {
+      "t": "2026-04-26T12:35:08.144710+00:00",
+      "occupancy": 0.2151,
+      "female_ratio": 0.8824
+    },
+    {
+      "t": "2026-04-26T12:55:08.564627+00:00",
+      "occupancy": 0.1898,
+      "female_ratio": 0.8667
+    },
+    {
+      "t": "2026-04-26T13:20:11.685210+00:00",
+      "occupancy": 0.2277,
+      "female_ratio": 0.6111
+    },
+    {
+      "t": "2026-04-26T13:40:14.021981+00:00",
+      "occupancy": 0.2024,
+      "female_ratio": 0.6875
+    },
+    {
+      "t": "2026-04-26T14:00:39.761842+00:00",
+      "occupancy": 0.1392,
+      "female_ratio": 0.5455
+    },
+    {
+      "t": "2026-04-26T14:20:11.718214+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-26T14:40:13.503839+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-26T15:05:30.737335+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-26T15:25:09.043882+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-26T15:45:13.217765+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.75
+    },
+    {
+      "t": "2026-04-26T16:05:25.714913+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-26T16:25:09.402086+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-26T16:45:11.456155+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-26T17:10:30.050968+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-26T17:30:17.913413+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-26T17:50:11.116830+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-26T18:10:27.104892+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-26T18:30:19.549288+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-26T18:55:08.462982+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-26T19:15:12.513454+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-26T19:35:11.784427+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-26T19:55:08.699164+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-27T10:15:12.555624+00:00",
+      "occupancy": 0.0253,
+      "female_ratio": 1.0
+    },
+    {
+      "t": "2026-04-27T10:35:08.762629+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-27T11:00:41.320381+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-27T11:20:11.192600+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-27T11:40:11.200760+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-27T12:00:46.516431+00:00",
+      "occupancy": 0.0886,
+      "female_ratio": 0.5714
+    },
+    {
+      "t": "2026-04-27T12:20:12.992309+00:00",
+      "occupancy": 0.1139,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-27T12:40:13.029869+00:00",
+      "occupancy": 0.1518,
+      "female_ratio": 0.5833
+    },
+    {
+      "t": "2026-04-27T13:05:27.878415+00:00",
+      "occupancy": 0.1771,
+      "female_ratio": 0.6429
+    },
+    {
+      "t": "2026-04-27T13:25:08.535899+00:00",
+      "occupancy": 0.1898,
+      "female_ratio": 0.6
+    },
+    {
+      "t": "2026-04-27T13:45:13.907597+00:00",
+      "occupancy": 0.2024,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-27T14:05:26.331643+00:00",
+      "occupancy": 0.2404,
+      "female_ratio": 0.4211
+    },
+    {
+      "t": "2026-04-27T14:25:12.659817+00:00",
+      "occupancy": 0.2657,
+      "female_ratio": 0.5238
+    },
+    {
+      "t": "2026-04-27T14:50:13.268165+00:00",
+      "occupancy": 0.2277,
+      "female_ratio": 0.6111
+    },
+    {
+      "t": "2026-04-27T15:10:28.024889+00:00",
+      "occupancy": 0.1645,
+      "female_ratio": 0.6923
+    },
+    {
+      "t": "2026-04-27T15:30:20.383411+00:00",
+      "occupancy": 0.1645,
+      "female_ratio": 0.4615
+    },
+    {
+      "t": "2026-04-27T15:50:15.521398+00:00",
+      "occupancy": 0.1771,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-27T16:10:28.570353+00:00",
+      "occupancy": 0.1771,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-27T16:30:20.413502+00:00",
+      "occupancy": 0.1898,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-27T16:55:10.008357+00:00",
+      "occupancy": 0.2277,
+      "female_ratio": 0.4444
+    },
+    {
+      "t": "2026-04-27T17:15:15.822481+00:00",
+      "occupancy": 0.2277,
+      "female_ratio": 0.4444
+    },
+    {
+      "t": "2026-04-27T17:35:12.093137+00:00",
+      "occupancy": 0.1771,
+      "female_ratio": 0.5714
+    },
+    {
+      "t": "2026-04-27T17:55:09.269593+00:00",
+      "occupancy": 0.1392,
+      "female_ratio": 0.6364
+    },
+    {
+      "t": "2026-04-27T18:15:12.371836+00:00",
+      "occupancy": 0.1392,
+      "female_ratio": 0.6364
+    },
+    {
+      "t": "2026-04-27T18:40:11.328892+00:00",
+      "occupancy": 0.1139,
+      "female_ratio": 0.7778
+    },
+    {
+      "t": "2026-04-27T19:03:01.626578+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.75
+    },
+    {
+      "t": "2026-04-27T19:20:12.337095+00:00",
+      "occupancy": 0.1139,
+      "female_ratio": 0.4444
+    },
+    {
+      "t": "2026-04-27T19:40:12.228251+00:00",
+      "occupancy": 0.0886,
+      "female_ratio": 0.2857
+    },
+    {
+      "t": "2026-04-28T10:03:13.308740+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-28T10:20:12.644505+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-28T10:45:12.550054+00:00",
+      "occupancy": 0.0886,
+      "female_ratio": 0.5714
+    },
+    {
+      "t": "2026-04-28T11:05:32.391693+00:00",
+      "occupancy": 0.0886,
+      "female_ratio": 0.5714
+    },
+    {
+      "t": "2026-04-28T11:25:08.886435+00:00",
+      "occupancy": 0.0886,
+      "female_ratio": 0.5714
+    },
+    {
+      "t": "2026-04-28T11:45:14.139090+00:00",
+      "occupancy": 0.1139,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-28T12:05:28.305811+00:00",
+      "occupancy": 0.2024,
+      "female_ratio": 0.6875
+    },
+    {
+      "t": "2026-04-28T12:30:21.659120+00:00",
+      "occupancy": 0.4301,
+      "female_ratio": 0.5882
+    },
+    {
+      "t": "2026-04-28T12:50:11.516448+00:00",
+      "occupancy": 0.4428,
+      "female_ratio": 0.5714
+    },
+    {
+      "t": "2026-04-28T13:10:30.178868+00:00",
+      "occupancy": 0.4428,
+      "female_ratio": 0.5714
+    },
+    {
+      "t": "2026-04-28T13:30:21.220952+00:00",
+      "occupancy": 0.4934,
+      "female_ratio": 0.6154
+    },
+    {
+      "t": "2026-04-28T13:50:12.261152+00:00",
+      "occupancy": 0.4428,
+      "female_ratio": 0.6286
+    },
+    {
+      "t": "2026-04-28T14:10:29.472925+00:00",
+      "occupancy": 0.6452,
+      "female_ratio": 0.549
+    },
+    {
+      "t": "2026-04-28T14:35:12.387028+00:00",
+      "occupancy": 0.5693,
+      "female_ratio": 0.6222
+    },
+    {
+      "t": "2026-04-28T14:55:09.201080+00:00",
+      "occupancy": 0.5187,
+      "female_ratio": 0.5854
+    },
+    {
+      "t": "2026-04-28T15:15:19.917223+00:00",
+      "occupancy": 0.5187,
+      "female_ratio": 0.4634
+    },
+    {
+      "t": "2026-04-28T15:35:09.058007+00:00",
+      "occupancy": 0.5693,
+      "female_ratio": 0.4667
+    },
+    {
+      "t": "2026-04-28T15:55:12.672538+00:00",
+      "occupancy": 0.4934,
+      "female_ratio": 0.5128
+    },
+    {
+      "t": "2026-04-28T16:20:14.447261+00:00",
+      "occupancy": 0.4681,
+      "female_ratio": 0.5405
+    },
+    {
+      "t": "2026-04-28T16:40:15.152396+00:00",
+      "occupancy": 0.4681,
+      "female_ratio": 0.5135
+    },
+    {
+      "t": "2026-04-28T17:00:45.088671+00:00",
+      "occupancy": 0.4934,
+      "female_ratio": 0.4872
+    },
+    {
+      "t": "2026-04-28T17:20:12.033019+00:00",
+      "occupancy": 0.3289,
+      "female_ratio": 0.5769
+    },
+    {
+      "t": "2026-04-28T17:40:12.977299+00:00",
+      "occupancy": 0.2657,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-28T18:00:53.247642+00:00",
+      "occupancy": 0.2783,
+      "female_ratio": 0.4545
+    },
+    {
+      "t": "2026-04-28T18:25:08.219671+00:00",
+      "occupancy": 0.3163,
+      "female_ratio": 0.52
+    },
+    {
+      "t": "2026-04-28T18:45:14.349882+00:00",
+      "occupancy": 0.2657,
+      "female_ratio": 0.4762
+    },
+    {
+      "t": "2026-04-28T19:05:28.900189+00:00",
+      "occupancy": 0.2404,
+      "female_ratio": 0.4211
+    },
+    {
+      "t": "2026-04-28T19:25:12.599377+00:00",
+      "occupancy": 0.1645,
+      "female_ratio": 0.4615
+    },
+    {
+      "t": "2026-04-28T19:45:14.301858+00:00",
+      "occupancy": 0.1898,
+      "female_ratio": 0.5333
+    },
+    {
+      "t": "2026-04-29T10:05:26.624333+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-29T10:30:19.780907+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-29T10:50:11.908549+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-29T11:10:26.975623+00:00",
+      "occupancy": 0.1265,
+      "female_ratio": 0.6
+    },
+    {
+      "t": "2026-04-29T11:30:22.692284+00:00",
+      "occupancy": 0.1518,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-29T11:50:11.935918+00:00",
+      "occupancy": 0.2277,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-29T12:15:13.550244+00:00",
+      "occupancy": 0.2277,
+      "female_ratio": 0.5556
+    },
+    {
+      "t": "2026-04-29T12:35:09.383314+00:00",
+      "occupancy": 0.2657,
+      "female_ratio": 0.4762
+    },
+    {
+      "t": "2026-04-29T12:55:09.076216+00:00",
+      "occupancy": 0.2657,
+      "female_ratio": 0.4762
+    },
+    {
+      "t": "2026-04-29T13:15:11.545261+00:00",
+      "occupancy": 0.2151,
+      "female_ratio": 0.4706
+    },
+    {
+      "t": "2026-04-29T13:35:08.183454+00:00",
+      "occupancy": 0.2151,
+      "female_ratio": 0.3529
+    },
+    {
+      "t": "2026-04-29T13:55:07.446378+00:00",
+      "occupancy": 0.1771,
+      "female_ratio": 0.4286
+    },
+    {
+      "t": "2026-04-29T14:20:10.285717+00:00",
+      "occupancy": 0.1518,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-29T14:40:11.045282+00:00",
+      "occupancy": 0.1518,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-29T15:00:42.685074+00:00",
+      "occupancy": 0.2277,
+      "female_ratio": 0.4444
+    },
+    {
+      "t": "2026-04-29T15:20:10.332849+00:00",
+      "occupancy": 0.2783,
+      "female_ratio": 0.3636
+    },
+    {
+      "t": "2026-04-29T15:40:09.974047+00:00",
+      "occupancy": 0.1898,
+      "female_ratio": 0.4
+    },
+    {
+      "t": "2026-04-29T16:05:27.664656+00:00",
+      "occupancy": 0.253,
+      "female_ratio": 0.55
+    },
+    {
+      "t": "2026-04-29T16:25:08.508935+00:00",
+      "occupancy": 0.2277,
+      "female_ratio": 0.6111
+    },
+    {
+      "t": "2026-04-29T16:45:17.119044+00:00",
+      "occupancy": 0.253,
+      "female_ratio": 0.65
+    },
+    {
+      "t": "2026-04-29T17:05:28.390603+00:00",
+      "occupancy": 0.2151,
+      "female_ratio": 0.7647
+    },
+    {
+      "t": "2026-04-29T17:25:15.585928+00:00",
+      "occupancy": 0.1898,
+      "female_ratio": 0.6
+    },
+    {
+      "t": "2026-04-29T17:45:11.094377+00:00",
+      "occupancy": 0.2151,
+      "female_ratio": 0.5294
+    },
+    {
+      "t": "2026-04-29T18:10:32.809859+00:00",
+      "occupancy": 0.2404,
+      "female_ratio": 0.5263
+    },
+    {
+      "t": "2026-04-29T18:30:17.248903+00:00",
+      "occupancy": 0.2404,
+      "female_ratio": 0.5263
+    },
+    {
+      "t": "2026-04-29T18:50:16.741245+00:00",
+      "occupancy": 0.1898,
+      "female_ratio": 0.6
+    },
+    {
+      "t": "2026-04-29T19:10:28.426011+00:00",
+      "occupancy": 0.1771,
+      "female_ratio": 0.4286
+    },
+    {
+      "t": "2026-04-29T19:30:17.281515+00:00",
+      "occupancy": 0.2151,
+      "female_ratio": 0.5294
+    },
+    {
+      "t": "2026-04-29T19:55:08.187898+00:00",
+      "occupancy": 0.1898,
+      "female_ratio": 0.6
+    },
+    {
+      "t": "2026-04-30T10:15:11.713743+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T10:35:06.821731+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T10:55:08.287624+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T11:15:10.765061+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T11:35:08.708533+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T12:00:43.315918+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T12:20:10.825280+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T12:40:13.517508+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-30T13:03:09.643759+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-30T13:20:13.152793+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-30T13:45:13.708659+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T14:05:26.063179+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T14:25:08.463186+00:00",
+      "occupancy": 0.1139,
+      "female_ratio": 0.5556
+    },
+    {
+      "t": "2026-04-30T14:45:10.877527+00:00",
+      "occupancy": 0.1392,
+      "female_ratio": 0.6364
+    },
+    {
+      "t": "2026-04-30T15:05:27.845491+00:00",
+      "occupancy": 0.1392,
+      "female_ratio": 0.6364
+    },
+    {
+      "t": "2026-04-30T15:25:07.756875+00:00",
+      "occupancy": 0.1392,
+      "female_ratio": 0.6364
+    },
+    {
+      "t": "2026-04-30T15:50:10.338058+00:00",
+      "occupancy": 0.1518,
+      "female_ratio": 0.4167
+    },
+    {
+      "t": "2026-04-30T16:10:26.375736+00:00",
+      "occupancy": 0.1392,
+      "female_ratio": 0.4545
+    },
+    {
+      "t": "2026-04-30T16:30:16.272954+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T16:50:10.514526+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T17:10:29.841652+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T17:30:15.880024+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T17:55:07.542746+00:00",
+      "occupancy": 0.1139,
+      "female_ratio": 0.4444
+    },
+    {
+      "t": "2026-04-30T18:15:10.594210+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-30T18:35:07.139484+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-04-30T18:55:06.936395+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T19:15:10.371906+00:00",
+      "occupancy": 0.0506,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-04-30T19:40:13.265782+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-05-01T10:03:10.221447+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.75
+    },
+    {
+      "t": "2026-05-01T10:20:14.257251+00:00",
+      "occupancy": 0.1265,
+      "female_ratio": 0.8
+    },
+    {
+      "t": "2026-05-01T10:40:09.434682+00:00",
+      "occupancy": 0.2151,
+      "female_ratio": 0.8824
+    },
+    {
+      "t": "2026-05-01T11:00:39.886321+00:00",
+      "occupancy": 0.291,
+      "female_ratio": 0.7391
+    },
+    {
+      "t": "2026-05-01T11:20:12.659793+00:00",
+      "occupancy": 0.4807,
+      "female_ratio": 0.5789
+    },
+    {
+      "t": "2026-05-01T11:45:09.869956+00:00",
+      "occupancy": 0.5566,
+      "female_ratio": 0.5909
+    },
+    {
+      "t": "2026-05-01T12:05:27.066495+00:00",
+      "occupancy": 0.544,
+      "female_ratio": 0.6512
+    },
+    {
+      "t": "2026-05-01T12:25:07.745782+00:00",
+      "occupancy": 0.6578,
+      "female_ratio": 0.5385
+    },
+    {
+      "t": "2026-05-01T12:45:11.198565+00:00",
+      "occupancy": 0.7717,
+      "female_ratio": 0.459
+    },
+    {
+      "t": "2026-05-01T13:05:22.738870+00:00",
+      "occupancy": 0.8223,
+      "female_ratio": 0.4615
+    },
+    {
+      "t": "2026-05-01T13:30:15.496932+00:00",
+      "occupancy": 0.8476,
+      "female_ratio": 0.4776
+    },
+    {
+      "t": "2026-05-01T13:50:09.869867+00:00",
+      "occupancy": 0.8855,
+      "female_ratio": 0.5286
+    },
+    {
+      "t": "2026-05-01T14:10:24.496578+00:00",
+      "occupancy": 0.8982,
+      "female_ratio": 0.5493
+    },
+    {
+      "t": "2026-05-01T14:30:15.482443+00:00",
+      "occupancy": 0.9741,
+      "female_ratio": 0.5584
+    },
+    {
+      "t": "2026-05-01T14:50:12.897804+00:00",
+      "occupancy": 0.8223,
+      "female_ratio": 0.5231
+    },
+    {
+      "t": "2026-05-01T15:10:28.202532+00:00",
+      "occupancy": 0.9488,
+      "female_ratio": 0.4267
+    },
+    {
+      "t": "2026-05-01T15:35:07.578643+00:00",
+      "occupancy": 0.9235,
+      "female_ratio": 0.411
+    },
+    {
+      "t": "2026-05-01T16:03:11.579982+00:00",
+      "occupancy": 0.8982,
+      "female_ratio": 0.3803
+    },
+    {
+      "t": "2026-05-01T16:20:10.254947+00:00",
+      "occupancy": 0.7337,
+      "female_ratio": 0.431
+    },
+    {
+      "t": "2026-05-01T16:40:09.508720+00:00",
+      "occupancy": 0.6452,
+      "female_ratio": 0.3529
+    },
+    {
+      "t": "2026-05-01T17:00:41.941088+00:00",
+      "occupancy": 0.6199,
+      "female_ratio": 0.3469
+    },
+    {
+      "t": "2026-05-01T17:25:11.032640+00:00",
+      "occupancy": 0.5313,
+      "female_ratio": 0.3571
+    },
+    {
+      "t": "2026-05-01T17:45:10.444202+00:00",
+      "occupancy": 0.3922,
+      "female_ratio": 0.4194
+    },
+    {
+      "t": "2026-05-01T18:05:28.077711+00:00",
+      "occupancy": 0.3036,
+      "female_ratio": 0.3333
+    },
+    {
+      "t": "2026-05-01T18:25:10.027654+00:00",
+      "occupancy": 0.2151,
+      "female_ratio": 0.3529
+    },
+    {
+      "t": "2026-05-01T18:45:10.326459+00:00",
+      "occupancy": 0.2151,
+      "female_ratio": 0.3529
+    },
+    {
+      "t": "2026-05-01T19:05:24.214906+00:00",
+      "occupancy": 0.2151,
+      "female_ratio": 0.3529
+    },
+    {
+      "t": "2026-05-01T19:30:14.637868+00:00",
+      "occupancy": 0.1771,
+      "female_ratio": 0.4286
+    },
+    {
+      "t": "2026-05-01T19:50:14.402884+00:00",
+      "occupancy": 0.1392,
+      "female_ratio": 0.5455
+    },
+    {
+      "t": "2026-05-02T10:10:24.769164+00:00",
+      "occupancy": 0.0759,
+      "female_ratio": 0.6667
+    },
+    {
+      "t": "2026-05-02T10:30:14.840430+00:00",
+      "occupancy": 0.0886,
+      "female_ratio": 0.5714
+    },
+    {
+      "t": "2026-05-02T10:50:08.689914+00:00",
+      "occupancy": 0.1012,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-05-02T11:15:09.779629+00:00",
+      "occupancy": 0.1645,
+      "female_ratio": 0.4615
+    },
+    {
+      "t": "2026-05-02T11:35:07.826567+00:00",
+      "occupancy": 0.2151,
+      "female_ratio": 0.5882
+    },
+    {
+      "t": "2026-05-02T11:55:07.697327+00:00",
+      "occupancy": 0.2151,
+      "female_ratio": 0.5882
+    },
+    {
+      "t": "2026-05-02T12:15:11.366928+00:00",
+      "occupancy": 0.3289,
+      "female_ratio": 0.6154
+    },
+    {
+      "t": "2026-05-02T12:35:07.509299+00:00",
+      "occupancy": 0.5819,
+      "female_ratio": 0.6304
+    },
+    {
+      "t": "2026-05-02T12:55:10.295003+00:00",
+      "occupancy": 0.7464,
+      "female_ratio": 0.4915
+    },
+    {
+      "t": "2026-05-02T13:20:10.140418+00:00",
+      "occupancy": 0.8855,
+      "female_ratio": 0.4571
+    },
+    {
+      "t": "2026-05-02T13:40:09.441196+00:00",
+      "occupancy": 1.0,
+      "female_ratio": 0.4737
+    },
+    {
+      "t": "2026-05-02T14:00:34.638179+00:00",
+      "occupancy": 1.0,
+      "female_ratio": 0.449
+    },
+    {
+      "t": "2026-05-02T14:20:09.919755+00:00",
+      "occupancy": 1.0,
+      "female_ratio": 0.5055
+    },
+    {
+      "t": "2026-05-02T14:40:09.610059+00:00",
+      "occupancy": 1.0,
+      "female_ratio": 0.5055
+    },
+    {
+      "t": "2026-05-02T15:00:40.844388+00:00",
+      "occupancy": 1.0,
+      "female_ratio": 0.4706
+    },
+    {
+      "t": "2026-05-02T15:25:07.420478+00:00",
+      "occupancy": 1.0,
+      "female_ratio": 0.4947
+    },
+    {
+      "t": "2026-05-02T15:45:09.746680+00:00",
+      "occupancy": 1.0,
+      "female_ratio": 0.5402
+    },
+    {
+      "t": "2026-05-02T16:05:27.243072+00:00",
+      "occupancy": 1.0,
+      "female_ratio": 0.4875
+    },
+    {
+      "t": "2026-05-02T16:25:07.356597+00:00",
+      "occupancy": 1.0,
+      "female_ratio": 0.4568
+    },
+    {
+      "t": "2026-05-02T16:45:12.884895+00:00",
+      "occupancy": 1.0,
+      "female_ratio": 0.4483
+    },
+    {
+      "t": "2026-05-02T17:10:28.255747+00:00",
+      "occupancy": 0.9614,
+      "female_ratio": 0.4868
+    },
+    {
+      "t": "2026-05-02T17:30:17.342065+00:00",
+      "occupancy": 0.8855,
+      "female_ratio": 0.4857
+    },
+    {
+      "t": "2026-05-02T17:50:09.150282+00:00",
+      "occupancy": 0.7084,
+      "female_ratio": 0.4821
+    },
+    {
+      "t": "2026-05-02T18:10:34.070143+00:00",
+      "occupancy": 0.6958,
+      "female_ratio": 0.4182
+    },
+    {
+      "t": "2026-05-02T18:30:16.096772+00:00",
+      "occupancy": 0.5946,
+      "female_ratio": 0.4894
+    },
+    {
+      "t": "2026-05-02T18:50:11.900146+00:00",
+      "occupancy": 0.4681,
+      "female_ratio": 0.4595
+    },
+    {
+      "t": "2026-05-02T19:15:10.328271+00:00",
+      "occupancy": 0.3922,
+      "female_ratio": 0.5484
+    },
+    {
+      "t": "2026-05-02T19:35:08.058039+00:00",
+      "occupancy": 0.3795,
+      "female_ratio": 0.5
+    },
+    {
+      "t": "2026-05-02T19:55:10.825664+00:00",
+      "occupancy": 0.3542,
+      "female_ratio": 0.5357
+    }
+  ],
+  "day_hour_heatmap": {
+    "cells": [
+      {
+        "day": 0,
+        "hour": 19,
+        "avg_occupancy": 0.0422,
+        "avg_female_ratio": 0.7778,
+        "sample_count": 12
+      },
+      {
+        "day": 0,
+        "hour": 20,
+        "avg_occupancy": 0.059,
+        "avg_female_ratio": 0.5556,
+        "sample_count": 12
+      },
+      {
+        "day": 0,
+        "hour": 21,
+        "avg_occupancy": 0.1276,
+        "avg_female_ratio": 0.6304,
+        "sample_count": 12
+      },
+      {
+        "day": 0,
+        "hour": 22,
+        "avg_occupancy": 0.1908,
+        "avg_female_ratio": 0.5868,
+        "sample_count": 12
+      },
+      {
+        "day": 0,
+        "hour": 23,
+        "avg_occupancy": 0.2551,
+        "avg_female_ratio": 0.5212,
+        "sample_count": 12
+      },
+      {
+        "day": 0,
+        "hour": 0,
+        "avg_occupancy": 0.0822,
+        "avg_female_ratio": 0.6875,
+        "sample_count": 12
+      },
+      {
+        "day": 0,
+        "hour": 1,
+        "avg_occupancy": 0.0886,
+        "avg_female_ratio": 0.5833,
+        "sample_count": 12
+      },
+      {
+        "day": 0,
+        "hour": 2,
+        "avg_occupancy": 0.059,
+        "avg_female_ratio": 0.5556,
+        "sample_count": 12
+      },
+      {
+        "day": 0,
+        "hour": 3,
+        "avg_occupancy": 0.0506,
+        "avg_female_ratio": 0.5,
+        "sample_count": 12
+      },
+      {
+        "day": 0,
+        "hour": 4,
+        "avg_occupancy": 0.0675,
+        "avg_female_ratio": 0.6111,
+        "sample_count": 12
+      },
+      {
+        "day": 1,
+        "hour": 19,
+        "avg_occupancy": 0.0685,
+        "avg_female_ratio": 0.5131,
+        "sample_count": 12
+      },
+      {
+        "day": 1,
+        "hour": 20,
+        "avg_occupancy": 0.097,
+        "avg_female_ratio": 0.6003,
+        "sample_count": 12
+      },
+      {
+        "day": 1,
+        "hour": 21,
+        "avg_occupancy": 0.3605,
+        "avg_female_ratio": 0.5936,
+        "sample_count": 12
+      },
+      {
+        "day": 1,
+        "hour": 22,
+        "avg_occupancy": 0.4723,
+        "avg_female_ratio": 0.5943,
+        "sample_count": 12
+      },
+      {
+        "day": 1,
+        "hour": 23,
+        "avg_occupancy": 0.6156,
+        "avg_female_ratio": 0.5592,
+        "sample_count": 12
+      },
+      {
+        "day": 1,
+        "hour": 0,
+        "avg_occupancy": 0.1718,
+        "avg_female_ratio": 0.5789,
+        "sample_count": 12
+      },
+      {
+        "day": 1,
+        "hour": 1,
+        "avg_occupancy": 0.1908,
+        "avg_female_ratio": 0.5477,
+        "sample_count": 12
+      },
+      {
+        "day": 1,
+        "hour": 2,
+        "avg_occupancy": 0.1898,
+        "avg_female_ratio": 0.5296,
+        "sample_count": 12
+      },
+      {
+        "day": 1,
+        "hour": 3,
+        "avg_occupancy": 0.1254,
+        "avg_female_ratio": 0.6883,
+        "sample_count": 12
+      },
+      {
+        "day": 1,
+        "hour": 4,
+        "avg_occupancy": 0.1033,
+        "avg_female_ratio": 0.4425,
+        "sample_count": 12
+      },
+      {
+        "day": 2,
+        "hour": 19,
+        "avg_occupancy": 0.0928,
+        "avg_female_ratio": 0.5778,
+        "sample_count": 12
+      },
+      {
+        "day": 2,
+        "hour": 20,
+        "avg_occupancy": 0.175,
+        "avg_female_ratio": 0.6465,
+        "sample_count": 12
+      },
+      {
+        "day": 2,
+        "hour": 21,
+        "avg_occupancy": 0.2541,
+        "avg_female_ratio": 0.5259,
+        "sample_count": 12
+      },
+      {
+        "day": 2,
+        "hour": 22,
+        "avg_occupancy": 0.2119,
+        "avg_female_ratio": 0.4157,
+        "sample_count": 12
+      },
+      {
+        "day": 2,
+        "hour": 23,
+        "avg_occupancy": 0.1623,
+        "avg_female_ratio": 0.5981,
+        "sample_count": 12
+      },
+      {
+        "day": 2,
+        "hour": 0,
+        "avg_occupancy": 0.5239,
+        "avg_female_ratio": 0.4862,
+        "sample_count": 12
+      },
+      {
+        "day": 2,
+        "hour": 1,
+        "avg_occupancy": 0.4628,
+        "avg_female_ratio": 0.5124,
+        "sample_count": 12
+      },
+      {
+        "day": 2,
+        "hour": 2,
+        "avg_occupancy": 0.3447,
+        "avg_female_ratio": 0.5771,
+        "sample_count": 12
+      },
+      {
+        "day": 2,
+        "hour": 3,
+        "avg_occupancy": 0.2846,
+        "avg_female_ratio": 0.4816,
+        "sample_count": 12
+      },
+      {
+        "day": 2,
+        "hour": 4,
+        "avg_occupancy": 0.1961,
+        "avg_female_ratio": 0.4873,
+        "sample_count": 12
+      },
+      {
+        "day": 3,
+        "hour": 19,
+        "avg_occupancy": 0.0738,
+        "avg_female_ratio": 0.5167,
+        "sample_count": 12
+      },
+      {
+        "day": 3,
+        "hour": 20,
+        "avg_occupancy": 0.077,
+        "avg_female_ratio": 0.5056,
+        "sample_count": 12
+      },
+      {
+        "day": 3,
+        "hour": 21,
+        "avg_occupancy": 0.0907,
+        "avg_female_ratio": 0.5694,
+        "sample_count": 12
+      },
+      {
+        "day": 3,
+        "hour": 22,
+        "avg_occupancy": 0.0654,
+        "avg_female_ratio": 0.5972,
+        "sample_count": 12
+      },
+      {
+        "day": 3,
+        "hour": 23,
+        "avg_occupancy": 0.098,
+        "avg_female_ratio": 0.5526,
+        "sample_count": 12
+      },
+      {
+        "day": 3,
+        "hour": 0,
+        "avg_occupancy": 0.2372,
+        "avg_female_ratio": 0.4161,
+        "sample_count": 12
+      },
+      {
+        "day": 3,
+        "hour": 1,
+        "avg_occupancy": 0.2404,
+        "avg_female_ratio": 0.6056,
+        "sample_count": 12
+      },
+      {
+        "day": 3,
+        "hour": 2,
+        "avg_occupancy": 0.2108,
+        "avg_female_ratio": 0.6276,
+        "sample_count": 12
+      },
+      {
+        "day": 3,
+        "hour": 3,
+        "avg_occupancy": 0.2319,
+        "avg_female_ratio": 0.5396,
+        "sample_count": 12
+      },
+      {
+        "day": 3,
+        "hour": 4,
+        "avg_occupancy": 0.1929,
+        "avg_female_ratio": 0.5065,
+        "sample_count": 12
+      },
+      {
+        "day": 4,
+        "hour": 19,
+        "avg_occupancy": 0.1676,
+        "avg_female_ratio": 0.8184,
+        "sample_count": 12
+      },
+      {
+        "day": 4,
+        "hour": 20,
+        "avg_occupancy": 0.4617,
+        "avg_female_ratio": 0.606,
+        "sample_count": 12
+      },
+      {
+        "day": 4,
+        "hour": 21,
+        "avg_occupancy": 0.681,
+        "avg_female_ratio": 0.5331,
+        "sample_count": 12
+      },
+      {
+        "day": 4,
+        "hour": 22,
+        "avg_occupancy": 0.8592,
+        "avg_female_ratio": 0.486,
+        "sample_count": 12
+      },
+      {
+        "day": 4,
+        "hour": 23,
+        "avg_occupancy": 0.9003,
+        "avg_female_ratio": 0.5462,
+        "sample_count": 12
+      },
+      {
+        "day": 4,
+        "hour": 0,
+        "avg_occupancy": 0.1434,
+        "avg_female_ratio": 0.5631,
+        "sample_count": 12
+      },
+      {
+        "day": 4,
+        "hour": 1,
+        "avg_occupancy": 0.1023,
+        "avg_female_ratio": 0.5055,
+        "sample_count": 12
+      },
+      {
+        "day": 4,
+        "hour": 2,
+        "avg_occupancy": 0.0611,
+        "avg_female_ratio": 0.4907,
+        "sample_count": 12
+      },
+      {
+        "day": 4,
+        "hour": 3,
+        "avg_occupancy": 0.0812,
+        "avg_female_ratio": 0.5833,
+        "sample_count": 12
+      },
+      {
+        "day": 4,
+        "hour": 4,
+        "avg_occupancy": 0.0675,
+        "avg_female_ratio": 0.6111,
+        "sample_count": 12
+      },
+      {
+        "day": 5,
+        "hour": 19,
+        "avg_occupancy": 0.0854,
+        "avg_female_ratio": 0.6102,
+        "sample_count": 24
+      },
+      {
+        "day": 5,
+        "hour": 20,
+        "avg_occupancy": 0.2114,
+        "avg_female_ratio": 0.6233,
+        "sample_count": 24
+      },
+      {
+        "day": 5,
+        "hour": 21,
+        "avg_occupancy": 0.4891,
+        "avg_female_ratio": 0.5886,
+        "sample_count": 24
+      },
+      {
+        "day": 5,
+        "hour": 22,
+        "avg_occupancy": 0.7976,
+        "avg_female_ratio": 0.4889,
+        "sample_count": 24
+      },
+      {
+        "day": 5,
+        "hour": 23,
+        "avg_occupancy": 0.9703,
+        "avg_female_ratio": 0.4814,
+        "sample_count": 24
+      },
+      {
+        "day": 5,
+        "hour": 0,
+        "avg_occupancy": 0.9108,
+        "avg_female_ratio": 0.4304,
+        "sample_count": 11
+      },
+      {
+        "day": 5,
+        "hour": 1,
+        "avg_occupancy": 0.6623,
+        "avg_female_ratio": 0.4286,
+        "sample_count": 17
+      },
+      {
+        "day": 5,
+        "hour": 2,
+        "avg_occupancy": 0.4844,
+        "avg_female_ratio": 0.4635,
+        "sample_count": 24
+      },
+      {
+        "day": 5,
+        "hour": 3,
+        "avg_occupancy": 0.321,
+        "avg_female_ratio": 0.4444,
+        "sample_count": 24
+      },
+      {
+        "day": 5,
+        "hour": 4,
+        "avg_occupancy": 0.224,
+        "avg_female_ratio": 0.5052,
+        "sample_count": 24
+      },
+      {
+        "day": 6,
+        "hour": 19,
+        "avg_occupancy": 0.0717,
+        "avg_female_ratio": 0.6319,
+        "sample_count": 12
+      },
+      {
+        "day": 6,
+        "hour": 20,
+        "avg_occupancy": 0.116,
+        "avg_female_ratio": 0.7764,
+        "sample_count": 12
+      },
+      {
+        "day": 6,
+        "hour": 21,
+        "avg_occupancy": 0.1803,
+        "avg_female_ratio": 0.8564,
+        "sample_count": 12
+      },
+      {
+        "day": 6,
+        "hour": 22,
+        "avg_occupancy": 0.1971,
+        "avg_female_ratio": 0.6572,
+        "sample_count": 12
+      },
+      {
+        "day": 6,
+        "hour": 23,
+        "avg_occupancy": 0.0738,
+        "avg_female_ratio": 0.5631,
+        "sample_count": 12
+      },
+      {
+        "day": 6,
+        "hour": 0,
+        "avg_occupancy": 0.984,
+        "avg_female_ratio": 0.4807,
+        "sample_count": 24
+      },
+      {
+        "day": 6,
+        "hour": 1,
+        "avg_occupancy": 0.9132,
+        "avg_female_ratio": 0.4542,
+        "sample_count": 24
+      },
+      {
+        "day": 6,
+        "hour": 2,
+        "avg_occupancy": 0.7453,
+        "avg_female_ratio": 0.5088,
+        "sample_count": 24
+      },
+      {
+        "day": 6,
+        "hour": 3,
+        "avg_occupancy": 0.5951,
+        "avg_female_ratio": 0.4942,
+        "sample_count": 24
+      },
+      {
+        "day": 6,
+        "hour": 4,
+        "avg_occupancy": 0.351,
+        "avg_female_ratio": 0.5469,
+        "sample_count": 24
+      }
+    ],
+    "hour_range": [
+      19,
+      20,
+      21,
+      22,
+      23,
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "day_labels_ja": [
+      "\u6708",
+      "\u706b",
+      "\u6c34",
+      "\u6728",
+      "\u91d1",
+      "\u571f",
+      "\u65e5"
+    ],
+    "max_avg_occupancy": 0.984
+  },
+  "next_week_recommendations": [
+    {
+      "day": 6,
+      "day_label_ja": "\u65e5",
+      "hour": 0,
+      "hour_label": "00:00-01:00",
+      "avg_occupancy": 0.984,
+      "avg_female_ratio": 0.4807
+    },
+    {
+      "day": 5,
+      "day_label_ja": "\u571f",
+      "hour": 23,
+      "hour_label": "23:00-00:00",
+      "avg_occupancy": 0.9703,
+      "avg_female_ratio": 0.4814
+    },
+    {
+      "day": 6,
+      "day_label_ja": "\u65e5",
+      "hour": 1,
+      "hour_label": "01:00-02:00",
+      "avg_occupancy": 0.9132,
+      "avg_female_ratio": 0.4542
+    }
+  ]
+}
