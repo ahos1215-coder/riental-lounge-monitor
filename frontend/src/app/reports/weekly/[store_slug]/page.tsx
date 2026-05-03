@@ -8,10 +8,11 @@ import { getStoreMetaBySlugStrict } from "@/app/config/stores";
 import { ForecastAccuracyCard } from "@/components/ForecastAccuracyCard";
 import { ReservationLinkCard } from "@/components/ReservationLinkCard";
 import { ReportViewTracker } from "@/components/ReportViewTracker";
-import WeeklyStoreCharts from "@/components/WeeklyStoreCharts";
-import type { SeriesCompactPoint, TopWindowChart } from "@/components/WeeklyStoreCharts";
+import type { TopWindowChart } from "@/components/WeeklyStoreCharts";
 import WeeklyHeatmap from "@/components/WeeklyHeatmap";
 import type { DayHourHeatmap, HeatmapCell } from "@/components/WeeklyHeatmap";
+import WeeklySummary from "@/components/WeeklySummary";
+import type { DailySummaryEntry } from "@/components/WeeklySummary";
 import { fetchLatestPublishedReportByStore } from "@/lib/supabase/blogDrafts";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { formatJstTimestamp, formatWindowTime } from "@/lib/dateFormat";
@@ -105,17 +106,19 @@ export default async function WeeklyReportStorePage({ params }: Props) {
       avg_score: typeof w.avg_score === "number" ? w.avg_score : undefined,
     }));
 
-  const rawSeries = Array.isArray(ij.series_compact) ? ij.series_compact : [];
-  const seriesCompact: SeriesCompactPoint[] = rawSeries
-    .filter(
-      (p): p is { t: string; occupancy: number; female_ratio: number } =>
-        typeof p?.t === "string" &&
-        typeof p?.occupancy === "number" &&
-        Number.isFinite(p.occupancy) &&
-        typeof p?.female_ratio === "number" &&
-        Number.isFinite(p.female_ratio),
-    )
-    .map((p) => ({ t: p.t, occupancy: p.occupancy, female_ratio: p.female_ratio }));
+  // 日別サマリ (先週 7 夜)
+  const rawDaily = Array.isArray(ij.daily_summary) ? ij.daily_summary : [];
+  const dailySummary: DailySummaryEntry[] = rawDaily
+    .filter((d): d is Record<string, unknown> => Boolean(d && typeof d === "object"))
+    .map((d) => ({
+      date: typeof d.date === "string" ? d.date : "",
+      day_label_ja: typeof d.day_label_ja === "string" ? d.day_label_ja : "",
+      avg_occupancy: typeof d.avg_occupancy === "number" ? d.avg_occupancy : 0,
+      peak_occupancy: typeof d.peak_occupancy === "number" ? d.peak_occupancy : 0,
+      avg_female_ratio: typeof d.avg_female_ratio === "number" ? d.avg_female_ratio : 0,
+      sample_count: typeof d.sample_count === "number" ? d.sample_count : 0,
+    }))
+    .filter((d) => d.date && d.sample_count > 0);
 
   // v2: Phase B 用ヒートマップ
   const rawHeatmap = (ij.day_hour_heatmap ?? null) as Record<string, unknown> | null;
@@ -174,7 +177,7 @@ export default async function WeeklyReportStorePage({ params }: Props) {
   // v2: Phase C 用 AI 自然文解説
   const aiCommentary = typeof ij.ai_commentary === "string" ? ij.ai_commentary.trim() : "";
 
-  const hasInsightData = seriesCompact.length > 0 || topWindows.length > 0 || heatmap !== null;
+  const hasInsightData = dailySummary.length > 0 || topWindows.length > 0 || heatmap !== null;
 
   function formatNumber(value: unknown, digits = 2): string {
     if (typeof value !== "number" || Number.isNaN(value)) return "-";
@@ -309,14 +312,12 @@ export default async function WeeklyReportStorePage({ params }: Props) {
             </section>
           )}
 
-          <div className="mt-8">
-            <WeeklyStoreCharts
-              store={store.slug}
-              series={seriesCompact}
-              topWindows={topWindows}
-              scoreThreshold={threshold}
-            />
-          </div>
+          {/* v2 追補: 先週の日別サマリ (旧 賑わいスコアバー削除) */}
+          {dailySummary.length > 0 && (
+            <div className="mt-8">
+              <WeeklySummary summary={dailySummary} />
+            </div>
+          )}
 
           {topWindows.length > 0 && (
             <section className="mt-8">

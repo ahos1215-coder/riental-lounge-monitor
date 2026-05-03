@@ -381,8 +381,10 @@ HEATMAP_HOURS = [19, 20, 21, 22, 23, 0, 1, 2, 3, 4]
 def _build_day_hour_heatmap(points: list[dict[str, Any]]) -> dict[str, Any]:
     """曜日 × 時間帯の平均混雑度ヒートマップを構築する。
 
-    各セルは JST の dayofweek (0=月, 6=日) × hour (19-23, 0-4) で集計。
-    Phase B のフロントエンド HeatmapChart が直接消費できる形で返す。
+    曜日付けは「夜のセッション」基準: 19:00 開始〜翌 04:59 終了を 1 つの夜として扱う。
+    たとえば日曜 00:00 のデータは「土曜の夜」と見なし、土曜行に集計する。
+    こうしないと「日曜 00:00 が混雑」のような直感に反する表示になる
+    (本来は土曜夜のパーティが続いているため)。
     """
     bucket: dict[tuple[int, int], list[tuple[float, float]]] = {}
     for p in points:
@@ -390,10 +392,14 @@ def _build_day_hour_heatmap(points: list[dict[str, Any]]) -> dict[str, Any]:
         if not isinstance(ts, datetime):
             continue
         ts_jst = ts.astimezone(JST_OFFSET)
-        day = ts_jst.weekday()  # 0=Mon
         hour = ts_jst.hour
         if hour not in HEATMAP_HOURS:
             continue
+        # 0-4 時は前日の「夜」として曜日を 1 日戻す
+        if hour < 5:
+            day = (ts_jst - timedelta(days=1)).weekday()
+        else:
+            day = ts_jst.weekday()
         occ = float(p.get("occupancy_rate") or 0.0)
         fr = float(p.get("female_ratio") or 0.0)
         bucket.setdefault((day, hour), []).append((occ, fr))
@@ -429,6 +435,47 @@ def _build_day_hour_heatmap(points: list[dict[str, Any]]) -> dict[str, Any]:
         "day_labels_ja": DAY_LABELS_JA,
         "max_avg_occupancy": round(max_occ, 4),
     }
+
+
+def _build_daily_summary(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """直近 7 夜の日別サマリ。各「夜」は 19:00 〜 翌 04:59 を 1 日として集計。
+
+    フロントの「先週はこんな感じだった」セクション用。
+    """
+    by_night: dict[Any, list[dict[str, float]]] = {}
+    for p in points:
+        ts = p.get("timestamp")
+        if not isinstance(ts, datetime):
+            continue
+        ts_jst = ts.astimezone(JST_OFFSET)
+        hour = ts_jst.hour
+        if hour not in HEATMAP_HOURS:
+            continue
+        # 0-4 時は前日の夜
+        night_date = (ts_jst - timedelta(days=1)).date() if hour < 5 else ts_jst.date()
+        occ = float(p.get("occupancy_rate") or 0.0)
+        fr = float(p.get("female_ratio") or 0.0)
+        by_night.setdefault(night_date, []).append({"occ": occ, "fr": fr})
+
+    out: list[dict[str, Any]] = []
+    for d in sorted(by_night.keys()):
+        rows = by_night[d]
+        if not rows:
+            continue
+        avg_occ = sum(r["occ"] for r in rows) / len(rows)
+        peak_occ = max(r["occ"] for r in rows)
+        avg_fr = sum(r["fr"] for r in rows) / len(rows)
+        out.append(
+            {
+                "date": d.isoformat(),
+                "day_label_ja": DAY_LABELS_JA[d.weekday()],
+                "avg_occupancy": round(avg_occ, 4),
+                "peak_occupancy": round(peak_occ, 4),
+                "avg_female_ratio": round(avg_fr, 4),
+                "sample_count": len(rows),
+            }
+        )
+    return out
 
 
 def _derive_next_week_recommendations(heatmap: dict[str, Any], top_n: int = 3) -> list[dict[str, Any]]:
@@ -717,6 +764,7 @@ def main() -> int:
 
         # v2: Phase A/B/D の追加データを構築
         heatmap = _build_day_hour_heatmap(points)
+        daily_summary = _build_daily_summary(points)
         next_week_recs = _derive_next_week_recommendations(heatmap)
         metrics_interp = _compute_metric_interpretations(
             points_count=len(points),
@@ -752,6 +800,8 @@ def main() -> int:
             "day_hour_heatmap": heatmap,
             # v2: Phase D
             "next_week_recommendations": next_week_recs,
+            # v2 追補: 日別サマリ (先週何が起きたか の視覚化用)
+            "daily_summary": daily_summary,
         }
 
         # v2: Phase C — AI 自然文解説 (Gemini API key + フラグ ON のときのみ)

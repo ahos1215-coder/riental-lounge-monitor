@@ -37,14 +37,30 @@ export default function WeeklyHeatmap({ heatmap }: Props) {
     cellMap.set(`${c.day}-${c.hour}`, c);
   }
 
-  // 混雑度に応じた色 (rose 系の透明度を変える)。サンプルなしのセルは灰色。
+  // データセット内の最大混雑度で正規化し、ガンマ補正で低中域も見えるようにする。
+  // 色相は青 (低) → 紫 → 桃赤 (高) の連続グラデで「違いが分かる」ことを優先。
+  const maxOcc = Math.max(0.001, heatmap.max_avg_occupancy || 0);
+
+  const colorForIntensity = (raw: number): string => {
+    const normalized = Math.min(1, Math.max(0, raw / maxOcc));
+    // ガンマ 0.55: 低い値ほど明るめに伸ばして差を強調
+    const t = Math.pow(normalized, 0.55);
+    // 220 (青) → 290 (紫) → 345 (桃赤)
+    const h = 220 + t * 125;
+    const s = 65 + t * 30;
+    const l = 22 + t * 38;
+    return `hsl(${h}, ${s}%, ${l}%)`;
+  };
+
   const cellStyle = (cell: HeatmapCell | undefined): React.CSSProperties => {
     if (!cell || cell.sample_count === 0) {
-      return { backgroundColor: "rgba(100, 116, 139, 0.08)", border: "1px solid rgba(255,255,255,0.04)" };
+      return {
+        backgroundColor: "rgba(100, 116, 139, 0.08)",
+        border: "1px solid rgba(255,255,255,0.04)",
+      };
     }
-    const intensity = Math.min(1, Math.max(0.05, cell.avg_occupancy));
     return {
-      backgroundColor: `hsla(345, 80%, ${15 + intensity * 40}%, ${0.3 + intensity * 0.7})`,
+      backgroundColor: colorForIntensity(cell.avg_occupancy),
       border: "1px solid rgba(255,255,255,0.06)",
     };
   };
@@ -120,31 +136,29 @@ export default function WeeklyHeatmap({ heatmap }: Props) {
         )}
       </div>
 
-      {/* カラーレジェンド */}
+      {/* カラーレジェンド (連続グラデで視認性を確保) */}
       <div className="mt-3 flex flex-wrap items-center gap-2 text-[10px] text-white/40">
         <span>混雑度:</span>
         <span className="flex items-center gap-1">
+          <span className="text-white/55">低</span>
           <span
-            className="inline-block h-3 w-6 rounded"
-            style={{ backgroundColor: "hsla(345, 80%, 18%, 0.3)" }}
+            className="inline-block h-3 w-32 rounded"
+            style={{
+              background:
+                "linear-gradient(to right, hsl(220, 65%, 22%), hsl(255, 80%, 35%), hsl(290, 85%, 48%), hsl(330, 92%, 55%), hsl(345, 95%, 60%))",
+            }}
           />
-          低
+          <span className="text-white/55">高</span>
         </span>
-        <span className="flex items-center gap-1">
-          <span
-            className="inline-block h-3 w-6 rounded"
-            style={{ backgroundColor: "hsla(345, 80%, 35%, 0.65)" }}
-          />
-          中
-        </span>
-        <span className="flex items-center gap-1">
-          <span
-            className="inline-block h-3 w-6 rounded"
-            style={{ backgroundColor: "hsla(345, 80%, 55%, 1.0)" }}
-          />
-          高
-        </span>
+        {maxOcc > 0 && (
+          <span className="ml-2 text-white/30">
+            最大値 {(maxOcc * 100).toFixed(0)}% で正規化
+          </span>
+        )}
       </div>
+      <p className="mt-2 text-[10px] text-white/35">
+        ※ 0-4 時のデータは前日の夜として集計しています (例: 日曜 00:00 → 土曜の夜)
+      </p>
     </section>
   );
 }
