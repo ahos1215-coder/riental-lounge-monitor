@@ -640,8 +640,24 @@ def _generate_ai_commentary(
         "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
         "generationConfig": {
             "temperature": 0.7,
-            "maxOutputTokens": 1200,
+            # 1200 だと 2 段落で稀に切断され parse 失敗するため余裕を持たせる
+            "maxOutputTokens": 2000,
             "responseMimeType": "application/json",
+            # responseSchema で 2 フィールドを強制し、Gemini 側で JSON エスケープも正しく処理させる
+            "responseSchema": {
+                "type": "OBJECT",
+                "properties": {
+                    "last_week_summary": {
+                        "type": "STRING",
+                        "description": "先週の傾向を 150-250 字で。過去形・観察形中心。",
+                    },
+                    "next_week_forecast": {
+                        "type": "STRING",
+                        "description": "来週の予想を 100-200 字で。推量形中心。",
+                    },
+                },
+                "required": ["last_week_summary", "next_week_forecast"],
+            },
         },
     }
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
@@ -666,7 +682,24 @@ def _generate_ai_commentary(
         raw = "".join(p.get("text", "") for p in parts).strip()
         if not raw:
             return None
-        parsed = json.loads(raw)
+        # 1) 通常の JSON parse を試す
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as primary_err:
+            # 2) フォールバック: 正規表現で 2 フィールドを抽出
+            print(
+                f"[weekly-insights] gemini commentary primary parse failed ({primary_err}); "
+                f"falling back to regex extraction",
+                file=sys.stderr,
+            )
+            parsed = _extract_commentary_via_regex(raw)
+            if parsed is None:
+                # 3) 切断などで parse 不可 → 諦めて None を返し UI 側でフォールバック
+                print(
+                    f"[weekly-insights] gemini commentary regex fallback also failed; raw head={raw[:200]!r}",
+                    file=sys.stderr,
+                )
+                return None
         last = (parsed.get("last_week_summary") or "").strip()
         nxt = (parsed.get("next_week_forecast") or "").strip()
         if not last and not nxt:
@@ -675,6 +708,27 @@ def _generate_ai_commentary(
     except Exception as exc:  # noqa: BLE001
         print(f"[weekly-insights] gemini commentary parse failed: {exc}", file=sys.stderr)
         return None
+
+
+def _extract_commentary_via_regex(raw: str) -> dict[str, str] | None:
+    """JSON parse 失敗時のフォールバック: 正規表現で 2 フィールドを抜き出す。
+
+    Gemini が引用符をエスケープせずに改行混じりで返すケースを救う。
+    取れた分だけ返し、両方空なら None。
+    """
+    import re
+
+    out: dict[str, str] = {}
+    for key in ("last_week_summary", "next_week_forecast"):
+        # "key": "..." を貪欲一致で。閉じ引用符の前は \" でエスケープされていないことを許容
+        m = re.search(rf'"{key}"\s*:\s*"((?:[^"\\]|\\.)*)"', raw, re.DOTALL)
+        if m:
+            text = m.group(1).replace("\\n", "\n").replace('\\"', '"').strip()
+            if text:
+                out[key] = text
+    if not out:
+        return None
+    return out
 
 
 def _call_find_good_windows(points: list[dict[str, Any]], **kwargs: Any) -> list[dict[str, Any]]:
