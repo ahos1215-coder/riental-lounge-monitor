@@ -74,33 +74,33 @@ export default function WeeklyHeatmap({ heatmap }: Props) {
 
       <div className="mt-4 overflow-x-auto">
         <div className="inline-block min-w-full">
-          {/* ヘッダー行: 時間ラベル */}
+          {/* ヘッダー行: 曜日ラベル */}
           <div
             className="grid gap-1"
-            style={{ gridTemplateColumns: `40px repeat(${hours.length}, minmax(28px, 1fr))` }}
+            style={{ gridTemplateColumns: `40px repeat(${days.length}, minmax(36px, 1fr))` }}
           >
             <div />
-            {hours.map((h) => (
+            {days.map((dayLabel, dayIdx) => (
               <div
-                key={`h-${h}`}
-                className="text-center text-[10px] font-medium text-white/50"
+                key={`d-${dayIdx}`}
+                className="text-center text-[11px] font-medium text-white/55"
               >
-                {h.toString().padStart(2, "0")}
+                {dayLabel}
               </div>
             ))}
           </div>
 
-          {/* 各曜日の行 */}
-          {days.map((dayLabel, dayIdx) => (
+          {/* 各時間帯の行 */}
+          {hours.map((h) => (
             <div
-              key={`d-${dayIdx}`}
+              key={`h-${h}`}
               className="mt-1 grid gap-1"
-              style={{ gridTemplateColumns: `40px repeat(${hours.length}, minmax(28px, 1fr))` }}
+              style={{ gridTemplateColumns: `40px repeat(${days.length}, minmax(36px, 1fr))` }}
             >
-              <div className="flex items-center justify-end pr-1 text-[11px] font-medium text-white/60">
-                {dayLabel}
+              <div className="flex items-center justify-end pr-1 text-[10px] font-medium text-white/50">
+                {h.toString().padStart(2, "0")}
               </div>
-              {hours.map((h) => {
+              {days.map((dayLabel, dayIdx) => {
                 const cell = cellMap.get(`${dayIdx}-${h}`);
                 return (
                   <div

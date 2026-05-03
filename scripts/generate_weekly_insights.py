@@ -552,13 +552,15 @@ def _generate_ai_commentary(
     store_label: str,
     metrics_interp: dict[str, Any],
     heatmap: dict[str, Any],
+    daily_summary: list[dict[str, Any]],
     top_windows: list[dict[str, Any]],
     next_week_recs: list[dict[str, Any]],
-) -> str | None:
-    """Gemini REST API で週報の自然文解説を生成する (Phase C)。
+) -> dict[str, str] | None:
+    """Gemini REST API で週報の自然文解説を 2 セクション分生成する (Phase C v2)。
+
+    返り値: {"last_week_summary": "...", "next_week_forecast": "..."} or None。
 
     `INSIGHTS_GENERATE_AI_COMMENTARY=1` かつ `GEMINI_API_KEY` 設定時のみ動作。
-    失敗時は None を返してフロントに「コメントなし」を表示させる。
     """
     if not _env_bool("INSIGHTS_GENERATE_AI_COMMENTARY", False):
         return None
@@ -566,7 +568,6 @@ def _generate_ai_commentary(
     if not api_key:
         return None
 
-    # ヒートマップ最上位セル 3 件を要約として渡す
     cells = heatmap.get("cells") or []
     top_cells = sorted(
         [c for c in cells if (c.get("sample_count") or 0) >= 2],
@@ -577,12 +578,20 @@ def _generate_ai_commentary(
     payload_for_ai = {
         "store": store_label,
         "metrics": metrics_interp,
+        "daily_summary": [
+            {
+                "date": d["date"],
+                "day": d["day_label_ja"],
+                "avg_pct": round((d.get("avg_occupancy") or 0) * 100, 1),
+                "peak_pct": round((d.get("peak_occupancy") or 0) * 100, 1),
+            }
+            for d in daily_summary
+        ],
         "top_heatmap_cells": [
             {
                 "day": DAY_LABELS_JA[c["day"]],
                 "hour": c["hour"],
                 "occupancy_pct": round((c.get("avg_occupancy") or 0) * 100, 1),
-                "female_pct": round((c.get("avg_female_ratio") or 0) * 100, 1),
             }
             for c in top_cells
         ],
@@ -600,39 +609,40 @@ def _generate_ai_commentary(
         "あなたは MEGRIBI の観測者。相席ラウンジの混雑データを毎週眺めてきた人で、"
         "数字の奥にある夜の流れを読む。店のスタッフでも営業マンでもない。"
         "データを見ながら友人にぽつりとつぶやく、そういう距離感で書く。\n\n"
-        "■ 視点\n"
-        "Daily Report が「点 (今夜)」、Weekly Report は「線 (1 週間のパターン)」を見せる役割。"
-        "曜日横断のリズムや、いつが安定して賑わうかを語る。\n\n"
-        "■ トーン\n"
-        "断定と過剰演出をしない。「〜の傾向」「〜らしい」「〜っぽい」のような観測者の距離を保つ。\n\n"
         "■ 業態\n"
         "対象は相席ラウンジ。キャバクラ・クラブ (接客型) ではない。"
         "キャバクラ、キャスト、指名、同伴、シャンパンなどの語は禁止。\n\n"
-        "■ 書くもの\n"
-        "- 先週の店内のリズム (どの曜日 / 時間帯が賑わっていたか)\n"
-        "- 先週ならではのパターン (普段と違う点があれば)\n"
-        "- 来週どの曜日 / 時間帯が狙い目になりそうか (推量形で)\n\n"
-        "■ 書かないもの\n"
-        "- 箇条書き (自然文で書く)\n"
-        "- 営業文句 (「ぜひお越しください」等)\n"
-        "- 店や客層の良し悪しの評価\n"
-        "- 挨拶やリード文\n\n"
-        "■ 構造と文量\n"
-        "200〜400 字の自然文。1〜2 段落で。\n\n"
-        "■ 出力\n"
-        "本文のみ。挨拶や見出しは不要。"
+        "■ トーン\n"
+        "断定と過剰演出をしない。「〜の傾向」「〜らしい」「〜っぽい」「〜になりそう」"
+        "のような観測者の距離を保つ。営業文句 (ぜひお越しください等) も禁止。\n\n"
+        "■ 共通ルール\n"
+        "- 自然文で書く。箇条書き、見出し、挨拶、リード文は不要。\n"
+        "- 0-4 時のデータは前日の夜セッションとして集計済み (例: 日曜 00:00 は土曜の夜)。\n"
+        "- 数値を羅列しない。読者が「で、何が読み取れるか」を知りたいことを前提に。\n\n"
+        "■ 出力 (JSON 形式)\n"
+        "{\n"
+        '  "last_week_summary": "<先週の傾向を 150-250 字で。過去形・観察形中心。'
+        "どの曜日が賑わっていたか、ピークが遅い日があったか、普段と違う点があれば 1 つ。>\",\n"
+        '  "next_week_forecast": "<来週の予想を 100-200 字で。推量形中心。'
+        "先週のパターンが続けばどの曜日 / 時間帯が狙い目か、注意点があれば添える。>\"\n"
+        "}\n"
+        "JSON 以外の文字 (説明、コードフェンス) は一切出力しない。"
     )
 
     user_prompt = (
-        "次の JSON は 1 週間分の混雑データの要約です。読者は来週どの曜日 / 時間帯に行くか"
-        "迷っている人を想定し、200〜400 字の観測コメントを書いてください。\n\n"
+        "次の JSON は 1 週間分の混雑データの要約です。これを踏まえて、"
+        "「先週の傾向」と「来週の予想傾向」の 2 つの段落を生成してください。\n\n"
         + json.dumps(payload_for_ai, ensure_ascii=False, indent=2)
     )
 
     body = {
         "system_instruction": {"parts": [{"text": system_instruction}]},
         "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
-        "generationConfig": {"temperature": 0.7, "maxOutputTokens": 800},
+        "generationConfig": {
+            "temperature": 0.7,
+            "maxOutputTokens": 1200,
+            "responseMimeType": "application/json",
+        },
     }
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
     req = Request(
@@ -653,9 +663,17 @@ def _generate_ai_commentary(
         if not candidates:
             return None
         parts = (candidates[0].get("content") or {}).get("parts") or []
-        text = "".join(p.get("text", "") for p in parts).strip()
-        return text if text else None
-    except Exception:  # noqa: BLE001
+        raw = "".join(p.get("text", "") for p in parts).strip()
+        if not raw:
+            return None
+        parsed = json.loads(raw)
+        last = (parsed.get("last_week_summary") or "").strip()
+        nxt = (parsed.get("next_week_forecast") or "").strip()
+        if not last and not nxt:
+            return None
+        return {"last_week_summary": last, "next_week_forecast": nxt}
+    except Exception as exc:  # noqa: BLE001
+        print(f"[weekly-insights] gemini commentary parse failed: {exc}", file=sys.stderr)
         return None
 
 
@@ -805,15 +823,24 @@ def main() -> int:
         }
 
         # v2: Phase C — AI 自然文解説 (Gemini API key + フラグ ON のときのみ)
+        # v2.1: last_week_summary + next_week_forecast の 2 セクション分割
         commentary = _generate_ai_commentary(
             store_label=store,
             metrics_interp=metrics_interp,
             heatmap=heatmap,
+            daily_summary=daily_summary,
             top_windows=top_windows,
             next_week_recs=next_week_recs,
         )
         if commentary:
-            payload["ai_commentary"] = commentary
+            if commentary.get("last_week_summary"):
+                payload["last_week_summary"] = commentary["last_week_summary"]
+            if commentary.get("next_week_forecast"):
+                payload["next_week_forecast"] = commentary["next_week_forecast"]
+            # 後方互換: 旧 ai_commentary 参照箇所のために連結も保持
+            joined_parts = [v for v in (commentary.get("last_week_summary"), commentary.get("next_week_forecast")) if v]
+            if joined_parts:
+                payload["ai_commentary"] = "\n\n".join(joined_parts)
 
         store_dir = base_dir / store
         _ensure_dir(store_dir)

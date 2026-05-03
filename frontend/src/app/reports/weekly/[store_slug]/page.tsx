@@ -174,7 +174,10 @@ export default async function WeeklyReportStorePage({ params }: Props) {
     }))
     .filter((r) => r.day_label_ja && r.hour_label);
 
-  // v2: Phase C 用 AI 自然文解説
+  // v2.1: AI 自然文解説 (2 セクション分割)
+  const lastWeekSummary = typeof ij.last_week_summary === "string" ? ij.last_week_summary.trim() : "";
+  const nextWeekForecast = typeof ij.next_week_forecast === "string" ? ij.next_week_forecast.trim() : "";
+  // 後方互換: 旧データの ai_commentary は last_week_summary が無いときの代替に使う
   const aiCommentary = typeof ij.ai_commentary === "string" ? ij.ai_commentary.trim() : "";
 
   const hasInsightData = dailySummary.length > 0 || topWindows.length > 0 || heatmap !== null;
@@ -215,8 +218,8 @@ export default async function WeeklyReportStorePage({ params }: Props) {
         </p>
       </header>
 
-      {/* v2: Phase C — AI 自然文解説 (ai_commentary が無いときは mdx_content 本文を表示) */}
-      {aiCommentary ? (
+      {/* 旧データ用フォールバック: 先週の傾向が無いが ai_commentary や mdx 本文がある場合 */}
+      {!lastWeekSummary && aiCommentary ? (
         <section className="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-5 md:p-6">
           <h2 className="mb-2 inline-flex items-center gap-2 text-xs font-bold text-indigo-200">
             <span className="rounded bg-indigo-500/30 px-1.5 py-0.5 text-[10px] text-indigo-100">AI 観測</span>
@@ -224,7 +227,7 @@ export default async function WeeklyReportStorePage({ params }: Props) {
           </h2>
           <p className="text-sm leading-relaxed text-white/85 whitespace-pre-line">{aiCommentary}</p>
         </section>
-      ) : content ? (
+      ) : !lastWeekSummary && content ? (
         <article className="prose prose-invert max-w-none prose-headings:text-white prose-p:text-white/80 prose-li:text-white/80">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
         </article>
@@ -233,6 +236,24 @@ export default async function WeeklyReportStorePage({ params }: Props) {
       {hasInsightData && (
         <>
           <hr className="my-10 border-white/10" />
+
+          {/* 1. 先週の日別サマリ (最初に表示 — 「先週どうだった?」が一番大事) */}
+          {dailySummary.length > 0 && (
+            <div className="mb-8">
+              <WeeklySummary summary={dailySummary} />
+            </div>
+          )}
+
+          {/* 2. 先週の傾向 (AI コメント) */}
+          {lastWeekSummary && (
+            <section className="mb-8 rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-5 md:p-6">
+              <h2 className="mb-2 inline-flex items-center gap-2 text-xs font-bold text-indigo-200">
+                <span className="rounded bg-indigo-500/30 px-1.5 py-0.5 text-[10px] text-indigo-100">AI 観測</span>
+                先週の傾向
+              </h2>
+              <p className="text-sm leading-relaxed text-white/85 whitespace-pre-line">{lastWeekSummary}</p>
+            </section>
+          )}
 
           <section>
             <h2 className="text-xl font-bold text-white">今週の分析</h2>
@@ -281,6 +302,17 @@ export default async function WeeklyReportStorePage({ params }: Props) {
             </div>
           )}
 
+          {/* 来週の予想傾向 (AI コメント) */}
+          {nextWeekForecast && (
+            <section className="mt-8 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5 md:p-6">
+              <h2 className="mb-2 inline-flex items-center gap-2 text-xs font-bold text-emerald-200">
+                <span className="rounded bg-emerald-500/30 px-1.5 py-0.5 text-[10px] text-emerald-100">AI 予想</span>
+                来週の予想傾向
+              </h2>
+              <p className="text-sm leading-relaxed text-white/85 whitespace-pre-line">{nextWeekForecast}</p>
+            </section>
+          )}
+
           {/* v2: Phase D — 来週の狙い目 TOP 3 */}
           {nextWeekRecs.length > 0 && (
             <section className="mt-8 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5 md:p-6">
@@ -312,12 +344,6 @@ export default async function WeeklyReportStorePage({ params }: Props) {
             </section>
           )}
 
-          {/* v2 追補: 先週の日別サマリ (旧 賑わいスコアバー削除) */}
-          {dailySummary.length > 0 && (
-            <div className="mt-8">
-              <WeeklySummary summary={dailySummary} />
-            </div>
-          )}
 
           {topWindows.length > 0 && (
             <section className="mt-8">
