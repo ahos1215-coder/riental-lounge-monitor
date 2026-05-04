@@ -73,7 +73,7 @@ jobs:
           set -euo pipefail
           export FORECAST_MODEL_BUCKET="${FORECAST_MODEL_BUCKET:-ml-models}"
           export FORECAST_MODEL_PREFIX="${FORECAST_MODEL_PREFIX:-forecast/latest}"
-          export FORECAST_MODEL_SCHEMA_VERSION="${FORECAST_MODEL_SCHEMA_VERSION:-v2}"
+          export FORECAST_MODEL_SCHEMA_VERSION="${FORECAST_MODEL_SCHEMA_VERSION:-v6}"
           export ML_TRAIN_DAYS="${ML_TRAIN_DAYS:-180}"
           export ML_TRAIN_LIMIT="${ML_TRAIN_LIMIT:-120000}"
           export ML_TRAIN_WEIGHT_PEAK="${ML_TRAIN_WEIGHT_PEAK:-1.8}"

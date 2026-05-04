@@ -105,7 +105,7 @@ class TrainingConfig:
             supabase_service_key=supabase_service_key,
             bucket=os.getenv("FORECAST_MODEL_BUCKET", "ml-models").strip(),
             prefix=os.getenv("FORECAST_MODEL_PREFIX", "forecast/latest").strip().strip("/"),
-            schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v2").strip(),
+            schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v6").strip(),
             timezone=os.getenv("TIMEZONE", "Asia/Tokyo").strip(),
             train_days=_env_int("ML_TRAIN_DAYS", 180),
             train_limit=_env_int("ML_TRAIN_LIMIT", 120000),
