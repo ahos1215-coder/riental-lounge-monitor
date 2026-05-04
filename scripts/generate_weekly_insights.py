@@ -298,6 +298,46 @@ def _supabase_conf() -> tuple[str, str] | None:
     return base, key
 
 
+def _fetch_existing_weekly_commentary(store: str) -> dict[str, str]:
+    """既存の Weekly Report レコードから AI コメンタリーフィールドを取得。
+
+    新規生成が 429 等で失敗した場合に、前回の文章を保持するために使う。
+    取得失敗・存在しない場合は空 dict。
+    """
+    conf = _supabase_conf()
+    if conf is None:
+        return {}
+    base, key = conf
+    facts_id = f"weekly_{store}"
+    url = (
+        f"{base}/rest/v1/blog_drafts"
+        f"?facts_id=eq.{facts_id}&select=insight_json&limit=1"
+    )
+    try:
+        req = Request(
+            url,
+            headers={
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+                "Accept": "application/json",
+            },
+        )
+        with urlopen(req, timeout=15) as resp:
+            rows = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(rows, list) or not rows:
+            return {}
+        ij = (rows[0] or {}).get("insight_json") or {}
+        out: dict[str, str] = {}
+        for k in ("last_week_summary", "next_week_forecast", "ai_commentary"):
+            v = ij.get(k)
+            if isinstance(v, str) and v.strip():
+                out[k] = v
+        return out
+    except Exception as exc:  # noqa: BLE001
+        print(f"[weekly-insights] fetch existing commentary failed: {exc}", file=sys.stderr)
+        return {}
+
+
 def _upsert_weekly_report_to_supabase(
     *,
     store: str,
@@ -672,18 +712,8 @@ def _generate_ai_commentary(
             },
         },
     }
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key}"
-    req = Request(
-        url,
-        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urlopen(req, timeout=30) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except Exception as exc:  # noqa: BLE001
-        print(f"[weekly-insights] gemini commentary failed: {exc}", file=sys.stderr)
+    payload = _gemini_call_with_retry(api_key, body)
+    if payload is None:
         return None
 
     try:
@@ -720,6 +750,63 @@ def _generate_ai_commentary(
     except Exception as exc:  # noqa: BLE001
         print(f"[weekly-insights] gemini commentary parse failed: {exc}", file=sys.stderr)
         return None
+
+
+def _gemini_call_with_retry(api_key: str, body: dict[str, Any]) -> dict[str, Any] | None:
+    """Gemini REST API 呼び出し。429 (rate limit) はバックオフで再試行し、
+    最終的に gemini-2.5-flash-lite (別クォータ枠) にフォールバックする。
+
+    全モデル・全試行で失敗したら None を返す。
+    """
+    from urllib.error import HTTPError
+
+    models = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    backoffs = [5, 15, 45]  # 秒
+    last_error: Exception | None = None
+
+    for model in models:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        for attempt, wait_sec in enumerate(backoffs):
+            req = Request(
+                url,
+                data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            try:
+                with urlopen(req, timeout=30) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except HTTPError as exc:
+                last_error = exc
+                if exc.code == 429:
+                    is_last_attempt = attempt == len(backoffs) - 1
+                    if is_last_attempt:
+                        print(
+                            f"[weekly-insights] {model} 429 quota exhausted after {len(backoffs)} attempts; "
+                            f"trying next model",
+                            file=sys.stderr,
+                        )
+                        break  # 次のモデルへ
+                    print(
+                        f"[weekly-insights] {model} 429, retrying in {wait_sec}s "
+                        f"(attempt {attempt + 1}/{len(backoffs)})",
+                        file=sys.stderr,
+                    )
+                    time.sleep(wait_sec)
+                    continue
+                # 429 以外の HTTP エラーはリトライしない
+                print(f"[weekly-insights] {model} HTTP error: {exc}", file=sys.stderr)
+                break
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                print(f"[weekly-insights] {model} call failed: {exc}", file=sys.stderr)
+                break
+
+    print(
+        f"[weekly-insights] gemini commentary failed across all models; last error={last_error}",
+        file=sys.stderr,
+    )
+    return None
 
 
 def _extract_commentary_via_regex(raw: str) -> dict[str, str] | None:
@@ -890,6 +977,7 @@ def main() -> int:
 
         # v2: Phase C — AI 自然文解説 (Gemini API key + フラグ ON のときのみ)
         # v2.1: last_week_summary + next_week_forecast の 2 セクション分割
+        # v2.2: 失敗時は既存 Supabase レコードから前回文を引き継ぎ、上書き消失を防ぐ
         commentary = _generate_ai_commentary(
             store_label=store,
             metrics_interp=metrics_interp,
@@ -907,6 +995,19 @@ def main() -> int:
             joined_parts = [v for v in (commentary.get("last_week_summary"), commentary.get("next_week_forecast")) if v]
             if joined_parts:
                 payload["ai_commentary"] = "\n\n".join(joined_parts)
+        else:
+            # 新規生成失敗 → 既存レコードから前回文を引き継ぐ (sync_to_supabase 時のみ意味あり)
+            if sync_to_supabase:
+                existing = _fetch_existing_weekly_commentary(store)
+                for k in ("last_week_summary", "next_week_forecast", "ai_commentary"):
+                    if existing.get(k):
+                        payload[k] = existing[k]
+                if existing:
+                    print(
+                        f"[weekly-insights] preserved existing commentary for store={store} "
+                        f"(keys={list(existing.keys())})",
+                        file=sys.stderr,
+                    )
 
         store_dir = base_dir / store
         _ensure_dir(store_dir)
