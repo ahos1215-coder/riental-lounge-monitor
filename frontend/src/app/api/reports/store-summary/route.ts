@@ -44,13 +44,7 @@ function formatJstLabel(iso: string | undefined): string {
   return r === "-" ? "—" : r;
 }
 
-const EDITION_LABELS: Record<string, string> = {
-  evening_preview: "18:00 便",
-  late_update: "21:30 便",
-  weekly: "週報",
-};
-
-/** AIレポートは18:00/21:30 更新 — 新着をすぐ反映するため 60s CDN + 5 分 stale */
+/** AIレポートは 18:00/21:30 (Daily) と毎週水曜 (Weekly) で更新 — 60s CDN + 5 分 stale */
 const CACHE_HEADER = "public, s-maxage=60, stale-while-revalidate=300";
 
 export async function GET(req: Request) {
@@ -71,20 +65,10 @@ export async function GET(req: Request) {
     );
   }
 
-  const [dailyRow, weeklyRow] = await Promise.all([
-    fetchLatestPublishedReportByStore(store, "daily"),
-    fetchLatestPublishedReportByStore(store, "weekly"),
-  ]);
-
-  const daily = dailyRow
-    ? {
-        bullets: extractBullets(dailyRow.mdx_content, 3),
-        heading: extractFirstHeading(dailyRow.mdx_content),
-        updatedAt: formatJstLabel(dailyRow.updated_at ?? dailyRow.created_at),
-        targetDate: dailyRow.target_date ?? "—",
-        editionLabel: EDITION_LABELS[dailyRow.edition ?? ""] ?? dailyRow.edition ?? "",
-      }
-    : null;
+  // /store/[id] からの Daily Report カードは v2 (2026-04-23) で削除済み。
+  // このエンドポイントは現在 weekly のみを使うため daily の Supabase クエリを省略する。
+  // 後方互換のため `daily: null` をレスポンスに残す。
+  const weeklyRow = await fetchLatestPublishedReportByStore(store, "weekly");
 
   const weekly = weeklyRow
     ? {
@@ -96,7 +80,7 @@ export async function GET(req: Request) {
     : null;
 
   return NextResponse.json(
-    { ok: true, daily, weekly },
+    { ok: true, daily: null, weekly },
     {
       status: 200,
       headers: { "cache-control": CACHE_HEADER },

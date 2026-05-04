@@ -27,11 +27,11 @@ type ReportSummaryItem = {
   heading: string | null;
   updatedAt: string;
   targetDate: string;
-  editionLabel?: string;
 } | null;
 
 type ReportSummaryData = {
-  daily: ReportSummaryItem;
+  // Daily カードは v2 で削除済 (LatestForecastSummaryCard の「今日の傾向まとめ」に統合)。
+  // ここでは weekly のみ保持する。
   weekly: ReportSummaryItem;
 };
 
@@ -119,17 +119,17 @@ function StorePageInner() {
     [slug],
   );
 
-  const [reportSummary, setReportSummary] = useState<ReportSummaryData>({ daily: null, weekly: null });
+  const [reportSummary, setReportSummary] = useState<ReportSummaryData>({ weekly: null });
 
   useEffect(() => {
     if (!slug) return;
     let active = true;
     fetch(`/api/reports/store-summary?store=${encodeURIComponent(slug)}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((body: { ok?: boolean; daily?: ReportSummaryItem; weekly?: ReportSummaryItem }) => {
+      .then((body: { ok?: boolean; weekly?: ReportSummaryItem }) => {
         if (!active) return;
         if (body.ok) {
-          setReportSummary({ daily: body.daily ?? null, weekly: body.weekly ?? null });
+          setReportSummary({ weekly: body.weekly ?? null });
         }
       })
       .catch(() => {/* サイレント */});
