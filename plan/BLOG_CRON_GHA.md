@@ -1,6 +1,11 @@
 # 定時コンテンツ生成（GitHub Actions — 正本）
 
-Last updated: 2026-03-26
+Last updated: 2026-03-26 (cron スケジュール / matrix 構成は引き続き有効)
+
+> **2026-04 以降の内容更新**:
+> - Daily Report のプロンプト改修は `plan/BLOG_REDESIGN_2026_04.md` を参照 (Phase 1 ✅ / Phase 3 cron 時間分散 ❌ 未着手)
+> - Weekly Report の v2 redesign (ヒートマップ + AI 自然文 + 来週狙い目) は `plan/WEEKLY_REPORT_REDESIGN_2026_05.md` を参照
+> - generate-weekly-insights workflow に `INSIGHTS_GENERATE_AI_COMMENTARY=1` + `GEMINI_API_KEY` を追加済 (2026-05-03〜)
 
 ## 方針
 

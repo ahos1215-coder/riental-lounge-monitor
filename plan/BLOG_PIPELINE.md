@@ -1,6 +1,11 @@
 # MEGRIBI Blog Pipeline（LINE / Next.js / GitHub Actions / Supabase / GitHub）
 
-最終更新: 2026-03-26
+最終更新: 2026-03-26 (本文の構造設計は引き続き有効)
+
+> **2026-04 以降の内容更新**:
+> - Daily Report のプロンプト / 出力スタイルは `plan/BLOG_REDESIGN_2026_04.md` (Phase 1 完了 / Phase 2-4 未着手) を正本として参照
+> - Weekly Report の構造 (ヒートマップ / AI 自然文 / 来週狙い目 等) は `plan/WEEKLY_REPORT_REDESIGN_2026_05.md` を正本として参照
+> - 本ドキュメントの 3 分類 / URL / 基本フローは引き続き有効
 
 ## コンテンツの 3 分類（`blog_drafts.content_type`）
 
