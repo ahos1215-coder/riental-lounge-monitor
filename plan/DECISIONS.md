@@ -29,7 +29,7 @@ Target commit: (see git)
     - `generate-weekly-insights.yml` は Fan-out（38店舗並列、`max-parallel: 10`）＋ Fan-in（index.json 一元マージ、Git commit 1回）構成を維持する。
     - 各 matrix ジョブは `--skip-index` で `index.json` 書き込みを行わない（競合防止）。
     - Supabase への upsert は各 matrix ジョブ内で完結させる（Fan-in ジョブは Git 操作のみ）。
-18) **Daily Report の matrix**: `max-parallel: 15`（Render 負荷上限として維持。504 多発時は下げる）。
+18) **Daily Report の matrix**: **`max-parallel: 5`** (`989637e`, 2026-04 で 15 → 5 に削減)。Gemini 無料枠の毎分リクエスト制限 (RPM) に抵触して 429 が頻発したため。Render 負荷ではなく Gemini クォータが律速。
 
 ## やらないこと（ハードルール）
 - `/api/range` にクエリ追加・サーバ側の夜窓フィルタ追加。

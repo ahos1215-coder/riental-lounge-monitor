@@ -136,7 +136,7 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 #### Daily Report（`content_type='daily'`, `is_published=true`）
 - **Workflow**: `.github/workflows/trigger-blog-cron.yml`（`schedule` 常駐 + `workflow_dispatch` 手動対応）
 - **トリガー**: **GHA native schedule**（`cron: "0 9 * * *"` JST 18:00 → evening_preview、`cron: "30 12 * * *"` JST 21:30 → late_update）。cron-job.org 不要
-- **構成**: 38店舗 × 独立 matrix ジョブ、`max-parallel: 15`、`continue-on-error: true`
+- **構成**: 38店舗 × 独立 matrix ジョブ、**`max-parallel: 5`** (`989637e`, 2026-04 — Gemini 無料枠の RPM 制限に合わせて 15 → 5 に削減済)、`continue-on-error: true`
 - **エンドポイント**: `GET /api/cron/blog-draft?store=<slug>&edition=<edition>&source=github_actions_cron`
 - **保存**: Supabase `blog_drafts`（`content_type='daily'`, `is_published=true`）
 - 失敗店舗のみ再実行: `retry-blog-draft-stores.yml`

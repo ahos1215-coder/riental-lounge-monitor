@@ -74,7 +74,7 @@ Render Starter プラン（$7/月、2025-12 移行済み）の gunicorn は `--w
 ```
 Daily Report（毎日 18:00 / 21:30 JST — GHA native schedule）:
   trigger-blog-cron.yml
-  └─ matrix: 38 store × 独立ジョブ (max-parallel: 15)
+  └─ matrix: 38 store × 独立ジョブ (max-parallel: 5 — Gemini 無料枠 RPM 対策で 15 → 5 に削減済)
      └─ GET /api/cron/blog-draft?store=<slug>&edition=...
         └─ Supabase blog_drafts (content_type='daily', is_published=true)
   x-auto-post.yml (workflow_run: trigger-blog-cron 完了後)
@@ -157,7 +157,7 @@ trigger-blog-cron.yml (Daily Report) 完了
 - X 投稿は `SNS_POST_SECRET` による Bearer 認証必須。dry_run デフォルト
 
 ## Blog Cron Scale Strategy（実装済み）
-- **Daily**: GitHub Actions `trigger-blog-cron.yml` が `matrix` で 38店舗を **`max-parallel: 15`** で並列処理。504 が出た店舗は `continue-on-error` + `retry-blog-draft-stores.yml` で再実行
+- **Daily**: GitHub Actions `trigger-blog-cron.yml` が `matrix` で 38店舗を **`max-parallel: 5`** (`989637e`, 2026-04 で 15 → 5 に削減 — Gemini 無料枠 RPM 対策) で並列処理。504 が出た店舗は `continue-on-error` + `retry-blog-draft-stores.yml` で再実行
 - **Weekly**: `generate-weekly-insights.yml` が Fan-in Matrix 構成。Fan-out（`max-parallel: 10`）→ Fan-in で `index.json` 一元マージ
 
 ## Key Files

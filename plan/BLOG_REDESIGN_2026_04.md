@@ -7,7 +7,7 @@ Status:
 - ⚠️ **Phase 5 (店舗ページに Daily カード埋め込み)** 方針変更 — 「重複削除のため Daily カードを削除」(`fd9a195`, 2026-04-23) に置換。`/store/[id]` には「今日の傾向まとめ」(LatestForecastSummaryCard) と Weekly Report カードが残置
 - ❌ **Phase 4 (フォールバック改善)** 未着手 — 429 等で `buildFallbackBlogDraftMdx()` が発動した際、依然旧スタイル (## 今日の結論 + 箇条書き) で生成される。Phase 1 の自然文と整合しない
 - ❌ **Phase 2 (`narrative_hint` ルールベース計算)** 未着手 — Daily Report 用の単調さ解消はまだプロンプト改善のみ
-- ❌ **Phase 3 (cron 時間分散)** 未着手 — 18:00/21:30 の 38 並列バーストが Gemini 15 RPM に抵触し続けている可能性あり
+- ✅ **Phase 3 (cron 時間分散)** 実質完了 — `989637e` (2026-04) で `max-parallel: 15 → 5` 削減済。同時 5 並列なら Gemini 無料枠 RPM (~10-15) 内に収まる。当初想定していた「18:00 → 18:00-19:00 に分散」の代わりに、最大同時数を絞ることで 429 を抑制する方針
 - ❌ **Phase 6 (Weekly プロンプト刷新)** → 別計画書 `plan/WEEKLY_REPORT_REDESIGN_2026_05.md` に分離して実装済 (2026-05-03〜)
 
 ## 目的
