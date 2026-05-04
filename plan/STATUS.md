@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-05-04 (Round 12: Weekly Report v2 redesign — heatmap + 日別サマリ + AI 自然文解説 (先週/来週) + 来週の狙い目 + 賑わいスコアバー削除)
+Last updated: 2026-05-05 (Round 13: ML schema v6 本番反映完了 + Daily Report フォールバック自然文化 (Phase 4) + cold-start 緩和の UptimeRobot 5 monitor 導入 + 技術的負債 6 件解消 + 関連ドキュメント整合)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -14,7 +14,7 @@ Target commit: (see git)
   - **店舗別最適化モデル（ML 3.0）本番稼働中**。全38店舗で Optuna HPO + Early Stopping による個別最適化モデル。
   - **LightGBM 移行完了 (2026-04-12〜)**: 推論メモリを XGBoost の約半分に削減。モデルファイル 179KB → 97KB (46% 削減)。学習時間も 30-40分 → 5分11秒に短縮。`model_xgb.py` は LightGBM を優先ロード、XGBoost フォールバック保持。
   - `model_registry.py` は `metadata.json` の `has_store_models` / `store_models` を検証し、**店舗別モデルを最優先でロード**。不整合時は明示エラー、未対応メタデータ時のみグローバルモデルへフォールバック。
-  - **schema_version v6 (2026-05-03〜)**: 特徴量 24 列。v5 の 22 + `holiday_block_length` / `holiday_block_position` (連休クラスタ判定 — `oriental/ml/holiday_calendar.py`)。GW・お盆・年末年始など連続休業期間を検出し、連休内位置 (初日/中日/最終日) を ML に伝える。お盆 8/13-15・年末年始 12/29-1/3 を慣習的休業日として扱う
+  - **schema_version v6 (2026-05-03〜、本番反映: 2026-05-05)**: 特徴量 24 列。v5 の 22 + `holiday_block_length` / `holiday_block_position` (連休クラスタ判定 — `oriental/ml/holiday_calendar.py`)。GW・お盆・年末年始など連続休業期間を検出し、連休内位置 (初日/中日/最終日) を ML に伝える。お盆 8/13-15・年末年始 12/29-1/3 を慣習的休業日として扱う。**本番反映には 3 段階が必要**だった: (1) `oriental/config.py` の default を v5 → v6 に bump、(2) **GitHub Actions Repository Variable `FORECAST_MODEL_SCHEMA_VERSION` を v5 → v6 に変更** (これが抜けていたため `train-ml-model.yml #56` は v5 モデルを生成して mismatch を起こした)、(3) Render env `FORECAST_MODEL_SCHEMA_VERSION` を v6 へ更新 + `train-ml-model.yml #57` 再実行 + Render 手動 deploy。`/api/meta` で `schema_version: "v6"` / `loaded: true` / `stores_loaded: 38` を確認済 (`70e1de6`)
   - **schema_version v5 (2026-04-13〜)**: 特徴量 22 列。v4 の 21 + `extreme_weather`（猛暑 35°C+ / 極寒 5°C- の極端天候フラグ）
   - **時間減衰ウェイト**: 学習時のサンプル重み付けに指数減衰（90日半減期）を追加。直近データを重視
   - **日次精度トラッキング**: `metadata.json` に店舗別・日別の MAE を自動記録
@@ -148,7 +148,7 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
   - 予測は断定回避 (「21時にピークが来ます」❌ → 「21時あたりが山になりそう」✅)
   - **2 エディションは独立**: `late_update` (21:30) は `evening_preview` (18:00) の予測には言及しない (予測精度の露呈防止)
   - Few-shot: 良い例 / 避ける例を system prompt 末尾に固定埋め込み
-  - 後段の `buildFallbackBlogDraftMdx()` は依然旧スタイル (Phase 4 で書き換え予定 — `plan/BLOG_REDESIGN_2026_04.md`)
+  - **フォールバック (Phase 4) — 2026-05-05 (`8d72a8b`) 実装済**: `buildFallbackBlogDraftMdx()` は Gemini が rate-limit / 失敗で呼べない時に発動する。旧「## 今日の結論 + 箇条書き」固定 → 新 **80-160 字の自然文 (です・ます調、見出し・箇条書きなし)**。edition 別: evening_preview は推量形 (「ピークになりそう」)、late_update は現況観察 (18:00 予測には言及せず)。dayLabel + secondary_wave も自然文に折り込む
 - **指示文漏洩修正 (2026-04-23, `fd9a195`)**: `secondary_wave.note` / `gender_note` から AI 指示語 (「控えめに言及してよい (断定禁止)」「過度に楽観・悲観しない説明にしてください」) を除去。AI が本文に書き写してユーザーに見えていたバグ
 - **/store/[id] からの Daily Report カード削除 (2026-04-23, `fd9a195`)**: 同ページの「今日の傾向まとめ」(`LatestForecastSummaryCard`) と内容重複のため削除。Weekly Report カードは残置
 
@@ -225,6 +225,36 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 - 統合レポート: `/reports` でタブ切替・検索・フィルタが機能すること
 - マイページ: `/mypage` でお気に入り店舗のリッチカードが表示されること
 - X 投稿: `x-auto-post.yml` を `dry_run=true` で実行し、ログに投稿テキストが出ること
+
+## 運用 / モニタリング (2026-05-05〜)
+
+### UptimeRobot 設定 (cold-start 緩和)
+
+低トラフィック時間帯 (深夜・早朝) に Render Flask と Vercel Next.js が冷えて初回リクエスト TTFB が **9-10 秒**に達していた問題を緩和するため、UptimeRobot の **無料枠 (50 monitor まで、5 分間隔)** で 5 経路を常時 ping している:
+
+| Monitor | URL | 役割 |
+|---|---|---|
+| 1 | `https://riental-lounge-monitor.onrender.com/healthz` | Render Flask を直接温める |
+| 2 | `https://www.meguribi.jp/api/holiday_status` | Vercel proxy → Render Flask の貫通経路を温める。軽量 endpoint (DB アクセスなし) |
+| 3 | `https://www.meguribi.jp/` | top page を常時 warm |
+| 4 | `https://www.meguribi.jp/stores` | 店舗一覧ページを常時 warm |
+| 5 | `https://www.meguribi.jp/reports` | レポート一覧ページを常時 warm |
+
+設定後の効果 (実測): `/api/forecast_today` の TTFB が **9.43s → 2.02s** (4.7x 改善)。Daily Report cron + 日中の通常アクセスを足してもコールドスタートが起きにくい状態。
+
+### Vercel Hobby (無料) 関数実行回数の監視
+
+UptimeRobot 5 monitor × 5 分間隔 × 24 時間 × 30 日 = **約 43,200 invocation/月**。Vercel Hobby の **月 100,000 invocation 上限** の 43% を消費する。実ユーザートラフィックを足しても余裕で収まる想定だが、**月末に Vercel Dashboard → Settings → Usage を確認する習慣**を持つこと。
+
+**80% 超え (= 月 80,000 invocation) を観測したら**: UptimeRobot monitor を 5 → 2 (`/healthz` + `/`) に減らせば即時 1/3 程度まで圧縮できる。Render の暖機効果はほぼ維持。逆に **Vercel Pro 課金** ($20/月) すれば数百万 invocation までスケールするが、個人開発の収益化前段階では monitor 削減で対処するのが妥当。
+
+### GHA Actions の月間消費
+
+- `train-ml-model.yml`: 日次 5-15 分 + 週次 30-60 分 (Optuna) ≒ 月 ~10 時間
+- `trigger-blog-cron.yml`: 1 日 2 回 × 38 並列ジョブ × max-parallel 5 ≒ 月 ~30-60 時間
+- `generate-weekly-insights.yml`: 週 1 回 × 38 並列 ≒ 月 ~4-8 時間
+
+**Public リポジトリは GHA 無料枠 = 無制限**なので心配不要。**Private 化したら 2,000 分/月** に当たるので注意。
 
 ## 既知の制限 / 注意
 - 週次インサイト生成は `/api/range` の可用性に依存（Actions はタイムアウト/リトライあり）

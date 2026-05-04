@@ -1,5 +1,5 @@
 # DECISIONS
-Last updated: 2026-05-04 (Round 12: schema v6 連休クラスタ + Daily prompt v2 + Weekly Report v2 redesign)
+Last updated: 2026-05-05 (Round 13: ML v6 本番反映 + Daily Phase 4 + UptimeRobot cold-start 緩和)
 Target commit: (see git)
 
 ## Core decisions (keep)
@@ -78,3 +78,9 @@ Target commit: (see git)
 41) **AI 生成失敗時は既存レコードの文章を保持**: Gemini が 429 や parse 失敗で None を返した場合、Supabase の既存 `last_week_summary` / `next_week_forecast` / `ai_commentary` を読み出して新 payload に merge してから upsert する。前回成功した文章が一過性の失敗で消える事故を防ぐ。
 42) **Gemini 呼び出しの 429 戦略**: 5s/15s/45s のバックオフで 3 回リトライ → `gemini-2.5-flash-lite` (別クォータ枠) にフォールバック → 全失敗で None 返却。非 429 エラーはリトライしない (即フェイルする。delay しても無意味)。
 43) **Gemini JSON parse の二段構え**: `responseSchema` で構造化出力を強制 + `maxOutputTokens=2000` で切断防止 + 万一の破損時は正規表現 (`r'"key"\s*:\s*"((?:[^"\\]|\\.)*)"'`) で各フィールドを抜き出すフォールバックパーサ。1 件でも取れれば「無コメント」より良いという方針。
+
+## Operations decisions (Round 13, 2026-05-05)
+44) **ML schema_version の本番反映は 3 箇所同期が必要**: コード default (`oriental/config.py`) / **GitHub Actions Repository Variable `FORECAST_MODEL_SCHEMA_VERSION`** / Render Environment `FORECAST_MODEL_SCHEMA_VERSION` の 3 箇所すべてを同じ値に揃えてから training workflow を実行する。GHA 変数が古いと「学習は成功したが古い schema で出力」され、Render 側で `model_registry.py` が `schema_version mismatch` を返して予測停止する事故になる (今回の `train-ml-model.yml #56` 失敗事例)。新 schema 移行手順テンプレートは `plan/STATUS.md` の ML セクション参照。
+45) **cold-start 緩和は UptimeRobot の無料枠で実施**: Render Starter ($7/月) と Vercel Hobby (無料) は技術的に「sleep しない」と謳うが、実測では低トラフィック時間帯に関数 / メモリキャッシュ / Supabase 接続が冷えて TTFB が 9-10 秒に達する。**UptimeRobot 無料 50 monitor 枠から 5 経路を 5 分間隔で ping** し続けることで TTFB を 2 秒前後に抑える (実測 4.7x 改善)。技術的な対症療法 (gunicorn workers 増、Vercel Pro 課金) より圧倒的に低コスト。
+46) **Vercel Hobby 関数実行回数の管理**: UptimeRobot 5 monitor は月 ~43,200 invocation を消費する (Vercel Hobby 上限 100,000 / 月 の 43%)。**月末に Vercel Dashboard → Settings → Usage を確認** し、80% (= 80,000) を超えたら **monitor 数を 5 → 2 (`/healthz` + `/`) に削減**して 1/3 程度まで圧縮する。Vercel Pro 課金 ($20/月) は収益化前段階では選ばない。
+47) **新エンドポイントのコールドスタート暖機戦略**: 重要なページ / API を新規追加した場合、UptimeRobot の monitor 枠 (5/50 使用中、45 残) から 1 つを当てて常時 warm にする選択肢を持つ。ただし Vercel invocation 上限を計算したうえで判断する。

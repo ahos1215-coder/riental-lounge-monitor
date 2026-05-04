@@ -1,5 +1,5 @@
 # ARCHITECTURE
-Last updated: 2026-05-04 (Round 12: Weekly Report v2 / Daily prompt v2 / schema v6 / holiday banner)
+Last updated: 2026-05-05 (Round 13: ML v6 本番反映完了 / Daily Phase 4 / UptimeRobot cold-start 緩和)
 Target commit: (see git)
 
 ## Overview
@@ -32,6 +32,8 @@ Target commit: (see git)
 **並列化パターン**: `range_multi`・`megribi_score`・`forecast_today_multi` は `ThreadPoolExecutor(max_workers=12)` で Supabase クエリ / ML 推論を並列実行。GIL 下でも I/O 待ち（HTTP）が支配的なため効果大。
 
 **Flask プロセス内キャッシュ**: `forecast_today` / `forecast_today_multi` は TTL 60s のインメモリキャッシュを共有。CDN `s-maxage=60` と組み合わせ、最大遅延 ~2 分。
+
+**Cold-start 緩和 (2026-05-05〜)**: 低トラフィック時間帯に Render Flask が冷えて初回 TTFB が 9-10 秒に達していた問題を、外部の **UptimeRobot 無料枠で 5 経路を 5 分間隔 ping** することで解消。詳細・運用ノートは `plan/STATUS.md` の「運用 / モニタリング」セクションを参照。実測効果: `/api/forecast_today` TTFB 9.43s → 2.02s。
 
 **ML モデルレジリエンス (2026-04-12〜)**: `model_registry.py` は 2 段階のフォールバックで Supabase Storage の一過性障害（接続リセット等）を吸収する:
 1. **Disk cache fallback**: `_download_to_cache` がリトライ全敗した場合、`forecast_model_cache_dir` 上の既存ファイルが `FORECAST_MODEL_CACHE_MAX_AGE_SEC`（既定 7 日 = 604800）以内であれば fallback として採用し、警告ログ `model download failed; using existing disk cache as fallback` を出して継続する
