@@ -1,5 +1,5 @@
 # ARCHITECTURE
-Last updated: 2026-04-12 (Round 9 + ML レジリエンス: disk cache fallback / 予測 UX 自動再試行)
+Last updated: 2026-05-04 (Round 12: Weekly Report v2 / Daily prompt v2 / schema v6 / holiday banner)
 Target commit: (see git)
 
 ## Overview
@@ -25,7 +25,9 @@ Target commit: (see git)
 - 店舗マスタは `frontend/src/data/stores.json` を Python/Frontend 共通で参照（`brand` フィールドで分離）
 
 ### 2) Flask API
-`/api/range` / `/api/current` / `/api/forecast_*` / `/api/forecast_today_multi` / `/api/megribi_score` / `/api/forecast_accuracy` を提供。`/api/range` は Supabase を `ts.desc` で取得し `ts.asc` で返却。
+`/api/range` / `/api/current` / `/api/forecast_*` / `/api/forecast_today_multi` / `/api/megribi_score` / `/api/forecast_accuracy` / `/api/holiday_status` を提供。`/api/range` は Supabase を `ts.desc` で取得し `ts.asc` で返却。
+
+`/api/holiday_status` (2026-05-03〜) は `oriental/ml/holiday_calendar.py` の `get_holiday_block` / `is_long_holiday` をラップ。任意の日付について「連続休業日数 + ブロック内位置 + 連休フラグ + 表示ラベル」を返す。フロントの `LongHolidayBanner` と、ML の `holiday_block_*` 特徴量で同じロジックを共有する。
 
 **並列化パターン**: `range_multi`・`megribi_score`・`forecast_today_multi` は `ThreadPoolExecutor(max_workers=12)` で Supabase クエリ / ML 推論を並列実行。GIL 下でも I/O 待ち（HTTP）が支配的なため効果大。
 
@@ -42,11 +44,11 @@ Target commit: (see git)
 | パス | データ取得元 |
 |------|--------------|
 | `/` | `/api/range` + `/api/megribi_score`（TOP 5 今夜のおすすめ）+ `getAllPostMetas()`（静的 MDX） |
-| `/store/[id]` | `/api/range` + `/api/forecast_today`（**Promise.all 同時発火**。`useStorePreviewData.ts` は `forecast_today` が空配列だった場合 5s/15s/45s のバックオフで最大 3 回自動再試行し、`forecastStatus` を UI に伝える）+ `/api/reports/store-summary` |
+| `/store/[id]` | `/api/range` + `/api/forecast_today`（**Promise.all 同時発火**。`useStorePreviewData.ts` は `forecast_today` が空配列だった場合 5s/15s/45s のバックオフで最大 3 回自動再試行し、`forecastStatus` を UI に伝える）+ `/api/reports/store-summary` + `/api/holiday_status` (`LongHolidayBanner`) + `/api/blog/latest-store-summary` (今日の傾向まとめ) |
 | `/stores` | **request ordering 戦略**: ① `/api/range_multi` await → 部分カード即表示 → ② `/api/megribi_score` → ③ `/api/forecast_today_multi`（バッチ）を後続発火。単一 gunicorn worker でも ~1.5s で初期表示 |
 | `/reports` | `/api/reports/list`（Supabase: 全店舗最新 Daily/Weekly メタ） |
 | `/reports/daily/[store_slug]` | Supabase `blog_drafts`（`content_type='daily'`, `is_published=true`） |
-| `/reports/weekly/[store_slug]` | Supabase `blog_drafts`（`content_type='weekly'`, `is_published=true`）— `mdx_content` + `insight_json`（チャート・メトリクス・Good Windows） |
+| `/reports/weekly/[store_slug]` | Supabase `blog_drafts`（`content_type='weekly'`, `is_published=true`）— `mdx_content` + `insight_json` (v2 redesign 2026-05〜): `daily_summary` (日別サマリ) / `metric_interpretations` (Phase A 解釈) / `day_hour_heatmap` (Phase B ヒートマップ) / `last_week_summary` + `next_week_forecast` (Phase C AI 自然文 — Markdown 箇条書き、フロントは ReactMarkdown でレンダ) / `next_week_recommendations` (Phase D 来週狙い目 TOP 3) / 既存の `top_windows` / `metrics` |
 | `/insights/weekly/[store]` | **→ `/reports/weekly/[store]` に 301 リダイレクト**。旧ページは `frontend/content/insights/weekly/<store>/<date>.json`（fs）を読むが、リダイレクトが優先 |
 | `/blog/[slug]` | Supabase `blog_drafts`（`content_type='editorial'`, `is_published=true`） |
 | `/compare` | `/api/range_multi` + `/api/megribi_score` + `/api/forecast_today_multi`（最大3店舗並列比較） |
@@ -82,6 +84,15 @@ Weekly Report（毎週水曜 06:30 JST — GHA schedule）:
   generate-weekly-insights.yml [Fan-in 構成]
   ├─ generate-store: 38 store × 独立ジョブ (max-parallel: 10)
   │   ├─ generate_weekly_insights.py --stores <one_store> --skip-index
+  │   │   ├─ /api/range で過去 5000 行取得
+  │   │   ├─ find_good_windows / top_windows
+  │   │   ├─ v2: _build_day_hour_heatmap (7 曜日 × 10 時間、0-4時は前日の夜セッション扱い)
+  │   │   ├─ v2: _build_daily_summary (7 夜分の avg/peak、夜セッション基準)
+  │   │   ├─ v2: _compute_metric_interpretations (Phase A ラベル)
+  │   │   ├─ v2: _derive_next_week_recommendations (Phase D ヒートマップ上位 3 セル)
+  │   │   └─ v2: _generate_ai_commentary (Phase C, INSIGHTS_GENERATE_AI_COMMENTARY=1 時のみ
+  │   │              Gemini 2.5 Flash → 失敗時 flash-lite フォールバック → 429 リトライ
+  │   │              5s/15s/45s → 失敗時は既存 Supabase レコードの文章を保持して上書き消失防止)
   │   ├─ Supabase upsert (content_type='weekly', is_published=true)
   │   └─ upload Artifact: weekly-<store>/
   └─ collect-and-commit: Fan-in
@@ -160,7 +171,8 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `oriental/ml/forecast_service.py`（ML 推論オーケストレーション）
 - `oriental/ml/megribi_score.py`（スコア算出 + good_windows）
 - `oriental/ml/model_registry.py`（Supabase Storage からモデルロード）
-- `oriental/ml/preprocess.py`（特徴量エンジニアリング — **22 FEATURE_COLUMNS、schema v5**。v4 の 21 + `extreme_weather`）
+- `oriental/ml/preprocess.py`（特徴量エンジニアリング — **24 FEATURE_COLUMNS、schema v6** (2026-05-03〜)。v5 の 22 + `holiday_block_length` + `holiday_block_position`）
+- `oriental/ml/holiday_calendar.py`（**2026-05-03〜**。連休判定のロジック単一ソース。`is_off_day` (土日 + 法定祝日 + 振替休日 + お盆 8/13-15 + 年末年始 12/29-1/3) / `get_holiday_block` (連続休業ブロックの長さと位置) / `is_long_holiday` (block_length>=4)。preprocess.py と /api/holiday_status の双方が import）
 - `oriental/ml/model_xgb.py`（**LightGBM 優先ロード** + XGBoost フォールバック。ファイル名は import 互換のため維持）
 - `multi_collect.py`（収集ロジック。Oriental Lounge トップページ + 相席屋トップページの2リクエストで全44店舗を取得）
 
@@ -183,7 +195,11 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `frontend/src/lib/dateFormat.ts`（JST 日時フォーマット共通ユーティリティ — レポートページ / API / チャートで共用）
 - `frontend/src/app/config/stores.ts`（38 店舗マスタ）
 - `frontend/src/components/StoreCard.tsx`（店舗カード。めぐりびスコアバッジ: 狙い目/様子見/他店へ）
-- `frontend/src/components/WeeklyStoreCharts.tsx`（週次 Recharts チャート: 時系列 + Top Windows バーチャート。`/reports/weekly` と `/insights/weekly` で共有）
+- `frontend/src/components/WeeklyStoreCharts.tsx`（週次 Recharts チャート。**v2 (2026-05〜) で時系列折れ線 + 賑わいスコアバーは削除**、現在は実質未使用 — `TopWindowChart` 型のみエクスポート）
+- `frontend/src/components/WeeklyHeatmap.tsx`（**2026-05-03〜**。曜日 × 時間帯ヒートマップ。10 行 (時間 19-04) × 7 列 (曜日 月-日)。データセット内最大値で正規化 + ガンマ 0.55 + 多色グラデ (青 220° → 紫 290° → 桃赤 345°) で混雑度差を強調。0-4 時は前日の夜セッションとして集計済みの注記あり）
+- `frontend/src/components/WeeklySummary.tsx`（**2026-05-03〜**。直近 7 夜分の日別サマリ。各夜 19:00-翌04:59 を 1 単位で avg/peak 混雑度をバー表示、一番賑わった夜を強調）
+- `frontend/src/components/store/LongHolidayBanner.tsx`（**2026-05-03〜**。`/store/[id]` の `PreviewMainSection` 内、タイムラインと「今日の傾向まとめ」の間に表示。`/api/holiday_status` を呼んで `is_long_holiday=true` のときのみ表示）
+- `frontend/src/components/store/LatestForecastSummaryCard.tsx`（「今日の傾向まとめ」カード。`/api/blog/latest-store-summary` から最新 Daily Report の bullets を抜粋）
 - `frontend/src/components/GoogleAnalytics.tsx`（GA4 Script ローダー + SPA トラッカー）
 - `frontend/src/components/ReportViewTracker.tsx`（サーバーコンポーネント用 GA4 イベント発火）
 - `frontend/src/lib/analytics.ts`（GA4 ヘルパー: sendEvent / sendPageView）

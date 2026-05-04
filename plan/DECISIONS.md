@@ -1,5 +1,5 @@
 # DECISIONS
-Last updated: 2026-04-18 (Round 10: マルチブランド + LightGBM + schema v5)
+Last updated: 2026-05-04 (Round 12: schema v6 連休クラスタ + Daily prompt v2 + Weekly Report v2 redesign)
 Target commit: (see git)
 
 ## Core decisions (keep)
@@ -57,3 +57,24 @@ Target commit: (see git)
     3. Supabase `stores` テーブルに INSERT
     4. `BrandId` 型と `BRAND_DISPLAY_LABEL` を `frontend/src/app/config/stores.ts` に追加
     5. ML モデルは「データが 1 ヶ月以上溜まってから」追加（リアルタイム表示優先）
+
+## Holiday cluster decisions (Round 11, 2026-05-03)
+29) **「連休」の操作的定義**: 連続して休業日扱いとなる日のかたまり。**休業日 = 土日 + 法定祝日 (jpholiday) + 振替休日 + お盆 8/13-15 + 年末年始 12/29-1/3**。実装は `oriental/ml/holiday_calendar.py` に集約し、ML 特徴量と `/api/holiday_status` エンドポイントの双方が同じロジックを参照する。
+30) **お盆 / 年末年始の固定期間**: お盆 = 8/13-15、年末年始 = 12/29-1/3 で固定。地域差・企業差はあるが、保守メンテ性のため固定値を採用。実データで明確な乖離が見られた場合のみ `holiday_calendar.py` の定数を更新する。
+31) **`schema_version` v6**: v5 の 22 列 + `holiday_block_length` (連続休業ブロック日数 0-9) + `holiday_block_position` (0.0=初日 〜 1.0=最終日、平日は中立値 0.5)。GW・お盆・年末年始など連続休業期間を ML が認識できるようにする。**ただし実効性は学習データに連休サンプルが累積した 2027 年 GW 以降から本格化する**(現状 6 ヶ月分のデータでは外挿が弱い)。
+32) **連休バナー (`LongHolidayBanner`) は期待値調整目的**: GW・お盆・年末年始の予測精度低下は ML データ不足由来で短期改善困難なため、UI で「乖離が大きくなる傾向があります」と明示してユーザーの期待値を調整する。技術的精度改善ではなく信頼性管理の施策。
+
+## Daily Report prompt v2 decisions (BLOG_REDESIGN_2026_04 Phase 1, 2026-04-19)
+33) **観測者ペルソナ**: Daily Report は「夜遊びに詳しい友人がデータを見ながらつぶやく」距離感の自然文 100-200 字。箇条書き禁止、見出し禁止、挨拶禁止。ペルソナを禁止事項羅列より優先することで AI 臭さを除去する。
+34) **2 エディションは独立**: 18:00 (`evening_preview`) と 21:30 (`late_update`) は相互参照禁止。**特に late_update は 18:00 の予測には言及しない**。理由: 予測が外れた場合に 21:30 で「予想を外れて」と書くと予測精度の低さが視覚化される。代わりに 21:30 は純粋な「今、こうなっている」観察に徹する。
+35) **予測表現は推量形**: 「21時にピークが来ます」(断定) ❌ → 「21時あたりが山になりそう」(推量) ✅。予測が外れたときの読者の信頼損失を最小化する。
+36) **`secondary_wave.note` / `gender_note` に AI 指示語を埋めない**: `insightFromRange.ts` で生成する文脈ノートは、AI に渡したものがそのまま本文に書き写される可能性がある。**ユーザー視認可能な観察文として書き、AI 向け指示 (「控えめに言及してよい」「過度に楽観しない」等) は禁止**。
+
+## Weekly Report v2 decisions (WEEKLY_REPORT_REDESIGN_2026_05, 2026-05-03)
+37) **Weekly Report の存在意義は「曜日横断パターン + 来週の戦略」**。Daily が「今夜の点」を見せるなら Weekly は「1 週間の線」を見せる。曜日 × 時間帯ヒートマップが Weekly の核心的差別化要因であり、これが無いなら Weekly Report は存続不要。
+38) **「夜セッション」の定義**: 19:00 〜 翌 04:59 を 1 つの「夜」として扱う。0-4 時のデータは前日の夜セッションに集計する (例: 日曜 00:00 のデータは土曜の夜)。これによりヒートマップの「日曜深夜が混雑」のような直感に反する表示が消える。`day_hour_heatmap` と `daily_summary` の両方でこのルールを適用。
+39) **ヒートマップの軸は時間 (Y) × 曜日 (X)**: 「22 時が週でどう変動するか」を 1 行スキャンで読めるようにするため。曜日 × 時間 (Y/X 入れ替え) では時間軸の比較が縦スキャンになり認知負荷が上がる。
+40) **AI 自然文解説は 2 セクション分割**: `last_week_summary` (過去形・観察、Markdown 箇条書き) + `next_week_forecast` (推量形、Markdown 箇条書き) の独立フィールド。1 つの長文で両方を兼ねさせると焦点がぼやけたため。各セクションはリード文 1 行 + 3-5 項目の箇条書き必須 (です・ます調)。
+41) **AI 生成失敗時は既存レコードの文章を保持**: Gemini が 429 や parse 失敗で None を返した場合、Supabase の既存 `last_week_summary` / `next_week_forecast` / `ai_commentary` を読み出して新 payload に merge してから upsert する。前回成功した文章が一過性の失敗で消える事故を防ぐ。
+42) **Gemini 呼び出しの 429 戦略**: 5s/15s/45s のバックオフで 3 回リトライ → `gemini-2.5-flash-lite` (別クォータ枠) にフォールバック → 全失敗で None 返却。非 429 エラーはリトライしない (即フェイルする。delay しても無意味)。
+43) **Gemini JSON parse の二段構え**: `responseSchema` で構造化出力を強制 + `maxOutputTokens=2000` で切断防止 + 万一の破損時は正規表現 (`r'"key"\s*:\s*"((?:[^"\\]|\\.)*)"'`) で各フィールドを抜き出すフォールバックパーサ。1 件でも取れれば「無コメント」より良いという方針。

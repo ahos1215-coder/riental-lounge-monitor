@@ -1,5 +1,5 @@
 # STATUS
-Last updated: 2026-05-03 (Round 11: 連休クラスタ特徴量 + schema v6 + 連休バナー UI)
+Last updated: 2026-05-04 (Round 12: Weekly Report v2 redesign — heatmap + 日別サマリ + AI 自然文解説 (先週/来週) + 来週の狙い目 + 賑わいスコアバー削除)
 Target commit: (see git)
 
 ## 現在動いている機能
@@ -24,6 +24,7 @@ Target commit: (see git)
 - `/api/second_venues`（最小応答。未設定時は空配列）
 - `/api/megribi_score`（全店舗 or 指定店舗の megribi_score を返す。`?store=` / `?stores=` 対応。Supabase backend 必須。**ThreadPoolExecutor(12) で並列取得 — 38店舗12s→<1s**）
 - `/api/forecast_accuracy`（`metadata.json` から店舗別 MAE/RMSE メトリクスを返却。**Holdout Test（直近20%）による真の汎化精度**。Feature importance も含む）
+- `/api/holiday_status`（**2026-05-03〜**。任意の日付について連休判定を返す。`?date=YYYY-MM-DD` 省略時は JST 今日。返却: `block_length` (連続休業日数 0-9) / `block_position` (0.0=初日 1.0=最終日 / 平日は 0.5) / `is_long_holiday` (block_length>=4) / `label` (例: "5連休 (3/5日目)")。実装: `oriental/ml/holiday_calendar.py` の `get_holiday_block` / `is_long_holiday`。フロントの `LongHolidayBanner` が消費）
 - `/tasks/multi_collect` / `/api/tasks/collect_all_once`（本番収集の入口 → Supabase `logs`。デフォルト 202 Accepted + バックグラウンドスレッド実行。`?mode=sync` で旧同期モード。`/tasks/multi_collect/status` でステータス確認）
   - **Phase 2 (Oriental Lounge)**: トップページ一括取得 (1 リクエストで 38 店舗、`src_brand="oriental"`)
   - **Phase 2b (相席屋)**: トップページから 6 店舗のパーセンテージを抽出 → 座席数 × % で逆算 (`src_brand="aisekiya"`、2026-04-17〜)
@@ -40,12 +41,12 @@ Target commit: (see git)
 |------|------|
 | `/` | トップ。「今夜のおすすめ」（megribi_score TOP 5）+ Last visited ミニチャート + ブログ新着 + ナビリンク |
 | `/stores` | 全店舗一覧（12件/ページ・地域タブ・テキスト検索・**request ordering 戦略**: ① `range_multi` 最優先 await → 部分カード即表示 → ② `megribi_score` + ③ `forecast_today_multi` を後続発火。単一 gunicorn worker でも体感 ~1.5s で初期表示） |
-| `/store/[id]` | 店舗詳細（リアルタイムカード・Recharts 時系列・ML 予測・レポート要約カード・関連店舗・**range + forecast 同時発火**） |
+| `/store/[id]` | 店舗詳細（リアルタイムカード・Recharts 時系列・ML 予測・**LongHolidayBanner** (連休期間中のみ)・「今日の傾向まとめ」・**Weekly Report 要約カード**・関連店舗・**range + forecast 同時発火**）。Daily Report 専用カードは `/store/[id]` から削除済み (2026-04-23) |
 | `/reports` | **AI予測レポート統合一覧**（Daily/Weekly タブ切替・エリアフィルタ・店舗名検索。ヘッダー「AI予測」からリンク） |
 | `/reports/daily` | `/reports` へリダイレクト |
 | `/reports/daily/[store_slug]` | **Daily Report 個別**: 最新 `content_type='daily'`・`is_published=true`。Facts カード表示 |
 | `/reports/weekly` | `/reports?tab=weekly` へリダイレクト |
-| `/reports/weekly/[store_slug]` | **Weekly Report 個別**: 最新 `content_type='weekly'`・`is_published=true`。**MDX プロース + `insight_json` 定量データ（メトリクスカード・時系列チャート・Good Windows）を統合表示** |
+| `/reports/weekly/[store_slug]` | **Weekly Report 個別**: 最新 `content_type='weekly'`・`is_published=true`。**v2 redesign (2026-05〜)**: 先週の日別サマリ → AI 観測「先週の傾向」(Markdown 箇条書き) → 今週の分析メトリクス → ヒートマップ (時間×曜日) → AI 予想「来週の予想傾向」(Markdown 箇条書き) → 来週の狙い目時間 TOP 3 → 賑わいやすい時間帯 → 予測モデル精度。各セクションは insight_json のフィールドが無いと安全に隠す |
 | `/blog` | 編集ブログ一覧。AI予測レポート一覧への誘導バナー付き |
 | `/blog/[slug]` | **editorial（`content_type='editorial'`, `is_published=true`）のみ**表示 |
 | `/insights/weekly` | **→ `/reports?tab=weekly` に 301 リダイレクト**（統合済み） |
@@ -53,7 +54,7 @@ Target commit: (see git)
 | `/compare` | **店舗比較**: 最大3店舗を並べてリアルタイム混雑を比較。マージチャート（実測+予測）・megribi_score・男女別人数カード。URL パラメータ `?stores=a,b,c` で状態共有 |
 | `/mypage` | **ダッシュボード型マイページ**: お気に入り店舗リッチカード（リアルタイム人数・男女スパークライン・megribi_score・ML 予測サマリ・Daily/Weekly リンク）+ 閲覧履歴ピルタグ |
 
-#### Next.js API Routes（14本）
+#### Next.js API Routes（15本）
 | パス | 用途 |
 |------|------|
 | `/api/range` | Flask `/api/range` プロキシ（CDN `s-maxage` 付き） |
@@ -69,6 +70,7 @@ Target commit: (see git)
 | `/api/cron/blog-draft` | Daily Report 生成（GHA matrix → Gemini → Supabase） |
 | `/api/line` | LINE Messaging webhook（下書き/分析/承認） |
 | `/api/forecast_accuracy` | Flask `/api/forecast_accuracy` プロキシ（CDN `s-maxage=3600`） |
+| `/api/holiday_status` | Flask `/api/holiday_status` プロキシ（CDN `s-maxage=3600` — 連休判定は日付固定なので長めにキャッシュ） |
 | `/api/sns/post` | X (Twitter) 投稿 API（OAuth 1.0a・dry_run 対応） |
 
 #### GA4 アナリティクス
@@ -90,6 +92,9 @@ Target commit: (see git)
 - **Recharts**: 全チャートを Chart.js → Recharts に統一済み（Round 3）。Chart.js 依存は完全削除
 - **StoreCard**: データ未取得時のプレースホルダ（`—`・`0人`）を非表示化（Round 3）。めぐりびスコアバッジ: `狙い目`（≥0.65）/ `様子見`（≥0.40）/ `他店へ`（<0.40）
 - **ForecastAccuracyCard**: `/store/[id]` ページに予測モデル精度カード表示（MAE / 週末夜 MAE / グレード表示）。`/api/forecast_accuracy` からクライアントサイドでフェッチ（モジュールレベルキャッシュ）
+- **LongHolidayBanner (2026-05-03〜)**: `/store/[id]` ページの `PreviewMainSection` 内、タイムライングラフと「今日の傾向まとめ」の間に表示。`/api/holiday_status` を呼び `is_long_holiday=true` (連続休業 4 日以上) のときのみバナー表示。文言: 「連休中は普段と異なる人の流れが起きるため、予測との乖離が大きくなる傾向があります」。GW・お盆・年末年始など ML が未学習の期間で予測がズレやすい点を読者に明示する目的 (`frontend/src/components/store/LongHolidayBanner.tsx`)
+- **WeeklyHeatmap (2026-05-03〜)**: `/reports/weekly/[store]` の中核チャート。10 行 (時間帯) × 7 列 (曜日) のグリッド、混雑度をデータセット内最大値で正規化 + ガンマ補正 + 多色グラデ (青→紫→桃赤) で表現。ホバー時に曜日 / 時間帯 / 混雑度 % / 女性比 % / サンプル数を詳細表示 (`frontend/src/components/WeeklyHeatmap.tsx`)
+- **WeeklySummary (2026-05-03〜)**: `/reports/weekly/[store]` の先頭近くに表示する 7 日分の日別サマリ。各「夜」(19:00-翌04:59) の avg/peak 混雑度をバーで一覧、一番賑わった夜を強調 (`frontend/src/components/WeeklySummary.tsx`)
 - **予測自動再試行 UX (2026-04-12〜)**: `useStorePreviewData.ts` は `/api/forecast_today` が空配列を返した場合（ML モデル一過性ロード失敗の典型症状）、5s → 15s → 45s のバックオフで最大 3 回自動再試行する。`StoreSnapshot.forecastStatus` に `idle` / `ok` / `retrying` / `unavailable` を出力し、`PreviewMainSection.tsx` が「予測データを再取得しています…」「予測データを取得できませんでした。実測グラフのみ表示しています。」のヒントを表示
 - **ブログ frontmatter**: Zod 検証（`blogFrontmatter.ts` / `content.ts`）
 - **CDN Cache-Control**: API proxy に `s-maxage` + `stale-while-revalidate` 設定。予測系（`forecast_today` / `forecast_next_hour`）は `s-maxage=60`（Flask TTL も 60s）、最大遅延 ~2 分
@@ -137,6 +142,15 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 - 失敗店舗のみ再実行: `retry-blog-draft-stores.yml`
 - 部分失敗通知: `summarize-blog-matrix` → `notify-partial-blog-failures`（`OPS_NOTIFY_WEBHOOK_URL` 設定時）
 - **X 自動投稿**: Daily Report 生成後、`x-auto-post.yml` が `workflow_run` で自動トリガー。許可店舗のみ投稿
+- **プロンプト v2 (Phase 1, 2026-04-19〜、`plan/BLOG_REDESIGN_2026_04.md`)**: 旧「禁止事項羅列」→ 新「観測者ペルソナ + 型 + 良い例/避ける例」。`buildSystemInstruction()` (`frontend/src/lib/blog/draftGenerator.ts`):
+  - ペルソナ「夜遊びに詳しい友人がデータを見ながらつぶやく」距離感
+  - 構造強制を撤廃 (旧「## 今日の結論 + 箇条書き 3-4 行」固定 → 新「自然文 100-200字、箇条書き / 見出し禁止」)
+  - 予測は断定回避 (「21時にピークが来ます」❌ → 「21時あたりが山になりそう」✅)
+  - **2 エディションは独立**: `late_update` (21:30) は `evening_preview` (18:00) の予測には言及しない (予測精度の露呈防止)
+  - Few-shot: 良い例 / 避ける例を system prompt 末尾に固定埋め込み
+  - 後段の `buildFallbackBlogDraftMdx()` は依然旧スタイル (Phase 4 で書き換え予定 — `plan/BLOG_REDESIGN_2026_04.md`)
+- **指示文漏洩修正 (2026-04-23, `fd9a195`)**: `secondary_wave.note` / `gender_note` から AI 指示語 (「控えめに言及してよい (断定禁止)」「過度に楽観・悲観しない説明にしてください」) を除去。AI が本文に書き写してユーザーに見えていたバグ
+- **/store/[id] からの Daily Report カード削除 (2026-04-23, `fd9a195`)**: 同ページの「今日の傾向まとめ」(`LatestForecastSummaryCard`) と内容重複のため削除。Weekly Report カードは残置
 
 #### Weekly Report（`content_type='weekly'`, `is_published=true`）
 - **Workflow**: `.github/workflows/generate-weekly-insights.yml`（毎週水曜 06:30 JST = UTC 火曜 21:30）
@@ -144,6 +158,14 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
   - **Fan-out** `generate-store`: 38 店舗 × 独立ジョブ、`max-parallel: 10`。`--skip-index` で `index.json` 更新を抑制。Supabase upsert は各ジョブ内で完結
   - **Fan-in** `collect-and-commit`: 全 Artifact を回収 → `index.json` マージ再構築 → Git commit 1回
 - **出力先**: `frontend/content/insights/weekly/<store>/<date>.json` + `index.json`
+- **v2 redesign (2026-05-03〜、`plan/WEEKLY_REPORT_REDESIGN_2026_05.md`)**:
+  - **Phase A — `metric_interpretations`**: 既存メトリクスに「だから何?」のラベルを添える (例: "1 日平均 142 件・平常", "中規模店レベル")
+  - **Phase B — `day_hour_heatmap`**: 7 曜日 × 10 時間 (19-04時) のヒートマップ。**0-4時のデータは前日の夜セッションとして集計** (例: 日曜 00:00 → 土曜行)。フロント `WeeklyHeatmap.tsx` が消費。多色グラデ (青→紫→桃赤、最大値正規化、ガンマ補正) で混雑度の差を強調。**軸は時間 (Y) × 曜日 (X)** (横方向に 1 時間を週全体でスキャンするため)
+  - **Phase C — `last_week_summary` / `next_week_forecast`**: Gemini 2.5 Flash による自然文解説 2 セクション。`INSIGHTS_GENERATE_AI_COMMENTARY=1` + `GEMINI_API_KEY` 設定時のみ動作。**responseSchema** で構造化出力を強制、**maxOutputTokens=2000** で切断防止、**正規表現フォールバックパーサ**で JSON 破損を救出、**429 リトライ (5s/15s/45s) + gemini-2.5-flash-lite フォールバック**、**生成失敗時は既存レコードの文章を保持** (上書き消失防止)。出力は **です・ます調 + Markdown 箇条書き必須** (リード文 1 行 + 3-5 項目)
+  - **Phase D — `next_week_recommendations`**: ヒートマップ上位 3 セル (`sample_count>=2`) を「来週の狙い目時間 TOP 3」として派生。`day_label_ja` / `hour_label` / `avg_occupancy` / `avg_female_ratio` を含む
+  - **`daily_summary`**: 直近 7 夜分の日別サマリ (各夜 19:00-翌04:59 を 1 単位、avg/peak occupancy + female_ratio + sample_count)。一番賑わった夜を強調
+  - **削除**: 旧「1 週間の混雑推移」折れ線グラフ (時系列で曜日パターンが読めなかった) + 旧「賑わいスコア」バーチャート (機能重複・直感性ゼロ)
+  - **既存データの後方互換**: 旧 JSON は `daily_summary` / `day_hour_heatmap` / AI フィールドが無いが、フロントは各セクションを条件付きレンダリングで安全に隠す。次回 cron 実行で全店舗 v2 化される
 
 #### Editorial Blog（`content_type='editorial'`, `is_published=false → true`）
 - **トリガー**: LINE で「○○について分析して」などのメッセージ
@@ -192,7 +214,7 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 | cron-job.org | `/tasks/multi_collect` | 5分毎（営業時間帯） | `CRON_SECRET` 認証 |
 | GHA schedule | `train-ml-model.yml` | 05:30 | UTC 20:30 |
 | GHA schedule | `generate-public-facts.yml` | 09:30 | UTC 00:30 |
-| GHA schedule | `generate-weekly-insights.yml` | 水曜 06:30 | UTC 火曜 21:30 |
+| GHA schedule | `generate-weekly-insights.yml` | 水曜 06:30 | UTC 火曜 21:30。`INSIGHTS_GENERATE_AI_COMMENTARY=1` + `GEMINI_API_KEY` で AI 自然文解説 (last_week_summary / next_week_forecast) を生成 |
 
 ## 動作確認の最小手順
 - Backend: `/api/range?store=...&limit=...` が `ts` 昇順で返ること
