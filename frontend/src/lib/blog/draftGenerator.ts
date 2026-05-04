@@ -455,28 +455,41 @@ async function generateStructuredWithRateLimitRetries(
   throw lastErr;
 }
 
+/**
+ * Gemini API が呼べないとき (rate limit / 一過性エラー等) に使う最小限の MDX。
+ * v2 (2026-05): Phase 1 で本流プロンプトを「## 今日の結論 + 箇条書き」から
+ * 「100-200字の自然文・見出しなし・箇条書きなし」に変えたため、フォールバックも
+ * 同じスタイルに揃える。AI 不在でも「短い情報記事」として違和感なく読めるよう、
+ * peak / crowd / 二次会フラグ / 曜日コンテキストを自然な日本語で 1-2 文にまとめる。
+ *
+ * トーンは中立的なです・ます調。late_update は 18:00 予測には触れず純粋な現況観察として書く
+ * (decoupled editions の方針)。
+ */
 export function buildFallbackBlogDraftMdx(input: DraftGeneratorInput): string {
   const { insight, draft_context } = input.insightResult;
-  const title = `${input.storeLabel}｜今日の傾向まとめ（${input.dateYmd}）`;
   const peak = insight.peak_time || "—";
   const crowd = insight.crowd_label || "—";
   const dayLabel = draft_context?.day_context?.day_name_ja ?? "";
+  const edition = draft_context?.edition ?? "evening_preview";
   const wave = draft_context?.secondary_wave?.detected
-    ? `二次会帯（21〜22時頃）に人が増える傾向${draft_context.secondary_wave.note ? `（${draft_context.secondary_wave.note}）` : ""}`
-    : null;
+    ? "21〜22時台に人が増える傾向もみられます。"
+    : "";
 
-  const bullets: string[] = [
-    `混雑度（目安）: ${crowd}${dayLabel ? `（${dayLabel}）` : ""}`,
-    `ピーク時間: ${peak} 前後 — この時間以降、人が減り始める傾向です`,
-  ];
-  if (wave) {
-    bullets.push(wave);
-  }
+  // Edition 別に短い自然文 (1-2 文、~80-160 字目安) を組み立てる
+  const dayPrefix = dayLabel ? `${dayLabel}の` : "";
+  const body =
+    edition === "late_update"
+      ? `${dayPrefix}現時点の混雑度は${crowd}、ピーク帯は${peak}前後の流れです。${wave}`.trim()
+      : `${dayPrefix}今夜は${peak}前後がピークになりそうで、混雑度の目安は${crowd}です。${wave}`.trim();
+
+  const titleSuffix = edition === "late_update" ? "今夜の様子" : "今夜の見通し";
+  const title = `${input.storeLabel} ${titleSuffix} ${input.dateYmd}`;
+  const description = `${input.storeLabel}のピーク${peak}前後、混雑度${crowd}。`;
 
   return [
     "---",
     `title: "${title}"`,
-    `description: "${input.storeLabel}の今夜の混雑予測。ピーク${peak}前後。"`,
+    `description: "${description}"`,
     `date: "${input.dateYmd}"`,
     "categoryId: prediction",
     "level: easy",
@@ -485,8 +498,7 @@ export function buildFallbackBlogDraftMdx(input: DraftGeneratorInput): string {
     "facts_visibility: show",
     "---",
     "",
-    "## 今日の結論",
-    ...bullets.map((b) => `- ${b}`),
+    body,
     "",
   ].join("\n");
 }
