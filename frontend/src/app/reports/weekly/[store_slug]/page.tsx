@@ -8,7 +8,7 @@ import { getStoreMetaBySlugStrict } from "@/app/config/stores";
 import { ForecastAccuracyCard } from "@/components/ForecastAccuracyCard";
 import { ReservationLinkCard } from "@/components/ReservationLinkCard";
 import { ReportViewTracker } from "@/components/ReportViewTracker";
-import type { TopWindowChart } from "@/components/WeeklyStoreCharts";
+import type { TopWindowChart } from "@/lib/types/weeklyReport";
 import WeeklyHeatmap from "@/components/WeeklyHeatmap";
 import type { DayHourHeatmap, HeatmapCell } from "@/components/WeeklyHeatmap";
 import WeeklySummary from "@/components/WeeklySummary";

@@ -212,7 +212,7 @@ export default function MyPageClient() {
             { href: "/stores", label: "店舗一覧" },
             { href: "/reports", label: "AI予測レポート" },
             { href: "/blog", label: "ブログ" },
-            { href: "/insights/weekly", label: "週次 Insights" },
+            { href: "/reports?tab=weekly", label: "週次 Insights" },
           ].map((link) => (
             <Link
               key={link.href}

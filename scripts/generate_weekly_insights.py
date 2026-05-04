@@ -206,35 +206,6 @@ def _build_points(rows: list[dict[str, Any]], baseline: float) -> list[dict[str,
     return points
 
 
-def _series_compact_points(points: list[dict[str, Any]], max_n: int = 240) -> list[dict[str, Any]]:
-    """時系列チャート用にサンプルを間引く（JSON サイズと描画コストのバランス）。"""
-    if not points:
-        return []
-    sorted_pts = sorted(points, key=lambda p: p.get("timestamp"))
-    n = len(sorted_pts)
-    if n <= max_n:
-        idxs = list(range(n))
-    else:
-        step = (n - 1) / (max_n - 1)
-        idxs = sorted({int(round(i * step)) for i in range(max_n)})
-    out: list[dict[str, Any]] = []
-    for i in idxs:
-        p = sorted_pts[i]
-        ts = p.get("timestamp")
-        if not isinstance(ts, datetime):
-            continue
-        occ = float(p.get("occupancy_rate") or 0.0)
-        fr = float(p.get("female_ratio") or 0.0)
-        out.append(
-            {
-                "t": _iso(ts),
-                "occupancy": round(occ, 4),
-                "female_ratio": round(fr, 4),
-            }
-        )
-    return out
-
-
 def _serialize_windows(windows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for w in windows:
@@ -966,7 +937,6 @@ def main() -> int:
             "metric_interpretations": metrics_interp,
             "windows": serialized_windows,
             "top_windows": top_windows,
-            "series_compact": _series_compact_points(points),
             # v2: Phase B
             "day_hour_heatmap": heatmap,
             # v2: Phase D
