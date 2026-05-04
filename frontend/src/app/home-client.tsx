@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { TrendingUp, Clock, MapPin, ChevronRight, Sparkles, BookOpen } from "lucide-react";
-import { FadeIn, StaggerContainer, StaggerItem } from "@/components/ui/FadeIn";
+import { FadeIn } from "@/components/ui/FadeIn";
 import {
   DEFAULT_STORE,
   STORES,

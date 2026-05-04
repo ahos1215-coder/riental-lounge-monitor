@@ -598,7 +598,6 @@ export function useStorePreviewData(
             },
           });
         }
-        // eslint-disable-next-line no-console
         console.error("useStorePreviewData.error", detail);
       }
     }

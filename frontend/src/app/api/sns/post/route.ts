@@ -52,7 +52,7 @@ function oauthSign(
   return crypto.createHmac("sha1", signingKey).update(baseString).digest("base64");
 }
 
-function buildOAuthHeader(method: string, url: string, body: string): string {
+function buildOAuthHeader(method: string, url: string, _body: string): string {
   const apiKey = process.env.X_API_KEY!.trim();
   const apiSecret = process.env.X_API_SECRET!.trim();
   const accessToken = process.env.X_ACCESS_TOKEN!.trim();

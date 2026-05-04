@@ -90,10 +90,8 @@ export default async function WeeklyReportStorePage({ params }: Props) {
   // insight_json から定量データを抽出
   const ij = row.insight_json ?? {};
   const metrics = (ij.metrics ?? {}) as Record<string, unknown>;
-  const insightParams = (ij.params ?? {}) as Record<string, unknown>;
   const period = (ij.period ?? {}) as Record<string, unknown>;
-  const threshold = typeof insightParams.threshold === "number" ? insightParams.threshold : 0.8;
-  const minDuration = typeof insightParams.min_duration_minutes === "number" ? insightParams.min_duration_minutes : 120;
+  // v2 redesign で WeeklyStoreCharts の Bar チャートを撤去したため、threshold / minDuration の参照は不要になった
   const reliability = typeof metrics.reliability_score === "number" ? metrics.reliability_score : 0;
 
   const rawTopWindows = Array.isArray(ij.top_windows) ? ij.top_windows : [];

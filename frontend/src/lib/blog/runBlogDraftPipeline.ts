@@ -85,7 +85,7 @@ export async function runBlogDraftPipeline(
         topicHint: topicHint ?? "",
         source,
       });
-    } catch (e) {
+    } catch {
       // cron で 429 retry-after が長い場合などは、ここで即フォールバックして mdx を必ず保存する
       mdx = buildFallbackBlogDraftMdx({
         storeLabel: store.label,

@@ -112,7 +112,7 @@ function StorePageInner() {
     if (!slug) return;
     recordStoreVisit(slug);
     sendEvent("store_view", { store_slug: slug, store_label: meta.label });
-  }, [slug]);
+  }, [slug, meta.label]);
 
   const digestStores = useMemo(
     () => STORES.filter((s) => s.slug !== slug).slice(0, 4),

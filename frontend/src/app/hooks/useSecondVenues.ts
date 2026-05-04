@@ -29,7 +29,6 @@ export function useSecondVenues(storeSlug: string): SecondVenuesState {
         }
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
-        // eslint-disable-next-line no-console
         console.error("useSecondVenues.error", detail);
         if (!cancelled) {
           setState({ loading: false, error: detail, data: [] });
