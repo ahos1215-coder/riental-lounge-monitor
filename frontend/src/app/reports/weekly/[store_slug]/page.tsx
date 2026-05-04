@@ -244,14 +244,16 @@ export default async function WeeklyReportStorePage({ params }: Props) {
             </div>
           )}
 
-          {/* 2. 先週の傾向 (AI コメント) */}
+          {/* 2. 先週の傾向 (AI コメント, Markdown 対応) */}
           {lastWeekSummary && (
             <section className="mb-8 rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-5 md:p-6">
               <h2 className="mb-2 inline-flex items-center gap-2 text-xs font-bold text-indigo-200">
                 <span className="rounded bg-indigo-500/30 px-1.5 py-0.5 text-[10px] text-indigo-100">AI 観測</span>
                 先週の傾向
               </h2>
-              <p className="text-sm leading-relaxed text-white/85 whitespace-pre-line">{lastWeekSummary}</p>
+              <div className="prose prose-invert prose-sm max-w-none prose-p:text-white/85 prose-li:text-white/85 prose-li:my-0.5 prose-ul:my-2">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{lastWeekSummary}</ReactMarkdown>
+              </div>
             </section>
           )}
 
@@ -302,14 +304,16 @@ export default async function WeeklyReportStorePage({ params }: Props) {
             </div>
           )}
 
-          {/* 来週の予想傾向 (AI コメント) */}
+          {/* 来週の予想傾向 (AI コメント, Markdown 対応) */}
           {nextWeekForecast && (
             <section className="mt-8 rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-5 md:p-6">
               <h2 className="mb-2 inline-flex items-center gap-2 text-xs font-bold text-emerald-200">
                 <span className="rounded bg-emerald-500/30 px-1.5 py-0.5 text-[10px] text-emerald-100">AI 予想</span>
                 来週の予想傾向
               </h2>
-              <p className="text-sm leading-relaxed text-white/85 whitespace-pre-line">{nextWeekForecast}</p>
+              <div className="prose prose-invert prose-sm max-w-none prose-p:text-white/85 prose-li:text-white/85 prose-li:my-0.5 prose-ul:my-2">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{nextWeekForecast}</ReactMarkdown>
+              </div>
             </section>
           )}
 
