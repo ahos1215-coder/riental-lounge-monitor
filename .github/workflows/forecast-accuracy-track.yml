@@ -1,0 +1,75 @@
+name: Forecast accuracy tracking
+
+# Daily "answer-check" loop for the LIVE forecast (distinct from training holdout):
+#   - snapshot (~18:10 JST): save tonight's served forecast before the night starts
+#   - score   (~06:10 JST): compare last night's snapshot to the actual 19:00-05:00
+#     counts and record per-store live MAE + a rolling summary in Supabase Storage.
+# See plan/FORECAST_ACCURACY.md. No new DB/bucket — reuses the model bucket.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "snapshot | score"
+        required: true
+        default: "score"
+        type: choice
+        options:
+          - snapshot
+          - score
+  schedule:
+    - cron: "10 9 * * *"   # 18:10 JST — snapshot the pure forward forecast
+    - cron: "10 21 * * *"  # 06:10 JST — score last night vs actuals
+
+jobs:
+  track:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Decide mode
+        id: decide
+        env:
+          INPUT_MODE: ${{ github.event.inputs.mode }}
+          SCHEDULE: ${{ github.event.schedule }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_MODE:-}" ]; then
+            MODE="$INPUT_MODE"
+          elif [ "${SCHEDULE:-}" = "10 9 * * *" ]; then
+            MODE="snapshot"
+          else
+            MODE="score"
+          fi
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "resolved mode: $MODE"
+
+      - name: Run
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          BACKEND_URL: ${{ vars.BACKEND_URL }}
+          FORECAST_MODEL_BUCKET: ${{ vars.FORECAST_MODEL_BUCKET }}
+          TIMEZONE: Asia/Tokyo
+          MODE: ${{ steps.decide.outputs.mode }}
+        run: |
+          set -euo pipefail
+          if [ "$MODE" = "snapshot" ]; then
+            python scripts/snapshot_forecasts.py
+          else
+            python scripts/score_forecasts.py
+          fi
+
+  notify-on-failure:
+    needs: [track]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "Forecast accuracy tracking"
