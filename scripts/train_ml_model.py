@@ -109,7 +109,11 @@ class TrainingConfig:
             schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v6").strip(),
             timezone=os.getenv("TIMEZONE", "Asia/Tokyo").strip(),
             train_days=_env_int("ML_TRAIN_DAYS", 180),
-            train_limit=_env_int("ML_TRAIN_LIMIT", 120000),
+            # 120000 was ~180 days back when the table was small; the table has since
+            # grown ~8x (≈960k rows), so a 120k cap silently shrank the effective window
+            # to ~26 days. Raise the default so the ML_TRAIN_DAYS window (180d) is the
+            # real bound, not the row cap. Override via ML_TRAIN_LIMIT if memory/time-bound.
+            train_limit=_env_int("ML_TRAIN_LIMIT", 1_000_000),
             store_id=os.getenv("ML_TRAIN_STORE_ID", "").strip() or None,
             sample_weight_peak=_env_float("ML_TRAIN_WEIGHT_PEAK", 1.8),
             sample_weight_rain=_env_float("ML_TRAIN_WEIGHT_RAIN", 1.8),
@@ -143,7 +147,11 @@ def _fetch_training_rows(cfg: TrainingConfig, session: requests.Session) -> list
         end = min(offset + page_size - 1, cfg.train_limit - 1)
         params: list[tuple[str, str]] = [
             ("select", "store_id,ts,men,women,total,weather_code,temp_c,precip_mm"),
-            ("order", "ts.asc"),
+            # newest-first: with a row cap (ML_TRAIN_LIMIT) smaller than the rows
+            # available in the window, ts.asc kept the OLDEST rows and silently trained
+            # on stale data (e.g. only Dec–Jan while ignoring 5 months of newer rows).
+            # ts.desc keeps the most RECENT rows, matching the 90-day recency weighting.
+            ("order", "ts.desc"),
             ("limit", str(page_size)),
             ("offset", str(offset)),
             ("ts", f"gte.{start_ts.isoformat()}"),
@@ -318,6 +326,30 @@ def _rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.sqrt(np.mean((y_pred - y_true) ** 2)))
 
 
+def _seasonal_naive_metrics(df: pd.DataFrame) -> dict[str, float]:
+    """Seasonal-naive baseline the ML must beat: predict tonight's `total` as the
+    same weekday + same time-slot from LAST week. Reuses the existing
+    `same_dow_last_week_total` feature (median-filled where last week's slot is
+    missing), so it is the realistic "last week, same time" rule with no model.
+    Returned MAE/RMSE are stored next to the model's metrics so the owner can see
+    whether the 24-feature, daily-retrained pipeline actually earns its complexity.
+    """
+    if "same_dow_last_week_total" not in df.columns or "total" not in df.columns:
+        return {}
+    pred_total = pd.to_numeric(df["same_dow_last_week_total"], errors="coerce").to_numpy()
+    true_total = pd.to_numeric(df["total"], errors="coerce").to_numpy()
+    mask = ~(np.isnan(pred_total) | np.isnan(true_total))
+    if not mask.any():
+        return {}
+    pred_total = pred_total[mask]
+    true_total = true_total[mask]
+    return {
+        "total_mae": float(np.mean(np.abs(pred_total - true_total))),
+        "total_rmse": _rmse(true_total, pred_total),
+        "rows_scored": int(mask.sum()),
+    }
+
+
 def _evaluate_rows(df: pd.DataFrame, pred_men: np.ndarray, pred_women: np.ndarray) -> dict[str, float]:
     true_men = df["men"].astype(float).to_numpy()
     true_women = df["women"].astype(float).to_numpy()
@@ -391,6 +423,7 @@ def _log_metrics_by_store(
         else:
             segment = {}
         daily = _daily_accuracy(sdf, pred_men_all[idx], pred_women_all[idx])
+        baseline = _seasonal_naive_metrics(sdf)
         entry = {
             "store_id": store,
             "rows_test": int(len(sdf)),
@@ -400,6 +433,15 @@ def _log_metrics_by_store(
             "evaluation": "holdout_test_20pct",
             "daily_accuracy": daily,
         }
+        if baseline:
+            entry["baseline_seasonal_naive"] = baseline
+            b_mae = baseline.get("total_mae")
+            m_mae = overall.get("total_mae")
+            if b_mae and b_mae > 0 and m_mae is not None:
+                # >0 means the ML beats "last week same slot"; <=0 means it does not.
+                entry["ml_vs_baseline_total_mae_improvement_pct"] = round(
+                    (b_mae - m_mae) / b_mae * 100.0, 1
+                )
         print("[train-ml][metrics]", json.dumps(entry, ensure_ascii=True))
         all_metrics[store] = entry
     return all_metrics
