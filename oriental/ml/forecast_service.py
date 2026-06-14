@@ -145,7 +145,16 @@ class ForecastService:
             return result
         except Exception as exc:  # noqa: BLE001
             self.logger.error("forecast.service.error store=%s", store_id, exc_info=exc)
-            result = {"ok": True, "store": store_id, "freq_min": freq_min, "data": []}
+            # 予期せぬ内部エラーを ok:true（成功）で隠すと、予測グラフが空のまま
+            # 5xx もアラートも出ず、障害に何日も気づけない。ok:false で明示する。
+            result = {
+                "ok": False,
+                "error": "forecast_internal_error",
+                "detail": str(exc),
+                "store": store_id,
+                "freq_min": freq_min,
+                "data": [],
+            }
             if extra_meta:
                 result.update(extra_meta)
             return result

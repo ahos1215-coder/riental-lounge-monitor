@@ -69,13 +69,19 @@ jobs:
       - name: Compute slug/branch
         id: meta
         shell: bash
+        env:
+          # 入力値はシェルに直接展開せず env 経由で受ける（コマンドインジェクション対策）
+          INPUT_TARGET_DATE: ${{ github.event.inputs.target_date }}
+          INPUT_STORE_ID: ${{ github.event.inputs.store_id }}
+          INPUT_KIND: ${{ github.event.inputs.kind }}
+          INPUT_REQUEST_ID: ${{ github.event.inputs.request_id }}
         run: |
           set -euo pipefail
-          ymd="${{ github.event.inputs.target_date }}"
+          ymd="$INPUT_TARGET_DATE"
           ymd8="${ymd//-/}"
-          slug="${{ github.event.inputs.store_id }}-${{ github.event.inputs.kind }}-${ymd8}"
+          slug="${INPUT_STORE_ID}-${INPUT_KIND}-${ymd8}"
 
-          rid_raw="${{ github.event.inputs.request_id }}"
+          rid_raw="$INPUT_REQUEST_ID"
           rid="$(echo "$rid_raw" | tr -cd 'A-Za-z0-9._-' | cut -c1-32)"
           if [ -z "$rid" ]; then rid="req"; fi
 
@@ -85,17 +91,27 @@ jobs:
 
       - name: Create draft MDX (+ stub facts file)
         working-directory: frontend
+        env:
+          # 入力値はシェルに直接展開せず env 経由で受ける（コマンドインジェクション対策）
+          INPUT_REQUEST_ID: ${{ github.event.inputs.request_id }}
+          INPUT_STORE_ID: ${{ github.event.inputs.store_id }}
+          INPUT_TARGET_DATE: ${{ github.event.inputs.target_date }}
+          INPUT_KIND: ${{ github.event.inputs.kind }}
+          INPUT_ANGLE: ${{ github.event.inputs.angle }}
+          INPUT_TONE: ${{ github.event.inputs.tone }}
+          INPUT_NOTES: ${{ github.event.inputs.notes }}
+          INPUT_SLUG: ${{ steps.meta.outputs.slug }}
         run: |
           set -euo pipefail
           node scripts/new-blog-request.mjs \
-            --request_id "${{ github.event.inputs.request_id }}" \
-            --store_id "${{ github.event.inputs.store_id }}" \
-            --target_date "${{ github.event.inputs.target_date }}" \
-            --kind "${{ github.event.inputs.kind }}" \
-            --angle "${{ github.event.inputs.angle }}" \
-            --tone "${{ github.event.inputs.tone }}" \
-            --notes "${{ github.event.inputs.notes }}" \
-            --slug "${{ steps.meta.outputs.slug }}"
+            --request_id "$INPUT_REQUEST_ID" \
+            --store_id "$INPUT_STORE_ID" \
+            --target_date "$INPUT_TARGET_DATE" \
+            --kind "$INPUT_KIND" \
+            --angle "$INPUT_ANGLE" \
+            --tone "$INPUT_TONE" \
+            --notes "$INPUT_NOTES" \
+            --slug "$INPUT_SLUG"
 
       - name: Generate public facts (uses /api/range)
         working-directory: frontend

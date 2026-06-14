@@ -69,6 +69,10 @@ jobs:
           ML_TRAIN_WEIGHT_RAIN: ${{ vars.ML_TRAIN_WEIGHT_RAIN }}
           ML_OPTUNA_ENABLED: ${{ steps.optuna.outputs.enabled }}
           ML_OPTUNA_TRIALS: ${{ vars.ML_OPTUNA_TRIALS }}
+          # workflow_dispatch の入力はシェルに直接展開せず env 経由で受ける（コマンドインジェクション対策）
+          INPUT_DAYS: ${{ github.event.inputs.days }}
+          INPUT_LIMIT: ${{ github.event.inputs.limit }}
+          INPUT_STORE_ID: ${{ github.event.inputs.store_id }}
         run: |
           set -euo pipefail
           export FORECAST_MODEL_BUCKET="${FORECAST_MODEL_BUCKET:-ml-models}"
@@ -80,17 +84,17 @@ jobs:
           export ML_TRAIN_WEIGHT_RAIN="${ML_TRAIN_WEIGHT_RAIN:-1.8}"
           export ML_OPTUNA_ENABLED="${ML_OPTUNA_ENABLED:-1}"
           export ML_OPTUNA_TRIALS="${ML_OPTUNA_TRIALS:-30}"
-          EXTRA_ARGS=""
-          if [ -n "${{ github.event.inputs.days }}" ]; then
-            EXTRA_ARGS="${EXTRA_ARGS} --days ${{ github.event.inputs.days }}"
+          EXTRA_ARGS=()
+          if [ -n "$INPUT_DAYS" ]; then
+            EXTRA_ARGS+=(--days "$INPUT_DAYS")
           fi
-          if [ -n "${{ github.event.inputs.limit }}" ]; then
-            EXTRA_ARGS="${EXTRA_ARGS} --limit ${{ github.event.inputs.limit }}"
+          if [ -n "$INPUT_LIMIT" ]; then
+            EXTRA_ARGS+=(--limit "$INPUT_LIMIT")
           fi
-          if [ -n "${{ github.event.inputs.store_id }}" ]; then
-            EXTRA_ARGS="${EXTRA_ARGS} --store-id ${{ github.event.inputs.store_id }}"
+          if [ -n "$INPUT_STORE_ID" ]; then
+            EXTRA_ARGS+=(--store-id "$INPUT_STORE_ID")
           fi
-          python scripts/train_ml_model.py ${EXTRA_ARGS}
+          python scripts/train_ml_model.py "${EXTRA_ARGS[@]}"
 
   notify-on-failure:
     needs: [train]
