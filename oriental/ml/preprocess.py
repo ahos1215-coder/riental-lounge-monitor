@@ -187,12 +187,20 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     df["same_dow_last_week_total"] = _merged["_total"].values
 
     # --- 直近30分の人数変化速度（v4 feature） ---
-    # 5分間隔のデータで6行前との差 = 30分間の変化量。
-    # 学習時: 連続データから自動算出。推論時: history の末尾から future の先頭行に引き継がれる。
+    # 5分間隔のデータで6行前との差 = 30分間の変化量。学習時: 連続データから自動算出。
     if group_keys:
         df["total_slope_30min"] = df.groupby(group_keys, dropna=False)["total"].diff(6)
     else:
         df["total_slope_30min"] = df["total"].diff(6)
+    # 推論時、未来行の total は NaN のため diff(6) も NaN になり、従来は下の中央値フィルで
+    # 「学習時=実値 / 推論時=定数」という train/serve skew が生じていた（hold-out MAE が
+    # 楽観的になる原因）。直近の実測 slope を未来行へ前方埋めし、学習・推論の双方で
+    # 「直近の変化速度」を見るように揃える。ffill は過去→未来方向のみ＝リーク無し。
+    # 学習時は連続データなのでほぼ no-op（各 store 先頭6行の NaN のみ残り中央値フィル）。
+    if group_keys:
+        df["total_slope_30min"] = df.groupby(group_keys, dropna=False)["total_slope_30min"].ffill()
+    else:
+        df["total_slope_30min"] = df["total_slope_30min"].ffill()
 
     df["gender_diff"] = (df["men"] - df["women"]).astype(float)
     df["minutes_to_midnight"] = (24 * 60 - (df["hour"] * 60 + df["minute"])).astype(float)
