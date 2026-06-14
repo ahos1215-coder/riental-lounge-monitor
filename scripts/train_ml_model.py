@@ -63,17 +63,39 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def _build_lgb_model(**overrides: Any) -> lgb.LGBMRegressor:
+def _objective_params(objective: str) -> dict[str, Any]:
+    """LightGBM objective + objective-specific params.
+
+    Counts are non-negative and intermittent (zero-heavy off-peak), so Poisson/
+    Tweedie (log-link) often beat the default L2 — but this must be MEASURED, so the
+    objective is env-configurable (ML_OBJECTIVE) and defaults to the current
+    'regression'. metric stays 'mae' across all objectives so early-stopping, Optuna
+    and the holdout report all judge by the SAME number — a fair A/B between
+    objectives. Poisson/Tweedie predict >= 0 via the log-link, making the
+    np.maximum(.,0) clamp in forecast_service redundant.
+    """
+    obj = (objective or "regression").lower()
+    if obj == "poisson":
+        return {"objective": "poisson", "metric": "mae", "poisson_max_delta_step": 0.7}
+    if obj == "tweedie":
+        return {
+            "objective": "tweedie",
+            "metric": "mae",
+            "tweedie_variance_power": _env_float("ML_TWEEDIE_VARIANCE_POWER", 1.3),
+        }
+    return {"objective": "regression", "metric": "mae"}
+
+
+def _build_lgb_model(objective: str = "regression", **overrides: Any) -> lgb.LGBMRegressor:
     params: dict[str, Any] = {
         "n_estimators": 300,
         "max_depth": 4,
         "learning_rate": 0.1,
         "subsample": 0.8,
         "colsample_bytree": 0.8,
-        "objective": "regression",
-        "metric": "mae",
         "verbosity": -1,
     }
+    params.update(_objective_params(objective))
     params.update(overrides)
     return lgb.LGBMRegressor(**params)
 
@@ -93,6 +115,7 @@ class TrainingConfig:
     sample_weight_rain: float
     optuna_trials: int
     optuna_enabled: bool
+    objective: str
 
     @classmethod
     def from_env(cls) -> "TrainingConfig":
@@ -119,6 +142,9 @@ class TrainingConfig:
             sample_weight_rain=_env_float("ML_TRAIN_WEIGHT_RAIN", 1.8),
             optuna_trials=_env_int("ML_OPTUNA_TRIALS", 30),
             optuna_enabled=os.getenv("ML_OPTUNA_ENABLED", "1").strip() == "1",
+            # 'regression' (L2) keeps current behavior; 'poisson'/'tweedie' are the
+            # count-data objectives to A/B (see _objective_params).
+            objective=(os.getenv("ML_OBJECTIVE", "regression").strip().lower() or "regression"),
         )
 
     def validate(self) -> None:
@@ -134,6 +160,8 @@ class TrainingConfig:
             raise SystemExit("FORECAST_MODEL_SCHEMA_VERSION is required")
         if self.sample_weight_peak < 1.0 or self.sample_weight_rain < 1.0:
             raise SystemExit("sample weights must be >= 1.0")
+        if self.objective not in {"regression", "poisson", "tweedie"}:
+            raise SystemExit("ML_OBJECTIVE must be one of: regression, poisson, tweedie")
 
 
 def _fetch_training_rows(cfg: TrainingConfig, session: requests.Session) -> list[dict[str, Any]]:
@@ -213,6 +241,7 @@ def _optuna_objective(
     x_test: pd.DataFrame,
     y_test: pd.Series,
     weights: np.ndarray,
+    objective: str = "regression",
 ) -> float:
     """Optuna objective: minimize MAE on held-out test set."""
     params = {
@@ -224,10 +253,9 @@ def _optuna_objective(
         "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
         "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
         "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
-        "objective": "regression",
-        "metric": "mae",
         "verbosity": -1,
     }
+    params.update(_objective_params(objective))
     model = lgb.LGBMRegressor(**params)
     model.fit(
         x_train, y_train, sample_weight=weights,
@@ -256,7 +284,7 @@ def _optimize_params(
 
     study = optuna.create_study(direction="minimize")
     study.optimize(
-        lambda trial: _optuna_objective(trial, x_train, y_men_train, x_test, y_men_test, weights),
+        lambda trial: _optuna_objective(trial, x_train, y_men_train, x_test, y_men_test, weights, cfg.objective),
         n_trials=cfg.optuna_trials,
         show_progress_bar=False,
     )
@@ -288,8 +316,8 @@ def _train_models(
 
     extra = dict(hpo_params) if hpo_params else {}
     callbacks = [lgb.early_stopping(15, verbose=False), lgb.log_evaluation(0)]
-    model_men = _build_lgb_model(**extra)
-    model_women = _build_lgb_model(**extra)
+    model_men = _build_lgb_model(objective=cfg.objective, **extra)
+    model_women = _build_lgb_model(objective=cfg.objective, **extra)
     model_men.fit(
         x_train, y_men_train, sample_weight=weights,
         eval_set=[(x_test, y_men_test)], callbacks=callbacks,
@@ -304,8 +332,8 @@ def _train_models(
 
     # Retrain on full data using the discovered optimal n_estimators
     full_weights = _sample_weights(df, cfg)
-    prod_model_men = _build_lgb_model(n_estimators=best_men_rounds, **extra)
-    prod_model_women = _build_lgb_model(n_estimators=best_women_rounds, **extra)
+    prod_model_men = _build_lgb_model(objective=cfg.objective, n_estimators=best_men_rounds, **extra)
+    prod_model_women = _build_lgb_model(objective=cfg.objective, n_estimators=best_women_rounds, **extra)
     prod_model_men.fit(df[FEATURE_COLUMNS], df["men"].astype(float), sample_weight=full_weights)
     prod_model_women.fit(df[FEATURE_COLUMNS], df["women"].astype(float), sample_weight=full_weights)
 
@@ -473,6 +501,7 @@ def _build_metadata(
         "store_models": store_models,
         "sample_weight_peak": cfg.sample_weight_peak,
         "sample_weight_rain": cfg.sample_weight_rain,
+        "objective": cfg.objective,
         "python_version": platform.python_version(),
         "xgboost_version": xgb.__version__,
     }

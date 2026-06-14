@@ -80,6 +80,18 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
         return df
     df = df.copy()
     group_keys = ["store_id"] if "store_id" in df.columns else []
+    # 推論時、未来行は天気が NaN（forecast_service._build_future_features が NaN を入れる）。
+    # ここで生の天気を前方埋めしておかないと、is_rainy / precip_mm / temp_diff_yesterday /
+    # extreme_weather / feat_rain_night_exit / next_morning_rain が未来行で定数（0 や中央値）に
+    # 潰れ、「学習では効くのに推論では死ぬ」train/serve skew になる（total_slope_30min と同じ問題）。
+    # 直近の実測天気を未来行へ引き継ぎ、天気派生特徴を有効化する。ffill は過去→未来方向のみ＝
+    # リーク無し。学習時は prepare_dataframe で既に天気が ffill 済みのため実質 no-op。
+    _weather_cols = [c for c in ("weather_code", "temp_c", "precip_mm") if c in df.columns]
+    if _weather_cols:
+        if group_keys:
+            df[_weather_cols] = df.groupby(group_keys, dropna=False)[_weather_cols].ffill()
+        else:
+            df[_weather_cols] = df[_weather_cols].ffill()
     ts_local = pd.to_datetime(df["ts"], errors="coerce")
     row_dates = ts_local.dt.date
 

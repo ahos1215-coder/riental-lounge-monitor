@@ -15,6 +15,15 @@ on:
       limit:
         description: "row cap (default 1000000)"
         required: false
+      objective:
+        description: "LightGBM objective to test (count-data A/B)"
+        required: false
+        default: "regression"
+        type: choice
+        options:
+          - regression
+          - poisson
+          - tweedie
 
 jobs:
   experiment:
@@ -41,11 +50,13 @@ jobs:
           # inputs via env (not interpolated into the shell) to avoid injection
           INPUT_DAYS: ${{ github.event.inputs.days }}
           INPUT_LIMIT: ${{ github.event.inputs.limit }}
+          INPUT_OBJECTIVE: ${{ github.event.inputs.objective }}
         run: |
           set -euo pipefail
           ARGS=(--json global_ab.json)
           if [ -n "${INPUT_DAYS:-}" ]; then ARGS+=(--days "$INPUT_DAYS"); fi
           if [ -n "${INPUT_LIMIT:-}" ]; then ARGS+=(--limit "$INPUT_LIMIT"); fi
+          if [ -n "${INPUT_OBJECTIVE:-}" ]; then ARGS+=(--objective "$INPUT_OBJECTIVE"); fi
           python scripts/experiments/global_vs_per_store.py "${ARGS[@]}"
 
       - name: Upload result JSON

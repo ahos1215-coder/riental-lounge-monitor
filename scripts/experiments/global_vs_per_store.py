@@ -159,8 +159,18 @@ def main() -> int:
     ap.add_argument("--days", type=int, default=int(os.getenv("ML_TRAIN_DAYS", "180")))
     ap.add_argument("--limit", type=int, default=int(os.getenv("ML_TRAIN_LIMIT", "1000000")))
     ap.add_argument("--min-rows", type=int, default=MIN_ROWS_PER_STORE)
+    ap.add_argument("--objective", choices=["regression", "poisson", "tweedie"],
+                    default=os.getenv("ML_OBJECTIVE", "regression"),
+                    help="LightGBM objective to test (count-data A/B: regression=L2 vs poisson vs tweedie)")
     ap.add_argument("--json", help="optional path to write the full result as JSON")
     args = ap.parse_args()
+
+    # Apply the chosen objective to the shared LightGBM params (metric stays mae for a fair A/B).
+    LGB_PARAMS["objective"] = args.objective
+    if args.objective == "tweedie":
+        LGB_PARAMS["tweedie_variance_power"] = 1.3
+    elif args.objective == "poisson":
+        LGB_PARAMS["poisson_max_delta_step"] = 0.7
 
     rows = _fetch_rows(args.days, args.limit)
     df = prepare_dataframe(rows, os.getenv("TIMEZONE", "Asia/Tokyo"))
@@ -169,7 +179,7 @@ def main() -> int:
     df["store_id"] = df["store_id"].astype("category")
 
     stores = [s for s in df["store_id"].cat.categories if (df["store_id"] == s).sum() >= args.min_rows]
-    print(f"[global-ab] stores={len(stores)} rows={len(df):,} days={args.days} limit={args.limit:,}")
+    print(f"[global-ab] stores={len(stores)} rows={len(df):,} days={args.days} limit={args.limit:,} objective={args.objective}")
 
     # Per-store time splits (test = each store's most recent 20%)
     train_parts, test_parts, per_store = [], {}, {}
@@ -247,7 +257,7 @@ def main() -> int:
 
     if args.json:
         Path(args.json).write_text(json.dumps({
-            "config": {"days": args.days, "limit": args.limit, "min_rows": args.min_rows},
+            "config": {"days": args.days, "limit": args.limit, "min_rows": args.min_rows, "objective": args.objective},
             "summary": {
                 "stores": n, "global_wins": g_wins, "ties": ties, "per_store_wins": ps_wins,
                 "mean_per_store_mae": round(mean_ps, 3), "mean_global_mae": round(mean_g, 3),
