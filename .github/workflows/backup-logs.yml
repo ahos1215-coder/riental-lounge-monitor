@@ -1,0 +1,80 @@
+name: Backup logs table
+
+# Weekly encrypted snapshot of the Supabase `logs` table (the irreplaceable ML
+# training data) to a GitHub Release asset. The repo is PUBLIC, so the dump is
+# encrypted with AES256 before upload and the job FAILS CLOSED if the passphrase
+# secret is missing — it will never publish a plaintext database dump.
+# Setup + restore: plan/LOGS_BACKUP.md
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Sunday 21:00 UTC = Monday 06:00 JST — runs BEFORE cleanup-old-logs.yml
+    # (Sun 22:00 UTC) so the snapshot is taken before any pruning.
+    - cron: "0 21 * * 0"
+
+permissions:
+  contents: write # create/upload Release assets + tags
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dump logs to gzipped NDJSON
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          STAMP="$(date -u +%Y%m%d)"
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          python scripts/backup_logs.py --out "logs-backup-${STAMP}.ndjson.gz"
+          ls -lh "logs-backup-${STAMP}.ndjson.gz"
+
+      - name: Encrypt and publish as Release asset
+        env:
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ -z "${BACKUP_PASSPHRASE:-}" ]; then
+            echo "::error::BACKUP_PASSPHRASE secret is not set. Refusing to upload an UNENCRYPTED database dump to a PUBLIC repo. Add the secret first — see plan/LOGS_BACKUP.md."
+            exit 1
+          fi
+          FILE="logs-backup-${STAMP}.ndjson.gz"
+          gpg --batch --yes --symmetric --cipher-algo AES256 \
+              --passphrase "$BACKUP_PASSPHRASE" -o "${FILE}.gpg" "$FILE"
+          rm -f "$FILE"   # never keep the plaintext dump around
+          TAG="logs-backup-${STAMP}"
+          gh release create "$TAG" "${FILE}.gpg" \
+            --title "logs backup ${STAMP} (encrypted)" \
+            --notes "Encrypted (AES256) weekly snapshot of the Supabase logs table. Decrypt with the BACKUP_PASSPHRASE. Restore steps: plan/LOGS_BACKUP.md." \
+            || gh release upload "$TAG" "${FILE}.gpg" --clobber
+
+      - name: Prune old backups (keep newest 8)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release list --limit 200 --json tagName --jq '.[].tagName' \
+            | grep '^logs-backup-' | sort -r | tail -n +9 \
+            | while read -r tag; do
+                echo "pruning old backup release: $tag"
+                gh release delete "$tag" --cleanup-tag --yes || true
+              done
+
+  notify-on-failure:
+    needs: [backup]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "Backup logs table"
