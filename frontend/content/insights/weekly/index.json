@@ -1,157 +1,157 @@
 {
-  "generated_at": "2026-06-09T23:00:25Z",
+  "generated_at": "2026-06-16T23:04:53Z",
   "stores": {
     "shibuya": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:56:17.504850+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:00:35.143056+00:00"
     },
     "ebisu": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:56:19.392230+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:00:41.551697+00:00"
     },
     "fukuoka": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:55:16.197099+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T22:59:46.066231+00:00"
     },
     "gangnam": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:55:17.844517+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T22:59:42.039548+00:00"
     },
     "hamamatsu": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:57:41.408569+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:02:11.221936+00:00"
     },
     "hiroshima_ag": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:58:48.069619+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:03:27.727639+00:00"
     },
     "kagoshima": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:55:22.158058+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T22:59:38.060369+00:00"
     },
     "kanazawa_ag": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:57:46.153732+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:02:07.084600+00:00"
     },
     "kashiwa": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:56:28.600834+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:00:57.982279+00:00"
     },
     "kobe": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:58:44.498421+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:03:13.513508+00:00"
     },
     "kokura": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:55:17.238873+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T22:59:44.407321+00:00"
     },
     "kumamoto": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:55:19.218091+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T22:59:38.979016+00:00"
     },
     "kyoto": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:58:45.904240+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:03:19.093885+00:00"
     },
     "machida": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:56:32.459233+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:00:53.683369+00:00"
     },
     "miyazaki": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:55:18.792739+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T22:59:42.544049+00:00"
     },
     "nagasaki": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:55:20.643850+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T22:59:40.526699+00:00"
     },
     "nagoya_ag": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:57:33.966681+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:02:03.285224+00:00"
     },
     "nagoya_nishiki": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:57:34.346257+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:02:02.795072+00:00"
     },
     "nagoya_sakae": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:57:31.323385+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:02:08.959485+00:00"
     },
     "namba": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:58:33.284379+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:03:09.631382+00:00"
     },
     "oita": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:55:22.782023+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T22:59:47.258593+00:00"
     },
     "okayama": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:58:52.720838+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:03:16.906478+00:00"
     },
     "okinawa_ag": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:55:15.592143+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T22:59:39.441004+00:00"
     },
     "omiya": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:57:06.177556+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:01:28.307229+00:00"
     },
     "osaka_ekimae": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:57:39.855289+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:02:14.672095+00:00"
     },
     "sapporo_ag": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:55:16.730929+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T22:59:46.408761+00:00"
     },
     "sendai_ag": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:56:14.377859+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:00:42.015175+00:00"
     },
     "shibuya_ag": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:56:25.257679+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:00:39.647949+00:00"
     },
     "shinjuku": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:56:25.586971+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:00:55.097949+00:00"
     },
     "shinsaibashi": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:58:25.786076+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:03:16.590444+00:00"
     },
     "shizuoka": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:57:35.799017+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:02:10.883662+00:00"
     },
     "takasaki": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:57:20.061457+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:02:02.273533+00:00"
     },
     "tenma": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:58:21.706386+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:03:15.059047+00:00"
     },
     "ueno": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:56:32.807829+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:00:59.992169+00:00"
     },
     "ueno_ag": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:56:31.107833+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:00:58.325853+00:00"
     },
     "umeda_ag": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:58:14.602728+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:02:39.594182+00:00"
     },
     "utsunomiya": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:57:13.153567+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:01:58.897190+00:00"
     },
     "yokohama": {
-      "latest_file": "2026-06-09.json",
-      "generated_at": "2026-06-09T22:56:33.480821+00:00"
+      "latest_file": "2026-06-16.json",
+      "generated_at": "2026-06-16T23:01:04.303619+00:00"
     }
   }
 }
