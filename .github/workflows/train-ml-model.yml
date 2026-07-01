@@ -69,28 +69,35 @@ jobs:
           ML_TRAIN_WEIGHT_RAIN: ${{ vars.ML_TRAIN_WEIGHT_RAIN }}
           ML_OPTUNA_ENABLED: ${{ steps.optuna.outputs.enabled }}
           ML_OPTUNA_TRIALS: ${{ vars.ML_OPTUNA_TRIALS }}
+          # workflow_dispatch の入力はシェルに直接展開せず env 経由で受ける（コマンドインジェクション対策）
+          INPUT_DAYS: ${{ github.event.inputs.days }}
+          INPUT_LIMIT: ${{ github.event.inputs.limit }}
+          INPUT_STORE_ID: ${{ github.event.inputs.store_id }}
         run: |
           set -euo pipefail
           export FORECAST_MODEL_BUCKET="${FORECAST_MODEL_BUCKET:-ml-models}"
           export FORECAST_MODEL_PREFIX="${FORECAST_MODEL_PREFIX:-forecast/latest}"
           export FORECAST_MODEL_SCHEMA_VERSION="${FORECAST_MODEL_SCHEMA_VERSION:-v6}"
           export ML_TRAIN_DAYS="${ML_TRAIN_DAYS:-180}"
-          export ML_TRAIN_LIMIT="${ML_TRAIN_LIMIT:-120000}"
+          # 旧 120000 は table が小さかった頃の ~180日分。現在 table は ~960k 行まで増え、
+          # 120k 上限だと直近26日に縮んでいた。180日窓を取り切れる値に引き上げる。
+          # ※ リポジトリ変数 vars.ML_TRAIN_LIMIT が 120000 のままだとそちらが優先されるので注意。
+          export ML_TRAIN_LIMIT="${ML_TRAIN_LIMIT:-1000000}"
           export ML_TRAIN_WEIGHT_PEAK="${ML_TRAIN_WEIGHT_PEAK:-1.8}"
           export ML_TRAIN_WEIGHT_RAIN="${ML_TRAIN_WEIGHT_RAIN:-1.8}"
           export ML_OPTUNA_ENABLED="${ML_OPTUNA_ENABLED:-1}"
           export ML_OPTUNA_TRIALS="${ML_OPTUNA_TRIALS:-30}"
-          EXTRA_ARGS=""
-          if [ -n "${{ github.event.inputs.days }}" ]; then
-            EXTRA_ARGS="${EXTRA_ARGS} --days ${{ github.event.inputs.days }}"
+          EXTRA_ARGS=()
+          if [ -n "$INPUT_DAYS" ]; then
+            EXTRA_ARGS+=(--days "$INPUT_DAYS")
           fi
-          if [ -n "${{ github.event.inputs.limit }}" ]; then
-            EXTRA_ARGS="${EXTRA_ARGS} --limit ${{ github.event.inputs.limit }}"
+          if [ -n "$INPUT_LIMIT" ]; then
+            EXTRA_ARGS+=(--limit "$INPUT_LIMIT")
           fi
-          if [ -n "${{ github.event.inputs.store_id }}" ]; then
-            EXTRA_ARGS="${EXTRA_ARGS} --store-id ${{ github.event.inputs.store_id }}"
+          if [ -n "$INPUT_STORE_ID" ]; then
+            EXTRA_ARGS+=(--store-id "$INPUT_STORE_ID")
           fi
-          python scripts/train_ml_model.py ${EXTRA_ARGS}
+          python scripts/train_ml_model.py "${EXTRA_ARGS[@]}"
 
   notify-on-failure:
     needs: [train]

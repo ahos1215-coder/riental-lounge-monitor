@@ -1,0 +1,62 @@
+name: Python CI
+
+# Automatically tests the Python backend on every PR (and push to main) that
+# touches Python. The test suite is fully offline — every network-touching test
+# uses monkeypatch/mock with fake credentials — so NO secrets are needed and the
+# run is deterministic. This is the gate that was missing: until now only the
+# frontend had CI, so backend changes (e.g. the `import time` typo) could merge
+# untested.
+
+on:
+  pull_request:
+    paths:
+      - "oriental/**"
+      - "scripts/**"
+      - "multi_collect.py"
+      - "tests/**"
+      - "requirements.txt"
+      - "pytest.ini"
+      - "pyproject.toml"
+      - ".github/workflows/python-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "oriental/**"
+      - "scripts/**"
+      - "multi_collect.py"
+      - "tests/**"
+      - "requirements.txt"
+      - "pytest.ini"
+      - "pyproject.toml"
+      - ".github/workflows/python-ci.yml"
+
+concurrency:
+  group: python-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pytest ruff
+
+      - name: Lint (ruff, non-blocking)
+        continue-on-error: true
+        run: ruff check .
+
+      - name: Run tests
+        run: python -m pytest -q

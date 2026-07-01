@@ -54,7 +54,8 @@ Thumbs.db
 *~
 *.swp
 *.tmp
-MEGRIBI_repo_*.zip
+*.zip
+*.patch
 
 # --- Project artifacts ---
 artifacts/

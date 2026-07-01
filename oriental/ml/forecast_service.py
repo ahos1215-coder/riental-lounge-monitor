@@ -118,6 +118,9 @@ class ForecastService:
                 reasoning = {"signals": {}, "notes": ["履歴データ不足のため根拠情報なし"]}
             else:
                 data = self._predict_with_history(df, future_times, store_id=store_id)
+                # 今夜のここまでの実測で残り時間の予測をスケール補正（21時半便など）。
+                # 経過スロットが無い予測（次の1時間など）では自動的に no-op。
+                data = _anchor_to_tonight(df, data, freq_min, self.tz)
                 reasoning = self._build_reasoning(df, store_id=store_id)
             self.logger.info("forecast.service.predicted size=%d", len(data))
 
@@ -145,7 +148,16 @@ class ForecastService:
             return result
         except Exception as exc:  # noqa: BLE001
             self.logger.error("forecast.service.error store=%s", store_id, exc_info=exc)
-            result = {"ok": True, "store": store_id, "freq_min": freq_min, "data": []}
+            # 予期せぬ内部エラーを ok:true（成功）で隠すと、予測グラフが空のまま
+            # 5xx もアラートも出ず、障害に何日も気づけない。ok:false で明示する。
+            result = {
+                "ok": False,
+                "error": "forecast_internal_error",
+                "detail": str(exc),
+                "store": store_id,
+                "freq_min": freq_min,
+                "data": [],
+            }
             if extra_meta:
                 result.update(extra_meta)
             return result
@@ -244,6 +256,67 @@ def _zero_payload(future_times):
         {"ts": ts.isoformat(), "men_pred": 0.0, "women_pred": 0.0, "total_pred": 0.0}
         for ts in future_times
     ]
+
+
+def _anchor_to_tonight(history, points, freq_min, tz):
+    """Nudge the FUTURE portion of tonight's forecast toward how tonight is actually
+    going so far. Over the already-elapsed slots that have real data, compute
+    factor = sum(actual) / sum(predicted), clamp it to [0.5, 2.0], and scale the
+    not-yet-happened slots by it (e.g. the 21:30 "late update" leans on the evening's
+    real build-up). Self-disabling: with no elapsed slots (the next-hour forecast) or
+    fewer than MIN_ELAPSED matched slots it returns points unchanged. Toggle off with
+    FORECAST_ANCHOR_TONIGHT=0. Leakage-free: only past (<= now) actuals inform the
+    correction; only future (> now) slots are adjusted.
+    """
+    if os.getenv("FORECAST_ANCHOR_TONIGHT", "1").strip() != "1":
+        return points
+    if not points or history is None or getattr(history, "empty", True):
+        return points
+    if "total" not in history.columns or "ts" not in history.columns:
+        return points
+
+    try:
+        now = pd.Timestamp.now(tz=tz)
+        freq = f"{max(1, int(freq_min))}min"
+        hist = history.dropna(subset=["ts"])
+        slots = pd.to_datetime(hist["ts"]).dt.floor(freq)
+        actual_by_slot = pd.to_numeric(hist["total"], errors="coerce").groupby(slots).mean().to_dict()
+    except Exception:  # noqa: BLE001
+        return points
+
+    def _as_ts(value):
+        ts = pd.Timestamp(value)
+        return ts.tz_localize(tz) if ts.tzinfo is None else ts
+
+    sum_actual = 0.0
+    sum_pred = 0.0
+    matched = 0
+    for p in points:
+        ts = _as_ts(p["ts"])
+        if ts > now:
+            continue
+        actual = actual_by_slot.get(ts.floor(freq))
+        if actual is None or not np.isfinite(actual):
+            continue
+        sum_actual += float(actual)
+        sum_pred += float(p.get("total_pred", 0.0))
+        matched += 1
+
+    MIN_ELAPSED = 3
+    if matched < MIN_ELAPSED or sum_pred <= 0.0 or sum_actual <= 0.0:
+        return points
+    factor = max(0.5, min(2.0, sum_actual / sum_pred))
+
+    adjusted = []
+    for p in points:
+        ts = _as_ts(p["ts"])
+        if ts > now:
+            mp = max(float(p["men_pred"]) * factor, 0.0)
+            wp = max(float(p["women_pred"]) * factor, 0.0)
+            adjusted.append({**p, "men_pred": mp, "women_pred": wp, "total_pred": mp + wp, "anchor_factor": round(factor, 3)})
+        else:
+            adjusted.append(dict(p))
+    return adjusted
 
 
 def _to_int(v) -> int:

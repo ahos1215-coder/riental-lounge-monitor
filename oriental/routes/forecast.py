@@ -33,6 +33,9 @@ def _error_status(raw: dict) -> int:
     err = raw.get("error")
     if err in {"model_schema_mismatch", "model_unavailable"}:
         return 503
+    # 予期せぬ内部エラーは 5xx にして監視・フロントが「予測利用不可」を検知できるようにする
+    if err == "forecast_internal_error":
+        return 500
     return 200
 
 

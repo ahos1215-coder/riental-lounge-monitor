@@ -6,6 +6,7 @@ import os
 import platform
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -62,17 +63,39 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def _build_lgb_model(**overrides: Any) -> lgb.LGBMRegressor:
+def _objective_params(objective: str) -> dict[str, Any]:
+    """LightGBM objective + objective-specific params.
+
+    Counts are non-negative and intermittent (zero-heavy off-peak), so Poisson/
+    Tweedie (log-link) often beat the default L2 — but this must be MEASURED, so the
+    objective is env-configurable (ML_OBJECTIVE) and defaults to the current
+    'regression'. metric stays 'mae' across all objectives so early-stopping, Optuna
+    and the holdout report all judge by the SAME number — a fair A/B between
+    objectives. Poisson/Tweedie predict >= 0 via the log-link, making the
+    np.maximum(.,0) clamp in forecast_service redundant.
+    """
+    obj = (objective or "regression").lower()
+    if obj == "poisson":
+        return {"objective": "poisson", "metric": "mae", "poisson_max_delta_step": 0.7}
+    if obj == "tweedie":
+        return {
+            "objective": "tweedie",
+            "metric": "mae",
+            "tweedie_variance_power": _env_float("ML_TWEEDIE_VARIANCE_POWER", 1.3),
+        }
+    return {"objective": "regression", "metric": "mae"}
+
+
+def _build_lgb_model(objective: str = "regression", **overrides: Any) -> lgb.LGBMRegressor:
     params: dict[str, Any] = {
         "n_estimators": 300,
         "max_depth": 4,
         "learning_rate": 0.1,
         "subsample": 0.8,
         "colsample_bytree": 0.8,
-        "objective": "regression",
-        "metric": "mae",
         "verbosity": -1,
     }
+    params.update(_objective_params(objective))
     params.update(overrides)
     return lgb.LGBMRegressor(**params)
 
@@ -92,6 +115,7 @@ class TrainingConfig:
     sample_weight_rain: float
     optuna_trials: int
     optuna_enabled: bool
+    objective: str
 
     @classmethod
     def from_env(cls) -> "TrainingConfig":
@@ -108,12 +132,19 @@ class TrainingConfig:
             schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v6").strip(),
             timezone=os.getenv("TIMEZONE", "Asia/Tokyo").strip(),
             train_days=_env_int("ML_TRAIN_DAYS", 180),
-            train_limit=_env_int("ML_TRAIN_LIMIT", 120000),
+            # 120000 was ~180 days back when the table was small; the table has since
+            # grown ~8x (≈960k rows), so a 120k cap silently shrank the effective window
+            # to ~26 days. Raise the default so the ML_TRAIN_DAYS window (180d) is the
+            # real bound, not the row cap. Override via ML_TRAIN_LIMIT if memory/time-bound.
+            train_limit=_env_int("ML_TRAIN_LIMIT", 1_000_000),
             store_id=os.getenv("ML_TRAIN_STORE_ID", "").strip() or None,
             sample_weight_peak=_env_float("ML_TRAIN_WEIGHT_PEAK", 1.8),
             sample_weight_rain=_env_float("ML_TRAIN_WEIGHT_RAIN", 1.8),
             optuna_trials=_env_int("ML_OPTUNA_TRIALS", 30),
             optuna_enabled=os.getenv("ML_OPTUNA_ENABLED", "1").strip() == "1",
+            # 'regression' (L2) keeps current behavior; 'poisson'/'tweedie' are the
+            # count-data objectives to A/B (see _objective_params).
+            objective=(os.getenv("ML_OBJECTIVE", "regression").strip().lower() or "regression"),
         )
 
     def validate(self) -> None:
@@ -129,22 +160,39 @@ class TrainingConfig:
             raise SystemExit("FORECAST_MODEL_SCHEMA_VERSION is required")
         if self.sample_weight_peak < 1.0 or self.sample_weight_rain < 1.0:
             raise SystemExit("sample weights must be >= 1.0")
+        if self.objective not in {"regression", "poisson", "tweedie"}:
+            raise SystemExit("ML_OBJECTIVE must be one of: regression, poisson, tweedie")
 
 
 def _fetch_training_rows(cfg: TrainingConfig, session: requests.Session) -> list[dict[str, Any]]:
+    """Fetch recent training rows via KEYSET pagination on the unique ``id``
+    (descending = newest-first).
+
+    Why keyset, not OFFSET: once the table grew to ~1M rows, deep OFFSET pages made
+    Supabase/Postgres hit a statement timeout and return HTTP 500 (observed dying at
+    offset ~42k), which — with no retry — aborted the whole daily/weekly training and
+    silently left the models stale. Keyset (``id=lt.<cursor>``) is O(1) per page at
+    any table size, and id.desc keeps the most RECENT rows (matching the recency
+    weighting). Transient 5xx/429/network errors are retried so a single blip no
+    longer kills the run.
+    """
     endpoint = f"{cfg.supabase_url}/rest/v1/logs"
     end_ts = datetime.now(timezone.utc)
     start_ts = end_ts - timedelta(days=max(1, cfg.train_days))
     page_size = 1000
-    offset = 0
     rows: list[dict[str, Any]] = []
+    cursor: Any = None  # keyset cursor: next page fetches rows with id < cursor
+    headers = {
+        "apikey": cfg.supabase_service_key,
+        "Authorization": f"Bearer {cfg.supabase_service_key}",
+        "Accept": "application/json",
+    }
     while len(rows) < cfg.train_limit:
-        end = min(offset + page_size - 1, cfg.train_limit - 1)
+        want = min(page_size, cfg.train_limit - len(rows))
         params: list[tuple[str, str]] = [
-            ("select", "store_id,ts,men,women,total,weather_code,temp_c,precip_mm"),
-            ("order", "ts.asc"),
-            ("limit", str(page_size)),
-            ("offset", str(offset)),
+            ("select", "id,store_id,ts,men,women,total,weather_code,temp_c,precip_mm"),
+            ("order", "id.desc"),
+            ("limit", str(want)),
             ("ts", f"gte.{start_ts.isoformat()}"),
             ("ts", f"lte.{end_ts.isoformat()}"),
             ("men", "not.is.null"),
@@ -152,25 +200,41 @@ def _fetch_training_rows(cfg: TrainingConfig, session: requests.Session) -> list
         ]
         if cfg.store_id:
             params.append(("store_id", f"eq.{cfg.store_id}"))
-        headers = {
-            "apikey": cfg.supabase_service_key,
-            "Authorization": f"Bearer {cfg.supabase_service_key}",
-            "Accept": "application/json",
-            "Range-Unit": "items",
-            "Range": f"{offset}-{end}",
-        }
-        response = session.get(endpoint, params=params, headers=headers, timeout=30)
-        if not response.ok:
-            raise SystemExit(f"failed to fetch logs from supabase: status={response.status_code}")
-        payload = response.json()
+        if cursor is not None:
+            params.append(("id", f"lt.{cursor}"))
+
+        payload = None
+        last_err = ""
+        for attempt in range(1, 6):
+            try:
+                response = session.get(endpoint, params=params, headers=headers, timeout=60)
+            except Exception as exc:  # noqa: BLE001 - transient network error
+                last_err = str(exc)[:160]
+            else:
+                if response.ok:
+                    payload = response.json()
+                    break
+                last_err = f"status={response.status_code}"
+                # 4xx (except 429 rate-limit) is a real error — do not retry.
+                if response.status_code < 500 and response.status_code != 429:
+                    raise SystemExit(f"failed to fetch logs from supabase: {last_err}")
+            if attempt < 5:
+                wait = min(2 ** attempt, 20)
+                print(f"[train-ml][fetch] transient error ({last_err}); retry {attempt}/5 in {wait}s")
+                time.sleep(wait)
+        if payload is None:
+            raise SystemExit(f"failed to fetch logs from supabase after retries: {last_err}")
         if not isinstance(payload, list):
             raise SystemExit("supabase logs payload is not a list")
+
         chunk = [row for row in payload if isinstance(row, dict)]
-        rows.extend(chunk)
-        print(f"[train-ml][fetch] {len(rows)}/{cfg.train_limit}")
-        if len(chunk) < page_size:
+        if not chunk:
             break
-        offset += page_size
+        rows.extend(chunk)
+        cursor = chunk[-1].get("id")
+        print(f"[train-ml][fetch] {len(rows)}/{cfg.train_limit}")
+        if len(chunk) < want or cursor is None:
+            break
     return rows[: cfg.train_limit]
 
 
@@ -204,6 +268,7 @@ def _optuna_objective(
     x_test: pd.DataFrame,
     y_test: pd.Series,
     weights: np.ndarray,
+    objective: str = "regression",
 ) -> float:
     """Optuna objective: minimize MAE on held-out test set."""
     params = {
@@ -215,10 +280,9 @@ def _optuna_objective(
         "min_child_weight": trial.suggest_int("min_child_weight", 1, 10),
         "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
         "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
-        "objective": "regression",
-        "metric": "mae",
         "verbosity": -1,
     }
+    params.update(_objective_params(objective))
     model = lgb.LGBMRegressor(**params)
     model.fit(
         x_train, y_train, sample_weight=weights,
@@ -247,7 +311,7 @@ def _optimize_params(
 
     study = optuna.create_study(direction="minimize")
     study.optimize(
-        lambda trial: _optuna_objective(trial, x_train, y_men_train, x_test, y_men_test, weights),
+        lambda trial: _optuna_objective(trial, x_train, y_men_train, x_test, y_men_test, weights, cfg.objective),
         n_trials=cfg.optuna_trials,
         show_progress_bar=False,
     )
@@ -279,8 +343,8 @@ def _train_models(
 
     extra = dict(hpo_params) if hpo_params else {}
     callbacks = [lgb.early_stopping(15, verbose=False), lgb.log_evaluation(0)]
-    model_men = _build_lgb_model(**extra)
-    model_women = _build_lgb_model(**extra)
+    model_men = _build_lgb_model(objective=cfg.objective, **extra)
+    model_women = _build_lgb_model(objective=cfg.objective, **extra)
     model_men.fit(
         x_train, y_men_train, sample_weight=weights,
         eval_set=[(x_test, y_men_test)], callbacks=callbacks,
@@ -295,8 +359,8 @@ def _train_models(
 
     # Retrain on full data using the discovered optimal n_estimators
     full_weights = _sample_weights(df, cfg)
-    prod_model_men = _build_lgb_model(n_estimators=best_men_rounds, **extra)
-    prod_model_women = _build_lgb_model(n_estimators=best_women_rounds, **extra)
+    prod_model_men = _build_lgb_model(objective=cfg.objective, n_estimators=best_men_rounds, **extra)
+    prod_model_women = _build_lgb_model(objective=cfg.objective, n_estimators=best_women_rounds, **extra)
     prod_model_men.fit(df[FEATURE_COLUMNS], df["men"].astype(float), sample_weight=full_weights)
     prod_model_women.fit(df[FEATURE_COLUMNS], df["women"].astype(float), sample_weight=full_weights)
 
@@ -315,6 +379,30 @@ def _train_models(
 
 def _rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.sqrt(np.mean((y_pred - y_true) ** 2)))
+
+
+def _seasonal_naive_metrics(df: pd.DataFrame) -> dict[str, float]:
+    """Seasonal-naive baseline the ML must beat: predict tonight's `total` as the
+    same weekday + same time-slot from LAST week. Reuses the existing
+    `same_dow_last_week_total` feature (median-filled where last week's slot is
+    missing), so it is the realistic "last week, same time" rule with no model.
+    Returned MAE/RMSE are stored next to the model's metrics so the owner can see
+    whether the 24-feature, daily-retrained pipeline actually earns its complexity.
+    """
+    if "same_dow_last_week_total" not in df.columns or "total" not in df.columns:
+        return {}
+    pred_total = pd.to_numeric(df["same_dow_last_week_total"], errors="coerce").to_numpy()
+    true_total = pd.to_numeric(df["total"], errors="coerce").to_numpy()
+    mask = ~(np.isnan(pred_total) | np.isnan(true_total))
+    if not mask.any():
+        return {}
+    pred_total = pred_total[mask]
+    true_total = true_total[mask]
+    return {
+        "total_mae": float(np.mean(np.abs(pred_total - true_total))),
+        "total_rmse": _rmse(true_total, pred_total),
+        "rows_scored": int(mask.sum()),
+    }
 
 
 def _evaluate_rows(df: pd.DataFrame, pred_men: np.ndarray, pred_women: np.ndarray) -> dict[str, float]:
@@ -390,6 +478,7 @@ def _log_metrics_by_store(
         else:
             segment = {}
         daily = _daily_accuracy(sdf, pred_men_all[idx], pred_women_all[idx])
+        baseline = _seasonal_naive_metrics(sdf)
         entry = {
             "store_id": store,
             "rows_test": int(len(sdf)),
@@ -399,6 +488,15 @@ def _log_metrics_by_store(
             "evaluation": "holdout_test_20pct",
             "daily_accuracy": daily,
         }
+        if baseline:
+            entry["baseline_seasonal_naive"] = baseline
+            b_mae = baseline.get("total_mae")
+            m_mae = overall.get("total_mae")
+            if b_mae and b_mae > 0 and m_mae is not None:
+                # >0 means the ML beats "last week same slot"; <=0 means it does not.
+                entry["ml_vs_baseline_total_mae_improvement_pct"] = round(
+                    (b_mae - m_mae) / b_mae * 100.0, 1
+                )
         print("[train-ml][metrics]", json.dumps(entry, ensure_ascii=True))
         all_metrics[store] = entry
     return all_metrics
@@ -430,6 +528,7 @@ def _build_metadata(
         "store_models": store_models,
         "sample_weight_peak": cfg.sample_weight_peak,
         "sample_weight_rain": cfg.sample_weight_rain,
+        "objective": cfg.objective,
         "python_version": platform.python_version(),
         "xgboost_version": xgb.__version__,
     }
