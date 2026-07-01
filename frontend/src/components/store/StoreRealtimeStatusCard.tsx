@@ -2,6 +2,7 @@
 
 import { GenderRatioBar } from "@/components/home/GenderRatioBar";
 import type { StoreSnapshot } from "@/app/hooks/useStorePreviewData";
+import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
 
 function crowdHintFromTotals(nowTotal: number, peakTotal: number): string {
   if (peakTotal <= 0) return "予測データ待ち";
@@ -28,6 +29,16 @@ export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
   const occupancy = peak > 0 ? Math.round((total / peak) * 100) : null;
   const menPct = total > 0 ? Math.round((men / total) * 100) : 50;
   const womenPct = total > 0 ? Math.round((women / total) * 100) : 50;
+
+  // 相席屋は在店人数を公開しておらず「席の埋まり具合(%)」のみ。保存済みの推定人数から
+  // %を復元してお客様には%だけを見せる（人数は非表示）。
+  const percentMode = isPercentCrowdBrand(snapshot.brand) && !!snapshot.capacity;
+  const menFullPct = percentMode ? seatFullnessPercent(men, snapshot.capacity) : null;
+  const womenFullPct = percentMode ? seatFullnessPercent(women, snapshot.capacity) : null;
+  const overallFullPct =
+    percentMode && snapshot.capacity
+      ? seatFullnessPercent(total, snapshot.capacity * 2)
+      : null;
 
   if (loading) {
     return (
@@ -56,28 +67,42 @@ export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">リアルタイム</p>
-          {total > 0 && (
-            <p className="mt-0.5 text-[11px] text-slate-400">
-              店内の目安 <span className="font-semibold text-slate-200">{total}</span> 名
-            </p>
-          )}
+          {percentMode
+            ? overallFullPct !== null && (
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  店内の埋まり具合{" "}
+                  <span className="font-semibold text-slate-200">約{overallFullPct}%</span>
+                </p>
+              )
+            : total > 0 && (
+                <p className="mt-0.5 text-[11px] text-slate-400">
+                  店内の目安 <span className="font-semibold text-slate-200">{total}</span> 名
+                </p>
+              )}
         </div>
       </div>
 
       <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <span className="inline-flex items-baseline gap-1.5">
           <span className="text-[11px] font-medium text-cyan-300/90">男性</span>
-          <span className="text-2xl font-black tabular-nums leading-none text-cyan-200 md:text-3xl">{men}</span>
-          <span className="text-[11px] text-cyan-200/60">人</span>
+          <span className="text-2xl font-black tabular-nums leading-none text-cyan-200 md:text-3xl">
+            {percentMode ? (menFullPct ?? 0) : men}
+          </span>
+          <span className="text-[11px] text-cyan-200/60">{percentMode ? "%" : "人"}</span>
         </span>
         <span className="text-slate-600" aria-hidden>
           ·
         </span>
         <span className="inline-flex items-baseline gap-1.5">
           <span className="text-[11px] font-medium text-pink-300/90">女性</span>
-          <span className="text-2xl font-black tabular-nums leading-none text-pink-200 md:text-3xl">{women}</span>
-          <span className="text-[11px] text-pink-200/60">人</span>
+          <span className="text-2xl font-black tabular-nums leading-none text-pink-200 md:text-3xl">
+            {percentMode ? (womenFullPct ?? 0) : women}
+          </span>
+          <span className="text-[11px] text-pink-200/60">{percentMode ? "%" : "人"}</span>
         </span>
+        {percentMode && (
+          <span className="text-[10px] text-slate-500">席の埋まり具合</span>
+        )}
       </div>
 
       <div className="mt-4">
@@ -105,6 +130,12 @@ export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
             </span>
           )}
       </div>
+
+      {percentMode && (
+        <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+          ※相席屋は在店人数を公開していないため、公式サイトの「席の埋まり具合(%)」を表示しています。
+        </p>
+      )}
     </div>
   );
 }

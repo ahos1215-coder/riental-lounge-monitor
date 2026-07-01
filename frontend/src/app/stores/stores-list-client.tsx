@@ -587,6 +587,8 @@ export default function StoresListClient() {
                       slug={store.slug}
                       label={buildStoreFullName(store)}
                       brandLabel={BRAND_DISPLAY_LABEL[store.brand]}
+                      brand={store.brand}
+                      capacity={store.capacity}
                       areaLabel={store.areaLabel}
                       isHighlight={idx === 0}
                       stats={storeRealtime[store.slug]?.stats}

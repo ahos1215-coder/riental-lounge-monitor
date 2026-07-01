@@ -4,12 +4,21 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { GenderRatioBar } from "@/components/home/GenderRatioBar";
 import { recordStoreVisit } from "@/lib/browser/meguribiStorage";
+import {
+  isPercentCrowdBrand,
+  seatFullnessPercent,
+  type BrandId,
+} from "@/app/config/stores";
 
 type StoreCardProps = {
   slug: string;
   label: string;
   brandLabel: string;
   areaLabel: string;
+  /** 相席屋は人数非公開＝%表示に切替。未指定は従来どおり人数表示。 */
+  brand?: BrandId;
+  /** 相席屋の席数（%逆算用）。 */
+  capacity?: number | null;
   href?: string;
   isHighlight?: boolean;
   stats?: {
@@ -155,6 +164,8 @@ export function StoreCard({
   label,
   brandLabel,
   areaLabel,
+  brand,
+  capacity,
   href,
   isHighlight = false,
   stats,
@@ -176,6 +187,13 @@ export function StoreCard({
   const nowTotal = Math.max(0, Math.round(Number(stats?.nowTotal ?? menCount + womenCount)));
   const peakPredTotal = Math.max(0, Math.round(Number(stats?.peakPredTotal ?? 0)));
   const hasPeakPred = peakPredTotal > 0;
+
+  // 相席屋は人数非公開＝席の埋まり具合(%)で表示（人数は非表示）。
+  const percentMode = brand ? isPercentCrowdBrand(brand) && !!capacity : false;
+  const menFullPct = percentMode ? seatFullnessPercent(menCount, capacity) ?? 0 : null;
+  const womenFullPct = percentMode ? seatFullnessPercent(womenCount, capacity) ?? 0 : null;
+  const peakPredPct =
+    percentMode && capacity ? seatFullnessPercent(peakPredTotal, capacity * 2) ?? 0 : null;
   const gender = (() => {
     const raw = stats?.genderRatio;
     if (!raw) return "-";
@@ -242,12 +260,14 @@ export function StoreCard({
             <div className="mt-2 space-y-2">
               <div className="flex items-center gap-2 text-[11px]">
                 <span className="rounded-full border border-cyan-400/35 bg-cyan-500/10 px-2 py-0.5 font-semibold text-cyan-200">
-                  男性 {menCount}
+                  男性 {percentMode ? `${menFullPct}%` : menCount}
                 </span>
                 <span className="rounded-full border border-pink-400/35 bg-pink-500/10 px-2 py-0.5 font-semibold text-pink-200">
-                  女性 {womenCount}
+                  女性 {percentMode ? `${womenFullPct}%` : womenCount}
                 </span>
-                <span className="text-white/45">計 {nowTotal}</span>
+                <span className="text-white/45">
+                  {percentMode ? "席の埋まり具合" : `計 ${nowTotal}`}
+                </span>
               </div>
               <GenderRatioBar men={menCount} women={womenCount} compact />
             </div>
@@ -260,7 +280,9 @@ export function StoreCard({
               {forecastPending ? (
                 <span className="font-semibold text-white/35">取得中</span>
               ) : (
-                <span className="font-semibold text-indigo-200">{peakPredTotal}人</span>
+                <span className="font-semibold text-indigo-200">
+                  {percentMode ? `約${peakPredPct}%` : `${peakPredTotal}人`}
+                </span>
               )}
             </div>
           )}
