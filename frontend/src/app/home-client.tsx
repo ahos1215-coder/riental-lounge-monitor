@@ -8,6 +8,7 @@ import {
   DEFAULT_STORE,
   STORES,
   getStoreMetaBySlug,
+  buildStoreFullName,
   type StoreMeta,
 } from "./config/stores";
 import { LAST_STORE_KEY } from "@/lib/browser/meguribiStorage";
@@ -31,7 +32,7 @@ type HomePageProps = {
 };
 
 const FALLBACK_LAST_STORE = {
-  name: `オリエンタルラウンジ ${getStoreMetaBySlug(DEFAULT_STORE).label}`,
+  name: buildStoreFullName(getStoreMetaBySlug(DEFAULT_STORE)),
   slug: getStoreMetaBySlug(DEFAULT_STORE).slug,
 };
 

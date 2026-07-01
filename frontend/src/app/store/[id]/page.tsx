@@ -309,6 +309,8 @@ function StorePageInner() {
               slug={store.slug}
               label={store.label}
               brandLabel={BRAND_DISPLAY_LABEL[store.brand]}
+              brand={store.brand}
+              capacity={store.capacity}
               areaLabel={store.areaLabel}
               isHighlight={idx === 0}
               stats={relatedRealtime[store.slug]?.stats}

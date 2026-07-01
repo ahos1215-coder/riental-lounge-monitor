@@ -1,5 +1,5 @@
 import { ImageResponse } from "next/og";
-import { getStoreMetaBySlugStrict } from "@/app/config/stores";
+import { getStoreMetaBySlugStrict, BRAND_DISPLAY_LABEL } from "@/app/config/stores";
 
 export const runtime = "edge";
 
@@ -15,6 +15,8 @@ export default async function StoreOGImage({ params }: Props) {
   const store = getStoreMetaBySlugStrict(id);
   const label = store ? store.label : id;
   const areaLabel = store ? store.areaLabel : "";
+  // ブランド名（オリエンタルラウンジ / 相席屋 / JIS）を店舗ごとに正しく表示。
+  const brandLabel = store ? BRAND_DISPLAY_LABEL[store.brand] : "オリエンタルラウンジ";
 
   return new ImageResponse(
     (
@@ -101,7 +103,7 @@ export default async function StoreOGImage({ params }: Props) {
               letterSpacing: "-0.02em",
             }}
           >
-            オリエンタルラウンジ
+            {brandLabel}
           </div>
           <div
             style={{

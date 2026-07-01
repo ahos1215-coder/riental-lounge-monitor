@@ -3,7 +3,9 @@ import { useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_STORE,
   getStoreMetaBySlug,
+  buildStoreFullName,
   type StoreMeta,
+  type BrandId,
 } from "../config/stores";
 
 export type PreviewRangeMode = "today" | "yesterday" | "lastWeek" | "custom";
@@ -33,6 +35,10 @@ export type StoreSnapshot = {
   slug: string;
   name: string;
   area: string;
+  /** ブランド（相席屋は人数非公開＝%表示に切替）。 */
+  brand: BrandId;
+  /** 相席屋の席数（%逆算用）。他ブランドは null。 */
+  capacity: number | null;
   level: string;
   nowTotal: number;
   nowMen: number;
@@ -118,8 +124,12 @@ function buildEmptySeries(): TimeSeriesPoint[] {
 function buildBaseSnapshot(meta: StoreMeta): StoreSnapshot {
   return {
     slug: meta.slug,
-    name: `オリエンタルラウンジ ${meta.label}`,
+    // ブランド（オリエンタルラウンジ / 相席屋 / JIS）を店舗ごとに正しく表示する。
+    // 以前は全店「オリエンタルラウンジ」固定で、相席屋店舗が誤表記されていた。
+    name: buildStoreFullName(meta),
     area: meta.areaLabel,
+    brand: meta.brand,
+    capacity: meta.capacity,
     level: "データなし",
     nowTotal: 0,
     nowMen: 0,

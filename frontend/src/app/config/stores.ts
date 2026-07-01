@@ -12,7 +12,40 @@ export type StoreMeta = {
   regionLabel: string;
   mapsQueryBase: string;
   brand: BrandId;
+  /** 相席屋のみ設定。席数(=(テーブル+VIP)×2)。%表示の逆算に使う。他ブランドは null。 */
+  capacity: number | null;
 };
+
+/**
+ * 相席屋の席数（= (テーブル+VIP)×2）。相席屋の公式サイトは人数を出さず「席の埋まり
+ * 具合(%)」だけを出しており、当プロジェクトでは `人数 = round(席数 × %/100)` で逆算した
+ * 推定人数を保存している。お客様向けには元データである%を表示するため、保存済みの人数
+ * から `% = round(人数 / 席数 × 100)` で復元する。値の出典は multi_collect.py の
+ * AISEKIYA_STORES（tables/vip）。店舗レイアウト変更時は両方を更新すること。
+ */
+const AISEKIYA_CAPACITY: Record<string, number> = {
+  ay_shibuya: 38,
+  ay_ikebukuro: 28,
+  ay_ueno: 30,
+  ay_chiba: 44,
+  ay_yokohama: 34,
+  ay_niigata: 30,
+};
+
+/** 相席屋は人数非公開（%のみ）。お客様向け表示を%にするブランドかどうか。 */
+export function isPercentCrowdBrand(brand: BrandId): boolean {
+  return brand === "aisekiya";
+}
+
+/** 逆算推定の人数から「席の埋まり具合(%)」を復元。capacity が無ければ null。 */
+export function seatFullnessPercent(
+  count: number,
+  capacity: number | null | undefined,
+): number | null {
+  if (!capacity || capacity <= 0) return null;
+  const pct = Math.round((Math.max(0, count) / capacity) * 100);
+  return Math.max(0, Math.min(100, pct));
+}
 
 /** ブランドの表示ラベル (StoreCard 等で使用) */
 export const BRAND_DISPLAY_LABEL: Record<BrandId, string> = {
@@ -42,6 +75,7 @@ export const STORES: StoreMeta[] = rawStores.map((s) => {
     regionLabel: s.region_label,
     mapsQueryBase: s.maps_query_base,
     brand,
+    capacity: brand === "aisekiya" ? (AISEKIYA_CAPACITY[s.store_id] ?? null) : null,
   };
 });
 

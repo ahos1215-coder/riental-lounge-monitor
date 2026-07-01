@@ -7,7 +7,7 @@ import remarkGfm from "remark-gfm";
 
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { fetchPublishedEditorialBySlug } from "@/lib/supabase/blogDrafts";
-import { getStoreMetaBySlugStrict } from "@/app/config/stores";
+import { getStoreMetaBySlugStrict, buildStoreFullName } from "@/app/config/stores";
 
 export const dynamicParams = true;
 
@@ -27,7 +27,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const row = await fetchPublishedEditorialBySlug(slug);
   if (!row) return {};
   const store = getStoreMetaBySlugStrict(row.store_slug);
-  const storeName = store ? `オリエンタルラウンジ ${store.label}` : row.store_slug;
+  const storeName = store ? buildStoreFullName(store) : row.store_slug;
   const title = `${storeName} 分析レポート`;
   const description = `${storeName} の編集記事（承認済み）です。`;
   const base = getMetadataBaseUrl();

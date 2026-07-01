@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import type { StoreSnapshot } from "@/app/hooks/useStorePreviewData";
+import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
 
 type Payload =
   | { ok: true; hasData: false }
@@ -12,31 +13,54 @@ type Payload =
 
 /** リアルタイムカードの「予測ハイライト」と同じ数値から、要約用バッジ文言を最大3つ生成 */
 function mlHighlightChips(snapshot: StoreSnapshot): string[] {
+  // 相席屋は在店人数を公開しておらず%のみ。ピーク要約も人数ではなく席の埋まり具合(%)で出す。
+  const percentMode = isPercentCrowdBrand(snapshot.brand) && !!snapshot.capacity;
+  const cap = snapshot.capacity ?? 0;
   const peak = Math.max(0, Math.round(Number(snapshot.peakTotal ?? 0)));
   const total = Math.max(0, Math.round(Number(snapshot.nowTotal ?? 0)));
   const peakTime = snapshot.peakTimeLabel?.trim() || "";
   const updated = snapshot.forecastUpdatedLabel?.trim() || "";
-  const delta = peak > 0 ? Math.max(0, peak - total) : 0;
   const rec = snapshot.recommendation?.trim() || "";
 
   const chips: string[] = [];
   if (peak > 0 && peakTime && peakTime !== "—") {
-    const pm = snapshot.peakMen != null ? Math.round(snapshot.peakMen) : null;
-    const pw = snapshot.peakWomen != null ? Math.round(snapshot.peakWomen) : null;
-    const detail = pm != null || pw != null
-      ? `男性${pm ?? 0}名 / 女性${pw ?? 0}名`
-      : `最大 ${peak} 人`;
-    chips.push(`ピーク目安 ${peakTime}（${detail}）`);
+    if (percentMode) {
+      const pm = snapshot.peakMen != null ? seatFullnessPercent(Math.round(snapshot.peakMen), cap) : null;
+      const pw = snapshot.peakWomen != null ? seatFullnessPercent(Math.round(snapshot.peakWomen), cap) : null;
+      const detail = pm != null || pw != null
+        ? `男性${pm ?? 0}% / 女性${pw ?? 0}%`
+        : `最大 席埋まり 約${seatFullnessPercent(peak, cap * 2) ?? 0}%`;
+      chips.push(`ピーク目安 ${peakTime}（${detail}）`);
+    } else {
+      const pm = snapshot.peakMen != null ? Math.round(snapshot.peakMen) : null;
+      const pw = snapshot.peakWomen != null ? Math.round(snapshot.peakWomen) : null;
+      const detail = pm != null || pw != null
+        ? `男性${pm ?? 0}名 / 女性${pw ?? 0}名`
+        : `最大 ${peak} 人`;
+      chips.push(`ピーク目安 ${peakTime}（${detail}）`);
+    }
   } else if (peakTime && peakTime !== "—") {
     chips.push(`ピーク目安 ${peakTime}`);
   }
   if (updated && updated !== "—") {
     chips.push(`予測更新 ${updated}`);
   }
-  if (delta > 0) {
-    chips.push(`ピークまで あと約${delta}人`);
-  } else if (rec && rec !== "データなし" && rec !== "データ取得済み") {
-    chips.push(`おすすめ度 ${rec}`);
+  if (percentMode) {
+    const peakPct = seatFullnessPercent(peak, cap * 2) ?? 0;
+    const nowPct = seatFullnessPercent(total, cap * 2) ?? 0;
+    const deltaPct = Math.max(0, peakPct - nowPct);
+    if (deltaPct > 0) {
+      chips.push(`ピークまで あと約${deltaPct}%`);
+    } else if (rec && rec !== "データなし" && rec !== "データ取得済み") {
+      chips.push(`おすすめ度 ${rec}`);
+    }
+  } else {
+    const delta = peak > 0 ? Math.max(0, peak - total) : 0;
+    if (delta > 0) {
+      chips.push(`ピークまで あと約${delta}人`);
+    } else if (rec && rec !== "データなし" && rec !== "データ取得済み") {
+      chips.push(`おすすめ度 ${rec}`);
+    }
   }
   return chips.slice(0, 3);
 }
