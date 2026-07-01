@@ -124,6 +124,35 @@ def _actual_total(row: dict) -> float | None:
     return None
 
 
+def _slot_means(rows: list[dict]) -> dict[str, float]:
+    """Average actual total per 15-min JST slot (multiple 5-min rows collapse into one)."""
+    by_slot: dict[str, list[float]] = {}
+    for r in rows:
+        dt = _parse_iso(r.get("ts", ""))
+        tot = _actual_total(r)
+        if dt is None or tot is None:
+            continue
+        by_slot.setdefault(_slot_key(dt), []).append(tot)
+    return {k: sum(v) / len(v) for k, v in by_slot.items()}
+
+
+def _alert(message: str) -> None:
+    """Post to OPS_NOTIFY_WEBHOOK_URL (Slack/Discord); no-op if unset. This is the
+    'Act' in the answer-check PDCA loop: when the live forecast degrades or stops
+    beating the naive baseline in production, ping a human to investigate/retrain."""
+    url = (os.environ.get("OPS_NOTIFY_WEBHOOK_URL") or "").strip()
+    if not url:
+        print("[score][alert] (OPS_NOTIFY_WEBHOOK_URL unset) " + message)
+        return
+    try:
+        req = urllib.request.Request(url, data=json.dumps({"text": message}).encode("utf-8"),
+                                     method="POST", headers={"Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=15)
+        print("[score][alert] sent: " + message)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[score][alert] failed: {str(exc)[:150]}")
+
+
 def main() -> int:
     _load_env()
     supabase_url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
@@ -147,43 +176,54 @@ def main() -> int:
     start_iso = start.astimezone(timezone.utc).isoformat()
     end_iso = end.astimezone(timezone.utc).isoformat()
 
+    # 7-days-earlier window for the LIVE seasonal-naive baseline ("same slot last week")
+    start_prev_iso = (start - timedelta(days=7)).astimezone(timezone.utc).isoformat()
+    end_prev_iso = (end - timedelta(days=7)).astimezone(timezone.utc).isoformat()
+
     per_store: dict[str, dict] = {}
     for slug, preds in by_slug.items():
         if not isinstance(preds, list) or not preds:
             continue
         store_id = f"ol_{slug}"
-        rows = _fetch_actuals(supabase_url, key, store_id, start_iso, end_iso)
-        actual_by_slot: dict[str, list[float]] = {}
-        for r in rows:
-            dt = _parse_iso(r.get("ts", ""))
-            tot = _actual_total(r)
-            if dt is None or tot is None:
-                continue
-            actual_by_slot.setdefault(_slot_key(dt), []).append(tot)
-        slot_mean = {k: sum(v) / len(v) for k, v in actual_by_slot.items()}
+        slot_now = _slot_means(_fetch_actuals(supabase_url, key, store_id, start_iso, end_iso))
+        slot_prev = _slot_means(_fetch_actuals(supabase_url, key, store_id, start_prev_iso, end_prev_iso))
 
-        errors: list[float] = []
+        ml_err: list[float] = []
+        base_err: list[float] = []
         for p in preds:
             dt = _parse_iso(p.get("ts", ""))
             if dt is None:
                 continue
-            actual = slot_mean.get(_slot_key(dt))
+            actual = slot_now.get(_slot_key(dt))
             if actual is None:
                 continue
             try:
                 pred_total = float(p.get("total_pred") or 0.0)
             except (TypeError, ValueError):
                 continue
-            errors.append(abs(pred_total - actual))
-        if errors:
-            per_store[slug] = {"live_mae": round(sum(errors) / len(errors), 2), "matched_slots": len(errors)}
+            ml_err.append(abs(pred_total - actual))
+            naive = slot_prev.get(_slot_key(dt - timedelta(days=7)))  # same clock slot, last week
+            if naive is not None:
+                base_err.append(abs(naive - actual))
+        if ml_err:
+            entry = {"live_mae": round(sum(ml_err) / len(ml_err), 2), "matched_slots": len(ml_err)}
+            if base_err:
+                b = sum(base_err) / len(base_err)
+                entry["live_baseline_mae"] = round(b, 2)
+                if b > 0:
+                    # >0 means ML beats "same slot last week" in production; <=0 means it does not
+                    entry["ml_vs_baseline_live_pct"] = round((b - entry["live_mae"]) / b * 100.0, 1)
+            per_store[slug] = entry
 
     maes = [v["live_mae"] for v in per_store.values()]
     overall = round(sum(maes) / len(maes), 2) if maes else None
+    base_maes = [v["live_baseline_mae"] for v in per_store.values() if "live_baseline_mae" in v]
+    overall_baseline = round(sum(base_maes) / len(base_maes), 2) if base_maes else None
     result = {
         "night_date": night_date,
         "scored_at_utc": datetime.now(timezone.utc).isoformat(),
         "overall_live_mae": overall,
+        "overall_baseline_mae": overall_baseline,
         "stores_scored": len(per_store),
         "per_store": per_store,
     }
@@ -200,13 +240,29 @@ def main() -> int:
         except Exception:  # noqa: BLE001
             pass
     summary["nights"] = (
-        [{"night_date": night_date, "overall_live_mae": overall, "stores_scored": len(per_store)}]
+        [{"night_date": night_date, "overall_live_mae": overall,
+          "overall_baseline_mae": overall_baseline, "stores_scored": len(per_store)}]
         + [n for n in summary["nights"] if n.get("night_date") != night_date]
     )[:SUMMARY_KEEP]
     summary["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
     _storage_put(bucket, "accuracy/scores/summary.json", json.dumps(summary, ensure_ascii=False).encode("utf-8"), supabase_url, key)
 
-    print(f"[score] night={night_date} overall_live_mae={overall} stores_scored={len(per_store)}")
+    # --- Act (close the PDCA loop): alert on production degradation ---
+    alerts: list[str] = []
+    if overall is not None and overall_baseline is not None and overall > overall_baseline:
+        alerts.append(f"ML is NOT beating the naive baseline in production (live MAE {overall} vs naive {overall_baseline}).")
+    recent = [n.get("overall_live_mae") for n in summary["nights"][1:8]
+              if isinstance(n.get("overall_live_mae"), (int, float))]
+    if overall is not None and recent:
+        med = sorted(recent)[len(recent) // 2]
+        if med > 0 and overall > med * 1.5:
+            alerts.append(f"Live forecast error spiked: tonight {overall} vs recent median {round(med, 2)} (>1.5x).")
+    if alerts:
+        worst = sorted(per_store.items(), key=lambda kv: kv[1]["live_mae"], reverse=True)[:5]
+        worst_str = ", ".join(f"{s}={v['live_mae']}" for s, v in worst)
+        _alert(f"[MEGRIBI forecast accuracy] night {night_date}: " + " ".join(alerts) + f" Worst stores: {worst_str}")
+
+    print(f"[score] night={night_date} overall_live_mae={overall} baseline={overall_baseline} stores_scored={len(per_store)}")
     for slug in sorted(per_store, key=lambda s: per_store[s]["live_mae"], reverse=True):
         v = per_store[slug]
         print(f"  {slug:<16} live_mae={v['live_mae']:>6}  slots={v['matched_slots']}")
