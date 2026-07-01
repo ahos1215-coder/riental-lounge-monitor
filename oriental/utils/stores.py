@@ -44,7 +44,26 @@ STORE_IDS = [
     "ol_hiroshima_ag",
 ]
 
+# 相席屋 (aisekiya) の Supabase store_id (6店)。ログは src_brand=aisekiya で保存され、
+# フロントの slug は store_id とそのまま同じ ("ay_*")。オリエンタルと違い "ol_" 接頭辞を
+# 剥がした短縮 slug は使わない（ay_ueno と ol_ueno の衝突を避けるため）。
+AISEKIYA_STORE_IDS = [
+    "ay_shibuya",
+    "ay_ikebukuro",
+    "ay_ueno",
+    "ay_chiba",
+    "ay_yokohama",
+    "ay_niigata",
+]
+
+# ブランド横断の全 store_id。store 解決はこれを正とする。
+ALL_STORE_IDS = STORE_IDS + AISEKIYA_STORE_IDS
+
+# slug -> canonical store_id
+#  - オリエンタル: 短縮 slug ("shibuya") -> "ol_shibuya"
+#  - 相席屋: slug == store_id ("ay_ueno") -> "ay_ueno"
 SLUG_TO_ID = {sid.split("ol_", 1)[-1]: sid for sid in STORE_IDS}
+SLUG_TO_ID.update({sid: sid for sid in AISEKIYA_STORE_IDS})
 
 
 def resolve_store_identifier(raw: str | None, default_id: str) -> Tuple[str, str]:
@@ -57,8 +76,8 @@ def resolve_store_identifier(raw: str | None, default_id: str) -> Tuple[str, str
     else:
         candidate = ""
 
-    # Explicit store_id match
-    if candidate in STORE_IDS:
+    # Explicit store_id match (オリエンタル "ol_*" / 相席屋 "ay_*" どちらも)
+    if candidate in ALL_STORE_IDS:
         sid = candidate
     else:
         slug = candidate.lower()

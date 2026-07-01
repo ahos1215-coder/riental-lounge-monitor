@@ -82,28 +82,55 @@ export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="inline-flex items-baseline gap-1.5">
-          <span className="text-[11px] font-medium text-cyan-300/90">男性</span>
-          <span className="text-2xl font-black tabular-nums leading-none text-cyan-200 md:text-3xl">
-            {percentMode ? (menFullPct ?? 0) : men}
+      {percentMode ? (
+        <div className="mt-3">
+          {/* 相席屋は在店人数を公開していないため「席の埋まり具合(%)」を大きく表示。
+              人数と誤読されないよう % を大きく＋ラベルを明示する。 */}
+          <p className="mb-1 text-[11px] font-semibold tracking-wide text-slate-300">
+            席の埋まり具合{" "}
+            <span className="font-normal text-slate-500">（人数ではありません）</span>
+          </p>
+          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+            <span className="inline-flex items-baseline gap-1">
+              <span className="text-[12px] font-medium text-cyan-300/90">男性</span>
+              <span className="text-4xl font-black tabular-nums leading-none text-cyan-200 md:text-5xl">
+                {menFullPct ?? 0}
+              </span>
+              <span className="text-2xl font-black leading-none text-cyan-200/80 md:text-3xl">%</span>
+            </span>
+            <span className="text-slate-600" aria-hidden>
+              ·
+            </span>
+            <span className="inline-flex items-baseline gap-1">
+              <span className="text-[12px] font-medium text-pink-300/90">女性</span>
+              <span className="text-4xl font-black tabular-nums leading-none text-pink-200 md:text-5xl">
+                {womenFullPct ?? 0}
+              </span>
+              <span className="text-2xl font-black leading-none text-pink-200/80 md:text-3xl">%</span>
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className="inline-flex items-baseline gap-1.5">
+            <span className="text-[11px] font-medium text-cyan-300/90">男性</span>
+            <span className="text-2xl font-black tabular-nums leading-none text-cyan-200 md:text-3xl">
+              {men}
+            </span>
+            <span className="text-[11px] text-cyan-200/60">人</span>
           </span>
-          <span className="text-[11px] text-cyan-200/60">{percentMode ? "%" : "人"}</span>
-        </span>
-        <span className="text-slate-600" aria-hidden>
-          ·
-        </span>
-        <span className="inline-flex items-baseline gap-1.5">
-          <span className="text-[11px] font-medium text-pink-300/90">女性</span>
-          <span className="text-2xl font-black tabular-nums leading-none text-pink-200 md:text-3xl">
-            {percentMode ? (womenFullPct ?? 0) : women}
+          <span className="text-slate-600" aria-hidden>
+            ·
           </span>
-          <span className="text-[11px] text-pink-200/60">{percentMode ? "%" : "人"}</span>
-        </span>
-        {percentMode && (
-          <span className="text-[10px] text-slate-500">席の埋まり具合</span>
-        )}
-      </div>
+          <span className="inline-flex items-baseline gap-1.5">
+            <span className="text-[11px] font-medium text-pink-300/90">女性</span>
+            <span className="text-2xl font-black tabular-nums leading-none text-pink-200 md:text-3xl">
+              {women}
+            </span>
+            <span className="text-[11px] text-pink-200/60">人</span>
+          </span>
+        </div>
+      )}
 
       <div className="mt-4">
         <GenderRatioBar men={men} women={women} compact />
