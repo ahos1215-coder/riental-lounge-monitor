@@ -260,11 +260,19 @@ def _zero_payload(future_times):
 
 def _anchor_to_tonight(history, points, freq_min, tz):
     """Nudge the FUTURE portion of tonight's forecast toward how tonight is actually
-    going so far. Over the already-elapsed slots that have real data, compute
-    factor = sum(actual) / sum(predicted), clamp it to [0.5, 2.0], and scale the
-    not-yet-happened slots by it (e.g. the 21:30 "late update" leans on the evening's
-    real build-up). Self-disabling: with no elapsed slots (the next-hour forecast) or
-    fewer than MIN_ELAPSED matched slots it returns points unchanged. Toggle off with
+    going so far — but as a DECAYING blend, not a flat scale.
+
+    Over the already-elapsed slots with real data, compute factor0 = sum(actual) /
+    sum(predicted), clamped to [0.5, 2.0]. Then each not-yet-happened slot is scaled by
+    an effective factor that starts at factor0 for the next slot and decays toward 1.0
+    (the model's own curve) further into the night: eff(h) = 1 + (factor0-1)*decay^h.
+    This means a night that merely started early/late corrects the NEAR term without
+    over- or under-inflating the late-night PEAK (the model estimates peak magnitude
+    better than a short elapsed window) — while a genuinely busy/quiet night still
+    lifts/lowers the coming hour. decay is FORECAST_ANCHOR_DECAY (default 0.85 per slot).
+
+    Self-disabling: with no elapsed slots (the next-hour forecast) or fewer than
+    MIN_ELAPSED matched slots it returns points unchanged. Toggle off with
     FORECAST_ANCHOR_TONIGHT=0. Leakage-free: only past (<= now) actuals inform the
     correction; only future (> now) slots are adjusted.
     """
@@ -305,15 +313,30 @@ def _anchor_to_tonight(history, points, freq_min, tz):
     MIN_ELAPSED = 3
     if matched < MIN_ELAPSED or sum_pred <= 0.0 or sum_actual <= 0.0:
         return points
-    factor = max(0.5, min(2.0, sum_actual / sum_pred))
+    factor0 = max(0.5, min(2.0, sum_actual / sum_pred))
+    try:
+        decay = float(os.getenv("FORECAST_ANCHOR_DECAY", "0.85"))
+    except ValueError:
+        decay = 0.85
+    decay = min(max(decay, 0.0), 0.999)
 
     adjusted = []
+    horizon = 0  # index among the FUTURE slots (0 = first not-yet-happened slot)
     for p in points:
         ts = _as_ts(p["ts"])
         if ts > now:
-            mp = max(float(p["men_pred"]) * factor, 0.0)
-            wp = max(float(p["women_pred"]) * factor, 0.0)
-            adjusted.append({**p, "men_pred": mp, "women_pred": wp, "total_pred": mp + wp, "anchor_factor": round(factor, 3)})
+            # The correction is strongest right after "now" and decays toward 1.0 (the
+            # model's learned curve) further into the night, so a night that merely
+            # started early/late bends the near term WITHOUT over-/under-inflating the
+            # late-night PEAK (which the model estimates better than a short elapsed window).
+            eff = 1.0 + (factor0 - 1.0) * (decay ** horizon)
+            horizon += 1
+            mp = max(float(p["men_pred"]) * eff, 0.0)
+            wp = max(float(p["women_pred"]) * eff, 0.0)
+            adjusted.append({
+                **p, "men_pred": mp, "women_pred": wp, "total_pred": mp + wp,
+                "anchor_factor": round(factor0, 3), "anchor_effective": round(eff, 3),
+            })
         else:
             adjusted.append(dict(p))
     return adjusted
