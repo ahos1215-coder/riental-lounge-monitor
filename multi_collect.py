@@ -121,6 +121,8 @@ LINE_USER_ID = os.environ.get("LINE_USER_ID", "").strip()
 # DOM アラートのクールダウン（秒）。デフォルト 6 時間
 DOM_ALERT_COOLDOWN_SEC = int(os.environ.get("DOM_ALERT_COOLDOWN_SEC", str(6 * 3600)))
 _DOM_ALERT_FLAG_PATH = _root / "data" / "dom_alert_sent.txt"
+# 相席屋スクレイピングの健全性アラート用クールダウンフラグ（DOM と同じ仕組み・別ファイル）
+_AY_ALERT_FLAG_PATH = _root / "data" / "aisekiya_alert_sent.txt"
 
 # 基準地点（とりあえず長崎市近辺）
 WEATHER_LAT = float(os.environ.get("WEATHER_LAT", "32.75"))
@@ -900,7 +902,11 @@ def _scrape_aisekiya() -> dict[str, tuple[int | None, int | None]]:
 
         if not cards:
             print("[aisekiya] no store cards found")
+            _check_aisekiya_health(0, [])
             return results
+
+        # 健全性チェック用に抽出できた生の混雑%（5の倍数のはず）を集める
+        pct_values: list[int] = []
 
         for card in cards:
             link = card.select_one("a.p-storeCard")
@@ -944,6 +950,11 @@ def _scrape_aisekiya() -> dict[str, tuple[int | None, int | None]]:
                         except ValueError:
                             pass
 
+            if men_pct is not None:
+                pct_values.append(men_pct)
+            if women_pct is not None:
+                pct_values.append(women_pct)
+
             capacity = _aisekiya_capacity(slug)
             store_id = AISEKIYA_STORES[slug]["store_id"]
 
@@ -962,6 +973,7 @@ def _scrape_aisekiya() -> dict[str, tuple[int | None, int | None]]:
 
         ok = sum(1 for m, w in results.values() if m is not None and w is not None)
         print(f"[aisekiya] extracted {ok}/{len(AISEKIYA_STORES)} stores")
+        _check_aisekiya_health(len(cards), pct_values)
         return results
 
     except Exception as e:
@@ -1129,11 +1141,11 @@ def _send_line_push(message: str) -> None:
         print(f"[dom-health][error] LINE push failed: {e}")
 
 
-def _dom_alert_in_cooldown() -> bool:
+def _dom_alert_in_cooldown(flag_path=_DOM_ALERT_FLAG_PATH) -> bool:
     """クールダウン期間内かどうかを判定する。"""
     try:
-        if _DOM_ALERT_FLAG_PATH.is_file():
-            ts_str = _DOM_ALERT_FLAG_PATH.read_text(encoding="utf-8").strip()
+        if flag_path.is_file():
+            ts_str = flag_path.read_text(encoding="utf-8").strip()
             last_sent = float(ts_str)
             if time.time() - last_sent < DOM_ALERT_COOLDOWN_SEC:
                 return True
@@ -1142,11 +1154,11 @@ def _dom_alert_in_cooldown() -> bool:
     return False
 
 
-def _mark_dom_alert_sent() -> None:
+def _mark_dom_alert_sent(flag_path=_DOM_ALERT_FLAG_PATH) -> None:
     """クールダウンフラグファイルにタイムスタンプを書き込む。"""
     try:
-        _DOM_ALERT_FLAG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _DOM_ALERT_FLAG_PATH.write_text(str(time.time()), encoding="utf-8")
+        flag_path.parent.mkdir(parents=True, exist_ok=True)
+        flag_path.write_text(str(time.time()), encoding="utf-8")
     except Exception as e:
         print(f"[dom-health] failed to write cooldown flag: {e}")
 
@@ -1229,6 +1241,62 @@ def _check_dom_health(
     _send_line_push(message)
     _mark_dom_alert_sent()
     print(f"[dom-health] DOM breakage alert sent: {both_none}/{total} stores failed")
+
+
+def _check_aisekiya_health(cards_found: int, pct_values: list[int]) -> None:
+    """
+    相席屋スクレイピングの健全性チェック（テンプレート変更の早期検知）。
+
+    検知条件（どちらかを満たせば通知）:
+      1. 店舗カードが期待数(=登録店舗数)未満しか取れない → セレクタ/一覧構造の変更
+      2. 混雑% が「5の倍数」でなくなる、またはカードはあるのに% を1件も取れない
+         → 表示フォーマット/内部セレクタの変更
+
+    相席屋は仕様上、混雑度を 5% 刻みの整数% でしか出さない。ここが崩れたら
+    サイト改修の可能性が高いので LINE Push で通知する（6時間クールダウン付き）。
+    """
+    expected = len(AISEKIYA_STORES)
+    problems: list[str] = []
+
+    if cards_found < expected:
+        problems.append(
+            f"店舗カードが {cards_found}/{expected} 件しか取得できません"
+            f"（一覧セレクタ li.p-congestionList__item の変更の可能性）"
+        )
+
+    if pct_values:
+        non_mult5 = [p for p in pct_values if p % 5 != 0]
+        if len(non_mult5) / len(pct_values) > 0.2:
+            problems.append(
+                f"混雑% が5の倍数でない値を多数含みます "
+                f"({len(non_mult5)}/{len(pct_values)}件) 例{non_mult5[:5]}"
+                f"：表示フォーマット変更の可能性"
+            )
+    elif cards_found > 0:
+        problems.append(
+            "店舗カードはあるのに混雑% を1件も抽出できません"
+            "（span.c-storeData__now など内部セレクタ変更の可能性）"
+        )
+
+    if not problems:
+        print(
+            f"[aisekiya-health] ok: cards={cards_found}/{expected}, "
+            f"pct_samples={len(pct_values)}"
+        )
+        return
+
+    if _dom_alert_in_cooldown(_AY_ALERT_FLAG_PATH):
+        print("[aisekiya-health] alert in cooldown, skipping")
+        return
+
+    message = (
+        "[MEGRIBI] 相席屋スクレイピングの異常検知\n"
+        + "\n".join(f"・{p}" for p in problems)
+        + "\n確認してください: https://aiseki-ya.com/"
+    )
+    _send_line_push(message)
+    _mark_dom_alert_sent(_AY_ALERT_FLAG_PATH)
+    print(f"[aisekiya-health] alert sent: {problems}")
 
 
 # ========= 38店舗ぶんを一気に送る =========
