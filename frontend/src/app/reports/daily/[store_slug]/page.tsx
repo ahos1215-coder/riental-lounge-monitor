@@ -117,6 +117,7 @@ export default async function DailyReportStorePage({ params }: Props) {
         <ReservationLinkCard
           storeName={buildStoreFullName(store)}
           storeSlug={store.slug}
+          brand={store.brand}
           utmCampaign="daily_report"
         />
       </div>

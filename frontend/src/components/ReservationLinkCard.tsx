@@ -7,12 +7,23 @@
  * utm_content は店舗 slug。
  */
 
+import { BRAND_DISPLAY_LABEL, type BrandId } from "@/app/config/stores";
+
 type Props = {
   storeName: string;
   storeSlug: string;
-  /** 公式サイト or アフィリエイトリンク。未指定時は Oriental Lounge 公式サイトを使用 */
+  /** 公式サイト or アフィリエイトリンク。未指定時はブランドの公式サイトを使用 */
   reservationUrl?: string;
+  /** ブランド（未指定は oriental）。リンク先とラベルを切り替える。 */
+  brand?: BrandId;
   utmCampaign?: "daily_report" | "weekly_report" | "store_detail";
+};
+
+// ブランド別の公式サイト（reservationUrl 未指定時のフォールバック）
+const BRAND_OFFICIAL_URL: Record<BrandId, string> = {
+  oriental: "https://oriental-lounge.com/",
+  aisekiya: "https://aiseki-ya.com/",
+  jis: "https://oriental-lounge.com/",
 };
 
 function buildUtmUrl(base: string, params: Record<string, string>): string {
@@ -27,9 +38,11 @@ export function ReservationLinkCard({
   storeName,
   storeSlug,
   reservationUrl,
+  brand = "oriental",
   utmCampaign = "store_detail",
 }: Props) {
-  const officialUrl = reservationUrl ?? "https://oriental-lounge.com/";
+  const officialUrl = reservationUrl ?? BRAND_OFFICIAL_URL[brand];
+  const brandLabel = BRAND_DISPLAY_LABEL[brand];
   const href = buildUtmUrl(officialUrl, {
     utm_source: "megribi",
     utm_medium: "referral",
@@ -54,7 +67,7 @@ export function ReservationLinkCard({
         </a>
       </div>
       <p className="mt-2 text-[10px] text-white/25">
-        ※ リンク先は Oriental Lounge 公式サイトです
+        ※ リンク先は {brandLabel} 公式サイトです
       </p>
     </div>
   );

@@ -184,7 +184,8 @@ def main() -> int:
     for slug, preds in by_slug.items():
         if not isinstance(preds, list) or not preds:
             continue
-        store_id = f"ol_{slug}"
+        # 相席屋は slug == store_id ("ay_*")。オリエンタルは短縮 slug なので "ol_" を付与。
+        store_id = slug if slug.startswith("ay_") else f"ol_{slug}"
         slot_now = _slot_means(_fetch_actuals(supabase_url, key, store_id, start_iso, end_iso))
         slot_prev = _slot_means(_fetch_actuals(supabase_url, key, store_id, start_prev_iso, end_prev_iso))
 

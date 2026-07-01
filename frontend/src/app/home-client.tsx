@@ -312,7 +312,7 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                 </FadeIn>
                 <FadeIn delay={0.35}>
                   <p className="mt-4 max-w-xl text-sm text-slate-100/80">
-                    全国 38 店舗の相席ラウンジの混雑状況をリアルタイムで収集。
+                    全国 {STORES.length} 店舗の相席ラウンジの混雑状況をリアルタイムで収集。
                     AI が今夜のピーク時間を予測して、ベストな来店タイミングの参考をお届けします。
                   </p>
                 </FadeIn>
@@ -330,7 +330,7 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                     </div>
                     <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3">
                       <p className="text-xs font-bold text-emerald-200">毎日自動レポート</p>
-                      <p className="mt-1 text-[11px] text-slate-400">38 店舗の傾向を毎日 AI が分析</p>
+                      <p className="mt-1 text-[11px] text-slate-400">{STORES.length} 店舗の傾向を毎日 AI が分析</p>
                     </div>
                   </div>
                 </FadeIn>
@@ -371,7 +371,7 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                     <>
                       <p className="text-[11px] text-slate-400">Last visited</p>
                       <p className="mt-1 text-lg font-semibold text-slate-50">
-                        Oriental Lounge {lastStore.label}
+                        {buildStoreFullName(lastStore)}
                       </p>
                       <p className="mt-1 text-[11px] text-slate-400">
                         {lastStore.areaLabel}

@@ -122,7 +122,7 @@ export default async function BlogOGImage({ params }: Props) {
             AI 分析レポート
           </span>
           <span style={{ color: "rgba(99,102,241,0.7)", fontSize: "18px" }}>
-            megribi.vercel.app
+            meguribi.jp
           </span>
         </div>
       </div>
