@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { getStoreMetaBySlugStrict } from "@/app/config/stores";
+import { getStoreMetaBySlugStrict, buildStoreFullName } from "@/app/config/stores";
 import { FactsSummaryCard } from "@/components/blog/FactsSummaryCard";
 import { ReservationLinkCard } from "@/components/ReservationLinkCard";
 import { ReportViewTracker } from "@/components/ReportViewTracker";
@@ -30,13 +30,17 @@ function stripFrontmatter(raw: string): string {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { store_slug } = await params;
   const meta = getStoreMetaBySlugStrict(store_slug);
-  const label = meta ? `オリエンタルラウンジ ${meta.label}` : store_slug;
+  const label = meta ? buildStoreFullName(meta) : store_slug;
   const title = `${label} · Daily Report`;
   const description = `${label} の最新AI予測予報（18:00/21:30更新のうち最新）を表示します。`;
   const base = getMetadataBaseUrl();
   return {
     title,
     description,
+    // Daily Report は毎日上書きされる速報（SNS/直リンク用）。同じ店の混雑は安定URLの
+    // 店舗ページ /store/[slug] が主役なので、Daily は noindex にして検索での重複・
+    // クロール浪費を避け、評価を店舗ページに集約する（follow は残しリンクは辿らせる）。
+    robots: { index: false, follow: true },
     openGraph: {
       title: `${title} | めぐりび`,
       description,
