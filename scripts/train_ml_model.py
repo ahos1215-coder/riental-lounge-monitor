@@ -165,23 +165,34 @@ class TrainingConfig:
 
 
 def _fetch_training_rows(cfg: TrainingConfig, session: requests.Session) -> list[dict[str, Any]]:
+    """Fetch recent training rows via KEYSET pagination on the unique ``id``
+    (descending = newest-first).
+
+    Why keyset, not OFFSET: once the table grew to ~1M rows, deep OFFSET pages made
+    Supabase/Postgres hit a statement timeout and return HTTP 500 (observed dying at
+    offset ~42k), which — with no retry — aborted the whole daily/weekly training and
+    silently left the models stale. Keyset (``id=lt.<cursor>``) is O(1) per page at
+    any table size, and id.desc keeps the most RECENT rows (matching the recency
+    weighting). Transient 5xx/429/network errors are retried so a single blip no
+    longer kills the run.
+    """
     endpoint = f"{cfg.supabase_url}/rest/v1/logs"
     end_ts = datetime.now(timezone.utc)
     start_ts = end_ts - timedelta(days=max(1, cfg.train_days))
     page_size = 1000
-    offset = 0
     rows: list[dict[str, Any]] = []
+    cursor: Any = None  # keyset cursor: next page fetches rows with id < cursor
+    headers = {
+        "apikey": cfg.supabase_service_key,
+        "Authorization": f"Bearer {cfg.supabase_service_key}",
+        "Accept": "application/json",
+    }
     while len(rows) < cfg.train_limit:
-        end = min(offset + page_size - 1, cfg.train_limit - 1)
+        want = min(page_size, cfg.train_limit - len(rows))
         params: list[tuple[str, str]] = [
-            ("select", "store_id,ts,men,women,total,weather_code,temp_c,precip_mm"),
-            # newest-first: with a row cap (ML_TRAIN_LIMIT) smaller than the rows
-            # available in the window, ts.asc kept the OLDEST rows and silently trained
-            # on stale data (e.g. only Dec–Jan while ignoring 5 months of newer rows).
-            # ts.desc keeps the most RECENT rows, matching the 90-day recency weighting.
-            ("order", "ts.desc"),
-            ("limit", str(page_size)),
-            ("offset", str(offset)),
+            ("select", "id,store_id,ts,men,women,total,weather_code,temp_c,precip_mm"),
+            ("order", "id.desc"),
+            ("limit", str(want)),
             ("ts", f"gte.{start_ts.isoformat()}"),
             ("ts", f"lte.{end_ts.isoformat()}"),
             ("men", "not.is.null"),
@@ -189,25 +200,41 @@ def _fetch_training_rows(cfg: TrainingConfig, session: requests.Session) -> list
         ]
         if cfg.store_id:
             params.append(("store_id", f"eq.{cfg.store_id}"))
-        headers = {
-            "apikey": cfg.supabase_service_key,
-            "Authorization": f"Bearer {cfg.supabase_service_key}",
-            "Accept": "application/json",
-            "Range-Unit": "items",
-            "Range": f"{offset}-{end}",
-        }
-        response = session.get(endpoint, params=params, headers=headers, timeout=30)
-        if not response.ok:
-            raise SystemExit(f"failed to fetch logs from supabase: status={response.status_code}")
-        payload = response.json()
+        if cursor is not None:
+            params.append(("id", f"lt.{cursor}"))
+
+        payload = None
+        last_err = ""
+        for attempt in range(1, 6):
+            try:
+                response = session.get(endpoint, params=params, headers=headers, timeout=60)
+            except Exception as exc:  # noqa: BLE001 - transient network error
+                last_err = str(exc)[:160]
+            else:
+                if response.ok:
+                    payload = response.json()
+                    break
+                last_err = f"status={response.status_code}"
+                # 4xx (except 429 rate-limit) is a real error — do not retry.
+                if response.status_code < 500 and response.status_code != 429:
+                    raise SystemExit(f"failed to fetch logs from supabase: {last_err}")
+            if attempt < 5:
+                wait = min(2 ** attempt, 20)
+                print(f"[train-ml][fetch] transient error ({last_err}); retry {attempt}/5 in {wait}s")
+                time.sleep(wait)
+        if payload is None:
+            raise SystemExit(f"failed to fetch logs from supabase after retries: {last_err}")
         if not isinstance(payload, list):
             raise SystemExit("supabase logs payload is not a list")
+
         chunk = [row for row in payload if isinstance(row, dict)]
-        rows.extend(chunk)
-        print(f"[train-ml][fetch] {len(rows)}/{cfg.train_limit}")
-        if len(chunk) < page_size:
+        if not chunk:
             break
-        offset += page_size
+        rows.extend(chunk)
+        cursor = chunk[-1].get("id")
+        print(f"[train-ml][fetch] {len(rows)}/{cfg.train_limit}")
+        if len(chunk) < want or cursor is None:
+            break
     return rows[: cfg.train_limit]
 
 
