@@ -78,7 +78,13 @@ def prepare_dataframe(records: list[dict], tz: str) -> pd.DataFrame:
 def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
-    df = df.copy()
+    # Normalize to a contiguous 0..N-1 index. Several steps below (the next_morning_rain
+    # merge, the same_dow_last_week_total mask, and the .map() assignments) mix values
+    # computed before an internal df.merge() — which resets the index — with the
+    # post-merge frame. That only aligns when the incoming index is already contiguous,
+    # which used to be guaranteed because rows arrived pre-sorted by ts. Now that the
+    # training fetch is newest-first (keyset), rows are not ts-sorted, so reset here.
+    df = df.copy().reset_index(drop=True)
     group_keys = ["store_id"] if "store_id" in df.columns else []
     # 推論時、未来行は天気が NaN（forecast_service._build_future_features が NaN を入れる）。
     # ここで生の天気を前方埋めしておかないと、is_rainy / precip_mm / temp_diff_yesterday /
