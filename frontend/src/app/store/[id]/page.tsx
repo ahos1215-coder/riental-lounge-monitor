@@ -20,7 +20,7 @@ import {
   pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
 import { ForecastAccuracyCard } from "@/components/ForecastAccuracyCard";
-import { DEFAULT_STORE, STORES, getStoreMetaBySlug, getStoreMetaBySlugStrict } from "../../config/stores";
+import { BRAND_DISPLAY_LABEL, DEFAULT_STORE, STORES, getStoreMetaBySlug, getStoreMetaBySlugStrict } from "../../config/stores";
 
 type ReportSummaryItem = {
   bullets: string[];
@@ -308,7 +308,7 @@ function StorePageInner() {
               key={store.slug}
               slug={store.slug}
               label={store.label}
-              brandLabel="ORIENTAL LOUNGE"
+              brandLabel={BRAND_DISPLAY_LABEL[store.brand]}
               areaLabel={store.areaLabel}
               isHighlight={idx === 0}
               stats={relatedRealtime[store.slug]?.stats}
