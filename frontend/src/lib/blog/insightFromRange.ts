@@ -600,6 +600,37 @@ export async function buildInsightFromBackend(
     }
   }
 
+  // 便（18時便/21時半便）を先に確定（合成の判定に使う）
+  const edition = options?.edition ?? inferBlogEditionFromJstNow();
+
+  // 21時半便: 実測（これまで）＋ 今夜アンカリング済み予測（この先）を合成し、記事を
+  // 「夜全体の見通し」で書けるようにする。実測だけだと "これまでのピーク" しか出ず、
+  // 本当の夜のピーク（23〜翌1時頃）が反映されないため。
+  let usedAnchoredForecast = false;
+  if (points.length > 0 && edition === "late_update" && !skipForecastDueToTimeout) {
+    try {
+      const fetched = await fetchForecastRows(backendBase, storeSlug);
+      forecastRows = fetched.rows;
+      forecastReasoningNotes = fetched.reasoningNotes;
+      const fcPoints = collectPoints(forecastRows, range.from, range.to, {
+        totalKeys: ["total_pred", "total"],
+        menKeys: ["men_pred", "men", "male", "m"],
+        womenKeys: ["women_pred", "women", "female", "f"],
+      });
+      if (fcPoints.length > 0) {
+        const lastActualMs = points[points.length - 1].dt.getTime();
+        const futureForecast = fcPoints.filter((p) => p.dt.getTime() > lastActualMs);
+        if (futureForecast.length > 0) {
+          points = [...points, ...futureForecast].sort((a, b) => a.dt.getTime() - b.dt.getTime());
+          usedAnchoredForecast = true;
+          notes.push("late_update_combined_actual_and_anchored_forecast");
+        }
+      }
+    } catch (e) {
+      notes.push(`late_combine_forecast_error:${errorMessage(e)}`);
+    }
+  }
+
   if (points.length === 0) {
     source = "api/forecast_today";
     if (!skipForecastDueToTimeout) {
@@ -653,7 +684,6 @@ export async function buildInsightFromBackend(
         };
   const detailed = collectPointsWithGender(rowsForGender, range.from, range.to, genderOpts);
 
-  const edition = options?.edition ?? inferBlogEditionFromJstNow();
   const dayContext = computeDayContext(dateYmd);
   const todayPeak = points.length > 0 ? Math.max(...points.map((p) => p.total)) : null;
   const rangeOpts: CollectOptions = {
@@ -663,7 +693,10 @@ export async function buildInsightFromBackend(
   };
   const weekComparison = computeWeekComparison(rangeRows, dateYmd, todayPeak, rangeOpts);
   const draft_context = computeDraftContext(detailed, insight, edition, notes, {
-    mlInferenceMode: source === "api/forecast_today" ? "store_specific_or_forecast" : "range_only",
+    mlInferenceMode:
+      source === "api/forecast_today" || usedAnchoredForecast
+        ? "store_specific_or_forecast"
+        : "range_only",
     mlSignalNotes: forecastReasoningNotes,
     dayContext,
     weekComparison,
