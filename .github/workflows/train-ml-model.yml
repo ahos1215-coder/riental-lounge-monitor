@@ -21,6 +21,10 @@ on:
 jobs:
   train:
     runs-on: ubuntu-latest
+    # Safety net: the weekly Optuna run over the ~1M-row table can be long; cap well
+    # under GitHub's 6h ceiling so a hung run doesn't waste minutes. Tune ML_OPTUNA_MAX_ROWS
+    # (repo variable) if it approaches this.
+    timeout-minutes: 300
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     steps:
