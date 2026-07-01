@@ -116,6 +116,7 @@ class TrainingConfig:
     optuna_trials: int
     optuna_enabled: bool
     objective: str
+    optuna_max_rows: int
 
     @classmethod
     def from_env(cls) -> "TrainingConfig":
@@ -145,6 +146,10 @@ class TrainingConfig:
             # 'regression' (L2) keeps current behavior; 'poisson'/'tweedie' are the
             # count-data objectives to A/B (see _objective_params).
             objective=(os.getenv("ML_OBJECTIVE", "regression").strip().lower() or "regression"),
+            # 0 = no cap (current behavior). If the weekly Optuna run gets too slow on the
+            # ~1M-row table, set ML_OPTUNA_MAX_ROWS (e.g. 8000) to run HPO on each store's
+            # most-recent N rows; the FINAL model still trains on the full data.
+            optuna_max_rows=_env_int("ML_OPTUNA_MAX_ROWS", 0),
         )
 
     def validate(self) -> None:
@@ -302,6 +307,12 @@ def _optimize_params(
     """Run Optuna HPO for a single store. Returns best params dict."""
     if not HAS_OPTUNA or not cfg.optuna_enabled or cfg.optuna_trials <= 0:
         return {}
+
+    # Optional: run HPO on only the most-recent rows to keep the weekly run fast
+    # (default 0 = use everything). The final model is still trained on full data.
+    if cfg.optuna_max_rows and cfg.optuna_max_rows > 0:
+        train_df = train_df.tail(cfg.optuna_max_rows)
+        test_df = test_df.tail(max(200, cfg.optuna_max_rows // 4))
 
     x_train = train_df[FEATURE_COLUMNS]
     x_test = test_df[FEATURE_COLUMNS]
@@ -573,6 +584,21 @@ def _upload_file(
     raise SystemExit(f"upload failed after {max_retries} attempts: {remote_name} {last_err}")
 
 
+def _download_existing_metadata(cfg: TrainingConfig, session: requests.Session) -> dict[str, Any] | None:
+    """Fetch the current metadata.json from Storage (for subset-training merge)."""
+    object_path = f"{cfg.prefix}/metadata.json".strip("/")
+    endpoint = f"{cfg.supabase_url}/storage/v1/object/{cfg.bucket}/{object_path}"
+    headers = {"apikey": cfg.supabase_service_key, "Authorization": f"Bearer {cfg.supabase_service_key}"}
+    try:
+        resp = session.get(endpoint, headers=headers, timeout=30)
+        if resp.ok:
+            data = resp.json()
+            return data if isinstance(data, dict) else None
+    except Exception as exc:  # noqa: BLE001
+        print(f"[train-ml][merge] could not fetch existing metadata: {str(exc)[:120]}")
+    return None
+
+
 def main() -> int:
     _load_env()
     parser = argparse.ArgumentParser(description="Train forecast XGBoost models and upload to Supabase Storage.")
@@ -666,6 +692,33 @@ def main() -> int:
 
         if not store_models:
             raise SystemExit("no per-store models were trained (all stores skipped)")
+
+        # Subset training (a single/specific store_id) must NOT clobber the other stores
+        # in the shared metadata.json — otherwise the registry drops them and their
+        # forecasts break. Merge the freshly-trained store(s) into the existing metadata
+        # (same schema only) so all stores keep being served.
+        if cfg.store_id:
+            existing = _download_existing_metadata(cfg, session)
+            if existing and str(existing.get("schema_version")) == cfg.schema_version:
+                prev_models = existing.get("store_models")
+                if isinstance(prev_models, dict):
+                    merged = dict(prev_models)
+                    merged.update(store_models)
+                    print(
+                        f"[train-ml][merge] merged {len(store_models)} trained store(s) into "
+                        f"{len(prev_models)} existing -> {len(merged)} total"
+                    )
+                    store_models = merged
+                prev_metrics = existing.get("metrics")
+                if isinstance(prev_metrics, dict):
+                    merged_metrics = dict(prev_metrics)
+                    merged_metrics.update(all_metrics)
+                    all_metrics = merged_metrics
+            elif existing:
+                print(
+                    f"[train-ml][merge] existing metadata schema "
+                    f"({existing.get('schema_version')}) != {cfg.schema_version}; replacing instead of merging"
+                )
 
         metadata = _build_metadata(
             cfg,
