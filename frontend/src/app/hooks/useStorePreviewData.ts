@@ -197,33 +197,51 @@ function parseYMD(value: string): Date | null {
   return date;
 }
 
+// The venues are in Japan and the night window is JST 19:00-05:00. Compute the base
+// date and window in Asia/Tokyo regardless of the viewer's device timezone, otherwise
+// a non-JST visitor filters/labels the wrong slice. JST is fixed +09:00 (no DST).
+function jstDateParts(d: Date): { year: number; month: number; day: number; hour: number } {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "0";
+  return {
+    year: Number(get("year")),
+    month: Number(get("month")),
+    day: Number(get("day")),
+    hour: Number(get("hour")),
+  };
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+// baseDate carries the JST night-date via its Y/M/D; it is only read through
+// getFullYear/getMonth/getDate for date arithmetic, never as an absolute instant.
 function computeNightBaseDate(now: Date): Date {
-  const base = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  if (now.getHours() < 19) {
+  const p = jstDateParts(now);
+  const base = new Date(p.year, p.month - 1, p.day);
+  if (p.hour < 19) {
     base.setDate(base.getDate() - 1);
   }
   return base;
 }
 
 function computeNightWindowFromBaseDate(baseDate: Date): NightWindow {
-  const start = new Date(
-    baseDate.getFullYear(),
-    baseDate.getMonth(),
-    baseDate.getDate(),
-    19,
-    0,
-    0,
-    0,
-  );
-  const end = new Date(
-    baseDate.getFullYear(),
-    baseDate.getMonth(),
-    baseDate.getDate() + 1,
-    5,
-    0,
-    0,
-    0,
-  );
+  const startYmd = `${baseDate.getFullYear()}-${pad2(baseDate.getMonth() + 1)}-${pad2(baseDate.getDate())}`;
+  const nextDay = new Date(baseDate);
+  nextDay.setDate(nextDay.getDate() + 1);
+  const endYmd = `${nextDay.getFullYear()}-${pad2(nextDay.getMonth() + 1)}-${pad2(nextDay.getDate())}`;
+  // Absolute JST instants (+09:00) so isWithinNight's getTime() comparison is correct
+  // for any viewer timezone.
+  const start = new Date(`${startYmd}T19:00:00+09:00`);
+  const end = new Date(`${endYmd}T05:00:00+09:00`);
   return { start, end };
 }
 
@@ -263,7 +281,7 @@ function isWithinNight(ts: string | undefined, window: NightWindow): boolean {
 function formatLabel(ts: string): string {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return ts;
-  return d.toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" });
 }
 
 function formatNowHmJst(date: Date): string {
