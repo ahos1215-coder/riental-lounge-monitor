@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { getStoreMetaBySlugStrict } from "@/app/config/stores";
+import { getStoreMetaBySlugStrict, buildStoreFullName } from "@/app/config/stores";
 import { ForecastAccuracyCard } from "@/components/ForecastAccuracyCard";
 import { ReservationLinkCard } from "@/components/ReservationLinkCard";
 import { ReportViewTracker } from "@/components/ReportViewTracker";
@@ -55,7 +55,7 @@ function stripMetadataLines(body: string): string {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { store_slug } = await params;
   const meta = getStoreMetaBySlugStrict(store_slug);
-  const label = meta ? `オリエンタルラウンジ ${meta.label}` : store_slug;
+  const label = meta ? buildStoreFullName(meta) : store_slug;
   const title = `${label} · Weekly Report`;
   const description = `${label} の最新AI週報（毎週水曜更新）を表示します。`;
   const base = getMetadataBaseUrl();

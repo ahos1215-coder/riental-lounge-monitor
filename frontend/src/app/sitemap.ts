@@ -19,7 +19,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     url: `${base}/store/${encodeURIComponent(s.slug)}`,
     lastModified: now,
     changeFrequency: "hourly",
-    priority: 0.8,
+    priority: 0.9,
   }));
 
   const blogRoutes: MetadataRoute.Sitemap = getAllPostMetas().map((p) => ({
@@ -29,13 +29,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.7,
   }));
 
-  // Daily Report: 定時自動更新の固定URL（毎日上書き）
-  const dailyReportRoutes: MetadataRoute.Sitemap = STORES.map((s) => ({
-    url: `${base}/reports/daily/${encodeURIComponent(s.slug)}`,
-    lastModified: now,
-    changeFrequency: "daily" as const,
-    priority: 0.85,
-  }));
+  // Daily Report は noindex（速報・店舗ページに評価を集約）のため sitemap から除外。
 
   // Weekly Report: 毎週水曜更新の固定URL
   const weeklyReportRoutes: MetadataRoute.Sitemap = STORES.map((s) => ({
@@ -45,5 +39,5 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.8,
   }));
 
-  return [...staticRoutes, ...storeRoutes, ...blogRoutes, ...dailyReportRoutes, ...weeklyReportRoutes];
+  return [...staticRoutes, ...storeRoutes, ...blogRoutes, ...weeklyReportRoutes];
 }
