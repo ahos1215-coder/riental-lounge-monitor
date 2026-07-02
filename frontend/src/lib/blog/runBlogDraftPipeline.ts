@@ -75,6 +75,9 @@ export async function runBlogDraftPipeline(
     });
 
     let mdx = "";
+    // Gemini 生成が失敗し buildFallbackBlogDraftMdx にフォールバックした場合、その理由を保持する
+    // （null のままなら正規の Gemini 生成成功、非 null ならフォールバック生成を示す）
+    let fallbackReason: string | null = null;
     try {
       mdx = await generateBlogDraftMdx({
         storeLabel: store.label,
@@ -85,8 +88,9 @@ export async function runBlogDraftPipeline(
         topicHint: topicHint ?? "",
         source,
       });
-    } catch {
+    } catch (genErr) {
       // cron で 429 retry-after が長い場合などは、ここで即フォールバックして mdx を必ず保存する
+      fallbackReason = genErr instanceof Error ? genErr.message : String(genErr);
       mdx = buildFallbackBlogDraftMdx({
         storeLabel: store.label,
         storeSlug: store.slug,
@@ -120,10 +124,11 @@ export async function runBlogDraftPipeline(
         insight_json: insightPayload as unknown as Record<string, unknown>,
         source,
         content_type: publication.contentType,
-        is_published: publication.isPublished,
+        // フォールバック生成（Gemini失敗）は正規の記事として公開しない
+        is_published: fallbackReason ? false : publication.isPublished,
         edition: edition ?? insightResult.draft_context.edition ?? null,
         line_user_id: lineUserId ?? null,
-        error_message: null,
+        error_message: fallbackReason ? `fallback: ${fallbackReason}` : null,
       });
       if (ins.ok) {
         db = { saved: true, id: ins.id };
@@ -170,7 +175,8 @@ export async function runBlogDraftPipeline(
         insight_json: {},
         source,
         content_type: publication.contentType,
-        is_published: publication.isPublished,
+        // 失敗時（mdx_content 空）は is_published:false で保存し、公開レポート一覧に空コンテンツが出ないようにする
+        is_published: false,
         edition: edition ?? null,
         line_user_id: lineUserId ?? null,
         error_message: msg,

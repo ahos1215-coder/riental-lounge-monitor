@@ -169,7 +169,8 @@ async function handleCron(req: NextRequest) {
           insight_json: {},
           source: pipelineSource,
           content_type: "daily",
-          is_published: true,
+          // 失敗時は is_published:false で保存し、空コンテンツが公開レポート一覧に出ないようにする
+          is_published: false,
           edition: edition ?? null,
           line_user_id: null,
           error_message: timeoutMsg,
@@ -214,7 +215,8 @@ async function handleCron(req: NextRequest) {
             insight_json: {},
             source: pipelineSource,
             content_type: "daily",
-            is_published: true,
+            // 失敗時は is_published:false で保存し、空コンテンツが公開レポート一覧に出ないようにする
+            is_published: false,
             edition: edition ?? null,
             line_user_id: null,
             error_message: msg,
