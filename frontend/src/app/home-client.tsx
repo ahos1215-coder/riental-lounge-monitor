@@ -492,8 +492,8 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
             </h2>
             <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-4 text-sm leading-relaxed text-slate-100/85">
               <p>
-                オリエンタルラウンジ{" "}
-                <span className="font-semibold text-slate-100">{STORES.length}</span>{" "}
+                相席ラウンジ（オリエンタルラウンジ・相席屋）{" "}
+                <span className="font-semibold text-slate-100">{STORES.length}</span>
                 店舗の実測・予測は、
                 <strong className="font-medium text-indigo-200">店舗一覧</strong>
                 にまとめています。地域での絞り込み・検索・ページ送りで探せます。

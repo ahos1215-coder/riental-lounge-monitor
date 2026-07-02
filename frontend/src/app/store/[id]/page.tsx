@@ -311,7 +311,7 @@ function StorePageInner() {
 
       <section className="mx-auto w-full max-w-6xl px-4">
         <div className="max-w-xs">
-          <ForecastAccuracyCard storeSlug={slug} />
+          <ForecastAccuracyCard storeSlug={slug} brand={meta.brand} capacity={meta.capacity} />
         </div>
       </section>
 

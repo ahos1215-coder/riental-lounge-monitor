@@ -199,16 +199,23 @@ export default function CompareClient() {
           const men = latest?.men ?? 0;
           const women = latest?.women ?? 0;
 
+          // 相席屋は人数非公開＝チャートも「席の埋まり具合(%)」に変換してから描画する（人数は出さない）。
+          const brand = meta?.brand ?? "oriental";
+          const capacity = meta?.capacity ?? null;
+          const percentMode = isPercentCrowdBrand(brand) && !!capacity;
+          const toSeries = (total: number) =>
+            percentMode ? seatFullnessPercent(total, (capacity as number) * 2) ?? 0 : total;
+
           const sparkline = rows
             .filter((r): r is RangeRow & { ts: string } => Boolean(r.ts))
-            .map((r) => ({ ts: new Date(r.ts!).getTime(), total: (r.men ?? 0) + (r.women ?? 0) }));
+            .map((r) => ({ ts: new Date(r.ts!).getTime(), total: toSeries((r.men ?? 0) + (r.women ?? 0)) }));
 
           const forecastRows: ForecastRow[] = Array.isArray(forecastData?.by_slug?.[slug]?.data)
             ? forecastData.by_slug[slug].data
             : [];
           const forecastPoints = forecastRows
             .filter((r): r is ForecastRow & { ts: string } => Boolean(r.ts))
-            .map((r) => ({ ts: new Date(r.ts!).getTime(), total: r.total_pred ?? 0 }));
+            .map((r) => ({ ts: new Date(r.ts!).getTime(), total: toSeries(r.total_pred ?? 0) }));
 
           const score = scoreMap.has(slug) ? (scoreMap.get(slug) as number) : null;
 
@@ -452,7 +459,7 @@ export default function CompareClient() {
           <section className="mt-8 rounded-2xl border border-white/10 bg-black/40 p-4 md:p-6">
             <h2 className="text-lg font-bold">混雑推移の比較</h2>
             <p className="mt-1 text-xs text-white/50">
-              実線 = 実測、点線 = ML 予測
+              実線 = 実測、点線 = ML 予測（相席屋は席の埋まり具合 % / オリエンタルは人数）
             </p>
             <div className="mt-4 h-72 w-full min-w-0">
               <ResponsiveContainer width="100%" height={288}>
@@ -469,7 +476,7 @@ export default function CompareClient() {
                   <YAxis
                     stroke="#94a3b8"
                     tick={{ fill: "#94a3b8", fontSize: 10 }}
-                    label={{ value: "人", angle: 0, position: "insideTopLeft", fill: "#64748b", fontSize: 10 }}
+                    label={{ value: "人 / %", angle: 0, position: "insideTopLeft", fill: "#64748b", fontSize: 10 }}
                   />
                   <Tooltip
                     contentStyle={{ backgroundColor: "#0f172a", border: "1px solid #334155", borderRadius: 8 }}
@@ -477,17 +484,24 @@ export default function CompareClient() {
                       const row = payload?.[0]?.payload as { label?: string } | undefined;
                       return row?.label ?? "";
                     }}
+                    formatter={(value, _name, item) => {
+                      const key = String(item?.dataKey ?? "");
+                      const slug = key.replace(/^(actual_|forecast_)/, "");
+                      const unit = isPercentCrowdBrand(storeDataMap[slug]?.brand ?? "oriental") ? "%" : "人";
+                      return [`${value}${unit}`, item?.name ?? ""];
+                    }}
                   />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
                   {selectedSlugs.map((slug, i) => {
                     const data = storeDataMap[slug];
                     const name = data?.label ?? slug;
+                    const unit = isPercentCrowdBrand(data?.brand ?? "oriental") ? "%" : "人";
                     return [
                       <Line
                         key={`actual_${slug}`}
                         type="monotone"
                         dataKey={`actual_${slug}`}
-                        name={`${name}（実測）`}
+                        name={`${name}（実測・${unit}）`}
                         stroke={COLORS[i]}
                         strokeWidth={2}
                         dot={false}
@@ -498,7 +512,7 @@ export default function CompareClient() {
                         key={`forecast_${slug}`}
                         type="monotone"
                         dataKey={`forecast_${slug}`}
-                        name={`${name}（予測）`}
+                        name={`${name}（予測・${unit}）`}
                         stroke={COLORS[i]}
                         strokeWidth={1.5}
                         strokeDasharray="6 3"

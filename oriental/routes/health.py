@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, jsonify
 
+from ..utils import timeutil
 from .common import get_config as _config
 
 bp = Blueprint("health", __name__)
@@ -64,10 +65,15 @@ def _data_freshness(cfg: AppConfig) -> dict:
         ts_fixed = latest_ts.replace("Z", "+00:00") if latest_ts.endswith("Z") else latest_ts
         dt = datetime.fromisoformat(ts_fixed)
         age_sec = int((datetime.now(timezone.utc) - dt).total_seconds())
-        # 収集は JST 19:00-05:00 の夜間のみ稼働する。閉店時間帯は新規データが無くて当然
-        # なので stale としない（従来は毎日 ~14h 誤って stale=true になっていた）。
-        jst_hour = datetime.now(timezone(timedelta(hours=9))).hour
-        in_window = jst_hour >= 19 or jst_hour < 5
+        # 収集は設定された時間帯（デフォルト JST 19:00-05:00）の夜間のみ稼働する。
+        # 閉店時間帯は新規データが無くて当然なので stale としない（従来は毎日
+        # ~14h 誤って stale=true になっていた）。tasks_tick と同じ判定ロジックを使う。
+        in_window, _start_dt, _end_dt = timeutil.collection_window(
+            current=timeutil.now(cfg.timezone),
+            start_hour=cfg.window_start,
+            end_hour=cfg.window_end,
+            tz_name=cfg.timezone,
+        )
         # 30 分以上更新がなければ stale（ただし収集ウィンドウ内のみ）
         stale = in_window and age_sec > 1800
         return {

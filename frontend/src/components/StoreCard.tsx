@@ -269,7 +269,7 @@ export function StoreCard({
                   {percentMode ? "席の埋まり具合" : `計 ${nowTotal}`}
                 </span>
               </div>
-              <GenderRatioBar men={menCount} women={womenCount} compact />
+              <GenderRatioBar men={menCount} women={womenCount} compact percentMode={percentMode} />
             </div>
           )}
         </div>
@@ -286,10 +286,12 @@ export function StoreCard({
               )}
             </div>
           )}
-          <div className="flex items-center gap-1">
-            <span className="text-white/50">比</span>
-            <span className="font-semibold text-white">{gender}</span>
-          </div>
+          {!percentMode && (
+            <div className="flex items-center gap-1">
+              <span className="text-white/50">比</span>
+              <span className="font-semibold text-white">{gender}</span>
+            </div>
+          )}
           {(forecastPending || hasCrowd) && (
             <div className="flex items-center gap-1">
               <span className="text-white/50">混雑</span>

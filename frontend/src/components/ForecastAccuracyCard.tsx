@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { isPercentCrowdBrand, type BrandId } from "@/app/config/stores";
 
 type StoreMetrics = {
   overall: { total_mae: number; men_mae: number; women_mae: number };
@@ -31,9 +32,20 @@ async function fetchAccuracy(): Promise<AccuracyResponse> {
   return fetchPromise;
 }
 
-export function ForecastAccuracyCard({ storeSlug }: { storeSlug: string }) {
+export function ForecastAccuracyCard({
+  storeSlug,
+  brand,
+  capacity,
+}: {
+  storeSlug: string;
+  /** 相席屋は人数非公開＝MAEも%pt表示に切替。未指定は従来どおり人 MAE 表示。 */
+  brand?: BrandId;
+  /** 相席屋の席数（%pt換算用）。 */
+  capacity?: number | null;
+}) {
   const [metrics, setMetrics] = useState<StoreMetrics | null>(null);
   const [trainedAt, setTrainedAt] = useState<string | null>(null);
+  const percentMode = brand ? isPercentCrowdBrand(brand) && !!capacity : false;
 
   useEffect(() => {
     let active = true;
@@ -50,8 +62,16 @@ export function ForecastAccuracyCard({ storeSlug }: { storeSlug: string }) {
 
   if (!metrics) return null;
 
-  const mae = metrics.overall.total_mae;
-  const weekendMae = metrics.weekend_night_segment?.total_mae;
+  const rawMae = metrics.overall.total_mae;
+  const rawWeekendMae = metrics.weekend_night_segment?.total_mae;
+
+  // 相席屋は人数非公開＝MAEも「席の埋まり具合(%)」の誤差(%pt)に換算して表示する。
+  // capacity は片性別の席数のため ×2 で店舗全体の座席数にする（seatFullnessPercentと同じ換算）。
+  const maeUnit = percentMode ? "％pt MAE" : "人 MAE";
+  const toDisplay = (v: number) =>
+    percentMode && capacity ? Math.round((v / (capacity * 2)) * 100 * 10) / 10 : v;
+  const mae = toDisplay(rawMae);
+  const weekendMae = rawWeekendMae != null ? toDisplay(rawWeekendMae) : undefined;
 
   const grade =
     mae <= 5 ? { label: "高精度", color: "text-emerald-300", bg: "bg-emerald-500/15 border-emerald-500/30" }
@@ -70,13 +90,13 @@ export function ForecastAccuracyCard({ storeSlug }: { storeSlug: string }) {
       </div>
       <div className="mt-3 flex items-baseline gap-1">
         <span className="text-2xl font-black text-white">{mae.toFixed(1)}</span>
-        <span className="text-xs text-white/50">人 MAE</span>
+        <span className="text-xs text-white/50">{maeUnit}</span>
       </div>
       <p className="mt-1 text-[11px] text-white/40">平均絶対誤差 — 予測と実測の平均的なズレ</p>
       {weekendMae != null && (
         <div className="mt-2 flex items-baseline gap-1">
           <span className="text-sm font-bold text-white/70">{weekendMae.toFixed(1)}</span>
-          <span className="text-[11px] text-white/40">人 MAE（週末夜）</span>
+          <span className="text-[11px] text-white/40">{maeUnit}（週末夜）</span>
         </div>
       )}
       <div className="mt-3 flex items-center gap-2 text-[10px] text-white/30">
