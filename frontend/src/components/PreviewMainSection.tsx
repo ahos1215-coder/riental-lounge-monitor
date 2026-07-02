@@ -26,6 +26,7 @@ import type {
   PreviewRangeMode,
   StoreSnapshot,
 } from "../app/hooks/useStorePreviewData";
+import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
 
 const cardClass = "rounded-3xl border border-slate-800 bg-slate-950/80";
 
@@ -45,6 +46,8 @@ type TimelinePayloadEntry = {
 type TimelineTooltipProps = TooltipProps<number, string> & {
   label?: string | number;
   payload?: TimelinePayloadEntry[];
+  /** 値の単位（"人" or "%"）。相席屋は席の埋まり具合% を表示。 */
+  unit?: string;
 };
 
 type TimelineLegendPayloadItem = {
@@ -102,7 +105,7 @@ function TimelineLegend(props: TimelineLegendProps) {
   );
 }
 
-function TimelineTooltip({ active, payload, label = "" }: TimelineTooltipProps) {
+function TimelineTooltip({ active, payload, label = "", unit = "" }: TimelineTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
 
   const labels: Record<string, string> = {
@@ -136,7 +139,7 @@ function TimelineTooltip({ active, payload, label = "" }: TimelineTooltipProps) 
 
         let valueText = "-";
         if (typeof raw === "number") {
-          valueText = Math.round(raw).toString();
+          valueText = `${Math.round(raw)}${unit}`;
         }
 
         const color = entry.color ?? "#e5e7eb";
@@ -181,6 +184,22 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
   const hasData = snapshot.hasData;
   const activeRangeMode = rangeMode ?? "today";
   const canControlRange = typeof onChangeRangeMode === "function";
+
+  // 相席屋は在店人数を公開しておらず「席の埋まり具合(%)」表示なので、タイムラインも
+  // 人数ではなく % に変換して描画する（見出しの数値と整合させる）。
+  const percentMode = isPercentCrowdBrand(snapshot.brand) && !!snapshot.capacity;
+  const chartCap = snapshot.capacity ?? 0;
+  const toChartPct = (v: number | null): number | null =>
+    v == null ? null : seatFullnessPercent(v, chartCap);
+  const chartData = percentMode
+    ? snapshot.series.map((p) => ({
+        ...p,
+        menActual: toChartPct(p.menActual),
+        womenActual: toChartPct(p.womenActual),
+        menForecast: toChartPct(p.menForecast),
+        womenForecast: toChartPct(p.womenForecast),
+      }))
+    : snapshot.series;
   const forecastStartLabel =
     snapshot.series.find(
       (p) =>
@@ -255,7 +274,9 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
             <div>
               <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">timeline</p>
               <p className="mt-0.5 text-[11px] text-slate-400">
-                19:00-05:00 の推移（実測 &amp; 予測 / 男性・女性）
+                {percentMode
+                  ? "19:00-05:00 の席の埋まり具合%（実測 & 予測 / 男性・女性）"
+                  : "19:00-05:00 の推移（実測 & 予測 / 男性・女性）"}
               </p>
             </div>
             <div className="text-right">
@@ -269,7 +290,7 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
             {isClient && (
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart
-                  data={snapshot.series}
+                  data={chartData}
                   margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
                 >
                   <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
@@ -284,8 +305,10 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
                     tick={{ fontSize: 10, fill: "#9ca3af" }}
                     stroke="#4b5563"
                     allowDecimals={false}
+                    domain={percentMode ? [0, 100] : undefined}
+                    unit={percentMode ? "%" : undefined}
                   />
-                  <Tooltip content={<TimelineTooltip />} />
+                  <Tooltip content={<TimelineTooltip unit={percentMode ? "%" : "人"} />} />
                   <Legend content={<TimelineLegend />} />
 
                   {forecastStartLabel && forecastEndLabel && (
