@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from flask import Blueprint, current_app, jsonify
 
@@ -64,8 +64,18 @@ def _data_freshness(cfg: AppConfig) -> dict:
         ts_fixed = latest_ts.replace("Z", "+00:00") if latest_ts.endswith("Z") else latest_ts
         dt = datetime.fromisoformat(ts_fixed)
         age_sec = int((datetime.now(timezone.utc) - dt).total_seconds())
-        # 30 分以上更新がなければ stale
-        stale = age_sec > 1800
-        return {"available": True, "age_sec": age_sec, "latest_ts": latest_ts, "stale": stale}
+        # 収集は JST 19:00-05:00 の夜間のみ稼働する。閉店時間帯は新規データが無くて当然
+        # なので stale としない（従来は毎日 ~14h 誤って stale=true になっていた）。
+        jst_hour = datetime.now(timezone(timedelta(hours=9))).hour
+        in_window = jst_hour >= 19 or jst_hour < 5
+        # 30 分以上更新がなければ stale（ただし収集ウィンドウ内のみ）
+        stale = in_window and age_sec > 1800
+        return {
+            "available": True,
+            "age_sec": age_sec,
+            "latest_ts": latest_ts,
+            "stale": stale,
+            "in_collection_window": in_window,
+        }
     except Exception:
         return {"available": False, "age_sec": None, "latest_ts": None, "stale": None}

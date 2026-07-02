@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import os
 import re
 import threading
@@ -58,17 +59,25 @@ def _run_collect_background(task_id: str) -> None:
 
 def _require_cron_secret() -> bool:
     """
-    環境変数 CRON_SECRET が設定されている場合、
     Authorization: Bearer <CRON_SECRET> ヘッダーを必須とする。
     返り値が True なら認証失敗（呼び出し元で 401 を返す）。
+
+    セキュリティ: 比較はタイミング攻撃に強い hmac.compare_digest を使う。
+    CRON_SECRET 未設定時は、本番(Render)では fail-CLOSED（誤って未設定でも
+    /tasks/* を公開しない）。ローカル/CI では従来どおり許可（テスト互換）。
     """
     secret = os.getenv("CRON_SECRET", "").strip()
-    if not secret:
-        return False  # 未設定時はスキップ（後方互換）
-    auth = request.headers.get("Authorization", "")
-    if auth == f"Bearer {secret}":
-        return False
-    return True  # 認証失敗
+    auth = request.headers.get("Authorization", "").strip()
+    if secret:
+        # 正しい Bearer トークンなら認証成功(False)、それ以外は失敗(True)
+        return not hmac.compare_digest(auth, f"Bearer {secret}")
+    # secret 未設定: 本番は fail-closed、それ以外(テスト/ローカル)は許可
+    is_prod = bool(
+        os.getenv("RENDER")
+        or os.getenv("RENDER_SERVICE_ID")
+        or os.getenv("FLASK_ENV") == "production"
+    )
+    return is_prod
 
 
 @bp.route("/tasks/collect", methods=["GET", "POST"])
