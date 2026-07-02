@@ -407,12 +407,21 @@ export default function StoresListClient() {
               { signal },
             );
             if (!signal.aborted && mRes.ok) {
-              const mJson = (await mRes.json()) as Record<string, { score?: number }>;
+              // megribi_score は {ok, data:[{slug,score}]} 形式。slug->score の Map にする。
+              const mJson = (await mRes.json()) as { ok?: boolean; data?: { slug: string; score?: number }[] };
+              const scoreMap = new Map<string, number>();
+              if (Array.isArray(mJson.data)) {
+                for (const it of mJson.data) {
+                  if (it && typeof it.slug === "string" && typeof it.score === "number") {
+                    scoreMap.set(it.slug, it.score);
+                  }
+                }
+              }
               if (!signal.aborted) {
                 setStoreRealtime((prev) => {
                   const next = { ...prev };
                   for (const t of targets) {
-                    const score = mJson[t.slug]?.score ?? null;
+                    const score = scoreMap.has(t.slug) ? (scoreMap.get(t.slug) as number) : null;
                     if (next[t.slug]) {
                       next[t.slug] = { ...next[t.slug], megribiScore: score };
                     }

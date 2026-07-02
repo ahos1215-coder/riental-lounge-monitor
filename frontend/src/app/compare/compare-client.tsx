@@ -6,7 +6,10 @@ import Link from "next/link";
 import {
   STORES,
   STORE_REGION_FILTER_ORDER,
+  isPercentCrowdBrand,
+  seatFullnessPercent,
   type StoreMeta,
+  type BrandId,
 } from "@/app/config/stores";
 import {
   CartesianGrid,
@@ -37,6 +40,8 @@ type StoreData = {
   slug: string;
   label: string;
   areaLabel: string;
+  brand: BrandId;
+  capacity: number | null;
   menCount: number;
   womenCount: number;
   total: number;
@@ -150,6 +155,8 @@ export default function CompareClient() {
           slug,
           label: meta?.label ?? slug,
           areaLabel: meta?.areaLabel ?? "",
+          brand: meta?.brand ?? "oriental",
+          capacity: meta?.capacity ?? null,
           menCount: 0,
           womenCount: 0,
           total: 0,
@@ -171,11 +178,23 @@ export default function CompareClient() {
       fetch(`/api/megribi_score?stores=${csvSlugs}`).then((r) => r.json()).catch(() => ({})),
       fetch(`/api/forecast_today_multi?stores=${csvSlugs}`).then((r) => r.json()).catch(() => ({})),
     ]).then(([rangeData, scoreData, forecastData]) => {
+      // megribi_score は {data:[{slug,score}]} 形式。slug->score の Map にする。
+      const scoreMap = new Map<string, number>();
+      if (Array.isArray(scoreData?.data)) {
+        for (const d of scoreData.data) {
+          if (d && typeof d.slug === "string" && typeof d.score === "number") {
+            scoreMap.set(d.slug, d.score);
+          }
+        }
+      }
       setStoreDataMap((prev) => {
         const copy = { ...prev };
         for (const slug of selectedSlugs) {
           const meta = STORES.find((s) => s.slug === slug);
-          const rows: RangeRow[] = Array.isArray(rangeData?.[slug]) ? rangeData[slug] : [];
+          // range_multi / forecast_today_multi は {by_slug:{slug:{rows|data}}} 形式。
+          const rows: RangeRow[] = Array.isArray(rangeData?.by_slug?.[slug]?.rows)
+            ? rangeData.by_slug[slug].rows
+            : [];
           const latest = rows[rows.length - 1];
           const men = latest?.men ?? 0;
           const women = latest?.women ?? 0;
@@ -184,17 +203,21 @@ export default function CompareClient() {
             .filter((r): r is RangeRow & { ts: string } => Boolean(r.ts))
             .map((r) => ({ ts: new Date(r.ts!).getTime(), total: (r.men ?? 0) + (r.women ?? 0) }));
 
-          const forecastRows: ForecastRow[] = Array.isArray(forecastData?.[slug]) ? forecastData[slug] : [];
+          const forecastRows: ForecastRow[] = Array.isArray(forecastData?.by_slug?.[slug]?.data)
+            ? forecastData.by_slug[slug].data
+            : [];
           const forecastPoints = forecastRows
             .filter((r): r is ForecastRow & { ts: string } => Boolean(r.ts))
             .map((r) => ({ ts: new Date(r.ts!).getTime(), total: r.total_pred ?? 0 }));
 
-          const score = typeof scoreData?.[slug]?.megribi_score === "number" ? scoreData[slug].megribi_score : null;
+          const score = scoreMap.has(slug) ? (scoreMap.get(slug) as number) : null;
 
           copy[slug] = {
             slug,
             label: meta?.label ?? slug,
             areaLabel: meta?.areaLabel ?? "",
+            brand: meta?.brand ?? "oriental",
+            capacity: meta?.capacity ?? null,
             menCount: men,
             womenCount: women,
             total: men + women,
@@ -371,22 +394,44 @@ export default function CompareClient() {
                         </div>
                         <span className={`text-sm font-bold ${sc.className}`}>{sc.text}</span>
                       </div>
-                      <div className="mt-4 grid grid-cols-3 gap-3 text-center">
-                        <div>
-                          <p className="text-[10px] text-white/50">合計</p>
-                          <p className="text-xl font-black">{data.total}</p>
+                      {isPercentCrowdBrand(data.brand) && data.capacity ? (
+                        // 相席屋は在店人数非公開 → 席の埋まり具合(%) のみ（人数は出さない）
+                        <div className="mt-4 grid grid-cols-2 gap-3 text-center">
+                          <div>
+                            <p className="text-[10px] text-white/50">男性</p>
+                            <p className="text-xl font-black text-blue-300">
+                              {seatFullnessPercent(data.menCount, data.capacity) ?? 0}%
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-white/50">女性</p>
+                            <p className="text-xl font-black text-pink-300">
+                              {seatFullnessPercent(data.womenCount, data.capacity) ?? 0}%
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-[10px] text-white/50">男性</p>
-                          <p className="text-xl font-black text-blue-300">{data.menCount}</p>
+                      ) : (
+                        <div className="mt-4 grid grid-cols-3 gap-3 text-center">
+                          <div>
+                            <p className="text-[10px] text-white/50">合計</p>
+                            <p className="text-xl font-black">{data.total}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-white/50">男性</p>
+                            <p className="text-xl font-black text-blue-300">{data.menCount}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-white/50">女性</p>
+                            <p className="text-xl font-black text-pink-300">{data.womenCount}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-[10px] text-white/50">女性</p>
-                          <p className="text-xl font-black text-pink-300">{data.womenCount}</p>
-                        </div>
-                      </div>
+                      )}
                       <div className="mt-3 flex items-center justify-between text-xs text-white/50">
-                        <span>女性比率: {data.genderRatio}</span>
+                        <span>
+                          {isPercentCrowdBrand(data.brand)
+                            ? "席の埋まり具合（人数非公開）"
+                            : `女性比率: ${data.genderRatio}`}
+                        </span>
                         <Link
                           href={`/store/${slug}?store=${slug}`}
                           className="text-indigo-300/80 hover:text-indigo-200"
