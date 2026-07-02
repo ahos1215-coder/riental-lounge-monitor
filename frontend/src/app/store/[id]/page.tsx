@@ -20,7 +20,7 @@ import {
   pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
 import { ForecastAccuracyCard } from "@/components/ForecastAccuracyCard";
-import { BRAND_DISPLAY_LABEL, DEFAULT_STORE, STORES, getStoreMetaBySlug, getStoreMetaBySlugStrict } from "../../config/stores";
+import { BRAND_DISPLAY_LABEL, DEFAULT_STORE, STORES, STORE_REGION_FILTER_ORDER, getStoreMetaBySlug, getStoreMetaBySlugStrict } from "../../config/stores";
 
 type ReportSummaryItem = {
   bullets: string[];
@@ -114,10 +114,26 @@ function StorePageInner() {
     sendEvent("store_view", { store_slug: slug, store_label: meta.label });
   }, [slug, meta.label]);
 
-  const digestStores = useMemo(
-    () => STORES.filter((s) => s.slug !== slug).slice(0, 4),
-    [slug],
-  );
+  // おすすめ（ほかの店舗）は「今見ている店舗に地理的に近い」店を出す。
+  // 精密な緯度経度が全店には無いため、地域（regionLabel）の並び順の距離で近さを近似する
+  // （関東を見ているのに九州の店を出す、といったズレを防ぐ）。同じ地域距離なら元の順を保つ。
+  const digestStores = useMemo(() => {
+    const order = STORE_REGION_FILTER_ORDER;
+    const curIdx = order.indexOf(meta.regionLabel);
+    const regionDist = (region: string): number => {
+      const i = order.indexOf(region);
+      if (curIdx < 0 || i < 0) return 99;
+      return Math.abs(i - curIdx);
+    };
+    return STORES.filter((s) => s.slug !== slug)
+      .map((s, i) => ({ s, i }))
+      .sort((a, b) => {
+        const d = regionDist(a.s.regionLabel) - regionDist(b.s.regionLabel);
+        return d !== 0 ? d : a.i - b.i;
+      })
+      .slice(0, 4)
+      .map((x) => x.s);
+  }, [slug, meta.regionLabel]);
 
   const [reportSummary, setReportSummary] = useState<ReportSummaryData>({ weekly: null });
 
