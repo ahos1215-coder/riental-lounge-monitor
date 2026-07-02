@@ -74,6 +74,15 @@ def _storage_get(bucket: str, path: str, url: str, key: str) -> bytes | None:
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
             return None
+        # Supabase Storage は存在しないオブジェクトに対し HTTP 400 + body {"error":"not_found",...}
+        # を返すことがある（初回でスナップショット/サマリが未作成のケース）。これは「無い」扱いで None。
+        if exc.code == 400:
+            try:
+                body = exc.read().decode("utf-8", "replace").lower()
+            except Exception:  # noqa: BLE001
+                body = ""
+            if "not_found" in body or "not found" in body or "object not found" in body:
+                return None
         raise
 
 
