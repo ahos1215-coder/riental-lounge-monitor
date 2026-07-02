@@ -485,7 +485,7 @@ export default function StoresListClient() {
               店舗一覧
             </h1>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed text-white/70">
-              めぐりびで掲載しているオリエンタルラウンジの店舗一覧です。カードを開くと、人数・混雑の目安・グラフ付きの店舗ページへ移動します。
+              めぐりびで掲載している相席ラウンジ（オリエンタルラウンジ・相席屋）の店舗一覧です。カードを開くと、人数・混雑の目安・グラフ付きの店舗ページへ移動します。
             </p>
           </section>
 
