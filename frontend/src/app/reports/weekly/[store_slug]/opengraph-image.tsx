@@ -102,7 +102,7 @@ export default async function WeeklyReportOGImage({ params }: Props) {
             週次の混雑傾向・ML 予測まとめ
           </span>
           <span style={{ color: "rgba(139,92,246,0.7)", fontSize: "18px" }}>
-            megribi.vercel.app
+            meguribi.jp
           </span>
         </div>
       </div>

@@ -42,10 +42,11 @@ def _load_env() -> None:
             os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
-def _oriental_slugs() -> list[str]:
+def _all_store_slugs() -> list[str]:
+    # 全ブランド（oriental + aisekiya 等）を対象にする。相席屋も予測の答え合わせに載せる。
     path = REPO_ROOT / "frontend" / "src" / "data" / "stores.json"
     data = json.loads(path.read_text(encoding="utf-8"))
-    return [s["slug"] for s in data if s.get("brand", "oriental") == "oriental" and s.get("slug")]
+    return [s["slug"] for s in data if s.get("slug")]
 
 
 def _get_json(url: str, retries: int = 3):
@@ -84,7 +85,7 @@ def main() -> int:
     if not supabase_url or not key:
         raise SystemExit("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required")
 
-    slugs = _oriental_slugs()
+    slugs = _all_store_slugs()
     night_date = datetime.now(JST).strftime("%Y%m%d")
 
     by_slug: dict[str, list] = {}

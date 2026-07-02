@@ -136,7 +136,7 @@ export default async function StoreOGImage({ params }: Props) {
             混雑傾向・男女比・ML 予測をまとめてチェック
           </span>
           <span style={{ color: "rgba(99,102,241,0.7)", fontSize: "18px" }}>
-            megribi.vercel.app
+            meguribi.jp
           </span>
         </div>
       </div>
