@@ -18,9 +18,14 @@ on:
         options:
           - evening_preview
           - late_update
-  schedule:
-    - cron: "0 9 * * *"    # JST 18:00 → evening_preview
-    - cron: "30 12 * * *"  # JST 21:30 → late_update
+  # 【2026-07 無効化】日次レポート生成はローカルの gemma4:12b ジョブ
+  # (scripts/local_report_job.py, Windows タスクスケジューラ MEGRIBI-daily-evening/late)
+  # へ移行したため、Gemini を叩くこの定時トリガは停止する。両者が同じ facts_id を
+  # 書くと、Gemini 失敗時に is_published:false でローカル生成分を上書き（非公開化）して
+  # しまうため、二重稼働させないこと。手動実行(workflow_dispatch)は緊急用に残す。
+  # schedule:
+  #   - cron: "0 9 * * *"    # JST 18:00 → evening_preview
+  #   - cron: "30 12 * * *"  # JST 21:30 → late_update
 
 jobs:
   trigger:
