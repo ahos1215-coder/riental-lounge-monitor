@@ -9,7 +9,7 @@ import {
   getStoreHistorySlugs,
   removeFavoriteStore,
 } from "@/lib/browser/meguribiStorage";
-import { getStoreMetaBySlug, type StoreMeta } from "@/app/config/stores";
+import { getStoreMetaBySlug, isPercentCrowdBrand, seatFullnessPercent, type StoreMeta } from "@/app/config/stores";
 import {
   STORE_CARD_RANGE_LIMIT,
   STORE_CARD_SPARKLINE_POINTS,
@@ -289,15 +289,29 @@ export default function MyPageClient() {
                     <ScoreBadge score={card.megribiScore} />
                   </div>
 
-                  {/* Realtime numbers */}
+                  {/* Realtime numbers（相席屋は人数非公開 → 席の埋まり具合% のみ） */}
                   <div className="mt-3 flex items-center gap-2 text-[11px]">
-                    <span className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-2 py-0.5 font-semibold text-cyan-200">
-                      男性 {card.men}
-                    </span>
-                    <span className="rounded-full border border-pink-400/30 bg-pink-500/10 px-2 py-0.5 font-semibold text-pink-200">
-                      女性 {card.women}
-                    </span>
-                    <span className="text-white/40">計 {card.total}</span>
+                    {isPercentCrowdBrand(card.meta.brand) && card.meta.capacity ? (
+                      <>
+                        <span className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-2 py-0.5 font-semibold text-cyan-200">
+                          男性 {seatFullnessPercent(card.men, card.meta.capacity) ?? 0}%
+                        </span>
+                        <span className="rounded-full border border-pink-400/30 bg-pink-500/10 px-2 py-0.5 font-semibold text-pink-200">
+                          女性 {seatFullnessPercent(card.women, card.meta.capacity) ?? 0}%
+                        </span>
+                        <span className="text-white/40">席の埋まり具合</span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-2 py-0.5 font-semibold text-cyan-200">
+                          男性 {card.men}
+                        </span>
+                        <span className="rounded-full border border-pink-400/30 bg-pink-500/10 px-2 py-0.5 font-semibold text-pink-200">
+                          女性 {card.women}
+                        </span>
+                        <span className="text-white/40">計 {card.total}</span>
+                      </>
+                    )}
                   </div>
 
                   {/* Sparkline */}
@@ -320,7 +334,11 @@ export default function MyPageClient() {
                     <div className="mt-2 flex items-center gap-3 text-[10px] text-white/50">
                       <span>ピーク <strong className="text-white/70">{card.forecastPeak}</strong></span>
                       <span>落ち着き <strong className="text-white/70">{card.forecastCalm}</strong></span>
-                      <span>最大 <strong className="text-white/70">{card.forecastMaxPred}人</strong></span>
+                      <span>最大 <strong className="text-white/70">{
+                        isPercentCrowdBrand(card.meta.brand) && card.meta.capacity
+                          ? `約${seatFullnessPercent(card.forecastMaxPred, card.meta.capacity * 2) ?? 0}%`
+                          : `${card.forecastMaxPred}人`
+                      }</strong></span>
                     </div>
                   )}
 

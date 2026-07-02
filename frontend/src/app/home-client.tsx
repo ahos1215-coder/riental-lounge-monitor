@@ -9,6 +9,8 @@ import {
   STORES,
   getStoreMetaBySlug,
   buildStoreFullName,
+  isPercentCrowdBrand,
+  seatFullnessPercent,
   type StoreMeta,
 } from "./config/stores";
 import { LAST_STORE_KEY } from "@/lib/browser/meguribiStorage";
@@ -472,7 +474,9 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                         <ScoreBar score={item.score} />
                       </div>
                       <span className="mt-1 text-[9px] text-white/30">
-                        {item.total}人（男{item.men} / 女{item.women}）
+                        {isPercentCrowdBrand(meta.brand) && meta.capacity
+                          ? `席 男${seatFullnessPercent(item.men, meta.capacity) ?? 0}% / 女${seatFullnessPercent(item.women, meta.capacity) ?? 0}%`
+                          : `${item.total}人（男${item.men} / 女${item.women}）`}
                       </span>
                     </Link>
                   );

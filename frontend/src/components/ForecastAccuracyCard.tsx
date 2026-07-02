@@ -37,7 +37,8 @@ export function ForecastAccuracyCard({ storeSlug }: { storeSlug: string }) {
 
   useEffect(() => {
     let active = true;
-    const storeId = `ol_${storeSlug}`;
+    // 相席屋は slug==store_id ("ay_*")。オリエンタルは短縮 slug なので "ol_" を付与。
+    const storeId = storeSlug.startsWith("ay_") ? storeSlug : `ol_${storeSlug}`;
     fetchAccuracy().then((data) => {
       if (!active) return;
       const m = data.metrics?.[storeId] ?? null;
