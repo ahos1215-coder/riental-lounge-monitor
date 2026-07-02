@@ -8,7 +8,7 @@ const base = getMetadataBaseUrl();
 export const metadata: Metadata = {
   title: "めぐりび | 相席ラウンジの混雑予測・リアルタイム人数",
   description:
-    "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測し、ベストな来店タイミングの参考をお届けします。全国38店舗対応。",
+    "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測し、ベストな来店タイミングの参考をお届けします。全国44店舗対応。",
   openGraph: {
     title: "めぐりび | 相席ラウンジの混雑予測・リアルタイム人数",
     description:
@@ -20,7 +20,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "めぐりび | 相席ラウンジの混雑予測",
     description:
-      "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測。全国38店舗対応。",
+      "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測。全国44店舗対応。",
   },
 };
 

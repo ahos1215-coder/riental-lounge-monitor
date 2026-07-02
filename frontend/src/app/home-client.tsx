@@ -596,8 +596,8 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
               <Link href="/contact" className="hover:text-slate-300">
                 お問い合わせ
               </Link>
-              <Link href="/about" className="hover:text-slate-300">
-                運営情報
+              <Link href="/disclaimer" className="hover:text-slate-300">
+                免責事項
               </Link>
             </div>
             <p className="text-slate-600">© めぐりび All Rights Reserved.</p>
