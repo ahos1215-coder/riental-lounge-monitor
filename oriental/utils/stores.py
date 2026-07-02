@@ -59,6 +59,20 @@ AISEKIYA_STORE_IDS = [
 # ブランド横断の全 store_id。store 解決はこれを正とする。
 ALL_STORE_IDS = STORE_IDS + AISEKIYA_STORE_IDS
 
+# 相席屋の店舗ごとの総座席数（男女計）。multi_collect.py の AISEKIYA_STORES
+# ((tables + vip) * 2 = 片性別の座席数) と同じ値を総座席数として持つ
+# （= (tables + vip) * 4）。multi_collect.py 側を更新したらここも同期すること。
+# multi_collect.py はスクレイピング用スクリプトで import 時の副作用が大きいため、
+# ここに最小限のコピーを持つ方が安全（Flask アプリからは import しない）。
+AISEKIYA_TOTAL_CAPACITY = {
+    "ay_shibuya": 76,
+    "ay_ikebukuro": 56,
+    "ay_ueno": 60,
+    "ay_chiba": 88,
+    "ay_yokohama": 68,
+    "ay_niigata": 60,
+}
+
 # slug -> canonical store_id
 #  - オリエンタル: 短縮 slug ("shibuya") -> "ol_shibuya"
 #  - 相席屋: slug == store_id ("ay_ueno") -> "ay_ueno"

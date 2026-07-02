@@ -3,9 +3,12 @@
 train/serve skew の緩和:
   従来は preprocess.add_time_features が未来行の天気(weather_code/temp_c/precip_mm)を
   「直近の実測値の前方埋め(ffill)」で埋めるため、夜の間ずっと 18:10 時点の天気で固定され、
-  is_rainy / precip_mm / extreme_weather / next_morning_rain / feat_rain_night_exit 等が
-  凍結していた。ここで Open-Meteo の時間別"予報"を取得し未来行へ入れることで、これらの
-  特徴が実際の見込みに沿って動き、雨/猛暑の夜の予測精度が改善する。
+  is_rainy / precip_mm / extreme_weather / feat_rain_night_exit 等が凍結していた。ここで
+  Open-Meteo の時間別"予報"を取得し未来行へ入れることで、これらの特徴が実際の見込みに沿って
+  動き、雨/猛暑の夜の予測精度が改善する。
+  なお next_morning_rain は 06:00-09:59 の行からのみ算出される特徴で、予報注入の対象である
+  19:00-05:00 の未来行には該当時間帯が含まれないため、この注入では復活しない
+  （推論時は常に 0 で feature_importance も 0 のまま）。schema 互換のため特徴自体は残す。
 
 安全設計（最重要）:
   - 座標不明・取得失敗・タイムアウト・パース失敗は **すべて {} を返す**。呼び出し側は

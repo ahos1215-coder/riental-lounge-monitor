@@ -179,6 +179,9 @@ class ForecastService:
         future_features = self._build_future_features(history, future_times, store_id=store_id)
         men_pred, women_pred = model.predict(future_features)
         total_pred = np.maximum(men_pred, 0) + np.maximum(women_pred, 0)
+        men_pred, women_pred, total_pred = self._sparse_store_fallback(
+            history, future_times, men_pred, women_pred, total_pred, store_id=store_id
+        )
         return [
             {
                 "ts": ts.isoformat(),
@@ -189,9 +192,77 @@ class ForecastService:
             for ts, mp, wp, tp in zip(future_times, men_pred, women_pred, total_pred)
         ]
 
+    def _sparse_store_fallback(
+        self,
+        history: pd.DataFrame,
+        future_times: pd.DatetimeIndex,
+        men_pred,
+        women_pred,
+        total_pred,
+        *,
+        store_id: str,
+    ):
+        """閑散/疎な店舗向けの縮退予測フォールバック。
+
+        ay_niigata のような客数の少ない店舗では、直近履歴が全体的にゼロに近いと
+        LightGBM の主要特徴量（total_slope_30min, same_dow_last_week_total 等）が
+        ゼロに潰れ、実際は繁忙な夜もあるのにモデルが 19:00-05:00 の全時間帯で
+        ほぼ横ばい・ほぼ0を予測してしまう「モデル崩壊」が起きる。
+
+        このフォールバックは以下の「崩壊シグネチャ」でのみ発火する：
+          - 履歴から見てこの店舗は本来賑わうことがある（hist_ceiling >= MIN_ACTIVE）
+          - にもかかわらず今回のモデル予測のピークが歴史的上限よりずっと低い
+            （pred_peak < COLLAPSE_FRAC * hist_ceiling）
+        本当に閑散な店舗（hist_ceiling が低い）や、健全にピークを予測できている
+        モデル出力には絶対に介入しない。介入時は、店舗自身の「賑わっていた夜」の
+        時間帯別平均カーブ（実測のみ、架空データなし）で置き換える。
+        何が起きてもモデル予測を壊さないよう、例外は握りつぶして元の値を返す。
+        """
+        try:
+            if history is None or history.empty:
+                return men_pred, women_pred, total_pred
+            tot = pd.to_numeric(history["total"], errors="coerce").fillna(0.0)
+            # historical activity ceiling: does this store actually get busy?
+            hist_ceiling = float(tot.quantile(0.85)) if len(tot) else 0.0
+            pred_peak = float(np.max(total_pred)) if len(total_pred) else 0.0
+            MIN_ACTIVE = 4.0        # below this the store is genuinely quiet -> leave model alone
+            COLLAPSE_FRAC = 0.30    # model predicts < 30% of historical ceiling -> collapsed
+            if hist_ceiling < MIN_ACTIVE or pred_peak >= COLLAPSE_FRAC * hist_ceiling:
+                return men_pred, women_pred, total_pred   # not degenerate; do nothing
+
+            # Build hour-of-night mean shape from the store's BUSY rows (total>0).
+            busy = history.loc[tot > 0].copy()
+            if busy.empty:
+                return men_pred, women_pred, total_pred
+            busy_tot = pd.to_numeric(busy["total"], errors="coerce").fillna(0.0)
+            hours = pd.DatetimeIndex(busy["ts"]).hour
+            hour_mean = pd.Series(busy_tot.values, index=hours).groupby(level=0).mean()  # {hour: mean total on busy nights}
+            overall_busy_mean = float(busy_tot.mean())
+            # historical men/women split on busy rows (default 0.5 each)
+            m = pd.to_numeric(busy.get("men"), errors="coerce").fillna(0.0).sum()
+            w = pd.to_numeric(busy.get("women"), errors="coerce").fillna(0.0).sum()
+            male_frac = float(m / (m + w)) if (m + w) > 0 else 0.5
+
+            fut_hours = pd.DatetimeIndex(future_times).hour
+            fb_total = np.array([float(hour_mean.get(h, overall_busy_mean)) for h in fut_hours], dtype=float)
+            fb_total = np.maximum(fb_total, 0.0)
+            fb_men = fb_total * male_frac
+            fb_women = fb_total * (1.0 - male_frac)
+            self.logger.warning(
+                "forecast.service.sparse_fallback store=%s pred_peak=%.2f hist_ceiling=%.2f -> hour-of-night mean shape",
+                store_id, pred_peak, hist_ceiling,
+            )
+            return fb_men, fb_women, fb_total
+        except Exception as exc:  # noqa: BLE001 — fallback must never break forecasting
+            self.logger.warning("forecast.service.sparse_fallback_skip detail=%s", exc)
+            return men_pred, women_pred, total_pred
+
     def _build_future_features(
         self, history: pd.DataFrame, future_times: pd.DatetimeIndex, *, store_id: str | None = None
     ) -> pd.DataFrame:
+        # 呼び出し側 df を破壊しないため（_forecast_generic が同じ df を後続の
+        # _anchor_to_tonight / _build_reasoning でも使い回す）、ここでコピーしてから変更する。
+        history = history.copy()
         base_cols = ["ts", "men", "women", "total", "weather_code", "temp_c", "precip_mm", "store_id"]
         for col in base_cols:
             if col not in history.columns:

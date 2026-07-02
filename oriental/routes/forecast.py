@@ -234,7 +234,7 @@ def api_megribi_score():
     ?store=slug または ?stores=slug1,slug2 で対象指定。
     省略時は全店舗を返す。
     """
-    from ..utils.stores import SLUG_TO_ID
+    from ..utils.stores import AISEKIYA_TOTAL_CAPACITY, SLUG_TO_ID
 
     cfg = _config()
     logger = current_app.logger
@@ -267,13 +267,19 @@ def api_megribi_score():
         total = float(latest.get("total", 0) or 0)
         men = float(latest.get("men", 0) or 0)
         women = float(latest.get("women", 0) or 0)
-        capacity = 80.0
+        if store_id.startswith("ay_"):
+            capacity = float(AISEKIYA_TOTAL_CAPACITY.get(store_id, 80.0))
+        else:
+            capacity = 80.0
         occupancy_rate = min(total / capacity, 1.0) if capacity > 0 else 0.0
         female_ratio = women / total if total > 0 else 0.5
         score = calc_megribi_score(
             female_ratio=female_ratio,
             occupancy_rate=occupancy_rate,
         )
+        # 相席屋 (ay_*) は %表示のみが正式仕様だが、men/women はフロントの
+        # seatFullnessPercent() 換算（home-client.tsx）が実際に消費しているため
+        # null化はしない（生の人数を隠す用途では使われていない）。
         return {
             "slug": slug,
             "score": round(score, 3),

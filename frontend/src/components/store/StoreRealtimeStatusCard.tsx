@@ -133,7 +133,7 @@ export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
       )}
 
       <div className="mt-4">
-        <GenderRatioBar men={men} women={women} compact />
+        <GenderRatioBar men={men} women={women} compact percentMode={percentMode} />
         <p className="mt-1.5 text-[11px] text-slate-400">
           男女比{" "}
           <span className="font-medium text-slate-200">

@@ -126,6 +126,9 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     df["precip_mm"] = pd.to_numeric(df["precip_mm"], errors="coerce").fillna(0.0).astype(float)
 
     # 翌朝（06:00-09:59）の降雨予報/実測が1件でもあればフラグ化
+    # 注意: 推論時の未来行は 19:00-05:00 の営業ウィンドウのみで 06-09 時台を含まないため、
+    # next_morning_rain は推論時は常に 0 に落ちる（= 死んだ特徴、weather_forecast.py の
+    # 予報注入でも復活しない）。schema v6 互換のため特徴自体・学習用計算は維持する。
     if group_keys:
         rain_map = (
             df.assign(date_key=row_dates, rainy=(df["weather_code"].fillna(-1) >= 51))
