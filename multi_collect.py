@@ -433,9 +433,14 @@ def insert_supabase_log(
     precip_mm: float | None,
     *,
     brand: str = SUPABASE_BRAND,
-) -> None:
+) -> bool:
+    """Supabase の logs テーブルに 1 行 INSERT する。
+
+    返値: INSERT が成功したか（HTTP 2xx）どうか。Supabase 未設定時は
+    そもそも書き込み対象外なので True（成功扱い）を返す。
+    """
     if not HAS_SUPABASE:
-        return
+        return True
 
     endpoint = SUPABASE_URL.rstrip("/") + "/rest/v1/logs"
     ts = datetime.now(timezone.utc).isoformat()
@@ -473,8 +478,10 @@ def insert_supabase_log(
             f"[supabase] store_id={store_id} status={r.status_code} "
             f"body={r.text[:200]}"
         )
+        return r.ok
     except Exception as e:
         print(f"[supabase][error] store_id={store_id} err={e}")
+        return False
 
 
 def _current_hour_window_jst() -> tuple[datetime, datetime]:
@@ -1007,7 +1014,7 @@ def _write_aisekiya_results(
                 weather_code, weather_label, temp_c, precip_mm = wdata
                 break
 
-        insert_supabase_log(
+        db_ok = insert_supabase_log(
             store_id,
             int(men),
             int(women),
@@ -1017,7 +1024,11 @@ def _write_aisekiya_results(
             precip_mm,
             brand=AISEKIYA_BRAND,
         )
-        success += 1
+        if db_ok:
+            success += 1
+        else:
+            print(f"[error] supabase insert failed store_id={store_id}")
+            fail += 1
 
     return success, fail
 
@@ -1099,7 +1110,7 @@ def _write_results(
         post_to_gas(body)
 
         # Supabase
-        insert_supabase_log(
+        db_ok = insert_supabase_log(
             store_id,
             int(men),
             int(women),
@@ -1112,7 +1123,11 @@ def _write_results(
         if BETWEEN_STORES_SEC > 0:
             time.sleep(BETWEEN_STORES_SEC)
 
-        success += 1
+        if db_ok:
+            success += 1
+        else:
+            print(f"[error] supabase insert failed store={store_name}")
+            fail += 1
 
     return success, fail
 

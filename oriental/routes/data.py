@@ -16,6 +16,10 @@ from ..utils.stores import SLUG_TO_ID
 
 bp = Blueprint("data", __name__)
 
+# マルチストア系エンドポイントの上限。既知の全店舗数（44店舗）を下回らないようにする。
+# DoS 対策は SLUG_TO_ID による既知 slug のみのフィルタリングとレート制限で担保する。
+MAX_MULTI_STORES = len(SLUG_TO_ID)
+
 
 @dataclass(slots=True)
 class RangeQuery:
@@ -200,7 +204,7 @@ def api_range_multi():
         return jsonify({"ok": False, "error": "supabase-unavailable"}), 502
 
     raw_stores = request.args.get("stores") or ""
-    slugs = _parse_multi_store_slugs(raw_stores, max_stores=40)
+    slugs = _parse_multi_store_slugs(raw_stores, max_stores=MAX_MULTI_STORES)
     if not slugs:
         return (
             jsonify(
@@ -229,7 +233,9 @@ def api_range_multi():
             )
         except SupabaseError as exc:
             logger.warning("api_range_multi.supabase_error slug=%s detail=%s", slug, exc)
-            return slug, {"rows": []}
+            # rows は空のままにしつつ ok:false と error を残し、
+            # 「データなし」と「取得失敗」をフロント/監視側で区別できるようにする
+            return slug, {"ok": False, "error": str(exc), "rows": []}
         deduped = _deduplicate_by_ts(supabase_rows)
         limited = deduped[-query.limit :]
         return slug, {"rows": limited}
@@ -241,12 +247,21 @@ def api_range_multi():
             slug_key, data = fut.result()
             by_slug[slug_key] = data
 
+    partial_failure_count = sum(
+        1 for data in by_slug.values() if isinstance(data, dict) and not data.get("ok", True)
+    )
+
     logger.info(
-        "api_range_multi.success slug_count=%d limit=%d",
+        "api_range_multi.success slug_count=%d limit=%d partial_failure_count=%d",
         len(slugs),
         query.limit,
+        partial_failure_count,
     )
-    return jsonify({"ok": True, "by_slug": by_slug})
+    return jsonify({
+        "ok": True,
+        "by_slug": by_slug,
+        "partial_failure_count": partial_failure_count,
+    })
 
 
 @bp.get("/api/meta")
@@ -324,7 +339,9 @@ def api_second_venues():
 
     if not (cfg.supabase_url and cfg.supabase_service_role_key):
         logger.warning("api_second_venues.supabase_missing_config store_id=%s", store_id)
-        return jsonify({"ok": True, "rows": []})
+        # 未設定は「データなし」ではなく取得不可なので ok:false で監視・フロントに伝える
+        # （rows は空のままにしておき、UI 側は空表示できる）
+        return jsonify({"ok": False, "error": "supabase-not-configured", "rows": []})
 
     repo = SecondVenuesRepository(
         base_url=cfg.supabase_url,
@@ -337,7 +354,7 @@ def api_second_venues():
         rows = repo.get_by_store(store_id)
     except Exception as exc:  # noqa: BLE001
         logger.warning("api_second_venues.fetch_failed store_id=%s detail=%s", store_id, exc)
-        rows = []
+        return jsonify({"ok": False, "error": str(exc), "rows": []})
 
     return jsonify({"ok": True, "rows": rows})
 

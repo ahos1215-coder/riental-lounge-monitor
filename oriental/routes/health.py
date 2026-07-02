@@ -19,6 +19,29 @@ def healthz():
     return jsonify(payload)
 
 
+@bp.get("/readyz")
+def readyz():
+    """Readiness: liveness の /healthz とは異なり、実際にトラフィックを
+    さばける状態かを判定する。予測モデル未ロード、または収集ウィンドウ内で
+    データが stale なら 503 を返す（外部の uptime monitor 用の /healthz は
+    warm-up 目的で常に 200 のまま維持する）。
+    """
+    cfg = _config()
+    forecast_model = _forecast_model_status()
+    data_freshness = _data_freshness(cfg)
+
+    model_not_loaded = not forecast_model.get("loaded")
+    data_stale = bool(data_freshness.get("stale"))
+    ready = not (model_not_loaded or data_stale)
+
+    payload = {
+        "ok": ready,
+        "forecast_model": forecast_model,
+        "data_freshness": data_freshness,
+    }
+    return jsonify(payload), 200 if ready else 503
+
+
 def _forecast_model_status() -> dict:
     service = current_app.config.get("FORECAST_SERVICE")
     if service is None or getattr(service, "model_registry", None) is None:

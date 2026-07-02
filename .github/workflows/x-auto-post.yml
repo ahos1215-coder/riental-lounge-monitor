@@ -1,7 +1,10 @@
 # X (Twitter) 自動投稿 — Daily Report 生成後に呼ばれる。
 #
-# 投稿対象: SNS_POST_ALLOWED_STORE_SLUGS（CSV）+ nagasaki（ハードコード）
-# 対象外の店舗は API が 403 を返すので安全にスキップされる。
+# 投稿対象: DEFAULT_STORES（下記 env、人気 Top5 + 長崎）+ SNS_POST_ALLOWED_STORE_SLUGS（CSV, Vercel 側）
+#   ※ DEFAULT_STORES は frontend/src/app/api/sns/post/route.ts の DEFAULT_ALLOWED_STORE_SLUGS と
+#     同じ値に揃えること（どちらかを変更したらもう一方も更新する）。
+# 対象外の店舗は API が 403 を返す。403 は「許可リスト外」として集計し、
+# 全件スキップの場合はジョブを警告付きで可視化する（サイレントスキップにしない）。
 #
 # 必要な Secrets:
 #   VERCEL_BLOG_CRON_BASE_URL  — Vercel のベース URL（末尾スラッシュなし）
@@ -41,6 +44,8 @@ jobs:
     timeout-minutes: 5
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      # frontend/src/app/api/sns/post/route.ts の DEFAULT_ALLOWED_STORE_SLUGS と同じ値を維持する
+      DEFAULT_STORES: "nagasaki,shibuya,ebisu,shinjuku,umeda_ag,fukuoka"
     steps:
       - name: Determine targets and dry_run
         id: targets
@@ -56,8 +61,8 @@ jobs:
             DRY_RUN="false"
           fi
 
-          # デフォルトの許可店舗リスト（6店舗：人気 Top5 + 長崎）
-          ALL_STORES="nagasaki,shibuya,ebisu,shinjuku,umeda_ag,fukuoka"
+          # デフォルトの許可店舗リスト（6店舗：人気 Top5 + 長崎）。env.DEFAULT_STORES を単一の情報源として使う。
+          ALL_STORES="${DEFAULT_STORES}"
 
           if [ -n "$INPUT_STORE" ]; then
             echo "stores=$INPUT_STORE" >> "$GITHUB_OUTPUT"
@@ -98,8 +103,10 @@ jobs:
           )
 
           IFS=',' read -ra SLUG_LIST <<< "$STORES"
+          TOTAL=${#SLUG_LIST[@]}
           SUCCESS=0
           FAIL=0
+          SKIPPED=0
 
           for SLUG in "${SLUG_LIST[@]}"; do
             SLUG="$(echo "$SLUG" | tr -d ' ')"
@@ -131,6 +138,7 @@ jobs:
               SUCCESS=$((SUCCESS + 1))
             elif [ "$HTTP_CODE" = "403" ]; then
               echo "  ⏭️ ${SLUG}: not in allowed list (403), skipping"
+              SKIPPED=$((SKIPPED + 1))
             else
               echo "  ❌ ${SLUG}: HTTP ${HTTP_CODE}"
               FAIL=$((FAIL + 1))
@@ -140,7 +148,22 @@ jobs:
           done
 
           echo ""
-          echo "=== Summary: success=${SUCCESS}, failed=${FAIL} ==="
+          echo "=== Summary: total=${TOTAL}, success=${SUCCESS}, skipped(403)=${SKIPPED}, failed=${FAIL} ==="
+          {
+            echo "### X auto-post summary"
+            echo ""
+            echo "| total | success | skipped(403) | failed |"
+            echo "|---|---|---|---|"
+            echo "| ${TOTAL} | ${SUCCESS} | ${SKIPPED} | ${FAIL} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
           if [ "$FAIL" -gt 0 ]; then
             echo "::warning::${FAIL} store(s) failed to post"
+          fi
+          if [ "$SKIPPED" -gt 0 ]; then
+            echo "::warning::${SKIPPED} store(s) skipped (403 not in allowed list) — check API allowlist matches DEFAULT_STORES"
+          fi
+          if [ "$SUCCESS" -eq 0 ] && [ "$TOTAL" -gt 0 ]; then
+            echo "::error::All ${TOTAL} store(s) were skipped or failed; nothing was posted"
+            exit 1
           fi

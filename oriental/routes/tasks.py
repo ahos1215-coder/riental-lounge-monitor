@@ -88,6 +88,9 @@ def tasks_collect_single():
     - POST: JSON {store, men, women, ts}
     バリデーション失敗は 400 を返す。
     """
+    if _require_cron_secret():
+        return jsonify({"ok": False, "error": "unauthorized"}), 401
+
     logger = current_app.logger
     payload = request.get_json(silent=True) or {}
     if request.method == "GET":
@@ -123,7 +126,7 @@ def tasks_collect_single():
         _gas_client().append_row(record)
     except Exception as exc:  # noqa: BLE001
         logger.exception("tasks.collect.append_failed")
-        return jsonify({"ok": False, "error": str(exc)}), 200
+        return jsonify({"ok": False, "error": str(exc)}), 502
 
     return jsonify({"ok": True}), 200
 

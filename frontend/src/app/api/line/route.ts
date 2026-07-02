@@ -247,7 +247,12 @@ async function processMessageEvent(ev: LineEvent): Promise<void> {
   if (!replyToken) return;
 
   const text = ev.message?.type === "text" ? ev.message.text?.trim() : "";
-  console.log("[line] Extracted text:", text);
+  // 本文そのものは PII になり得るため本番では出力しない（開発時のみ全文ログ）
+  if (process.env.NODE_ENV !== "production") {
+    console.log("[line] Extracted text:", text);
+  } else {
+    console.log("[line] Extracted text length:", text?.length ?? 0);
+  }
   if (!text) {
     await replyLine(replyToken, "テキストメッセージのみ対応しています。");
     return;
@@ -288,7 +293,12 @@ async function handleWebhookBody(rawBody: string): Promise<void> {
 
   const events = body.events ?? [];
   for (const ev of events) {
-    console.log("[line] Received event:", JSON.stringify(ev, null, 2));
+    // イベント全文には userId / message 本文等の PII が含まれるため本番では出力しない
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[line] Received event:", JSON.stringify(ev, null, 2));
+    } else {
+      console.log("[line] Received event:", ev.type, ev.message?.type ?? "");
+    }
     if (ev.type !== "message") continue;
     await processMessageEvent(ev);
   }

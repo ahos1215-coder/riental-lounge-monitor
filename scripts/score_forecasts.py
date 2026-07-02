@@ -174,10 +174,15 @@ def main() -> int:
     night_date = (datetime.now(JST) - timedelta(days=1)).strftime("%Y%m%d")
     snap_raw = _storage_get(bucket, f"accuracy/snapshots/{night_date}.json", supabase_url, key)
     if snap_raw is None:
+        # snapshot は毎晩 18:10 JST に走る前提なので、無いのは異常。サイレントに
+        # green で終わらせず、監視が拾えるようアラート + 非ゼロ終了にする。
+        msg = f"[MEGRIBI forecast accuracy] night {night_date}: no snapshot found — snapshot job may not have run."
         print(f"[score] no snapshot for {night_date} — nothing to score (snapshot job may not have run).")
-        return 0
+        _alert(msg)
+        return 1
     snapshot = json.loads(snap_raw.decode())
     by_slug = snapshot.get("by_slug") or {}
+    expected = len(by_slug)
 
     base = datetime.strptime(night_date, "%Y%m%d").replace(tzinfo=JST)
     start = base.replace(hour=19, minute=0, second=0, microsecond=0)
@@ -267,17 +272,33 @@ def main() -> int:
         med = sorted(recent)[len(recent) // 2]
         if med > 0 and overall > med * 1.5:
             alerts.append(f"Live forecast error spiked: tonight {overall} vs recent median {round(med, 2)} (>1.5x).")
+
+    # スナップショットされていた店舗数(expected)に対し、実際に答え合わせできた
+    # 店舗数(stores_scored)が 90% 未満なら異常。0 件を含め、監視ジョブが
+    # green のまま死ぬのを防ぐ。expected==0（スナップショット自体が空）は
+    # 別枠でログのみ（snapshot 側の問題なので score 側の非ゼロ終了はしない）。
+    stores_scored = len(per_store)
+    coverage_failure = expected > 0 and stores_scored < expected * 0.9
+    if coverage_failure:
+        alerts.append(
+            f"Only {stores_scored}/{expected} stores were scored (<90% coverage) — "
+            "check logs collection / store id mapping."
+        )
+
     if alerts:
         worst = sorted(per_store.items(), key=lambda kv: kv[1]["live_mae"], reverse=True)[:5]
         worst_str = ", ".join(f"{s}={v['live_mae']}" for s, v in worst)
         _alert(f"[MEGRIBI forecast accuracy] night {night_date}: " + " ".join(alerts) + f" Worst stores: {worst_str}")
 
-    print(f"[score] night={night_date} overall_live_mae={overall} baseline={overall_baseline} stores_scored={len(per_store)}")
+    print(f"[score] night={night_date} overall_live_mae={overall} baseline={overall_baseline} stores_scored={stores_scored}/{expected}")
     for slug in sorted(per_store, key=lambda s: per_store[s]["live_mae"], reverse=True):
         v = per_store[slug]
         print(f"  {slug:<16} live_mae={v['live_mae']:>6}  slots={v['matched_slots']}")
     if not per_store:
         print("[score] no stores could be scored (no overlapping actual slots).")
+
+    if coverage_failure:
+        return 1
     return 0
 
 

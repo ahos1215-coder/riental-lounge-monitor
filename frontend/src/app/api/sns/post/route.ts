@@ -1,8 +1,12 @@
 import crypto from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 
+// ワークフロー（.github/workflows/x-auto-post.yml）側の既定投稿対象（人気 Top5 + 長崎）と揃える。
+// SNS_POST_ALLOWED_STORE_SLUGS を設定すればそちらで上書き・追加できる。
+const DEFAULT_ALLOWED_STORE_SLUGS = ["nagasaki", "shibuya", "ebisu", "shinjuku", "umeda_ag", "fukuoka"];
+
 const ALLOWED_STORE_SLUGS = new Set([
-  "nagasaki",
+  ...DEFAULT_ALLOWED_STORE_SLUGS,
   ...(process.env.SNS_POST_ALLOWED_STORE_SLUGS?.split(",").map((s) => s.trim()).filter(Boolean) ?? []),
 ]);
 

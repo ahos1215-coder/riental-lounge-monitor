@@ -1,6 +1,6 @@
 ﻿from __future__ import annotations
 
-from datetime import date, datetime, time as dt_time, timedelta
+from datetime import date, datetime, time as dt_time, timedelta, timezone
 from functools import lru_cache
 from zoneinfo import ZoneInfo
 
@@ -41,7 +41,9 @@ def collection_window(
     end_hour: int,
     tz_name: str,
 ) -> tuple[bool, datetime, datetime]:
-    tz_now = ensure_timezone(current or datetime.utcnow(), tz_name)
+    # current 省略時は tz-aware な UTC 現在時刻を使う（naive datetime だと
+    # ensure_timezone() に JST 等として誤解釈されてしまうため）
+    tz_now = ensure_timezone(current if current is not None else datetime.now(timezone.utc), tz_name)
     start_t = dt_time(start_hour % 24, 0)
     end_t = dt_time(end_hour % 24, 0)
 
@@ -54,5 +56,6 @@ def collection_window(
         else:
             end_dt += timedelta(days=1)
 
-    is_in = start_dt <= tz_now <= end_dt
+    # end_dt は排他的（例: 05:00:00 ちょうどはウィンドウ外）
+    is_in = start_dt <= tz_now < end_dt
     return is_in, start_dt, end_dt

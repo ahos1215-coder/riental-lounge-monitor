@@ -10,7 +10,6 @@ import {
   getStoreMetaBySlug,
   buildStoreFullName,
   isPercentCrowdBrand,
-  seatFullnessPercent,
   type StoreMeta,
 } from "./config/stores";
 import { LAST_STORE_KEY } from "@/lib/browser/meguribiStorage";
@@ -153,10 +152,13 @@ type LastVisitFetchedTrend = {
 type MegribiScoreItem = {
   slug: string;
   score: number;
-  total: number;
-  men: number;
-  women: number;
+  total: number | null;
+  men: number | null;
+  women: number | null;
   female_ratio: number;
+  // 相席屋 (ay_*) のみサーバー側で算出された席の埋まり具合(%)。オリエンタルは null。
+  men_seat_pct: number | null;
+  women_seat_pct: number | null;
 };
 
 function ScoreBar({ score }: { score: number }) {
@@ -195,7 +197,10 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
         if (!res.ok) { setTopStoresLoading(false); return; }
         const json = (await res.json()) as { ok: boolean; data?: MegribiScoreItem[] };
         if (!ac.signal.aborted && json.ok && Array.isArray(json.data)) {
-          setTopStores(json.data.filter((d) => d.total > 0).slice(0, 5));
+          // 相席屋 (ay_*) は total が null（%表示のみ）のため、席の埋まり(%)で判定する
+          const hasActivity = (d: MegribiScoreItem) =>
+            (d.total ?? 0) > 0 || (d.men_seat_pct ?? 0) > 0 || (d.women_seat_pct ?? 0) > 0;
+          setTopStores(json.data.filter(hasActivity).slice(0, 5));
         }
       } catch {
         /* ignore */
@@ -475,7 +480,7 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
                       </div>
                       <span className="mt-1 text-[9px] text-white/30">
                         {isPercentCrowdBrand(meta.brand) && meta.capacity
-                          ? `席 男${seatFullnessPercent(item.men, meta.capacity) ?? 0}% / 女${seatFullnessPercent(item.women, meta.capacity) ?? 0}%`
+                          ? `席 男${item.men_seat_pct ?? 0}% / 女${item.women_seat_pct ?? 0}%`
                           : `${item.total}人（男${item.men} / 女${item.women}）`}
                       </span>
                     </Link>
