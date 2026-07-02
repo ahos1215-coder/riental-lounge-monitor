@@ -9,10 +9,28 @@ type StoreMetrics = {
   rows_test: number;
 };
 
+type LiveStoreScore = {
+  live_mae: number;
+  matched_slots: number;
+  live_baseline_mae?: number;
+  ml_vs_baseline_live_pct?: number;
+};
+
+type LiveAccuracy = {
+  mae_7d: number | null;
+  mae_30d: number | null;
+  baseline_7d: number | null;
+  nights_count: number;
+  updated_at?: string | null;
+  stores_scored_latest?: number | null;
+  per_store: Record<string, LiveStoreScore>;
+};
+
 type AccuracyResponse = {
   ok: boolean;
   trained_at?: string;
   metrics?: Record<string, StoreMetrics>;
+  live?: LiveAccuracy | null;
 };
 
 let cachedResponse: AccuracyResponse | null = null;
@@ -45,6 +63,8 @@ export function ForecastAccuracyCard({
 }) {
   const [metrics, setMetrics] = useState<StoreMetrics | null>(null);
   const [trainedAt, setTrainedAt] = useState<string | null>(null);
+  const [live, setLive] = useState<LiveAccuracy | null>(null);
+  const [liveStore, setLiveStore] = useState<LiveStoreScore | null>(null);
   const percentMode = brand ? isPercentCrowdBrand(brand) && !!capacity : false;
 
   useEffect(() => {
@@ -56,20 +76,25 @@ export function ForecastAccuracyCard({
       const m = data.metrics?.[storeId] ?? null;
       setMetrics(m);
       setTrainedAt(data.trained_at ?? null);
+      setLive(data.live ?? null);
+      setLiveStore(data.live?.per_store?.[storeId] ?? null);
     });
     return () => { active = false; };
   }, [storeSlug]);
 
   if (!metrics) return null;
 
-  const rawMae = metrics.overall.total_mae;
-  const rawWeekendMae = metrics.weekend_night_segment?.total_mae;
-
   // 相席屋は人数非公開＝MAEも「席の埋まり具合(%)」の誤差(%pt)に換算して表示する。
   // capacity は片性別の席数のため ×2 で店舗全体の座席数にする（seatFullnessPercentと同じ換算）。
   const maeUnit = percentMode ? "％pt MAE" : "人 MAE";
   const toDisplay = (v: number) =>
     percentMode && capacity ? Math.round((v / (capacity * 2)) * 100 * 10) / 10 : v;
+
+  // 実測精度（本番の答え合わせ）を優先。この店舗の live スコアがまだ無ければ
+  // 学習時の holdout metrics にフォールバックする（その場合は「参考値」であることを明示）。
+  const hasLive = liveStore != null;
+  const rawMae = hasLive ? liveStore.live_mae : metrics.overall.total_mae;
+  const rawWeekendMae = hasLive ? undefined : metrics.weekend_night_segment?.total_mae;
   const mae = toDisplay(rawMae);
   const weekendMae = rawWeekendMae != null ? toDisplay(rawWeekendMae) : undefined;
 
@@ -82,6 +107,12 @@ export function ForecastAccuracyCard({
     ? new Date(trainedAt).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo", month: "short", day: "numeric" })
     : null;
 
+  // ベースライン比（直近7日平均）。live 側にのみ存在する。
+  const baselinePct =
+    hasLive && live?.mae_7d != null && live?.baseline_7d != null && live.baseline_7d > 0
+      ? Math.round(((live.baseline_7d - live.mae_7d) / live.baseline_7d) * 1000) / 10
+      : null;
+
   return (
     <div className={`rounded-2xl border p-4 ${grade.bg}`}>
       <div className="flex items-center justify-between gap-2">
@@ -92,17 +123,38 @@ export function ForecastAccuracyCard({
         <span className="text-2xl font-black text-white">{mae.toFixed(1)}</span>
         <span className="text-xs text-white/50">{maeUnit}</span>
       </div>
-      <p className="mt-1 text-[11px] text-white/40">平均絶対誤差 — 予測と実測の平均的なズレ</p>
-      {weekendMae != null && (
-        <div className="mt-2 flex items-baseline gap-1">
-          <span className="text-sm font-bold text-white/70">{weekendMae.toFixed(1)}</span>
-          <span className="text-[11px] text-white/40">{maeUnit}（週末夜）</span>
-        </div>
+      <p className="mt-1 text-[11px] text-white/40">
+        {hasLive
+          ? "実測精度 — 前夜の予測と実測の平均的なズレ（本番）"
+          : "学習時の参考値（実測精度を集計中）— 予測と実測の平均的なズレ"}
+      </p>
+      {hasLive ? (
+        <>
+          {baselinePct != null && (
+            <div className="mt-2 flex items-baseline gap-1">
+              <span className="text-sm font-bold text-white/70">{baselinePct > 0 ? "+" : ""}{baselinePct.toFixed(1)}%</span>
+              <span className="text-[11px] text-white/40">ベースライン比（直近7日）</span>
+            </div>
+          )}
+          <div className="mt-3 flex items-center gap-2 text-[10px] text-white/30">
+            {live?.stores_scored_latest != null && <span>直近夜: {live.stores_scored_latest}店舗</span>}
+            {live?.nights_count != null && <span>集計: {live.nights_count}夜分</span>}
+          </div>
+        </>
+      ) : (
+        <>
+          {weekendMae != null && (
+            <div className="mt-2 flex items-baseline gap-1">
+              <span className="text-sm font-bold text-white/70">{weekendMae.toFixed(1)}</span>
+              <span className="text-[11px] text-white/40">{maeUnit}（週末夜）</span>
+            </div>
+          )}
+          <div className="mt-3 flex items-center gap-2 text-[10px] text-white/30">
+            <span>テスト: {metrics.rows_test}件</span>
+            {trainedLabel && <span>学習: {trainedLabel}</span>}
+          </div>
+        </>
       )}
-      <div className="mt-3 flex items-center gap-2 text-[10px] text-white/30">
-        <span>テスト: {metrics.rows_test}件</span>
-        {trainedLabel && <span>学習: {trainedLabel}</span>}
-      </div>
     </div>
   );
 }
