@@ -14,7 +14,26 @@ export type StoreMeta = {
   brand: BrandId;
   /** 相席屋のみ設定。席数(=(テーブル+VIP)×2)。%表示の逆算に使う。他ブランドは null。 */
   capacity: number | null;
+  /** 店舗の緯度・経度（公式サイトの地図から取得）。おすすめ店舗の距離判定に使う。 */
+  lat: number | null;
+  lon: number | null;
 };
+
+/** 2地点間の距離(km)。ハバサイン公式。おすすめ店舗の「近い順」に使う。 */
+export function distanceKm(
+  a: { lat: number | null; lon: number | null },
+  b: { lat: number | null; lon: number | null },
+): number | null {
+  if (a.lat == null || a.lon == null || b.lat == null || b.lon == null) return null;
+  const R = 6371;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b.lat - a.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
 
 /**
  * 相席屋の席数（= (テーブル+VIP)×2）。相席屋の公式サイトは人数を出さず「席の埋まり
@@ -76,6 +95,8 @@ export const STORES: StoreMeta[] = rawStores.map((s) => {
     mapsQueryBase: s.maps_query_base,
     brand,
     capacity: brand === "aisekiya" ? (AISEKIYA_CAPACITY[s.store_id] ?? null) : null,
+    lat: typeof (s as { lat?: number }).lat === "number" ? (s as { lat: number }).lat : null,
+    lon: typeof (s as { lon?: number }).lon === "number" ? (s as { lon: number }).lon : null,
   };
 });
 
