@@ -207,17 +207,21 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
         _merged = _merge_df.merge(_lookup_df, on="_future_ts", how="left")
     df["same_dow_last_week_total"] = _merged["_total"].values
 
-    # --- 直近30分の人数変化速度（v4 feature） ---
-    # 5分間隔のデータで6行前との差 = 30分間の変化量。学習時: 連続データから自動算出。
+    # --- 直近30分の人数変化速度（v4 feature、v7でラグ化） ---
+    # 5分間隔のデータで「1行前」と「7行前」の差 = t-1 時点で終わる30分間の変化量。
+    # 現在行(t)の total を一切使わないラグ特徴量にすることで、モデルが予測対象そのものである
+    # total[t] を特徴量経由で「見てしまう」ターゲットリーク（total.diff(6) = total[t]-total[t-6]
+    # は total[t] を含んでいた）を防ぐ。
     if group_keys:
-        df["total_slope_30min"] = df.groupby(group_keys, dropna=False)["total"].diff(6)
+        grouped = df.groupby(group_keys, dropna=False)
+        df["total_slope_30min"] = grouped["total"].shift(1) - grouped["total"].shift(7)
     else:
-        df["total_slope_30min"] = df["total"].diff(6)
-    # 推論時、未来行の total は NaN のため diff(6) も NaN になり、従来は下の中央値フィルで
-    # 「学習時=実値 / 推論時=定数」という train/serve skew が生じていた（hold-out MAE が
-    # 楽観的になる原因）。直近の実測 slope を未来行へ前方埋めし、学習・推論の双方で
-    # 「直近の変化速度」を見るように揃える。ffill は過去→未来方向のみ＝リーク無し。
-    # 学習時は連続データなのでほぼ no-op（各 store 先頭6行の NaN のみ残り中央値フィル）。
+        df["total_slope_30min"] = df["total"].shift(1) - df["total"].shift(7)
+    # 推論時、未来行の total は NaN のため shift(1)/shift(7) の差も NaN になり、従来は下の
+    # 中央値フィルで「学習時=実値 / 推論時=定数」という train/serve skew が生じていた
+    # （hold-out MAE が楽観的になる原因）。直近の実測 slope を未来行へ前方埋めし、学習・推論の
+    # 双方で「直近の変化速度」を見るように揃える。ffill は過去→未来方向のみ＝リーク無し。
+    # 学習時は連続データなのでほぼ no-op（各 store 先頭7行の NaN のみ残り中央値フィル）。
     if group_keys:
         df["total_slope_30min"] = df.groupby(group_keys, dropna=False)["total_slope_30min"].ffill()
     else:

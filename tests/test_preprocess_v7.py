@@ -5,6 +5,10 @@
 反映しているかを確認する。これらは `oriental/ml/holiday_calendar.py` のロジックに
 依存しており、特徴量計算の経路でバグが入ると ML 予測精度に直接効くため
 回帰検出の最後の砦としてテストを置く。
+
+Schema v7 (2026-07-02〜): `total_slope_30min` のターゲットリーク修正
+（現在行(t)の total を含む `total.diff(6)` から、現在行を含まないラグ計算
+`total.shift(1) - total.shift(7)` へ変更）を検証するテストも本ファイルに追加する。
 """
 
 from __future__ import annotations
@@ -165,3 +169,67 @@ class TestFeatureColumnsAccessibility:
         # holiday_block_length は int、position は float (中立値 0.5 含む)
         assert pd.api.types.is_integer_dtype(df["holiday_block_length"])
         assert pd.api.types.is_float_dtype(df["holiday_block_position"])
+
+
+# ---------------------------------------------------------------------------
+# v7: total_slope_30min のターゲットリーク修正 (shift(1) - shift(7))
+# ---------------------------------------------------------------------------
+
+
+def _records_with_totals(totals: list[int], store_id: str = "ol_shibuya") -> list[dict]:
+    """5分間隔・連続 total 系列を持つレコードを生成する（slope 検証用）。"""
+    base = datetime(2026, 4, 7, 19, 0, 0, tzinfo=JST)  # 平日 (火) 19:00〜
+    out: list[dict] = []
+    for i, total in enumerate(totals):
+        ts = base + timedelta(minutes=5 * i)
+        out.append(
+            {
+                "ts": ts.isoformat(),
+                "men": total // 2,
+                "women": total - total // 2,
+                "total": total,
+                "store_id": store_id,
+                "weather_code": 1,
+                "temp_c": 20.0,
+                "precip_mm": 0.0,
+            }
+        )
+    return out
+
+
+class TestTotalSlope30MinNoLeak:
+    def test_slope_uses_shift1_minus_shift7_not_current_row(self) -> None:
+        # total を 0,2,4,...,18 (公差2) の等差数列にすると、旧実装 total.diff(6) は
+        # 現在行(t)を含む差分 = 12 (定数) になっていた。新実装は shift(1)-shift(7) で
+        # 現在行(t)を含まない、1行前を終端とする30分間の差分 = 12 (t-1 と t-7 の差) になる。
+        # 値そのものは等差数列なので新旧どちらも 12 に一致するが、ここでは「現在行を
+        # 使っていないか」を非等差な系列で区別する。
+        totals = [0, 1, 2, 3, 4, 5, 6, 100]  # 8行目だけ急増させて漏れを検出する
+        records = _records_with_totals(totals)
+        df = prepare_dataframe(records, "Asia/Tokyo")
+        # 旧実装 (diff(6)) なら 8行目(idx=7, total=100) の slope = total[7]-total[1] = 99
+        # 新実装 (shift(1)-shift(7)) では idx=7 の slope = total[6]-total[0] = 6-0 = 6
+        # → 現在行の急増 (100) が特徴量に一切反映されないことを確認する。
+        assert df["total_slope_30min"].iloc[7] == pytest.approx(6.0)
+
+    def test_slope_matches_manual_lagged_diff_for_regular_series(self) -> None:
+        totals = [10, 12, 14, 16, 18, 20, 22, 24, 26, 30]
+        records = _records_with_totals(totals)
+        df = prepare_dataframe(records, "Asia/Tokyo")
+        # idx=8 (total=26): shift(1)=24 (idx7), shift(7)=12 (idx1) -> 24-12=12
+        assert df["total_slope_30min"].iloc[8] == pytest.approx(12.0)
+        # idx=9 (total=30): shift(1)=26 (idx8), shift(7)=14 (idx2) -> 26-14=12
+        assert df["total_slope_30min"].iloc[9] == pytest.approx(12.0)
+
+    def test_slope_is_grouped_per_store(self) -> None:
+        # 店舗が混在していても、他店舗の行を跨いで shift しないこと
+        recs_a = _records_with_totals([0, 1, 2, 3, 4, 5, 6, 7], store_id="ol_shibuya")
+        recs_b = _records_with_totals([100, 101, 102, 103, 104, 105, 106, 107], store_id="ol_nagasaki")
+        # 時系列を交互に混ぜて店舗ごとの独立性を検証する
+        records = [r for pair in zip(recs_a, recs_b) for r in pair]
+        df = prepare_dataframe(records, "Asia/Tokyo")
+        df_a = df[df["store_id"] == "ol_shibuya"].reset_index(drop=True)
+        df_b = df[df["store_id"] == "ol_nagasaki"].reset_index(drop=True)
+        # 両店舗とも公差1の等差数列 -> shift(1)-shift(7) = 6 (idx>=7)
+        assert df_a["total_slope_30min"].iloc[7] == pytest.approx(6.0)
+        assert df_b["total_slope_30min"].iloc[7] == pytest.approx(6.0)
