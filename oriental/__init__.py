@@ -37,7 +37,7 @@ def _preload_models(app: Flask) -> None:
             store_ids: list[str] = []
             if stores_json.exists():
                 import json
-                with open(stores_json) as f:
+                with open(stores_json, encoding="utf-8") as f:
                     for entry in json.load(f):
                         sid = entry.get("store_id", "")
                         if sid:

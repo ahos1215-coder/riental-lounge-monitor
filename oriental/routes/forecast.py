@@ -12,9 +12,14 @@ _FORECAST_CACHE_TTL = int(os.getenv("FORECAST_RESULT_CACHE_TTL", "60"))  # 1 分
 from ..config import AppConfig
 from ..ml.forecast_service import ForecastService
 from ..ml.megribi_score import megribi_score as calc_megribi_score
+from ..utils.stores import SLUG_TO_ID
 from .common import get_config as _config, get_supabase_provider, resolve_store_id
 
 bp = Blueprint("forecast", __name__, url_prefix="/api")
+
+# マルチストア系エンドポイントの上限。既知の全店舗数（44店舗）を下回らないようにする。
+# DoS 対策は SLUG_TO_ID による既知 slug のみのフィルタリングとレート制限で担保する。
+MAX_MULTI_STORES = len(SLUG_TO_ID)
 
 
 def _service() -> ForecastService:
@@ -169,21 +174,19 @@ def forecast_today():
 @bp.get("/forecast_today_multi")
 def forecast_today_multi():
     """複数店舗の forecast_today を1リクエストで返す。
-    ?stores=slug1,slug2,... で最大40店舗。
+    ?stores=slug1,slug2,... で最大 MAX_MULTI_STORES 店舗（既知の全店舗数）。
     ThreadPoolExecutor で並列実行 — 12店舗でも ~1-2s。
     """
     guard = _guard()
     if guard:
         return guard
 
-    from ..utils.stores import SLUG_TO_ID
-
     cfg = _config()
     logger = current_app.logger
 
     raw_stores = request.args.get("stores") or ""
     slugs = [s.strip().lower() for s in raw_stores.split(",") if s.strip()]
-    valid = [(s, SLUG_TO_ID[s]) for s in slugs if s in SLUG_TO_ID][:40]
+    valid = [(s, SLUG_TO_ID[s]) for s in slugs if s in SLUG_TO_ID][:MAX_MULTI_STORES]
 
     if not valid:
         return jsonify({"ok": False, "error": "no-valid-stores"}), 422
@@ -206,7 +209,7 @@ def forecast_today_multi():
             store_id=store_id, freq_min=freq, start_h=start_h, end_h=end_h
         )
         if not raw.get("ok", True):
-            return slug, {"ok": False, "data": []}
+            return slug, {"ok": False, "data": [], "error": raw.get("error") or "forecast_failed"}
 
         data = raw.get("data")
         points = [d for d in data if isinstance(d, dict) and "ts" in d] if isinstance(data, list) else []
@@ -215,17 +218,33 @@ def forecast_today_multi():
         return slug, result
 
     by_slug: dict = {}
+    errors_by_slug: dict = {}
     with ThreadPoolExecutor(max_workers=min(12, len(valid))) as pool:
         futures = {pool.submit(_fetch_one, s, sid): s for s, sid in valid}
         for fut in as_completed(futures):
             try:
                 slug_key, data = fut.result()
                 by_slug[slug_key] = data
-            except Exception:
-                by_slug[futures[fut]] = {"ok": False, "data": []}
+            except Exception as exc:
+                slug_key = futures[fut]
+                by_slug[slug_key] = {"ok": False, "data": [], "error": str(exc)}
 
-    logger.info("api_forecast_today_multi.success count=%d", len(by_slug))
-    return jsonify({"ok": True, "by_slug": by_slug})
+    # 個別店舗の失敗を可視化する（全体は ok:true / 200 のまま、追加フィールドのみ）
+    for slug_key, entry in by_slug.items():
+        if isinstance(entry, dict) and not entry.get("ok", True):
+            errors_by_slug[slug_key] = entry.get("error") or "unknown_error"
+
+    logger.info(
+        "api_forecast_today_multi.success count=%d partial_failure_count=%d",
+        len(by_slug),
+        len(errors_by_slug),
+    )
+    return jsonify({
+        "ok": True,
+        "by_slug": by_slug,
+        "partial_failure_count": len(errors_by_slug),
+        "errors_by_slug": errors_by_slug,
+    })
 
 
 @bp.get("/megribi_score")
@@ -257,7 +276,7 @@ def api_megribi_score():
     if provider is None:
         return jsonify({"ok": False, "error": "supabase-unavailable"}), 502
 
-    valid_slugs = [(s, SLUG_TO_ID[s]) for s in slugs[:40] if s in SLUG_TO_ID]
+    valid_slugs = [(s, SLUG_TO_ID[s]) for s in slugs[:MAX_MULTI_STORES] if s in SLUG_TO_ID]
 
     def _fetch_one(slug: str, store_id: str):
         rows = provider.fetch_range(store_id=store_id, limit=1)
@@ -267,7 +286,8 @@ def api_megribi_score():
         total = float(latest.get("total", 0) or 0)
         men = float(latest.get("men", 0) or 0)
         women = float(latest.get("women", 0) or 0)
-        if store_id.startswith("ay_"):
+        is_aisekiya = store_id.startswith("ay_")
+        if is_aisekiya:
             capacity = float(AISEKIYA_TOTAL_CAPACITY.get(store_id, 80.0))
         else:
             capacity = 80.0
@@ -277,10 +297,8 @@ def api_megribi_score():
             female_ratio=female_ratio,
             occupancy_rate=occupancy_rate,
         )
-        # 相席屋 (ay_*) は %表示のみが正式仕様だが、men/women はフロントの
-        # seatFullnessPercent() 換算（home-client.tsx）が実際に消費しているため
-        # null化はしない（生の人数を隠す用途では使われていない）。
-        return {
+
+        item = {
             "slug": slug,
             "score": round(score, 3),
             "total": int(total),
@@ -289,7 +307,21 @@ def api_megribi_score():
             "female_ratio": round(female_ratio, 3),
             "occupancy_rate": round(occupancy_rate, 3),
             "ts": latest.get("ts", ""),
+            "men_seat_pct": None,
+            "women_seat_pct": None,
         }
+        if is_aisekiya:
+            # 相席屋 (ay_*) は %表示のみが正式仕様。生の推定人数はフロントに渡さず、
+            # 席の埋まり具合(%)をサーバー側で計算して渡す
+            # （home-client.tsx の seatFullnessPercent(count, perGenderCapacity) と同じ換算）。
+            per_gender_capacity = capacity / 2 if capacity > 0 else 0.0
+            if per_gender_capacity > 0:
+                item["men_seat_pct"] = round(min(1.0, men / per_gender_capacity) * 100)
+                item["women_seat_pct"] = round(min(1.0, women / per_gender_capacity) * 100)
+            item["men"] = None
+            item["women"] = None
+            item["total"] = None
+        return item
 
     results = []
     with ThreadPoolExecutor(max_workers=min(12, len(valid_slugs) or 1)) as pool:
