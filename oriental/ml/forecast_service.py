@@ -176,7 +176,7 @@ class ForecastService:
             raise ModelRegistryError("model_registry is not configured")
         bundle = self.model_registry.get_bundle(store_id=store_id)
         model = bundle.model
-        future_features = self._build_future_features(history, future_times)
+        future_features = self._build_future_features(history, future_times, store_id=store_id)
         men_pred, women_pred = model.predict(future_features)
         total_pred = np.maximum(men_pred, 0) + np.maximum(women_pred, 0)
         return [
@@ -189,7 +189,9 @@ class ForecastService:
             for ts, mp, wp, tp in zip(future_times, men_pred, women_pred, total_pred)
         ]
 
-    def _build_future_features(self, history: pd.DataFrame, future_times: pd.DatetimeIndex) -> pd.DataFrame:
+    def _build_future_features(
+        self, history: pd.DataFrame, future_times: pd.DatetimeIndex, *, store_id: str | None = None
+    ) -> pd.DataFrame:
         base_cols = ["ts", "men", "women", "total", "weather_code", "temp_c", "precip_mm", "store_id"]
         for col in base_cols:
             if col not in history.columns:
@@ -207,6 +209,32 @@ class ForecastService:
                 "store_id": history["store_id"].iloc[-1] if "store_id" in history.columns and not history.empty else np.nan,
             }
         )
+        # 未来行へ実天気「予報」を注入し、天気派生特徴の凍結(train/serve skew)を緩和する。
+        # 失敗/座標不明時は weather を NaN のまま残す → preprocess の ffill が働き従来動作＝回帰なし。
+        try:
+            if store_id:
+                from .weather_forecast import get_hourly_forecast
+
+                fc = get_hourly_forecast(store_id, self.tz)
+                if fc:
+                    hour_keys = pd.DatetimeIndex(future_times).strftime("%Y-%m-%dT%H")
+                    wc, tc, pm = [], [], []
+                    for key in hour_keys:
+                        v = fc.get(key)
+                        wc.append(v[0] if v is not None else np.nan)
+                        tc.append(v[1] if v is not None else np.nan)
+                        pm.append(v[2] if v is not None else np.nan)
+                    future_df["weather_code"] = wc
+                    future_df["temp_c"] = tc
+                    future_df["precip_mm"] = pm
+                    self.logger.info(
+                        "forecast.service.weather_forecast store=%s filled=%d/%d",
+                        store_id,
+                        sum(1 for x in wc if x is not None and not (isinstance(x, float) and np.isnan(x))),
+                        len(wc),
+                    )
+        except Exception as exc:  # noqa: BLE001 — 天気予報は best-effort。失敗しても現行動作へ。
+            self.logger.warning("forecast.service.weather_forecast_skip store=%s detail=%s", store_id, exc)
         combined = pd.concat([hist_base, future_df], ignore_index=True)
         combined = add_time_features(combined)
         return combined.tail(len(future_times))[FEATURE_COLUMNS]
