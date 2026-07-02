@@ -339,9 +339,89 @@ def api_megribi_score():
     return jsonify({"ok": True, "data": results})
 
 
+def _fetch_live_accuracy(cfg: AppConfig) -> dict | None:
+    """Supabase Storage の答え合わせ結果 (scripts/score_forecasts.py が毎晩書き込む)
+    から実測精度を組み立てる。summary.json が無い/壊れている、または nights が
+    空なら None を返す（呼び出し側は holdout の metrics にフォールバックする）。
+    Storage 障害でエンドポイント全体を落とさないよう、例外はすべてここで握りつぶす。
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    supabase_url = (cfg.supabase_url or "").rstrip("/")
+    key = cfg.supabase_service_role_key or ""
+    bucket = cfg.forecast_model_bucket or "ml-models"
+    if not supabase_url or not key:
+        return None
+
+    def _storage_get(path: str) -> bytes | None:
+        endpoint = f"{supabase_url}/storage/v1/object/{bucket}/{path}"
+        req = urllib.request.Request(
+            endpoint, headers={"apikey": key, "Authorization": f"Bearer {key}"}
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return None
+            if exc.code == 400:
+                try:
+                    body = exc.read().decode("utf-8", "replace").lower()
+                except Exception:  # noqa: BLE001
+                    body = ""
+                if "not_found" in body or "not found" in body or "object not found" in body:
+                    return None
+            raise
+
+    try:
+        raw = _storage_get("accuracy/scores/summary.json")
+        if raw is None:
+            return None
+        summary = json.loads(raw.decode())
+        nights = summary.get("nights")
+        if not isinstance(nights, list) or not nights:
+            return None
+
+        def _avg(key_name: str, n: int) -> float | None:
+            vals = [
+                x.get(key_name) for x in nights[:n]
+                if isinstance(x.get(key_name), (int, float))
+            ]
+            return round(sum(vals) / len(vals), 2) if vals else None
+
+        live: dict = {
+            "mae_7d": _avg("overall_live_mae", 7),
+            "mae_30d": _avg("overall_live_mae", 30),
+            "baseline_7d": _avg("overall_baseline_mae", 7),
+            "nights_count": len(nights),
+            "updated_at": summary.get("updated_at_utc"),
+            "stores_scored_latest": nights[0].get("stores_scored"),
+            "per_store": {},
+        }
+
+        latest_date = nights[0].get("night_date")
+        if latest_date:
+            daily_raw = _storage_get(f"accuracy/scores/{latest_date}.json")
+            if daily_raw is not None:
+                daily = json.loads(daily_raw.decode())
+                per_store = daily.get("per_store")
+                if isinstance(per_store, dict):
+                    live["per_store"] = per_store
+
+        return live
+    except Exception:  # noqa: BLE001
+        # Storage 障害・パース失敗は「実測精度なし」として holdout にフォールバックさせる
+        current_app.logger.warning("api_forecast_accuracy.live_fetch_failed", exc_info=True)
+        return None
+
+
 @bp.get("/forecast_accuracy")
 def api_forecast_accuracy():
-    """Return per-store training accuracy metrics from metadata.json."""
+    """Return per-store accuracy: 学習時の holdout metrics（後方互換）に加え、
+    Supabase Storage に蓄積された本番の答え合わせ結果（live）を返す。
+    """
     import json
     from pathlib import Path
 
@@ -361,8 +441,11 @@ def api_forecast_accuracy():
     if not metrics:
         return jsonify({"ok": False, "error": "no-metrics-in-metadata"}), 404
 
+    live = _fetch_live_accuracy(cfg)
+
     return jsonify({
         "ok": True,
         "trained_at": meta.get("trained_at"),
         "metrics": metrics,
+        "live": live,
     })

@@ -275,7 +275,9 @@ def _optuna_objective(
     weights: np.ndarray,
     objective: str = "regression",
 ) -> float:
-    """Optuna objective: minimize MAE on held-out test set."""
+    """Optuna objective: minimize MAE on the VALIDATION set (x_test/y_test here is
+    the val split passed in by the caller — the true test set is never touched
+    during HPO, see _time_series_split_3)."""
     params = {
         "n_estimators": 300,
         "max_depth": trial.suggest_int("max_depth", 3, 8),
@@ -300,11 +302,13 @@ def _optuna_objective(
 
 def _optimize_params(
     train_df: pd.DataFrame,
-    test_df: pd.DataFrame,
+    val_df: pd.DataFrame,
     cfg: TrainingConfig,
     store_id: str,
 ) -> dict[str, Any]:
-    """Run Optuna HPO for a single store. Returns best params dict."""
+    """Run Optuna HPO for a single store. Fits on train_df, scores on val_df —
+    the held-out test set is never passed in here, so HPO cannot leak into the
+    reported metric (see _time_series_split_3). Returns best params dict."""
     if not HAS_OPTUNA or not cfg.optuna_enabled or cfg.optuna_trials <= 0:
         return {}
 
@@ -312,17 +316,17 @@ def _optimize_params(
     # (default 0 = use everything). The final model is still trained on full data.
     if cfg.optuna_max_rows and cfg.optuna_max_rows > 0:
         train_df = train_df.tail(cfg.optuna_max_rows)
-        test_df = test_df.tail(max(200, cfg.optuna_max_rows // 4))
+        val_df = val_df.tail(max(200, cfg.optuna_max_rows // 4))
 
     x_train = train_df[FEATURE_COLUMNS]
-    x_test = test_df[FEATURE_COLUMNS]
+    x_val = val_df[FEATURE_COLUMNS]
     y_men_train = train_df["men"].astype(float)
-    y_men_test = test_df["men"].astype(float)
+    y_men_val = val_df["men"].astype(float)
     weights = _sample_weights(train_df, cfg)
 
     study = optuna.create_study(direction="minimize")
     study.optimize(
-        lambda trial: _optuna_objective(trial, x_train, y_men_train, x_test, y_men_test, weights, cfg.objective),
+        lambda trial: _optuna_objective(trial, x_train, y_men_train, x_val, y_men_val, weights, cfg.objective),
         n_trials=cfg.optuna_trials,
         show_progress_bar=False,
     )
@@ -331,49 +335,90 @@ def _optimize_params(
     return best
 
 
-def _time_series_split(df: pd.DataFrame, test_ratio: float = 0.2) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Split DataFrame chronologically: train on older data, test on recent data."""
-    split_idx = int(len(df) * (1.0 - test_ratio))
-    split_idx = max(1, min(split_idx, len(df) - 1))
-    return df.iloc[:split_idx].copy(), df.iloc[split_idx:].copy()
+def _time_series_split_3(
+    df: pd.DataFrame, val_ratio: float = 0.15, test_ratio: float = 0.15,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Split DataFrame chronologically into train / val / test (oldest -> newest).
+
+    リーク防止のための3分割:
+      - train: HPO・early-stopping のフィッティングに使う
+      - val:   HPO（Optuna）と early-stopping の評価専用。ここで選んだハイパラ/
+               ラウンド数は val にオーバーフィットし得るが、test には触れていない
+      - test:  最終的な報告用メトリクスにのみ使う「未見データ」
+
+    以前は train/test の2分割で、同じ test 区間を Optuna・early-stopping・報告用
+    メトリクスの3箇所で使い回していたため、報告 MAE が楽観的（過小評価）になって
+    いた（#4）。val を挟むことで test は本当の未見データのまま保たれる。
+    """
+    n = max(1, len(df))
+    # 各パートが最低1行になるようにガードしつつ、val/test の希望サイズを計算する。
+    # train が痩せすぎないよう、val+test で最大 n-1 行までに制限する。
+    val_n = max(1, int(round(n * val_ratio)))
+    test_n = max(1, int(round(n * test_ratio)))
+    if val_n + test_n > n - 1:
+        # 極端に小さい df の場合は val/test を1行ずつまで縮めて train を確保する
+        val_n = 1
+        test_n = 1
+    train_n = max(1, n - val_n - test_n)
+    train_end = train_n
+    val_end = train_n + val_n
+    return (
+        df.iloc[:train_end].copy(),
+        df.iloc[train_end:val_end].copy(),
+        df.iloc[val_end:].copy(),
+    )
 
 
 def _train_models(
-    df: pd.DataFrame, work_dir: Path, cfg: TrainingConfig, store_id: str, date_tag: str,
+    full_df: pd.DataFrame,
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame,
+    test_df: pd.DataFrame,
+    work_dir: Path,
+    cfg: TrainingConfig,
+    store_id: str,
+    date_tag: str,
     hpo_params: dict[str, Any] | None = None,
 ) -> tuple[Path, Path, lgb.LGBMRegressor, lgb.LGBMRegressor, pd.DataFrame, dict[str, float], dict[str, float]]:
-    train_df, test_df = _time_series_split(df, test_ratio=0.2)
+    """train/val/test はあらかじめ呼び出し側で _time_series_split_3 して渡す（この
+    関数内では分割しない）。early-stopping の評価は val_df のみに対して行い、
+    test_df はここでは一切フィッティング/評価に使わない ── 呼び出し側が
+    _log_metrics_by_store(test_df, ...) で最初に触れる「未見データ」のまま渡す。
+    """
     x_train = train_df[FEATURE_COLUMNS]
     y_men_train = train_df["men"].astype(float)
     y_women_train = train_df["women"].astype(float)
     weights = _sample_weights(train_df, cfg)
 
-    x_test = test_df[FEATURE_COLUMNS]
-    y_men_test = test_df["men"].astype(float)
-    y_women_test = test_df["women"].astype(float)
+    x_val = val_df[FEATURE_COLUMNS]
+    y_men_val = val_df["men"].astype(float)
+    y_women_val = val_df["women"].astype(float)
 
     extra = dict(hpo_params) if hpo_params else {}
     callbacks = [lgb.early_stopping(15, verbose=False), lgb.log_evaluation(0)]
+    # train のみでフィットし、val のみで early-stop を判定する（test は不可視のまま）
     model_men = _build_lgb_model(objective=cfg.objective, **extra)
     model_women = _build_lgb_model(objective=cfg.objective, **extra)
     model_men.fit(
         x_train, y_men_train, sample_weight=weights,
-        eval_set=[(x_test, y_men_test)], callbacks=callbacks,
+        eval_set=[(x_val, y_men_val)], callbacks=callbacks,
     )
     model_women.fit(
         x_train, y_women_train, sample_weight=weights,
-        eval_set=[(x_test, y_women_test)], callbacks=callbacks,
+        eval_set=[(x_val, y_women_val)], callbacks=callbacks,
     )
     best_men_rounds = model_men.best_iteration_ if model_men.best_iteration_ > 0 else model_men.n_estimators
     best_women_rounds = model_women.best_iteration_ if model_women.best_iteration_ > 0 else model_women.n_estimators
     print(f"[train-ml][early_stop] store={store_id} best_rounds men={best_men_rounds} women={best_women_rounds}")
 
-    # Retrain on full data using the discovered optimal n_estimators
-    full_weights = _sample_weights(df, cfg)
+    # 本番用モデルは train+val+test の全データで再学習する（サービング用途なので
+    # 直近データも含めて最大限活用してよい。リークが問題になるのは「評価」であって
+    # 「本番モデルの学習データ量」ではない）。ハイパラ/ラウンド数は val で選んだもの。
+    full_weights = _sample_weights(full_df, cfg)
     prod_model_men = _build_lgb_model(objective=cfg.objective, n_estimators=best_men_rounds, **extra)
     prod_model_women = _build_lgb_model(objective=cfg.objective, n_estimators=best_women_rounds, **extra)
-    prod_model_men.fit(df[FEATURE_COLUMNS], df["men"].astype(float), sample_weight=full_weights)
-    prod_model_women.fit(df[FEATURE_COLUMNS], df["women"].astype(float), sample_weight=full_weights)
+    prod_model_men.fit(full_df[FEATURE_COLUMNS], full_df["men"].astype(float), sample_weight=full_weights)
+    prod_model_women.fit(full_df[FEATURE_COLUMNS], full_df["women"].astype(float), sample_weight=full_weights)
 
     # LightGBM は .txt 形式で保存（XGBoost の .json より軽量）
     model_men_path = work_dir / f"model_{store_id}_{date_tag}_men.txt"
@@ -385,6 +430,8 @@ def _train_models(
     fi_men = dict(zip(FEATURE_COLUMNS, prod_model_men.feature_importances_.tolist()))
     fi_women = dict(zip(FEATURE_COLUMNS, prod_model_women.feature_importances_.tolist()))
 
+    # 報告用メトリクスは train/val に一切触れていない model_men/model_women
+    # （train-only + val-early-stop）で test_df を評価することで得る。
     return model_men_path, model_women_path, model_men, model_women, test_df, fi_men, fi_women
 
 
@@ -496,7 +543,8 @@ def _log_metrics_by_store(
             "overall": overall,
             "weekend_night_segment_rows": int(peak_mask.sum()),
             "weekend_night_segment": segment,
-            "evaluation": "holdout_test_20pct",
+            # train/val に一切触れていない、真に未見のホールドアウト test（既定15%）
+            "evaluation": "holdout_test_15pct_3way_split",
             "daily_accuracy": daily,
         }
         if baseline:
@@ -651,12 +699,14 @@ def main() -> int:
                 print(f"[train-ml][skip] store_id={store_id} rows={len(sdf)} (<200)")
                 continue
 
-            # Optuna HPO (uses train/test split internally)
-            train_part, test_part = _time_series_split(sdf, test_ratio=0.2)
-            hpo_params = _optimize_params(train_part, test_part, cfg, store_id)
+            # 評価方法のリーク対策（#4）: train/val/test に3分割し、
+            # HPO（Optuna）と early-stopping は train+val のみで完結させる。
+            # test は _log_metrics_by_store に渡すまで一切参照しない「未見データ」。
+            train_part, val_part, test_part = _time_series_split_3(sdf)
+            hpo_params = _optimize_params(train_part, val_part, cfg, store_id)
 
             model_men_path, model_women_path, model_men, model_women, test_df, fi_men, fi_women = _train_models(
-                sdf, work_dir, cfg, store_id, date_tag, hpo_params=hpo_params,
+                sdf, train_part, val_part, test_part, work_dir, cfg, store_id, date_tag, hpo_params=hpo_params,
             )
             store_metrics = _log_metrics_by_store(test_df, model_men, model_women)
             if hpo_params:
