@@ -97,7 +97,8 @@ class AppConfig:
             forecast_model_prefix=os.getenv("FORECAST_MODEL_PREFIX", "forecast/latest"),
             forecast_model_cache_dir=forecast_model_cache_dir,
             forecast_model_refresh_sec=forecast_model_refresh_sec,
-            forecast_model_schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v6"),
+            # v7 = total_slope_30min のターゲットリーク修正（再学習必須。旧 v6 モデルは互換なし）
+            forecast_model_schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v7"),
             enable_forecast=enable_forecast,
         )
 

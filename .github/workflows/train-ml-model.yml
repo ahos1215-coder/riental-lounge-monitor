@@ -81,7 +81,7 @@ jobs:
           set -euo pipefail
           export FORECAST_MODEL_BUCKET="${FORECAST_MODEL_BUCKET:-ml-models}"
           export FORECAST_MODEL_PREFIX="${FORECAST_MODEL_PREFIX:-forecast/latest}"
-          export FORECAST_MODEL_SCHEMA_VERSION="${FORECAST_MODEL_SCHEMA_VERSION:-v6}"
+          export FORECAST_MODEL_SCHEMA_VERSION="${FORECAST_MODEL_SCHEMA_VERSION:-v7}"
           export ML_TRAIN_DAYS="${ML_TRAIN_DAYS:-180}"
           # 旧 120000 は table が小さかった頃の ~180日分。現在 table は ~960k 行まで増え、
           # 120k 上限だと直近26日に縮んでいた。180日窓を取り切れる値に引き上げる。
