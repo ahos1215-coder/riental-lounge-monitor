@@ -543,6 +543,7 @@
     "pref": "tokyo",
     "lat": 35.661442,
     "lon": 139.692273,
+    "capacity": 38,
     "brand": "aisekiya"
   },
   {
@@ -557,6 +558,7 @@
     "pref": "tokyo",
     "lat": 35.729548,
     "lon": 139.712786,
+    "capacity": 28,
     "brand": "aisekiya"
   },
   {
@@ -571,6 +573,7 @@
     "pref": "tokyo",
     "lat": 35.708942,
     "lon": 139.771392,
+    "capacity": 30,
     "brand": "aisekiya"
   },
   {
@@ -585,6 +588,7 @@
     "pref": "chiba",
     "lat": 35.608262,
     "lon": 140.116296,
+    "capacity": 44,
     "brand": "aisekiya"
   },
   {
@@ -599,6 +603,7 @@
     "pref": "kanagawa",
     "lat": 35.463169,
     "lon": 139.6125,
+    "capacity": 34,
     "brand": "aisekiya"
   },
   {
@@ -613,6 +618,7 @@
     "pref": "niigata",
     "lat": 37.916231,
     "lon": 139.052318,
+    "capacity": 30,
     "brand": "aisekiya"
   }
 ]

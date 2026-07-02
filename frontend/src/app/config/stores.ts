@@ -36,20 +36,17 @@ export function distanceKm(
 }
 
 /**
- * 相席屋の席数（= (テーブル+VIP)×2）。相席屋の公式サイトは人数を出さず「席の埋まり
- * 具合(%)」だけを出しており、当プロジェクトでは `人数 = round(席数 × %/100)` で逆算した
- * 推定人数を保存している。お客様向けには元データである%を表示するため、保存済みの人数
- * から `% = round(人数 / 席数 × 100)` で復元する。値の出典は multi_collect.py の
- * AISEKIYA_STORES（tables/vip）。店舗レイアウト変更時は両方を更新すること。
+ * 相席屋の席数（片性別あたり = (テーブル+VIP)×2）。相席屋の公式サイトは人数を出さず
+ * 「席の埋まり具合(%)」だけを出しており、当プロジェクトでは `人数 = round(席数 × %/100)`
+ * で逆算した推定人数を保存している。お客様向けには元データである%を表示するため、保存済み
+ * の人数から `% = round(人数 / 席数 × 100)` で復元する。
+ *
+ * 席数の単一ソースは stores.json の各店 `capacity` フィールド（下の STORES で読み込む）。
+ * 生の座席レイアウト(tables/vip)は multi_collect.py の AISEKIYA_STORES にあり、
+ * tests/test_store_capacity_ssot.py が「(tables+vip)×2 == stores.json.capacity」を検証して
+ * 両者のズレを検知する。店舗レイアウト変更時は multi_collect の tables/vip と stores.json の
+ * capacity を更新すればよい（このファイルにハードコードは持たない）。
  */
-const AISEKIYA_CAPACITY: Record<string, number> = {
-  ay_shibuya: 38,
-  ay_ikebukuro: 28,
-  ay_ueno: 30,
-  ay_chiba: 44,
-  ay_yokohama: 34,
-  ay_niigata: 30,
-};
 
 /** 相席屋は人数非公開（%のみ）。お客様向け表示を%にするブランドかどうか。 */
 export function isPercentCrowdBrand(brand: BrandId): boolean {
@@ -94,7 +91,10 @@ export const STORES: StoreMeta[] = rawStores.map((s) => {
     regionLabel: s.region_label,
     mapsQueryBase: s.maps_query_base,
     brand,
-    capacity: brand === "aisekiya" ? (AISEKIYA_CAPACITY[s.store_id] ?? null) : null,
+    capacity:
+      brand === "aisekiya" && typeof (s as { capacity?: number }).capacity === "number"
+        ? (s as { capacity: number }).capacity
+        : null,
     lat: typeof (s as { lat?: number }).lat === "number" ? (s as { lat: number }).lat : null,
     lon: typeof (s as { lon?: number }).lon === "number" ? (s as { lon: number }).lon : null,
   };
