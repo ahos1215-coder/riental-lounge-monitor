@@ -823,11 +823,24 @@ def _parse_commentary_text(raw: str, *, backend: str) -> dict[str, str] | None:
                 file=sys.stderr,
             )
             return None
-    last = (parsed.get("last_week_summary") or "").strip()
-    nxt = (parsed.get("next_week_forecast") or "").strip()
+    last = _sanitize_commentary_text(parsed.get("last_week_summary") or "")
+    nxt = _sanitize_commentary_text(parsed.get("next_week_forecast") or "")
     if not last and not nxt:
         return None
     return {"last_week_summary": last, "next_week_forecast": nxt}
+
+
+def _sanitize_commentary_text(text: str) -> str:
+    """モデル出力の軽微なアーティファクトを除去する。
+
+    観測例 (fukuoka 2026-07-03): 文末の「。」直後に孤立した 'n' が残り
+    「〜見込みです。n」のまま公開された (\\n エスケープ崩れの残骸)。
+    句点・感嘆・疑問符の直後で行末に孤立する 'n' は日本語文として
+    あり得ないため安全に除去できる。"""
+    import re
+
+    text = re.sub(r"(?<=[。．！？])n(?=\s*$)", "", text, flags=re.MULTILINE)
+    return text.strip()
 
 
 def _ollama_commentary_call(system_instruction: str, user_prompt: str) -> str | None:
@@ -845,8 +858,6 @@ def _ollama_commentary_call(system_instruction: str, user_prompt: str) -> str | 
 
     from contextlib import nullcontext
 
-    lock_cm = gpu_lock.acquire(owner="meguribi-weekly", timeout=900) if gpu_lock is not None else nullcontext()
-
     body = {
         "model": "gemma4:12b",
         "messages": [
@@ -859,24 +870,35 @@ def _ollama_commentary_call(system_instruction: str, user_prompt: str) -> str | 
         "options": {"num_ctx": 8192, "temperature": 0.7},
     }
 
-    try:
-        with lock_cm:
-            req = Request(
-                "http://localhost:11434/api/chat",
-                data=json.dumps(body).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST",
+    # タイムアウト等の一過性エラーで 1 店だけ本文が欠けるのを防ぐため 1 回だけ再試行する
+    # (観測例 2026-07-03: ay_shibuya / hiroshima_ag が単発 timeout で欠報になった)。
+    # ロックは試行ごとに取得し直し、待ち時間に音楽プロジェクトが割り込めるようにする。
+    attempts = 2
+    for attempt in range(1, attempts + 1):
+        lock_cm = gpu_lock.acquire(owner="meguribi-weekly", timeout=900) if gpu_lock is not None else nullcontext()
+        try:
+            with lock_cm:
+                req = Request(
+                    "http://localhost:11434/api/chat",
+                    data=json.dumps(body).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urlopen(req, timeout=360) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
+            text = (payload.get("message") or {}).get("content", "")
+            if not text or not text.strip():
+                print("[weekly-insights] ollama commentary: empty response content", file=sys.stderr)
+                return None
+            return text
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"[weekly-insights] ollama commentary call failed (attempt {attempt}/{attempts}): {exc}",
+                file=sys.stderr,
             )
-            with urlopen(req, timeout=360) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-        text = (payload.get("message") or {}).get("content", "")
-        if not text or not text.strip():
-            print("[weekly-insights] ollama commentary: empty response content", file=sys.stderr)
-            return None
-        return text
-    except Exception as exc:  # noqa: BLE001
-        print(f"[weekly-insights] ollama commentary call failed: {exc}", file=sys.stderr)
-        return None
+            if attempt < attempts:
+                time.sleep(10)
+    return None
 
 
 def _gemini_call_with_retry(api_key: str, body: dict[str, Any]) -> dict[str, Any] | None:
