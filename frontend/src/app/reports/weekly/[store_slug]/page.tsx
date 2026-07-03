@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -13,7 +14,7 @@ import WeeklyHeatmap from "@/components/WeeklyHeatmap";
 import type { DayHourHeatmap, HeatmapCell } from "@/components/WeeklyHeatmap";
 import WeeklySummary from "@/components/WeeklySummary";
 import type { DailySummaryEntry } from "@/components/WeeklySummary";
-import { fetchLatestPublishedReportByStore } from "@/lib/supabase/blogDrafts";
+import { fetchLatestPublishedReportByStore, type PublishedReportRow } from "@/lib/supabase/blogDrafts";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { formatJstTimestamp, formatWindowTime } from "@/lib/dateFormat";
 
@@ -52,10 +53,24 @@ function stripMetadataLines(body: string): string {
     .trim();
 }
 
+/**
+ * React cache() で同一リクエスト内の generateMetadata / page 呼び出しを重複排除する
+ * （fetchLatestPublishedReportByStore は cache: "no-store" のため fetch レベルの重複排除は効かない）。
+ */
+const resolveWeeklyReport = cache(
+  async (storeSlug: string): Promise<PublishedReportRow | null> =>
+    fetchLatestPublishedReportByStore(storeSlug, "weekly"),
+);
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { store_slug } = await params;
   const meta = getStoreMetaBySlugStrict(store_slug);
-  const label = meta ? buildStoreFullName(meta) : store_slug;
+  if (!meta) notFound();
+
+  const row = await resolveWeeklyReport(meta.slug);
+  if (!row) notFound();
+
+  const label = buildStoreFullName(meta);
   const title = `${label} · Weekly Report`;
   const description = `${label} の最新AI週報（毎週水曜更新）を表示します。`;
   const base = getMetadataBaseUrl();
@@ -82,7 +97,7 @@ export default async function WeeklyReportStorePage({ params }: Props) {
   const store = getStoreMetaBySlugStrict(store_slug);
   if (!store) notFound();
 
-  const row = await fetchLatestPublishedReportByStore(store.slug, "weekly");
+  const row = await resolveWeeklyReport(store.slug);
   if (!row) notFound();
 
   const content = stripMetadataLines(stripFrontmatter(row.mdx_content));
