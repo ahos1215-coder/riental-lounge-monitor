@@ -1,9 +1,10 @@
 import type { MetadataRoute } from "next";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { getAllPostMetas } from "@/lib/blog/content";
+import { fetchAllPublishedEditorialSlugs } from "@/lib/supabase/blogDrafts";
 import { STORES } from "./config/stores";
 
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = getMetadataBaseUrl().toString().replace(/\/+$/, "");
   const now = new Date();
 
@@ -22,9 +23,19 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.9,
   }));
 
+  // ファイルシステム記事（frontend/content/blog/*.mdx）
   const blogRoutes: MetadataRoute.Sitemap = getAllPostMetas().map((p) => ({
     url: `${base}/blog/${encodeURIComponent(p.slug)}`,
     lastModified: p.date ? new Date(p.date) : now,
+    changeFrequency: "weekly",
+    priority: 0.7,
+  }));
+
+  // Supabase 編集記事（LINE承認済み）。失敗時は空配列が返るため sitemap 全体は壊れない。
+  const editorialSlugs = await fetchAllPublishedEditorialSlugs();
+  const editorialRoutes: MetadataRoute.Sitemap = editorialSlugs.map((e) => ({
+    url: `${base}/blog/${encodeURIComponent(e.public_slug)}`,
+    lastModified: e.target_date ? new Date(e.target_date) : now,
     changeFrequency: "weekly",
     priority: 0.7,
   }));
@@ -41,5 +52,5 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority: 0.8,
   }));
 
-  return [...staticRoutes, ...storeRoutes, ...blogRoutes, ...weeklyReportRoutes];
+  return [...staticRoutes, ...storeRoutes, ...blogRoutes, ...editorialRoutes, ...weeklyReportRoutes];
 }

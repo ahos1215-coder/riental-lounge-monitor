@@ -375,6 +375,49 @@ export async function fetchPublishedEditorialBySlug(slug: string): Promise<Publi
   }
 }
 
+export type PublishedEditorialListItem = {
+  public_slug: string;
+  target_date: string;
+};
+
+/**
+ * sitemap 用: 公開済み editorial 記事の public_slug 一覧を取得する。
+ * 失敗時は空配列を返す（sitemap 生成を壊さない）。
+ */
+export async function fetchAllPublishedEditorialSlugs(limit = 200): Promise<PublishedEditorialListItem[]> {
+  const conf = endpointUrl();
+  if (!conf) return [];
+  const { endpoint, key } = conf;
+  const url =
+    `${endpoint}?select=public_slug,target_date` +
+    `&content_type=eq.editorial&is_published=eq.true&error_message=is.null` +
+    `&public_slug=not.is.null` +
+    `&order=created_at.desc&limit=${Math.min(limit, 500)}`;
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      cache: "no-store",
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) return [];
+    const parsed = (await res.json()) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((v): v is Record<string, unknown> => Boolean(v && typeof v === "object"))
+      .map((v) => ({
+        public_slug: typeof v.public_slug === "string" ? v.public_slug : "",
+        target_date: typeof v.target_date === "string" ? v.target_date : "",
+      }))
+      .filter((v) => v.public_slug);
+  } catch {
+    return [];
+  }
+}
+
 /**
  * LINE 承認フロー: editorial 下書きを is_published=true に更新する。
  * facts_id で特定する。成功時は public_slug を返す（ページURLに使う）。
