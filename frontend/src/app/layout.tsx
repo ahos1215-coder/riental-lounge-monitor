@@ -4,8 +4,26 @@ import { Suspense } from "react";
 import { MeguribiHeader } from "@/components/MeguribiHeader";
 import { GoogleAnalytics } from "@/components/GoogleAnalytics";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { serializeJsonLd } from "@/lib/jsonLd";
 
 const base = getMetadataBaseUrl();
+
+const siteJsonLd = serializeJsonLd([
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    name: "めぐりび",
+    alternateName: "MEGRIBI",
+    url: base.href,
+  },
+  {
+    "@context": "https://schema.org",
+    "@type": "Organization",
+    name: "めぐりび",
+    url: base.href,
+    logo: new URL("/icons/icon-192.png", base).href,
+  },
+]);
 
 export const metadata: Metadata = {
   metadataBase: base,
@@ -57,6 +75,10 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="めぐりび" />
       </head>
       <body className="bg-black">
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: siteJsonLd }}
+        />
         <Suspense>
           <GoogleAnalytics />
         </Suspense>
