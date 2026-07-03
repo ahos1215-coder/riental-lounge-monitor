@@ -25,6 +25,9 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from commentary_quality_gate import check_weekly_commentary  # noqa: E402
+
 MEGRIBI_SCORE_PATH = REPO_ROOT / "oriental" / "ml" / "megribi_score.py"
 
 if not MEGRIBI_SCORE_PATH.exists():
@@ -1137,6 +1140,18 @@ def main() -> int:
             top_windows=top_windows,
             next_week_recs=next_week_recs,
         )
+        if commentary:
+            # v2.3: 公開前の数値グラウンディング検証 (2026-07-03 全44店監査で発見した
+            # shinsaibashi 級の数値誤りを block する)。LLM を追加で呼ばない決定的チェック。
+            # 詳細: scripts/commentary_quality_gate.py
+            gate_ok, gate_reasons = check_weekly_commentary(commentary, daily_summary)
+            if not gate_ok:
+                print(
+                    f"[weekly-insights] commentary quality gate failed for store={store}: "
+                    f"{'; '.join(gate_reasons)}",
+                    file=sys.stderr,
+                )
+                commentary = None
         if commentary:
             if commentary.get("last_week_summary"):
                 payload["last_week_summary"] = commentary["last_week_summary"]

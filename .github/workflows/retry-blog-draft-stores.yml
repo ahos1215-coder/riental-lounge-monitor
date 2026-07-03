@@ -1,7 +1,18 @@
-# Supabase blog_drafts で error が残った店舗だけを再実行する（手動）。
-# 全店舗の定時実行は trigger-blog-cron.yml を使用。
+# Supabase blog_drafts で error が残った店舗だけを再実行する（手動・緊急用）。
 #
-# 必要な Repository Secrets: CRON_SECRET, VERCEL_BLOG_CRON_BASE_URL（trigger-blog-cron と同一）
+# 【重要・2026-07 追記】日次レポートは現在ローカル gemma4:12b (scripts/local_report_job.py,
+# Windows タスクスケジューラ) が生成しており、本ワークフローが叩く /api/cron/blog-draft は
+# 旧 Gemini/Vercel 経路で、同じ facts_id (auto_<store>_<edition>) に書き込む。
+# そのため無警戒に実行すると、ローカル gemma が既に公開した良好なレポートを
+# Gemini 経由の結果で上書きしてしまう恐れがある。
+# これを防ぐため、実行前に該当 facts_id の現在の source を確認し、既に
+# local_gemma* が公開済みなら confirm_overwrite=yes を明示しない限りスキップする。
+# 通常はローカル側で該当店舗だけ再実行するほうが安全:
+#   python scripts/local_report_job.py --stores <slug> --edition <edition> --mode publish
+# 本ワークフローは「ローカル生成パイプライン自体が長時間ダウンしている」緊急時のみ使う。
+#
+# 必要な Repository Secrets: CRON_SECRET, VERCEL_BLOG_CRON_BASE_URL, SUPABASE_URL,
+# SUPABASE_SERVICE_ROLE_KEY（安全ガードの照会用）
 
 name: Retry blog draft (selected stores)
 
@@ -20,6 +31,14 @@ on:
         description: "店舗 slug をカンマ区切り（例: nagasaki,fukuoka）。空白は無視されます。"
         required: true
         type: string
+      confirm_overwrite:
+        description: "ローカルgemmaの公開済みレポートがあっても上書きする場合は yes"
+        type: choice
+        required: true
+        default: "no"
+        options:
+          - "no"
+          - "yes"
 
 jobs:
   retry:
@@ -32,12 +51,19 @@ jobs:
         env:
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
           BASE_URL: ${{ secrets.VERCEL_BLOG_CRON_BASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           EDITION: ${{ github.event.inputs.edition }}
           STORES_INPUT: ${{ github.event.inputs.stores }}
+          CONFIRM_OVERWRITE: ${{ github.event.inputs.confirm_overwrite }}
         run: |
           set -uo pipefail
           if [ -z "${CRON_SECRET:-}" ] || [ -z "${BASE_URL:-}" ]; then
             echo "::error::Repository Secrets に CRON_SECRET と VERCEL_BLOG_CRON_BASE_URL を設定してください。"
+            exit 1
+          fi
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_SERVICE_ROLE_KEY:-}" ]; then
+            echo "::error::Repository Secrets に SUPABASE_URL と SUPABASE_SERVICE_ROLE_KEY を設定してください（上書きガードに必要）。"
             exit 1
           fi
           BASE="${BASE_URL%/}"
@@ -50,6 +76,22 @@ jobs:
           FAILURES=""
           while IFS= read -r STORE; do
             [ -z "$STORE" ] && continue
+
+            # --- 安全ガード: ローカルgemmaの公開済みレポートを誤って上書きしないか確認 ---
+            FACTS_ID="auto_${STORE}_${EDITION}"
+            ROW_JSON="$(curl -sS -G "${SUPABASE_URL%/}/rest/v1/blog_drafts" \
+              --data-urlencode "facts_id=eq.${FACTS_ID}" \
+              --data-urlencode "select=source,is_published" \
+              -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" || echo '[]')"
+            SOURCE="$(echo "$ROW_JSON" | jq -r '.[0].source // ""' 2>/dev/null || echo "")"
+            IS_PUB="$(echo "$ROW_JSON" | jq -r '.[0].is_published // false' 2>/dev/null || echo "false")"
+            if [[ "$SOURCE" == local_gemma* && "$IS_PUB" == "true" && "$CONFIRM_OVERWRITE" != "yes" ]]; then
+              echo "::error::store=${STORE} は既にローカルgemma(source=${SOURCE})の公開済みレポートがあります。誤上書き防止のためスキップしました。本当に旧Gemini経由で上書きする場合は confirm_overwrite=yes を指定してください。"
+              FAILURES="${FAILURES} ${STORE}(guarded)"
+              continue
+            fi
+
             URL="${BASE}/api/cron/blog-draft?edition=${EDITION}&source=github_actions_retry&store=${STORE}"
             echo "Retrying store=${STORE}"
             if ! RESP="$(curl -sS -f -X GET \
