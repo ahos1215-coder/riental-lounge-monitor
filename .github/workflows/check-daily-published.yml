@@ -1,0 +1,115 @@
+name: Check daily reports published
+
+# ローカル(このPCのgemma4:12b)による日次レポート生成が、その日ちゃんと公開されたかを
+# GitHub 側から監視する。PC が落ちている / Ollama が固まっている / ジョブが途中で
+# 死んだ場合、当日の blog_drafts(content_type=daily, is_published=true) が欠けるので検知できる。
+# 失敗時はジョブが exit 1 する → GitHub が自動でオーナーにメール通知。
+# さらに OPS_NOTIFY_WEBHOOK_URL があれば Slack/Discord にも通知する。
+
+on:
+  schedule:
+    # 毎日 23:30 JST（= 14:30 UTC）。dailyの2エディション(18:00 / 21:30 JST)完了後。
+    - cron: "30 14 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "チェック対象日 YYYY-MM-DD（空欄=JSTの今日）"
+        required: false
+        default: ""
+      min_published:
+        description: "各エディションの最低公開数（既定30 / 全44店）"
+        required: false
+        default: "30"
+
+permissions:
+  contents: read
+
+jobs:
+  check-published:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      detail: ${{ steps.check.outputs.detail }}
+    steps:
+      - name: Query Supabase for today's daily reports
+        id: check
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          INPUT_DATE: ${{ github.event.inputs.date }}
+          MIN_PUBLISHED: ${{ github.event.inputs.min_published || '30' }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, urllib.request, urllib.parse
+          from datetime import datetime, timezone, timedelta
+
+          url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+          key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or ""
+          if not url or not key:
+              print("::error::SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY secret 未設定")
+              sys.exit(1)
+
+          target = (os.environ.get("INPUT_DATE") or "").strip()
+          if not target:
+              target = (datetime.now(timezone.utc) + timedelta(hours=9)).strftime("%Y-%m-%d")
+          floor = int(os.environ.get("MIN_PUBLISHED") or "30")
+          editions = ["evening_preview", "late_update"]
+
+          def count(edition):
+              q = urllib.parse.urlencode({
+                  "content_type": "eq.daily",
+                  "target_date": f"eq.{target}",
+                  "edition": f"eq.{edition}",
+                  "is_published": "eq.true",
+                  "error_message": "is.null",
+                  "select": "facts_id",
+              })
+              req = urllib.request.Request(
+                  f"{url}/rest/v1/blog_drafts?{q}",
+                  headers={"apikey": key, "Authorization": f"Bearer {key}",
+                           "Prefer": "count=exact", "Range-Unit": "items", "Range": "0-0"},
+              )
+              last_err = None
+              for _ in range(3):
+                  try:
+                      with urllib.request.urlopen(req, timeout=30) as r:
+                          cr = r.headers.get("Content-Range", "")  # 例 "0-0/44"
+                          return int(cr.split("/")[-1]) if "/" in cr else 0
+                  except Exception as e:
+                      last_err = e
+              print(f"::error::Supabase 照会に失敗: {last_err}")
+              sys.exit(1)
+
+          results = {e: count(e) for e in editions}
+          lines = [f"日次レポート公開チェック（{target} JST, 基準={floor}/エディション）"]
+          missing = []
+          for e in editions:
+              n = results[e]
+              ok = n >= floor
+              lines.append(f"- {e}: {n} 件 公開 {'OK' if ok else '不足！'}")
+              if not ok:
+                  missing.append(f"{e}={n}")
+          detail = "\n".join(lines)
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write(detail + "\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write("detail<<EOF\n" + detail + "\nEOF\n")
+          print(detail)
+
+          if missing:
+              print(f"::error::日次レポートが未公開/不足です（{target}): {', '.join(missing)}")
+              sys.exit(1)
+          print("OK: 両エディションとも基準を満たしています。")
+          PY
+
+  notify:
+    needs: [check-published]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "日次レポート未公開チェック"
+      custom_body: |
+        ⚠️ 日次レポートが公開されていない可能性があります（ローカル生成の失敗 / PC停止 / Ollama不調）。
+        ${{ needs.check-published.outputs.detail }}
