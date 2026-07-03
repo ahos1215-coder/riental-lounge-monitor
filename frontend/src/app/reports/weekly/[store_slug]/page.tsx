@@ -16,6 +16,7 @@ import WeeklySummary from "@/components/WeeklySummary";
 import type { DailySummaryEntry } from "@/components/WeeklySummary";
 import { fetchLatestPublishedReportByStore, type PublishedReportRow } from "@/lib/supabase/blogDrafts";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { serializeJsonLd } from "@/lib/jsonLd";
 import { formatJstTimestamp, formatWindowTime } from "@/lib/dateFormat";
 
 /** 毎週水曜更新 — 5 分ごとに再検証 */
@@ -74,13 +75,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const title = `${label} · Weekly Report`;
   const description = `${label} の最新AI週報（毎週水曜更新）を表示します。`;
   const base = getMetadataBaseUrl();
+  const url = new URL(`/reports/weekly/${encodeURIComponent(store_slug)}`, base);
   return {
     title,
     description,
+    alternates: { canonical: url.href },
     openGraph: {
       title: `${title} | めぐりび`,
       description,
-      url: new URL(`/reports/weekly/${encodeURIComponent(store_slug)}`, base),
+      url,
       type: "article",
       locale: "ja_JP",
     },
@@ -200,8 +203,32 @@ export default async function WeeklyReportStorePage({ params }: Props) {
     return value.toFixed(digits);
   }
 
+  const storeName = buildStoreFullName(store);
+  const base = getMetadataBaseUrl();
+  const pageUrl = new URL(`/reports/weekly/${encodeURIComponent(store.slug)}`, base).href;
+  const logoUrl = new URL("/icons/icon-192.png", base).href;
+  const articleJsonLd = serializeJsonLd({
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: `${storeName}の週間混雑レポート`,
+    dateModified: row.updated_at ?? row.created_at,
+    datePublished: row.created_at ?? row.updated_at,
+    author: { "@type": "Organization", name: "めぐりび" },
+    publisher: {
+      "@type": "Organization",
+      name: "めぐりび",
+      logo: { "@type": "ImageObject", url: logoUrl },
+    },
+    mainEntityOfPage: pageUrl,
+    inLanguage: "ja",
+  });
+
   return (
     <main className="mx-auto w-full max-w-3xl px-4 py-10">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: articleJsonLd }}
+      />
       <ReportViewTracker storeSlug={store.slug} reportType="weekly" />
       <div className="mb-6 flex flex-wrap gap-4">
         <Link

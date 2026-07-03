@@ -43,9 +43,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Daily Report は noindex（速報・店舗ページに評価を集約）のため sitemap から除外。
 
   // Weekly Report: 毎週水曜更新の固定URL。
-  // 相席屋(aisekiya)は weekly レポート生成ワークフロー未対応のため notFound() になる → sitemap から除外。
-  // 現状 weekly が生成されるのは oriental の 38 店舗のみ。aisekiya 対応後は published 行 / weekly_enabled 判定に切り替える。
-  const weeklyReportRoutes: MetadataRoute.Sitemap = STORES.filter((s) => s.brand === "oriental").map((s) => ({
+  // 2026-07-03 時点でローカル gemma 生成が相席屋(aisekiya)にも対応し、全44店舗で published 行が存在するため
+  // ブランドによる絞り込みは不要（以前は oriental のみ対応で aisekiya は notFound() になっていた）。
+  const weeklyReportRoutes: MetadataRoute.Sitemap = STORES.map((s) => ({
     url: `${base}/reports/weekly/${encodeURIComponent(s.slug)}`,
     lastModified: now,
     changeFrequency: "weekly" as const,
