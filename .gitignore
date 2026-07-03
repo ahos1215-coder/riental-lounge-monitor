@@ -64,3 +64,10 @@ supabase/.temp/
 
 # Open-Meteo weather cache (multi_collect.py)
 .cache/
+
+# --- Claude Code local working dir (worktrees, session state) ---
+.claude/
+
+# --- Local LLM job artifacts / state ---
+local_llm_spike_out/
+data/aisekiya_alert_sent.txt
