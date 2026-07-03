@@ -250,6 +250,62 @@ def _load_all_store_slugs() -> list[str]:
     return slugs
 
 
+_SLUG_TO_STORE_ID_CACHE: dict[str, str] | None = None
+
+
+def _load_slug_to_store_id_map() -> dict[str, str]:
+    """stores.json (PR #28 で単一ソース化済み) から slug -> store_id の対応表を読み込む。
+
+    oriental/utils/stores.py や multi_collect.py と同じ出典。1プロセス内で1回だけ
+    読み込みキャッシュする。stores.json が存在しない/壊れている場合は空の dict を
+    返し、呼び出し側 (_store_id_for_slug) のフォールバックに委ねる。
+    """
+    global _SLUG_TO_STORE_ID_CACHE
+    if _SLUG_TO_STORE_ID_CACHE is not None:
+        return _SLUG_TO_STORE_ID_CACHE
+
+    mapping: dict[str, str] = {}
+    if STORES_JSON_PATH.exists():
+        try:
+            data = json.loads(STORES_JSON_PATH.read_text(encoding="utf-8"))
+            for row in data:
+                slug = row.get("slug")
+                store_id = row.get("store_id")
+                if slug and store_id:
+                    mapping[slug] = store_id
+        except (json.JSONDecodeError, OSError) as exc:  # noqa: BLE001
+            print(f"[weekly-insights] failed to load stores.json for store_id mapping: {exc}", file=sys.stderr)
+    else:
+        print(f"[weekly-insights] stores.json not found for store_id mapping: {STORES_JSON_PATH}", file=sys.stderr)
+
+    _SLUG_TO_STORE_ID_CACHE = mapping
+    return mapping
+
+
+def _store_id_for_slug(slug: str) -> str:
+    """週次レポートの store slug (例: shibuya, shibuya_ag, ay_niigata) から
+    Supabase blog_drafts.store_id を解決する。
+
+    店舗マスタは stores.json (PR #28 で単一ソース化) の `store_id` フィールド。
+    ブランド判定は slug の見た目 (`_ag` サフィックス等) からは行えない
+    (`_ag` は oriental の AG サブブランドで store_id は `ol_*`、相席屋は `ay_`
+    プレフィックスの slug で store_id もそのまま `ay_*`)。stores.json に slug が
+    見つからない場合は、ジョブを落とさないよう旧来の `ol_{slug}` にフォールバック
+    しつつ、大きく警告を出す。
+    """
+    mapping = _load_slug_to_store_id_map()
+    store_id = mapping.get(slug)
+    if store_id:
+        return store_id
+    fallback = f"ol_{slug}"
+    print(
+        f"[weekly-insights] WARNING: slug={slug!r} not found in stores.json; "
+        f"falling back to {fallback!r} (may be incorrect for non-oriental brands)",
+        file=sys.stderr,
+    )
+    return fallback
+
+
 def _env_float(name: str, default: float) -> float:
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
@@ -349,7 +405,7 @@ def _upsert_weekly_report_to_supabase(
     else:
         mdx_body = "ヒートマップと「賑わいやすい時間帯」を参考に、来週の来店タイミングを検討してみてください。"
     body = {
-        "store_id": f"ol_{store}",
+        "store_id": _store_id_for_slug(store),
         "store_slug": store,
         "target_date": date_label,
         "facts_id": facts_id,
