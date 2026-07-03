@@ -81,12 +81,23 @@ class ForecastService:
         return self._forecast_generic(store_id, freq_min, builder)
 
     def forecast_today(self, store_id: str, freq_min: int, *, start_h: int = 19, end_h: int = 5) -> dict:
-        """Return 19:00-05:00 slots for the specified store."""
+        """Return the UPCOMING/current night session's slots (start_h:00 -> next-day end_h:00).
+
+        The night session runs start_h:00 through end_h:00 the following day (e.g.
+        19:00-05:00). "Today" therefore means: while we're inside the tail of a
+        still-running session (00:00 up to end_h:00), the target session is the one
+        that started YESTERDAY at start_h; from end_h:00 onward (including all of the
+        daytime hours up to start_h and beyond), the target is the session starting
+        TODAY at start_h. Shifting back a day whenever now.hour < start_h (the old,
+        buggy condition) incorrectly returned last night's already-finished session
+        for the entire start_h:00-day boundary window (e.g. 05:00-18:59 with the
+        default 19/5 hours).
+        """
 
         def builder(_history: pd.DataFrame) -> pd.DatetimeIndex:
             now = pd.Timestamp.now(tz=self.tz)
             start = now.replace(hour=start_h, minute=0, second=0, microsecond=0)
-            if now.hour < start_h:
+            if now.hour < end_h:
                 start -= pd.Timedelta(days=1)
             end = (start + pd.Timedelta(days=1)).replace(hour=end_h, minute=0, second=0, microsecond=0)
             return pd.date_range(start=start, end=end, freq=f"{freq_min}min", inclusive="left", tz=self.tz)
