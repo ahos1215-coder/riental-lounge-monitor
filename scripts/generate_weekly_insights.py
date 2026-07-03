@@ -231,6 +231,25 @@ def _parse_store_list(value: str | None) -> list[str]:
     return [item.strip() for item in raw if item.strip()]
 
 
+STORES_JSON_PATH = REPO_ROOT / "frontend" / "src" / "data" / "stores.json"
+
+
+def _load_all_store_slugs() -> list[str]:
+    """`--stores all` / `INSIGHTS_STORES=all` 用: stores.json の全店舗 slug を返す。
+
+    ローカル実行で 44 店舗を 1 回でカバーするための便宜機能。
+    """
+    if not STORES_JSON_PATH.exists():
+        raise SystemExit(f"stores.json not found: {STORES_JSON_PATH}")
+    data = json.loads(STORES_JSON_PATH.read_text(encoding="utf-8"))
+    slugs: list[str] = []
+    for row in data:
+        slug = row.get("slug")
+        if slug:
+            slugs.append(slug)
+    return slugs
+
+
 def _env_float(name: str, default: float) -> float:
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
@@ -567,17 +586,31 @@ def _generate_ai_commentary(
     top_windows: list[dict[str, Any]],
     next_week_recs: list[dict[str, Any]],
 ) -> dict[str, str] | None:
-    """Gemini REST API で週報の自然文解説を 2 セクション分生成する (Phase C v2)。
+    """週報の自然文解説を 2 セクション分生成する (Phase C v2)。
+
+    バックエンドは `INSIGHTS_LLM_BACKEND` (既定 "ollama") で切り替える:
+      - "ollama": ローカル Ollama (gemma4:12b) を使用。GEMINI_API_KEY 不要。コスト削減版。
+      - "gemini": 従来通り Gemini REST API (要 GEMINI_API_KEY)。
+
+    system_instruction / user_prompt はモデル非依存のため共通で組み立て、
+    実際の呼び出し・レスポンス抽出だけをバックエンドごとに分岐する。
 
     返り値: {"last_week_summary": "...", "next_week_forecast": "..."} or None。
 
-    `INSIGHTS_GENERATE_AI_COMMENTARY=1` かつ `GEMINI_API_KEY` 設定時のみ動作。
+    `INSIGHTS_GENERATE_AI_COMMENTARY=1` のときのみ動作。
     """
     if not _env_bool("INSIGHTS_GENERATE_AI_COMMENTARY", False):
         return None
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if not api_key:
-        return None
+
+    backend = os.environ.get("INSIGHTS_LLM_BACKEND", "ollama").strip().lower()
+    if not backend:
+        backend = "ollama"
+
+    api_key = ""
+    if backend == "gemini":
+        api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+        if not api_key:
+            return None
 
     cells = heatmap.get("cells") or []
     top_cells = sorted(
@@ -658,6 +691,13 @@ def _generate_ai_commentary(
         + json.dumps(payload_for_ai, ensure_ascii=False, indent=2)
     )
 
+    if backend == "ollama":
+        raw = _ollama_commentary_call(system_instruction, user_prompt)
+        if raw is None:
+            return None
+        return _parse_commentary_text(raw, backend="ollama")
+
+    # backend == "gemini" (既存の挙動を変更しない)
     body = {
         "system_instruction": {"parts": [{"text": system_instruction}]},
         "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
@@ -695,31 +735,91 @@ def _generate_ai_commentary(
         raw = "".join(p.get("text", "") for p in parts).strip()
         if not raw:
             return None
-        # 1) 通常の JSON parse を試す
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError as primary_err:
-            # 2) フォールバック: 正規表現で 2 フィールドを抽出
-            print(
-                f"[weekly-insights] gemini commentary primary parse failed ({primary_err}); "
-                f"falling back to regex extraction",
-                file=sys.stderr,
-            )
-            parsed = _extract_commentary_via_regex(raw)
-            if parsed is None:
-                # 3) 切断などで parse 不可 → 諦めて None を返し UI 側でフォールバック
-                print(
-                    f"[weekly-insights] gemini commentary regex fallback also failed; raw head={raw[:200]!r}",
-                    file=sys.stderr,
-                )
-                return None
-        last = (parsed.get("last_week_summary") or "").strip()
-        nxt = (parsed.get("next_week_forecast") or "").strip()
-        if not last and not nxt:
-            return None
-        return {"last_week_summary": last, "next_week_forecast": nxt}
+        return _parse_commentary_text(raw, backend="gemini")
     except Exception as exc:  # noqa: BLE001
         print(f"[weekly-insights] gemini commentary parse failed: {exc}", file=sys.stderr)
+        return None
+
+
+def _parse_commentary_text(raw: str, *, backend: str) -> dict[str, str] | None:
+    """LLM が返した生テキストを {"last_week_summary", "next_week_forecast"} に変換する。
+
+    バックエンド (ollama/gemini) 共通のロジック:
+    1) 通常の json.loads を試す
+    2) 失敗したら正規表現フォールバック (_extract_commentary_via_regex)
+    3) それでも駄目なら None
+    """
+    raw = raw.strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as primary_err:
+        print(
+            f"[weekly-insights] {backend} commentary primary parse failed ({primary_err}); "
+            f"falling back to regex extraction",
+            file=sys.stderr,
+        )
+        parsed = _extract_commentary_via_regex(raw)
+        if parsed is None:
+            print(
+                f"[weekly-insights] {backend} commentary regex fallback also failed; raw head={raw[:200]!r}",
+                file=sys.stderr,
+            )
+            return None
+    last = (parsed.get("last_week_summary") or "").strip()
+    nxt = (parsed.get("next_week_forecast") or "").strip()
+    if not last and not nxt:
+        return None
+    return {"last_week_summary": last, "next_week_forecast": nxt}
+
+
+def _ollama_commentary_call(system_instruction: str, user_prompt: str) -> str | None:
+    """ローカル Ollama (gemma4:12b) を呼び出し、応答テキスト (JSON 文字列想定) を返す。
+
+    共有 GPU ロック (gpu_lock) 配下で呼ぶ (local_report_job.py と同じ取り込み方)。
+    gpu_lock が見つからない場合はロック無しで続行 (best-effort)。
+    エラー・タイムアウト時は stderr にログして None を返す (例外は投げない)。
+    """
+    try:
+        sys.path.insert(0, r"C:\Users\Public\共有データ系")
+        import gpu_lock  # type: ignore
+    except Exception:  # noqa: BLE001
+        gpu_lock = None
+
+    from contextlib import nullcontext
+
+    lock_cm = gpu_lock.acquire(owner="meguribi-weekly", timeout=900) if gpu_lock is not None else nullcontext()
+
+    body = {
+        "model": "gemma4:12b",
+        "messages": [
+            {"role": "system", "content": system_instruction},
+            {"role": "user", "content": user_prompt},
+        ],
+        "stream": False,
+        "keep_alive": 0,
+        "format": "json",
+        "options": {"num_ctx": 8192, "temperature": 0.7},
+    }
+
+    try:
+        with lock_cm:
+            req = Request(
+                "http://localhost:11434/api/chat",
+                data=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(req, timeout=360) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        text = (payload.get("message") or {}).get("content", "")
+        if not text or not text.strip():
+            print("[weekly-insights] ollama commentary: empty response content", file=sys.stderr)
+            return None
+        return text
+    except Exception as exc:  # noqa: BLE001
+        print(f"[weekly-insights] ollama commentary call failed: {exc}", file=sys.stderr)
         return None
 
 
@@ -827,7 +927,10 @@ def main() -> int:
     args = parser.parse_args()
 
     stores_value = args.stores or os.environ.get("INSIGHTS_STORES")
-    stores = _parse_store_list(stores_value)
+    if stores_value and stores_value.strip().lower() == "all":
+        stores = _load_all_store_slugs()
+    else:
+        stores = _parse_store_list(stores_value)
     if not stores:
         raise SystemExit("stores are required. Use --stores or INSIGHTS_STORES.")
 

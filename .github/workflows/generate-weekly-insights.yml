@@ -19,9 +19,14 @@ on:
         description: "最小連続分数"
         required: false
         default: "60"
-  schedule:
-    # 毎週水曜 06:30 JST（UTC では火曜 21:30）
-    - cron: "30 21 * * 2"
+  # 【2026-07 無効化】週次レポートのコメント生成をローカル gemma4:12b
+  # (scripts/generate_weekly_insights.py --stores all, INSIGHTS_LLM_BACKEND=ollama,
+  #  Windows タスクスケジューラ MEGRIBI-weekly) へ移行したため、Gemini を叩くこの
+  # 定時トリガは停止する。両者が同じ blog_drafts (content_type=weekly) を書くため、
+  # 二重稼働させないこと。手動実行(workflow_dispatch)は緊急用に残す。
+  # schedule:
+  #   # 毎週水曜 06:30 JST（UTC では火曜 21:30）
+  #   - cron: "30 21 * * 2"
 
 permissions:
   contents: write
@@ -128,6 +133,9 @@ jobs:
           INSIGHTS_SYNC_SUPABASE: "1"
           # AI 自然文解説 (last_week_summary / next_week_forecast) を生成する
           INSIGHTS_GENERATE_AI_COMMENTARY: "1"
+          # 通常はローカル gemma4:12b へ移行済み(既定 ollama)。GHA には Ollama が無いので、
+          # 緊急の手動 workflow_dispatch 時のみ Gemini を使う。
+          INSIGHTS_LLM_BACKEND: "gemini"
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
