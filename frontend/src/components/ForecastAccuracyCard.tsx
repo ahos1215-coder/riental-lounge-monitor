@@ -123,7 +123,7 @@ export function ForecastAccuracyCard({
         <span className="text-2xl font-black text-white">{mae.toFixed(1)}</span>
         <span className="text-xs text-white/50">{maeUnit}</span>
       </div>
-      <p className="mt-1 text-[11px] text-white/40">
+      <p className="mt-1 text-[11px] text-white/60">
         {hasLive
           ? "実測精度 — 前夜の予測と実測の平均的なズレ（本番）"
           : "学習時の参考値（実測精度を集計中）— 予測と実測の平均的なズレ"}
@@ -133,10 +133,10 @@ export function ForecastAccuracyCard({
           {baselinePct != null && (
             <div className="mt-2 flex items-baseline gap-1">
               <span className="text-sm font-bold text-white/70">{baselinePct > 0 ? "+" : ""}{baselinePct.toFixed(1)}%</span>
-              <span className="text-[11px] text-white/40">ベースライン比（直近7日）</span>
+              <span className="text-[11px] text-white/60">ベースライン比（直近7日）</span>
             </div>
           )}
-          <div className="mt-3 flex items-center gap-2 text-[10px] text-white/30">
+          <div className="mt-3 flex items-center gap-2 text-[10px] text-white/50">
             {live?.stores_scored_latest != null && <span>直近夜: {live.stores_scored_latest}店舗</span>}
             {live?.nights_count != null && <span>集計: {live.nights_count}夜分</span>}
           </div>
@@ -146,10 +146,10 @@ export function ForecastAccuracyCard({
           {weekendMae != null && (
             <div className="mt-2 flex items-baseline gap-1">
               <span className="text-sm font-bold text-white/70">{weekendMae.toFixed(1)}</span>
-              <span className="text-[11px] text-white/40">{maeUnit}（週末夜）</span>
+              <span className="text-[11px] text-white/60">{maeUnit}（週末夜）</span>
             </div>
           )}
-          <div className="mt-3 flex items-center gap-2 text-[10px] text-white/30">
+          <div className="mt-3 flex items-center gap-2 text-[10px] text-white/50">
             <span>テスト: {metrics.rows_test}件</span>
             {trainedLabel && <span>学習: {trainedLabel}</span>}
           </div>

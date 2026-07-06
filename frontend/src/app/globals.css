@@ -22,3 +22,14 @@ html, body {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     "Noto Sans JP", sans-serif;
 }
+
+/* モーション低減設定のユーザー向けに、pulse（スケルトン）や幅の transition
+   （GenderRatioBar 等）を無効化する。レイアウトやサイズには影響しない。 */
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse {
+    animation: none !important;
+  }
+  [class*="transition-"] {
+    transition: none !important;
+  }
+}

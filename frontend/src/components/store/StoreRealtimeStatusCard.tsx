@@ -3,14 +3,7 @@
 import { GenderRatioBar } from "@/components/home/GenderRatioBar";
 import type { StoreSnapshot } from "@/app/hooks/useStorePreviewData";
 import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
-
-function crowdHintFromTotals(nowTotal: number, peakTotal: number): string {
-  if (peakTotal <= 0) return "予測データ待ち";
-  const r = nowTotal / peakTotal;
-  if (r >= 0.85) return "混雑に近い目安";
-  if (r >= 0.45) return "ほどよい目安";
-  return "空いている目安";
-}
+import { crowdHintFromTotals } from "@/lib/megribiVerdict";
 
 type Props = {
   snapshot: StoreSnapshot;
@@ -149,13 +142,6 @@ export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
             <span className="text-slate-400">（ピーク比 {occupancy}%）</span>
           )}
         </span>
-        {snapshot.recommendation &&
-          snapshot.recommendation !== "データなし" &&
-          snapshot.recommendation !== "データ取得済み" && (
-            <span className="rounded-full border border-indigo-500/25 bg-indigo-500/10 px-2.5 py-1 text-[11px] text-indigo-100/90">
-              おすすめ度: {snapshot.recommendation}
-            </span>
-          )}
       </div>
 
       {percentMode && (
