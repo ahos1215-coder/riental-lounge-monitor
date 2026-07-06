@@ -50,8 +50,12 @@ export type StoreSnapshot = {
   peakTotal: number;
   peakMen: number | null;
   peakWomen: number | null;
-  recommendation: string;
+  /** ピーク時刻の ISO タイムスタンプ（日付込み）。未来/過去の判定に使う。無ければ null。 */
+  peakTs: string | null;
   forecastUpdatedLabel: string;
+  /** 最新の実測データ点の ISO タイムスタンプ（無ければ null）。鮮度表示（"◯分前更新"）に使う。
+   *  クライアントの現在時刻ではなく、実データの ts を保持する（以前は破棄していた）。 */
+  latestActualTs: string | null;
   series: TimeSeriesPoint[];
   hasData: boolean;
   forecastStatus: ForecastStatus;
@@ -91,7 +95,14 @@ export type StorePreviewControls = {
   selectedBaseDate: string; // yyyy-mm-dd
 };
 
-const FORECAST_REFRESH_MS = 15 * 60 * 1000;
+// 実測データは5分間隔で更新されるため、本来は range 側だけ~5分で再取得したい。
+// ただし現在の run() は range と forecast(重めのML推論)を1つの関数で同時に叩く実装
+// になっており、両者を完全に分離するには再試行/マージ処理を含む大きな書き換えが必要。
+// 無料枠のバックエンド呼び出し回数を抑えつつ体感の鮮度を上げるため、まずは折衷案として
+// 15分→8分に短縮するだけに留める（forecast_today も一緒に8分毎に呼ばれるが、
+// 15分間隔よりは増えるものの実測を毎回叩くよりは抑えられている）。将来 range 専用の
+// 軽量タイマーに分離できればより頻繁な実測更新が可能。
+const FORECAST_REFRESH_MS = 8 * 60 * 1000;
 
 // 予測 API が空応答だった場合の自動再試行設定。
 // 一過性の Supabase Storage 接続リセットや ML モデルプリロード待ちを想定し、
@@ -142,8 +153,9 @@ function buildBaseSnapshot(meta: StoreMeta): StoreSnapshot {
     peakTotal: 0,
     peakMen: null,
     peakWomen: null,
-    recommendation: "データなし",
+    peakTs: null,
     forecastUpdatedLabel: "--:--",
+    latestActualTs: null,
     series: buildEmptySeries(),
     hasData: false,
     forecastStatus: "idle",
@@ -400,6 +412,7 @@ function pickPeak(series: TimeSeriesPoint[]) {
   let bestTotal = 0;
   let bestMen: number | null = null;
   let bestWomen: number | null = null;
+  let bestTs: string | null = null;
   series.forEach((p) => {
     // actual があればそちらを優先、なければ forecast（二重カウント防止）
     const men = p.menActual ?? p.menForecast ?? 0;
@@ -410,9 +423,19 @@ function pickPeak(series: TimeSeriesPoint[]) {
       bestLabel = p.label;
       bestMen = men > 0 ? Math.round(men) : null;
       bestWomen = women > 0 ? Math.round(women) : null;
+      bestTs = p.ts ?? null;
     }
   });
-  return { peakTotal: bestTotal, peakTimeLabel: bestLabel || "--:--", peakMen: bestMen, peakWomen: bestWomen };
+  return {
+    peakTotal: bestTotal,
+    peakTimeLabel: bestLabel || "--:--",
+    peakMen: bestMen,
+    peakWomen: bestWomen,
+    // ピーク時刻の本来のタイムスタンプ（日付込み）。ラベルは "23:00" のような
+    // 時刻のみの文字列で日付を持たないため、「ピークは未来か過去か」の判定には
+    // これを使う（日またぎの深夜ピークを誤判定しないため）。
+    peakTs: bestTs,
+  };
 }
 
 function hasSeriesData(series: TimeSeriesPoint[]) {
@@ -438,6 +461,9 @@ function pickLatestActualPoint(points: RangePoint[]) {
   return {
     nowMen: typeof latest.men === "number" ? Math.round(latest.men) : 0,
     nowWomen: typeof latest.women === "number" ? Math.round(latest.women) : 0,
+    // 実測データそのものの計測時刻。クライアントの "now" とは別物として保持し、
+    // 鮮度表示（"◯分前更新"）を実データ基準で出せるようにする。
+    ts: typeof latest.ts === "string" ? latest.ts : null,
   };
 }
 
@@ -520,7 +546,7 @@ export function useStorePreviewData(
         const current = pickCurrentActual(effectiveActualSeries);
         const nowMen = latestActual?.nowMen ?? current.nowMen;
         const nowWomen = latestActual?.nowWomen ?? current.nowWomen;
-        const { peakTotal, peakTimeLabel, peakMen: peakMenVal, peakWomen: peakWomenVal } = pickPeak(effectiveActualSeries);
+        const { peakTotal, peakTimeLabel, peakMen: peakMenVal, peakWomen: peakWomenVal, peakTs } = pickPeak(effectiveActualSeries);
 
         // 再試行中は forecastStatus を引き継ぎ、それ以外は loading 段階の "idle" を維持
         const initialForecastStatus: ForecastStatus =
@@ -533,7 +559,6 @@ export function useStorePreviewData(
         const baseSnapshotResolved: StoreSnapshot = {
           ...baseSnapshot,
           level: hasData ? "データ取得済み" : "データなし",
-          recommendation: hasData ? "データ取得済み" : "データなし",
           nowMen: Math.round(nowMen),
           nowWomen: Math.round(nowWomen),
           nowTotal: Math.round(nowMen + nowWomen),
@@ -541,7 +566,9 @@ export function useStorePreviewData(
           peakTimeLabel,
           peakMen: peakMenVal,
           peakWomen: peakWomenVal,
+          peakTs,
           forecastUpdatedLabel: "--:--",
+          latestActualTs: latestActual?.ts ?? null,
           series: effectiveActualSeries,
           hasData,
           forecastStatus: initialForecastStatus,
@@ -622,6 +649,7 @@ export function useStorePreviewData(
           peakTimeLabel: mergedPeak.peakTimeLabel,
           peakMen: mergedPeak.peakMen,
           peakWomen: mergedPeak.peakWomen,
+          peakTs: mergedPeak.peakTs,
           forecastUpdatedLabel: formatNowHmJst(new Date()),
           series: effectiveMergedSeries,
           hasData:

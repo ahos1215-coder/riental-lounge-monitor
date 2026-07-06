@@ -93,6 +93,7 @@ describe("buildStoreFullName", () => {
     capacity: 38,
     lat: null,
     lon: null,
+    officialUrl: null,
   };
 
   it("prefixes aisekiya stores with 相席屋", () => {
