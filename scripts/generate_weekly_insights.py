@@ -53,6 +53,12 @@ DEFAULT_HTTP_TIMEOUT_SECONDS = 60
 DEFAULT_HTTP_RETRIES = 3
 DEFAULT_USER_AGENT = "MEGRIBI-weekly-insights-bot"
 
+# 新規コメンタリー生成が失敗/ゲート却下された際、既存 Supabase レコードの文章を
+# 引き継いでよい最大経過日数。これを超えたら「1年前の先週」のような陳腐化した
+# 文章を新しい期間のレポートとして出し続けてしまうため、carry-over を止めて
+# 空のまま公開 (フロントはヒートマップのみ表示にフォールバック) し、運用に通知する。
+WEEKLY_COMMENTARY_MAX_AGE_DAYS = 21
+
 
 def _pick_value(row: dict[str, Any], keys: Iterable[str]) -> Any:
     for key in keys:
@@ -347,11 +353,16 @@ def _supabase_conf() -> tuple[str, str] | None:
     return base, key
 
 
-def _fetch_existing_weekly_commentary(store: str) -> dict[str, str]:
+def _fetch_existing_weekly_commentary(store: str) -> dict[str, Any]:
     """既存の Weekly Report レコードから AI コメンタリーフィールドを取得。
 
     新規生成が 429 等で失敗した場合に、前回の文章を保持するために使う。
     取得失敗・存在しない場合は空 dict。
+
+    返り値には本文 3 フィールドに加え、鮮度判定用の `_existing_generated_at`
+    (insight_json.generated_at があればそれ、無ければ行の updated_at/created_at) を
+    ISO 文字列で含める。呼び出し側はこれで carry-over の年齢を判定できる
+    (WEEKLY_COMMENTARY_MAX_AGE_DAYS)。
     """
     conf = _supabase_conf()
     if conf is None:
@@ -360,7 +371,7 @@ def _fetch_existing_weekly_commentary(store: str) -> dict[str, str]:
     facts_id = f"weekly_{store}"
     url = (
         f"{base}/rest/v1/blog_drafts"
-        f"?facts_id=eq.{facts_id}&select=insight_json&limit=1"
+        f"?facts_id=eq.{facts_id}&select=insight_json,updated_at,created_at&limit=1"
     )
     try:
         req = Request(
@@ -375,16 +386,64 @@ def _fetch_existing_weekly_commentary(store: str) -> dict[str, str]:
             rows = json.loads(resp.read().decode("utf-8"))
         if not isinstance(rows, list) or not rows:
             return {}
-        ij = (rows[0] or {}).get("insight_json") or {}
-        out: dict[str, str] = {}
+        row = rows[0] or {}
+        ij = row.get("insight_json") or {}
+        out: dict[str, Any] = {}
         for k in ("last_week_summary", "next_week_forecast", "ai_commentary"):
             v = ij.get(k)
             if isinstance(v, str) and v.strip():
                 out[k] = v
+        existing_generated_at = (
+            ij.get("generated_at") or row.get("updated_at") or row.get("created_at")
+        )
+        if isinstance(existing_generated_at, str) and existing_generated_at.strip():
+            out["_existing_generated_at"] = existing_generated_at
         return out
     except Exception as exc:  # noqa: BLE001
         print(f"[weekly-insights] fetch existing commentary failed: {exc}", file=sys.stderr)
         return {}
+
+
+def _commentary_age_days(existing_generated_at: str | None, *, now: datetime) -> float | None:
+    """既存コメンタリーの生成時刻からの経過日数を返す。パース不可なら None
+    (= 年齢不明。呼び出し側は安全側に倒して carry-over を許可する)。"""
+    if not existing_generated_at:
+        return None
+    raw = existing_generated_at.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    delta = now.astimezone(timezone.utc) - dt.astimezone(timezone.utc)
+    return delta.total_seconds() / 86400.0
+
+
+def _notify_ops(message: str) -> None:
+    """OPS_NOTIFY_WEBHOOK_URL (Slack/Discord) へ best-effort で POST する。
+
+    未設定なら no-op。失敗しても例外は投げない (呼び出し元の処理を止めないため)。
+    scripts/score_forecasts.py の `_alert` と同じ規約 ({"text": message} を POST)。
+    """
+    url = (os.environ.get("OPS_NOTIFY_WEBHOOK_URL") or "").strip()
+    if not url:
+        print(f"[weekly-insights][alert] (OPS_NOTIFY_WEBHOOK_URL unset) {message}", file=sys.stderr)
+        return
+    try:
+        req = Request(
+            url,
+            data=json.dumps({"text": message}).encode("utf-8"),
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        with urlopen(req, timeout=15):
+            pass
+        print(f"[weekly-insights][alert] sent: {message}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[weekly-insights][alert] failed to send: {str(exc)[:200]}", file=sys.stderr)
 
 
 def _upsert_weekly_report_to_supabase(
@@ -526,10 +585,18 @@ def _build_day_hour_heatmap(points: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+WEEKLY_DAILY_SUMMARY_MAX_NIGHTS = 7
+
+
 def _build_daily_summary(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """直近 7 夜の日別サマリ。各「夜」は 19:00 〜 翌 04:59 を 1 日として集計。
 
     フロントの「先週はこんな感じだった」セクション用。
+
+    注意: 入力 `points` にはフェッチ元 API の `--limit` に応じて 7 夜を超える
+    夜が含まれ得る (実例: fukuoka 2026-07-03 で 9 夜分が混入していた)。
+    ここで直近 (日付が新しい方から) WEEKLY_DAILY_SUMMARY_MAX_NIGHTS 夜だけを
+    残すことで、docstring/フロント表記の「先週7夜」を実態と一致させる。
     """
     by_night: dict[Any, list[dict[str, float]]] = {}
     for p in points:
@@ -546,8 +613,11 @@ def _build_daily_summary(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
         fr = float(p.get("female_ratio") or 0.0)
         by_night.setdefault(night_date, []).append({"occ": occ, "fr": fr})
 
+    # 直近 N 夜だけを残す (日付が新しい方から N 件 → 昇順に戻す)
+    kept_nights = sorted(by_night.keys())[-WEEKLY_DAILY_SUMMARY_MAX_NIGHTS:]
+
     out: list[dict[str, Any]] = []
-    for d in sorted(by_night.keys()):
+    for d in kept_nights:
         rows = by_night[d]
         if not rows:
             continue
@@ -602,13 +672,21 @@ def _compute_metric_interpretations(
     period_start: datetime | None,
     period_end: datetime | None,
     baseline: float,
+    *,
+    period_days_override: int | None = None,
 ) -> dict[str, Any]:
     """既存メトリクスに「だから何?」の解釈を添える (Phase A)。
 
     フロントの数値カードに「平常」「やや少なめ」などのラベルを表示するための情報。
+
+    `period_days_override`: 呼び出し側が正確な日数 (例: daily_summary が保持した
+    夜の件数) を把握している場合に指定する。省略時は period_start/period_end の
+    差分から概算する (従来通り)。
     """
     days = 7
-    if period_start and period_end:
+    if period_days_override is not None:
+        days = max(1, period_days_override)
+    elif period_start and period_end:
         days = max(1, (period_end - period_start).days + 1)
 
     daily_avg = points_count / days if days > 0 else 0
@@ -1092,11 +1170,32 @@ def main() -> int:
         heatmap = _build_day_hour_heatmap(points)
         daily_summary = _build_daily_summary(points)
         next_week_recs = _derive_next_week_recommendations(heatmap)
+
+        # _build_daily_summary は直近 WEEKLY_DAILY_SUMMARY_MAX_NIGHTS 夜だけに切り詰める
+        # (fukuoka 2026-07-03 実例: フェッチ元の rows に 9 夜分混入していた)。
+        # レポート上部の「集計期間」表示や metric_interpretations の period_days が
+        # 生の取得ウィンドウ (最大 9 日超) のままだと、"先週7夜" と謳いながら表示される
+        # 期間だけ数日分ズレて見える。daily_summary が実際に保持した夜の範囲・件数に
+        # period を合わせ、両者を一致させる。
+        if daily_summary:
+            kept_dates = [d["date"] for d in daily_summary]
+            report_period_start = datetime.fromisoformat(min(kept_dates)).replace(tzinfo=JST_OFFSET)
+            # 最終夜の営業終了 (翌 04:59 相当) を期間終端として表示する
+            report_period_end = datetime.fromisoformat(max(kept_dates)).replace(
+                tzinfo=JST_OFFSET
+            ) + timedelta(days=1, hours=4, minutes=59)
+            report_period_days = len(daily_summary)
+        else:
+            report_period_start = period_start
+            report_period_end = period_end
+            report_period_days = None
+
         metrics_interp = _compute_metric_interpretations(
             points_count=len(points),
-            period_start=period_start,
-            period_end=period_end,
+            period_start=report_period_start,
+            period_end=report_period_end,
             baseline=baseline,
+            period_days_override=report_period_days,
         )
 
         payload = {
@@ -1104,7 +1203,10 @@ def main() -> int:
             "type": "weekly",
             "store": store,
             "generated_at": generated_at,
-            "period": {"start": _iso(period_start), "end": _iso(period_end)},
+            "period": {"start": _iso(report_period_start), "end": _iso(report_period_end)},
+            # フェッチ元 API から返った生データの実際の範囲 (デバッグ・監査用。
+            # 上の period はレポート表示/daily_summary と一致させた「表示用」の期間)。
+            "raw_fetch_period": {"start": _iso(period_start), "end": _iso(period_end)},
             "params": {
                 "threshold": threshold,
                 "min_duration_minutes": min_duration_minutes,
@@ -1162,16 +1264,41 @@ def main() -> int:
             if joined_parts:
                 payload["ai_commentary"] = "\n\n".join(joined_parts)
         else:
-            # 新規生成失敗 → 既存レコードから前回文を引き継ぐ (sync_to_supabase 時のみ意味あり)
+            # 新規生成失敗 → 既存レコードから前回文を引き継ぐ (sync_to_supabase 時のみ意味あり)。
+            # ただし引き継ぎには鮮度上限を設ける (WEEKLY_COMMENTARY_MAX_AGE_DAYS)。
+            # これが無いと、生成が恒常的に失敗し続ける店舗で「1年前の先週は〜」が
+            # 新しい target_date/period/heatmap と一緒に is_published=true のまま
+            # 延々と表示され続け、誰も気づかない致命的な陳腐化になる。
             if sync_to_supabase:
                 existing = _fetch_existing_weekly_commentary(store)
-                for k in ("last_week_summary", "next_week_forecast", "ai_commentary"):
-                    if existing.get(k):
-                        payload[k] = existing[k]
-                if existing:
+                existing_generated_at = existing.get("_existing_generated_at")
+                age_days = _commentary_age_days(existing_generated_at, now=now)
+                text_keys = ("last_week_summary", "next_week_forecast", "ai_commentary")
+                has_existing_text = any(existing.get(k) for k in text_keys)
+
+                if has_existing_text and age_days is not None and age_days > WEEKLY_COMMENTARY_MAX_AGE_DAYS:
+                    print(
+                        f"[weekly-insights] existing commentary for store={store} is stale "
+                        f"({age_days:.1f} days > {WEEKLY_COMMENTARY_MAX_AGE_DAYS}); "
+                        f"NOT carrying over, publishing without commentary (heatmap-only)",
+                        file=sys.stderr,
+                    )
+                    _notify_ops(
+                        f"[weekly-insights] store={store}: AI commentary generation failed/rejected "
+                        f"and the existing Supabase record is {age_days:.1f} days old "
+                        f"(> {WEEKLY_COMMENTARY_MAX_AGE_DAYS}d threshold). "
+                        f"Stale carry-over was SKIPPED; this week's report will publish "
+                        f"without last_week_summary/next_week_forecast. Investigate the "
+                        f"local Ollama/GHA Gemini pipeline for store={store}."
+                    )
+                elif has_existing_text:
+                    for k in text_keys:
+                        if existing.get(k):
+                            payload[k] = existing[k]
+                    age_label = f"{age_days:.1f}d" if age_days is not None else "unknown age"
                     print(
                         f"[weekly-insights] preserved existing commentary for store={store} "
-                        f"(keys={list(existing.keys())})",
+                        f"(keys={[k for k in text_keys if existing.get(k)]}, age={age_label})",
                         file=sys.stderr,
                     )
 

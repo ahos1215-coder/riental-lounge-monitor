@@ -1,0 +1,161 @@
+name: Check weekly reports published
+
+# 週次レポート (Windows タスクスケジューラ MEGRIBI-weekly, 毎週水曜 06:30 JST 実行、
+# scripts/generate_weekly_insights.py --stores all, INSIGHTS_LLM_BACKEND=ollama) が
+# ちゃんと公開されたかを GitHub 側から監視する。日次の check-daily-published.yml と
+# 同じ発想: ローカル PC が落ちている / Ollama が固まっている / タスクスケジューラが
+# 動かなかった場合、blog_drafts(content_type=weekly, is_published=true) の
+# 店舗数が基準を満たさない、または最終更新が古すぎることで検知する。
+# 失敗時はジョブが exit 1 する → GitHub が自動でオーナーにメール通知。
+# さらに OPS_NOTIFY_WEBHOOK_URL があれば Slack/Discord にも通知する。
+
+on:
+  schedule:
+    # 毎週木曜 08:00 JST（= 水曜 23:00 UTC）。水曜 06:30 JST 開始の週次生成が
+    # 44 店舗分終わっているのに十分な時間的余裕を見た翌朝。
+    - cron: "0 23 * * 3"
+  workflow_dispatch:
+    inputs:
+      min_stores:
+        description: "公開済みとみなす最低店舗数（既定38 / 全44店 + 余裕）"
+        required: false
+        default: "38"
+      max_staleness_days:
+        description: "最新更新がこれより古ければ失敗扱い（既定8日 = 先週水曜分が来ていない）"
+        required: false
+        default: "8"
+
+permissions:
+  contents: read
+
+jobs:
+  check-published:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      detail: ${{ steps.check.outputs.detail }}
+    steps:
+      - name: Query Supabase for latest weekly reports
+        id: check
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          MIN_STORES: ${{ github.event.inputs.min_stores || '38' }}
+          MAX_STALENESS_DAYS: ${{ github.event.inputs.max_staleness_days || '8' }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, urllib.request, urllib.parse
+          from datetime import datetime, timezone
+
+          url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+          key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or ""
+          if not url or not key:
+              print("::error::SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY secret 未設定")
+              sys.exit(1)
+
+          min_stores = int(os.environ.get("MIN_STORES") or "38")
+          max_staleness_days = float(os.environ.get("MAX_STALENESS_DAYS") or "8")
+
+          def fetch_rows():
+              # is_published=true かつ error_message が無い weekly レコードを
+              # store_slug, updated_at だけ取得する（全44店なので limit は余裕を持たせる）。
+              q = urllib.parse.urlencode({
+                  "content_type": "eq.weekly",
+                  "is_published": "eq.true",
+                  "error_message": "is.null",
+                  "select": "store_slug,updated_at",
+                  "order": "updated_at.desc",
+                  "limit": "200",
+              })
+              req = urllib.request.Request(
+                  f"{url}/rest/v1/blog_drafts?{q}",
+                  headers={"apikey": key, "Authorization": f"Bearer {key}"},
+              )
+              last_err = None
+              for _ in range(3):
+                  try:
+                      with urllib.request.urlopen(req, timeout=30) as r:
+                          return json.loads(r.read().decode("utf-8"))
+                  except Exception as e:
+                      last_err = e
+              print(f"::error::Supabase 照会に失敗: {last_err}")
+              sys.exit(1)
+
+          rows = fetch_rows()
+          if not isinstance(rows, list):
+              print(f"::error::予期しないレスポンス形式: {rows!r}")
+              sys.exit(1)
+
+          distinct_stores = {r.get("store_slug") for r in rows if r.get("store_slug")}
+          store_count = len(distinct_stores)
+
+          newest_updated_at = None
+          for r in rows:
+              raw = r.get("updated_at")
+              if not raw:
+                  continue
+              text = raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+              try:
+                  dt = datetime.fromisoformat(text)
+              except ValueError:
+                  continue
+              if dt.tzinfo is None:
+                  dt = dt.replace(tzinfo=timezone.utc)
+              if newest_updated_at is None or dt > newest_updated_at:
+                  newest_updated_at = dt
+
+          now = datetime.now(timezone.utc)
+          staleness_days = None
+          if newest_updated_at is not None:
+              staleness_days = (now - newest_updated_at).total_seconds() / 86400.0
+
+          lines = [f"週次レポート公開チェック（基準={min_stores}店舗以上, 鮮度基準={max_staleness_days}日以内）"]
+          lines.append(f"- 公開済み店舗数（distinct store_slug）: {store_count} 件")
+          if newest_updated_at is not None:
+              lines.append(
+                  f"- 最新更新: {newest_updated_at.isoformat()} "
+                  f"（{staleness_days:.1f} 日前）"
+              )
+          else:
+              lines.append("- 最新更新: 取得できませんでした（該当レコード無し）")
+
+          problems = []
+          if store_count < min_stores:
+              lines.append(f"  -> 不足！ ({store_count} < {min_stores})")
+              problems.append(f"store_count={store_count}<{min_stores}")
+          else:
+              lines.append("  -> OK")
+
+          if staleness_days is None:
+              lines.append("  -> 判定不能（更新日時が取得できません）")
+              problems.append("newest_updated_at unavailable")
+          elif staleness_days > max_staleness_days:
+              lines.append(f"  -> 陳腐化！ ({staleness_days:.1f} > {max_staleness_days} 日)")
+              problems.append(f"staleness_days={staleness_days:.1f}>{max_staleness_days}")
+          else:
+              lines.append("  -> OK")
+
+          detail = "\n".join(lines)
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write(detail + "\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write("detail<<EOF\n" + detail + "\nEOF\n")
+          print(detail)
+
+          if problems:
+              print(f"::error::週次レポートが未公開/不足/陳腐化の可能性があります: {', '.join(problems)}")
+              sys.exit(1)
+          print("OK: 週次レポートは基準を満たしています。")
+          PY
+
+  notify:
+    needs: [check-published]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "週次レポート未公開チェック"
+      custom_body: |
+        ⚠️ 週次レポートが公開されていない、または古い可能性があります（ローカル生成(MEGRIBI-weekly)の失敗 / PC停止 / Ollama不調）。
+        ${{ needs.check-published.outputs.detail }}
