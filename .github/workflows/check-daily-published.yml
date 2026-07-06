@@ -51,7 +51,13 @@ jobs:
 
           target = (os.environ.get("INPUT_DATE") or "").strip()
           if not target:
-              target = (datetime.now(timezone.utc) + timedelta(hours=9)).strftime("%Y-%m-%d")
+              # 対象は「JST のその日」の日次レポート。cron は 14:30 UTC(=23:30 JST) で、
+              # その瞬間は UTC 日付 == JST 日付。GitHub の cron 遅延は後ろにしかずれず、
+              # UTC 日付は翌 00:00 UTC(=09:00 JST) まで変わらないので、UTC 日付をそのまま
+              # 使えば深夜跨ぎの遅延でも「まだ生成前の翌日」を誤って対象にしない。
+              # (旧実装は UTC+9h だったため、15:00 UTC 以降に遅延実行されると日付が翌日へ
+              #  飛び、未生成の当日を 0 件と誤検知して誤アラートを出していた。2026-07-06 実測)
+              target = datetime.now(timezone.utc).strftime("%Y-%m-%d")
           floor = int(os.environ.get("MIN_PUBLISHED") or "30")
           editions = ["evening_preview", "late_update"]
 
