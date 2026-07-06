@@ -1,0 +1,133 @@
+name: Check collection heartbeat
+
+# 収集プロセス（multi_collect.py / /tasks/multi_collect）の生存監視。
+#
+# 背景: 全ての下流（forecast, ML学習, blog, weekly insights）は Supabase の
+# `logs` テーブルに依存しているが、収集自体を監視するものが無かった。収集が
+# 静かに止まっても、下流は「古いデータのまま」成功し続けてしまう。
+#
+# 収集は cron-job.org が /tasks/multi_collect を 5分毎にトリガーする
+# (plan/ARCHITECTURE.md: "cron-job.org が 5 分毎にトリガー")。
+# multi_collect.py / /tasks/multi_collect には営業時間ウィンドウのゲートが無く、
+# 24時間365日収集する想定（`/tasks/tick` という別の legacy エンドポイントには
+# WINDOW_START/WINDOW_END による時間帯ゲートがあるが、現行の収集経路である
+# /tasks/multi_collect はそれを使っていない）。そのため本チェックは
+# 時間帯を絞らず常時（24/7）実行する。
+#
+# 5分毎の収集に対して閾値を30分に設定: 1〜数回分のリトライ猶予を持たせつつ、
+# 実質的な停止（PCダウン・Renderコールドスタート長期化・cron-job.org 側の障害等）
+# を数十分以内に検知する。2時間毎にチェックすることで、閾値超過を見逃さない
+# （最悪でも stale から 2時間+30分 以内に検知）。
+#
+# 必要な Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+
+on:
+  schedule:
+    # 2時間毎（24/7）
+    - cron: "0 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      threshold_minutes:
+        description: "許容する最終収集からの経過分数（既定30分）"
+        required: false
+        default: "30"
+
+permissions:
+  contents: read
+
+jobs:
+  check-heartbeat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      detail: ${{ steps.check.outputs.detail }}
+    steps:
+      - name: Query Supabase for newest log timestamp
+        id: check
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          THRESHOLD_MINUTES: ${{ github.event.inputs.threshold_minutes || '30' }}
+        run: |
+          python3 - <<'PY'
+          import json, os, sys, urllib.request, urllib.parse
+          from datetime import datetime, timezone
+
+          url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+          key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or ""
+          if not url or not key:
+              print("::error::SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY secret 未設定")
+              sys.exit(1)
+
+          try:
+              threshold_minutes = int(os.environ.get("THRESHOLD_MINUTES") or "30")
+          except ValueError:
+              threshold_minutes = 30
+
+          q = urllib.parse.urlencode({
+              "select": "ts",
+              "order": "ts.desc",
+              "limit": "1",
+          })
+          req = urllib.request.Request(
+              f"{url}/rest/v1/logs?{q}",
+              headers={"apikey": key, "Authorization": f"Bearer {key}"},
+          )
+
+          last_err = None
+          rows = None
+          for _ in range(3):
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      rows = json.loads(r.read().decode())
+                      break
+              except Exception as e:
+                  last_err = e
+          if rows is None:
+              print(f"::error::Supabase 照会に失敗: {last_err}")
+              sys.exit(1)
+
+          if not rows:
+              detail = "logs テーブルが空です（収集が一度も成功していない可能性）。"
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+                  fh.write(detail + "\n")
+              with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+                  fh.write("detail<<EOF\n" + detail + "\nEOF\n")
+              print(f"::error::{detail}")
+              sys.exit(1)
+
+          newest_raw = rows[0]["ts"]
+          newest = datetime.fromisoformat(str(newest_raw).replace("Z", "+00:00"))
+          now = datetime.now(timezone.utc)
+          age_minutes = (now - newest).total_seconds() / 60.0
+
+          lines = [
+              f"収集ハートビートチェック（閾値={threshold_minutes}分）",
+              f"- 最新ログ ts: {newest_raw}",
+              f"- 現在時刻(UTC): {now.isoformat()}",
+              f"- 経過: {age_minutes:.1f} 分",
+          ]
+          detail = "\n".join(lines)
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write(detail + "\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              fh.write("detail<<EOF\n" + detail + "\nEOF\n")
+          print(detail)
+
+          if age_minutes > threshold_minutes:
+              print(f"::error::収集が {age_minutes:.1f} 分間停止しています（閾値 {threshold_minutes} 分）。")
+              sys.exit(1)
+          print("OK: 収集は正常に継続しています。")
+          PY
+
+  notify:
+    needs: [check-heartbeat]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "収集ハートビートチェック"
+      custom_body: |
+        ⚠️ 収集プロセス（/tasks/multi_collect）が長時間停止している可能性があります（PC停止 / Render障害 / cron-job.org障害など）。
+        ${{ needs.check-heartbeat.outputs.detail }}

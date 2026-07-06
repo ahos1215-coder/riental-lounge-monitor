@@ -58,7 +58,8 @@ class Cfg:
             train_limit=int(os.getenv("ML_TRAIN_LIMIT", "120000")),
             bucket=os.getenv("FORECAST_MODEL_BUCKET", "ml-models").strip(),
             prefix=os.getenv("FORECAST_MODEL_PREFIX", "forecast/latest").strip("/"),
-            schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v1").strip(),
+            # serving 側 (oriental/config.py) と揃える。現行スキーマは v7。
+            schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v7").strip(),
             cache_dir=Path(os.getenv("FORECAST_MODEL_CACHE_DIR", "data/ml_models")),
         )
 

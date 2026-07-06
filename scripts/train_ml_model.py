@@ -130,7 +130,12 @@ class TrainingConfig:
             supabase_service_key=supabase_service_key,
             bucket=os.getenv("FORECAST_MODEL_BUCKET", "ml-models").strip(),
             prefix=os.getenv("FORECAST_MODEL_PREFIX", "forecast/latest").strip().strip("/"),
-            schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v6").strip(),
+            # 意図的にデフォルト値を持たせない: serving 側 (oriental/config.py) は v7 を
+            # デフォルトにしているが、学習側でここが古いデフォルト(旧 v6)にずれると
+            # 「ローカルで直接実行 → 気づかず古いスキーマのモデルを upload」という事故になる
+            # (2026-07-06 発覚: ここが v6, config.py が v7 のまま長期間ずれていた)。
+            # 未設定なら空文字のままにし、validate() で明示的に SystemExit させる。
+            schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "").strip(),
             timezone=os.getenv("TIMEZONE", "Asia/Tokyo").strip(),
             train_days=_env_int("ML_TRAIN_DAYS", 180),
             # 120000 was ~180 days back when the table was small; the table has since
