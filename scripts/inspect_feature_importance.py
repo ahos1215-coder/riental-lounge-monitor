@@ -32,7 +32,8 @@ def main() -> int:
         model_prefix=os.getenv("FORECAST_MODEL_PREFIX", "forecast/latest").strip("/"),
         cache_dir=Path(os.getenv("FORECAST_MODEL_CACHE_DIR", "data/ml_models")),
         refresh_sec=300,
-        schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v1").strip(),
+        # serving 側 (oriental/config.py) と揃える。現行スキーマは v7。
+        schema_version=os.getenv("FORECAST_MODEL_SCHEMA_VERSION", "v7").strip(),
         logger=logging.getLogger("feature-importance"),
     )
     target_store = os.getenv("ML_TRAIN_STORE_ID", "").strip() or os.getenv("STORE_ID", "ol_nagasaki").strip()

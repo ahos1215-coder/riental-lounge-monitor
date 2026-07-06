@@ -2,8 +2,11 @@
 Supabase logs テーブルの容量管理スクリプト。
 
 2段階の防御:
-  1. ダウンサンプリング: 1年超のデータを 30分間隔に間引く
+  1. ダウンサンプリング: 1年超のデータを 30分間隔に間引く（先に実行し、余剰を間引いてから）
   2. 緊急削除: 行数上限（デフォルト300万行）を超えたら最古から削除
+     ただし ML 学習ウィンドウ（PROTECT_DAYS、既定200日 = train_ml_model.py の
+     ML_TRAIN_DAYS=180 + 余裕）より新しい行は「絶対に」削除しない。フロアを守れず
+     上限を切れない場合は、安全に消せる分だけ消して大声で警告する。
 
 Usage:
     python scripts/cleanup_old_logs.py                    # dry-run（確認のみ）
@@ -17,6 +20,10 @@ Usage:
     LOGS_DOWNSAMPLE_AFTER_DAYS    ダウンサンプリング対象（デフォルト 365日）
     LOGS_DOWNSAMPLE_MINUTES       間引き間隔（デフォルト 30分）
     LOGS_EMERGENCY_DELETE_BATCH   緊急削除のバッチサイズ（デフォルト 10000）
+    LOGS_PROTECT_DAYS             緊急削除で絶対に消さない直近日数
+                                   （デフォルト 200 = ML_TRAIN_DAYS(180) + 余裕20日。
+                                    train_ml_model.py 側の ML_TRAIN_DAYS を変更した場合は
+                                    こちらも合わせて見直すこと）
 """
 from __future__ import annotations
 
@@ -35,6 +42,10 @@ MAX_ROWS = int(os.getenv("LOGS_MAX_ROWS", "3000000"))
 DOWNSAMPLE_AFTER_DAYS = int(os.getenv("LOGS_DOWNSAMPLE_AFTER_DAYS", "365"))
 DOWNSAMPLE_MINUTES = int(os.getenv("LOGS_DOWNSAMPLE_MINUTES", "30"))
 EMERGENCY_DELETE_BATCH = int(os.getenv("LOGS_EMERGENCY_DELETE_BATCH", "10000"))
+# train_ml_model.py の ML_TRAIN_DAYS 既定値(180) + 20日の安全マージン。
+# train_ml_model.py は numpy/xgboost/lightgbm/optuna 等の重い依存を持つため、
+# ここでは import せず、独立した env 変数 + 定数フォールバックで意図を明示する。
+PROTECT_DAYS = int(os.getenv("LOGS_PROTECT_DAYS", "200"))
 
 
 def _headers() -> dict[str, str]:
@@ -96,6 +107,25 @@ def get_newest_ts() -> str | None:
     return rows[0]["ts"] if rows else None
 
 
+def get_protect_cutoff_iso(protect_days: int = PROTECT_DAYS) -> str:
+    """ML 学習ウィンドウ保護のカットオフ（この時刻以降の行は緊急削除で絶対に消さない）。"""
+    return (datetime.now(timezone.utc) - timedelta(days=protect_days)).isoformat()
+
+
+def get_row_count_before(cutoff_iso: str) -> int:
+    """cutoff より古い行数を取得（count=exact ヘッダー使用）。"""
+    url = f"{SUPABASE_URL}/rest/v1/logs?select=id&ts=lt.{cutoff_iso}&limit=1"
+    headers = {**_headers(), "Prefer": "count=exact"}
+    req = Request(url, headers=headers)
+    with urlopen(req, timeout=30) as resp:
+        cr = resp.headers.get("Content-Range", "")
+        if "/" in cr:
+            total = cr.split("/")[-1]
+            if total != "*":
+                return int(total)
+    return -1
+
+
 def find_downsample_candidates(cutoff_iso: str) -> list[dict]:
     """cutoff より古い行で、同じ store_id + 30分スロットに複数行あるものを検出。"""
     # Supabase REST API では複雑な GROUP BY が直接できないため、
@@ -148,26 +178,57 @@ def delete_by_ids(ids: list[str], dry_run: bool) -> int:
     return deleted
 
 
-def emergency_delete_oldest(current_count: int, max_rows: int, dry_run: bool) -> int:
-    """行数上限を超えている場合、最古から削除して上限の 95% まで減らす。"""
+def emergency_delete_oldest(
+    current_count: int,
+    max_rows: int,
+    dry_run: bool,
+    protect_cutoff_iso: str,
+    protected_count: int,
+) -> int:
+    """行数上限を超えている場合、最古から削除して上限の 95% まで減らす。
+
+    ただし ``protect_cutoff_iso`` より新しい行（ML 学習ウィンドウ内、既定で直近
+    PROTECT_DAYS 日）は絶対に削除しない。フロアを守ったままでは目標行数まで
+    減らせない場合は、安全に削除できる分だけ削除して大声で警告する
+    （例外は投げない＝cleanup 自体は成功させ、運用者に気づかせることを優先する）。
+    """
     target = int(max_rows * 0.95)  # 5% のバッファを確保
     excess = current_count - target
     if excess <= 0:
         return 0
 
+    # フロアを守れる最大削除可能数 = 「保護対象より古い行」の総数。
+    deletable_before_floor = max(0, current_count - protected_count)
+    safe_excess = min(excess, deletable_before_floor)
+
     print(f"  [emergency] {current_count} rows > {max_rows} limit")
-    print(f"  [emergency] deleting oldest {excess} rows (target: {target})")
+    print(f"  [emergency] deleting oldest {safe_excess} rows (target: {target})")
+    print(f"  [emergency] protect_cutoff={protect_cutoff_iso} (protected rows: {protected_count:,})")
+
+    if safe_excess < excess:
+        shortfall = excess - safe_excess
+        print(
+            f"  [emergency][WARNING] cannot reach target without deleting rows newer than "
+            f"protect_cutoff ({protect_cutoff_iso}). Would breach ML training window floor by "
+            f"{shortfall:,} rows - REFUSING to delete those rows. Row count will remain above "
+            f"the 95% target after this run. Investigate MAX_ROWS / PROTECT_DAYS or accept a "
+            f"temporarily higher row count."
+        )
+
+    if safe_excess <= 0:
+        return 0
 
     if dry_run:
-        return excess
+        return safe_excess
 
     total_deleted = 0
-    remaining = excess
+    remaining = safe_excess
     while remaining > 0:
         batch = min(remaining, EMERGENCY_DELETE_BATCH)
         rows = _rest_get("logs", {
             "select": "id",
             "order": "ts.asc",
+            "ts": f"lt.{protect_cutoff_iso}",
             "limit": str(batch),
         })
         if not rows:
@@ -176,7 +237,7 @@ def emergency_delete_oldest(current_count: int, max_rows: int, dry_run: bool) ->
         delete_by_ids(ids, dry_run=False)
         total_deleted += len(ids)
         remaining -= len(ids)
-        print(f"  [emergency] deleted batch: {len(ids)}, total: {total_deleted}/{excess}")
+        print(f"  [emergency] deleted batch: {len(ids)}, total: {total_deleted}/{safe_excess}")
     return total_deleted
 
 
@@ -198,6 +259,7 @@ def main():
     print(f"  max_rows: {args.max_rows:,}")
     print(f"  downsample_after: {DOWNSAMPLE_AFTER_DAYS} days")
     print(f"  downsample_interval: {DOWNSAMPLE_MINUTES} min")
+    print(f"  protect_days (ML window floor): {PROTECT_DAYS} days")
     print()
 
     # Step 1: 現在の状態
@@ -210,15 +272,8 @@ def main():
     print(f"  usage: {count / args.max_rows * 100:.1f}% of limit")
     print()
 
-    # Step 2: 緊急削除（行数上限超過時）
-    if count > args.max_rows:
-        deleted = emergency_delete_oldest(count, args.max_rows, dry_run)
-        action = "would delete" if dry_run else "deleted"
-        print(f"  [emergency] {action} {deleted:,} oldest rows")
-        count -= deleted
-        print()
-
-    # Step 3: ダウンサンプリング（1年超のデータ）
+    # Step 2: ダウンサンプリング（1年超のデータ）を先に実行し、緊急削除で
+    # ML 学習ウィンドウを食う前に古いデータの余剰を間引いておく。
     if not args.skip_downsample:
         cutoff = datetime.now(timezone.utc) - timedelta(days=DOWNSAMPLE_AFTER_DAYS)
         cutoff_iso = cutoff.isoformat()
@@ -231,9 +286,31 @@ def main():
                 ids = [c["id"] for c in candidates]
                 deleted = delete_by_ids(ids, dry_run=False)
                 print(f"  [downsample] deleted {deleted:,} rows")
+                count -= deleted
         else:
             print(f"  [downsample] no redundant rows found (already clean or not enough old data)")
     print()
+
+    # Step 3: 緊急削除（行数上限超過時）。ML 学習ウィンドウ（PROTECT_DAYS）より
+    # 新しい行は絶対に削除しない。
+    if count > args.max_rows:
+        protect_cutoff_iso = get_protect_cutoff_iso()
+        # cutoff より古い（= 削除対象になり得る）行数。取得失敗(-1)時は安全側に倒して 0 扱い
+        # （＝削除可能行数0 => 緊急削除は何もせず警告のみ、が最も安全）。
+        eligible_count = get_row_count_before(protect_cutoff_iso)
+        eligible_count = max(eligible_count, 0)
+        protected_count = max(count - eligible_count, 0)
+        deleted = emergency_delete_oldest(
+            count,
+            args.max_rows,
+            dry_run,
+            protect_cutoff_iso=protect_cutoff_iso,
+            protected_count=protected_count,
+        )
+        action = "would delete" if dry_run else "deleted"
+        print(f"  [emergency] {action} {deleted:,} oldest rows")
+        count -= deleted
+        print()
 
     # Step 4: 結果サマリ
     if not dry_run:

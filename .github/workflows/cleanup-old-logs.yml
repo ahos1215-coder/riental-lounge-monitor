@@ -2,6 +2,16 @@ name: Cleanup Old Logs
 
 # 毎週月曜 07:00 JST (UTC 日曜 22:00) に自動実行
 # 手動実行も可能（dry_run で確認してから execute）
+#
+# 安全装置: cleanup_old_logs.py --execute は破壊的（logs テーブルから実データを削除）。
+# backup-logs.yml（UTC 日曜 21:00 = JST 月曜 06:00、cleanup の1時間前）がその週の
+# バックアップを GitHub Release (logs-backup-YYYYMMDD) として作成する前提で動いているため、
+# その週のバックアップが存在しない状態で cleanup が --execute で走ると、
+# 「バックアップ失敗週に無防備で削除される」という致命的な穴になる。
+# そのため schedule トリガー時は、破壊的な実行の前に「今週のバックアップ Release」の
+# 存在を GitHub Releases API で確認し、無ければ --execute を止めて失敗させる
+# （notify-on-failure で運用者に通知）。workflow_dispatch の force=true で明示的に
+# バイパス可能（バックアップ機構自体のメンテなど、意図的にバイパスしたい運用向け）。
 on:
   workflow_dispatch:
     inputs:
@@ -17,6 +27,14 @@ on:
         description: "行数上限 (デフォルト: 3000000)"
         required: false
         default: "3000000"
+      force:
+        description: "今週のバックアップ確認をバイパスして強制実行する (通常は false のままにする)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
   schedule:
     # 毎週月曜 07:00 JST = UTC 日曜 22:00
     - cron: "0 22 * * 0"
@@ -25,7 +43,64 @@ permissions:
   contents: read
 
 jobs:
+  check-backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backup_ok: ${{ steps.check.outputs.backup_ok }}
+    steps:
+      - name: Verify this week's backup release exists
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          FORCE: ${{ github.event.inputs.force || 'false' }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$FORCE" = "true" ]; then
+            echo "force=true が指定されたため、バックアップ確認をバイパスします。"
+            echo "backup_ok=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # backup-logs.yml は STAMP="$(date -u +%Y%m%d)" 実行時刻(UTC 日曜 21:00)で
+          # タグ logs-backup-<STAMP> を作成する。cleanup は同じ UTC 日曜の 22:00 に走るため
+          # 通常は同一 UTC 日付になるが、GitHub Actions のスケジュール遅延を考慮して
+          # 当日 + 前日の2つのタグ候補を許容する（遅延で日付を跨いでも誤検知しないため）。
+          TODAY="$(date -u +%Y%m%d)"
+          YESTERDAY="$(date -u -d '1 day ago' +%Y%m%d)"
+
+          FOUND=""
+          for STAMP in "$TODAY" "$YESTERDAY"; do
+            TAG="logs-backup-${STAMP}"
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${REPO}/releases/tags/${TAG}")
+            echo "checked tag=${TAG} status=${STATUS}"
+            if [ "$STATUS" = "200" ]; then
+              FOUND="$TAG"
+              break
+            fi
+          done
+
+          if [ -n "$FOUND" ]; then
+            echo "今週のバックアップ Release を確認しました: $FOUND"
+            echo "backup_ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::今週のバックアップ Release (logs-backup-${TODAY} / logs-backup-${YESTERDAY}) が見つかりません。backup-logs.yml が失敗した可能性があります。安全のため destructive な cleanup をスキップします。"
+            echo "backup_ok=false" >> "$GITHUB_OUTPUT"
+            # workflow_dispatch (dry-run 確認目的等) では失敗させず後続 job 側で execute を止めるだけに留めるが、
+            # schedule トリガーではジョブを失敗させて notify-on-failure に伝播させる。
+            if [ "$EVENT_NAME" = "schedule" ]; then
+              exit 1
+            fi
+          fi
+
   cleanup:
+    needs: [check-backup]
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -42,7 +117,9 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           LOGS_MAX_ROWS: ${{ github.event.inputs.max_rows || '3000000' }}
+          BACKUP_OK: ${{ needs.check-backup.outputs.backup_ok }}
         run: |
+          set -euo pipefail
           EXECUTE_FLAG=""
           if [ "${{ github.event.inputs.execute || 'false' }}" = "true" ]; then
             EXECUTE_FLAG="--execute"
@@ -51,10 +128,16 @@ jobs:
           if [ "${{ github.event_name }}" = "schedule" ]; then
             EXECUTE_FLAG="--execute"
           fi
+
+          if [ -n "$EXECUTE_FLAG" ] && [ "$BACKUP_OK" != "true" ]; then
+            echo "::error::今週のバックアップが確認できないため、破壊的な cleanup (--execute) をスキップします。dry-run のみ実行します。"
+            EXECUTE_FLAG=""
+          fi
+
           python scripts/cleanup_old_logs.py $EXECUTE_FLAG --max-rows "$LOGS_MAX_ROWS"
 
   notify-on-failure:
-    needs: [cleanup]
+    needs: [check-backup, cleanup]
     if: failure()
     uses: ./.github/workflows/notify-on-failure.yml
     secrets: inherit

@@ -41,6 +41,11 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SELECT = "id,store_id,ts,men,women,total,weather_code,weather_label,temp_c,precip_mm,src_brand"
+# Row-count sanity check tolerance: allows for rows inserted by the live 5-min
+# collector during the dump window, without masking a real silent truncation
+# (the 2026-07-06 incident dumped 1000 of ~1.07M rows -- a ~99.9% shortfall,
+# far outside this tolerance).
+ROW_COUNT_TOLERANCE = 0.02  # 2%
 
 
 def _load_env() -> None:
@@ -76,6 +81,61 @@ def _get(endpoint: str, key: str, params: list[tuple[str, str]], retries: int = 
         if attempt < retries:
             time.sleep(2 * attempt)
     raise SystemExit(f"backup fetch failed after {retries} attempts: {last}")
+
+
+def _get_exact_row_count(endpoint: str, key: str, retries: int = 4) -> int:
+    """Ask PostgREST for the exact row count via Content-Range, without fetching rows.
+
+    Uses ``Prefer: count=exact`` + ``Range: 0-0`` so the server returns only the
+    count in the ``Content-Range: 0-0/<N>`` response header (cheap, no body payload
+    of consequence). This is the sanity check against a silent pagination bug like
+    the 2026-07-06 incident where the dump stopped after the first page (1,000
+    rows) out of ~1.07M and still exited 0.
+    """
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/json",
+        "Prefer": "count=exact",
+        "Range-Unit": "items",
+        "Range": "0-0",
+    }
+    query = endpoint + "?" + urllib.parse.urlencode([("select", "id"), ("limit", "1")])
+    last = ""
+    for attempt in range(1, retries + 1):
+        try:
+            req = urllib.request.Request(query, headers=headers)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                content_range = resp.headers.get("Content-Range", "")
+                # e.g. "0-0/1074907"
+                if "/" in content_range:
+                    tail = content_range.split("/")[-1]
+                    if tail != "*":
+                        return int(tail)
+                raise SystemExit(
+                    f"could not parse row count from Content-Range header: {content_range!r}"
+                )
+        except urllib.error.HTTPError as exc:
+            last = f"HTTP {exc.code}"
+            if exc.code < 500 and exc.code != 429:
+                raise SystemExit(f"row-count check failed: {last} {exc.read().decode()[:200]}")
+        except Exception as exc:  # noqa: BLE001
+            last = str(exc)[:120]
+        if attempt < retries:
+            time.sleep(2 * attempt)
+    raise SystemExit(f"row-count check failed after {retries} attempts: {last}")
+
+
+def check_row_count_sane(
+    total: int, db_count: int, tolerance: float = ROW_COUNT_TOLERANCE
+) -> tuple[bool, int]:
+    """Return ``(is_sane, min_acceptable)`` comparing the dumped row count against
+    the DB's actual exact count, within ``tolerance`` (fraction, e.g. 0.02 = 2%).
+
+    Pure function (no I/O) so it can be unit-tested without hitting Supabase.
+    """
+    min_acceptable = int((1 - tolerance) * db_count)
+    return total >= min_acceptable, min_acceptable
 
 
 def main() -> int:
@@ -130,7 +190,22 @@ def main() -> int:
     size = out.stat().st_size
     print(f"[backup] done: {total:,} rows -> {out} ({size / 1e6:.1f} MB) in {time.time() - t0:.0f}s")
     if total == 0:
-        raise SystemExit("backup wrote 0 rows — refusing to treat an empty dump as success")
+        raise SystemExit("backup wrote 0 rows -- refusing to treat an empty dump as success")
+
+    # Row-count sanity check: the 2026-07-06 incident (keyset pagination stopping
+    # after the first 1000-row page out of ~1.07M) exited 0 because the only guard
+    # was `total == 0`. Compare the dumped row count against the DB's actual exact
+    # count (cheap: Content-Range header only, no row payload).
+    db_count = _get_exact_row_count(endpoint, key)
+    is_sane, min_acceptable = check_row_count_sane(total, db_count)
+    print(f"[backup] verify: dumped={total:,} db_count={db_count:,} min_acceptable={min_acceptable:,}")
+    if not is_sane:
+        raise SystemExit(
+            f"backup row-count check failed: dumped {total:,} rows but Supabase reports "
+            f"{db_count:,} rows in logs (tolerance {ROW_COUNT_TOLERANCE:.0%}, min acceptable "
+            f"{min_acceptable:,}). This looks like a partial/truncated dump -- refusing to "
+            f"treat it as a successful backup. Not uploading."
+        )
     return 0
 
 
