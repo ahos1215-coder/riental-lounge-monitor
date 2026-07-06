@@ -82,7 +82,10 @@ def main() -> int:
     _load_env()
     ap = argparse.ArgumentParser(description="Full gzipped NDJSON backup of the Supabase logs table")
     ap.add_argument("--out", required=True, help="output path, e.g. logs-backup.ndjson.gz")
-    ap.add_argument("--page", type=int, default=50000, help="rows per request (default 50000)")
+    # PostgREST はサーバ側 db-max-rows(既定 1000)で応答行数を頭打ちにする。ページサイズを
+    # それより大きくしても 1000 行しか返らないため、1000 に合わせる(大きくしても無意味かつ
+    # 巨大クエリは statement timeout を招く)。終了判定はページ長ではなく空ページで行う(下記)。
+    ap.add_argument("--page", type=int, default=1000, help="rows per request (default 1000)")
     args = ap.parse_args()
 
     url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
@@ -116,7 +119,12 @@ def main() -> int:
             total += len(rows)
             cursor = rows[-1].get("id")
             print(f"[backup] {total:,} rows ...", flush=True)
-            if len(rows) < args.page or cursor is None:
+            # 終了は「空ページ」でのみ判定する(上の `if not rows: break`)。
+            # 旧実装は `len(rows) < args.page` でも打ち切っていたが、PostgREST の
+            # db-max-rows(1000)で page(旧既定50000)より少ない行数が返るため、
+            # 最初の1000行だけで最終ページと誤判定し、107万行中1000行しか
+            # バックアップしていなかった(2026-07-06 発覚)。keyset は空ページまで回す。
+            if cursor is None:
                 break
 
     size = out.stat().st_size
