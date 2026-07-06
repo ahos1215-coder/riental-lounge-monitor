@@ -1,7 +1,17 @@
 // Service Worker for めぐりび (MEGRIBI)
 // Strategy: Network-first for API, Cache-first for static assets
 
-const CACHE_NAME = "megribi-v1";
+// キャッシュ名にデプロイのバージョンを含める。
+// public/ 配下はビルドパイプラインを通らない静的ファイルなのでこのファイル自体は
+// デプロイ間で変化しないが、layout.tsx が
+// `register("/sw.js?v=<commit-sha-or-build-id>")` のようにクエリ付きURLで登録するため
+// (frontend/src/app/layout.tsx の SW_VERSION 参照)、ブラウザはデプロイごとに
+// 新しい登録URLとして SW を再インストールする。ここで self.location.search から
+// そのバージョンを読み取って CACHE_NAME に含めることで、旧デプロイのキャッシュ名と
+// 一致しなくなり、activate ハンドラの「CACHE_NAME 以外を削除」が確実に効くようになる。
+// クエリが無い（ローカル開発などで直接 /sw.js を登録した）場合は固定名にフォールバックする。
+const SW_VERSION = new URL(self.location.href).searchParams.get("v") || "dev";
+const CACHE_NAME = `megribi-v1-${SW_VERSION}`;
 const STATIC_ASSETS = ["/", "/stores", "/reports", "/mypage"];
 
 self.addEventListener("install", (event) => {

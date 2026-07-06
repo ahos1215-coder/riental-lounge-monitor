@@ -28,8 +28,11 @@ export type TimeSeriesPoint = {
  * - `ok`: 予測データを取得できた
  * - `retrying`: 予測が空だったため自動再試行中
  * - `unavailable`: 自動再試行の上限に達してもデータが取れなかった
+ * - `insufficient_history`: 店舗の履歴データがまだ無く、そもそも予測できない
+ *   （バックエンドが `insufficient_history:true` を返した場合。再試行しても状況は
+ *   変わらないため、retrying ループには入らずすぐにこの状態を出す）
  */
-export type ForecastStatus = "idle" | "ok" | "retrying" | "unavailable";
+export type ForecastStatus = "idle" | "ok" | "retrying" | "unavailable" | "insufficient_history";
 
 export type StoreSnapshot = {
   slug: string;
@@ -63,9 +66,10 @@ type RangePoint = {
 
 type ForecastPoint = {
   ts?: string;
-  men_pred?: number;
-  women_pred?: number;
-  total_pred?: number;
+  // 履歴データ不足の店舗ではバックエンドが null を返す（0.0 との区別のため）。
+  men_pred?: number | null;
+  women_pred?: number | null;
+  total_pred?: number | null;
 };
 
 type NightWindow = {
@@ -550,6 +554,23 @@ export function useStorePreviewData(
         // forecast が完了したら合流（range と並行で既にリクエスト済み）
         const forecastJson = await forecastPromise;
         if (!forecastJson || rangeMode !== "today") {
+          return;
+        }
+
+        // バックエンドが履歴データ不足を明示している場合（店舗の実測データがまだ無く、
+        // そもそも予測できない）。この場合は men_pred/women_pred/total_pred が全て null の
+        // ダミー行が返ってくるだけなので、再試行しても状況は変わらない。再試行ループには
+        // 入らず、即座に「データ準備中」状態にする（0人の平坦な予測ラインを描かない）。
+        const isInsufficientHistory = Boolean(
+          (forecastJson as { insufficient_history?: boolean })?.insufficient_history,
+        );
+        if (isInsufficientHistory) {
+          if (!cancelled) {
+            setState((prev) => ({
+              ...prev,
+              snapshot: { ...prev.snapshot, forecastStatus: "insufficient_history" },
+            }));
+          }
           return;
         }
 

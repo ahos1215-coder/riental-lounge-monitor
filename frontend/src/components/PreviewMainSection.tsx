@@ -261,6 +261,11 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
                 予測データを取得できませんでした。実測グラフのみ表示しています。
               </p>
             )}
+            {!loading && !error && snapshot.forecastStatus === "insufficient_history" && (
+              <p className="max-w-[16rem] text-[10px] text-amber-300">
+                データ準備中：履歴が少なく今夜の予測はまだ出せません。実測のみ表示しています。
+              </p>
+            )}
           </div>
         </div>
 

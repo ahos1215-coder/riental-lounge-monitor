@@ -213,9 +213,14 @@ export default function CompareClient() {
           const forecastRows: ForecastRow[] = Array.isArray(forecastData?.by_slug?.[slug]?.data)
             ? forecastData.by_slug[slug].data
             : [];
+          // total_pred が null の行（履歴データ不足で予測不能な店舗）は除外する。
+          // 0 埋めすると「今夜ずっと0人」の平坦な予測ラインとして誤表示されるため。
           const forecastPoints = forecastRows
-            .filter((r): r is ForecastRow & { ts: string } => Boolean(r.ts))
-            .map((r) => ({ ts: new Date(r.ts!).getTime(), total: toSeries(r.total_pred ?? 0) }));
+            .filter(
+              (r): r is ForecastRow & { ts: string; total_pred: number } =>
+                Boolean(r.ts) && typeof r.total_pred === "number",
+            )
+            .map((r) => ({ ts: new Date(r.ts).getTime(), total: toSeries(r.total_pred) }));
 
           const score = scoreMap.has(slug) ? (scoreMap.get(slug) as number) : null;
 

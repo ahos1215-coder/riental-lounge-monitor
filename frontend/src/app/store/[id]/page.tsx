@@ -91,6 +91,11 @@ export default async function StorePage({ params }: Props) {
           dangerouslySetInnerHTML={{ __html: jsonLd }}
         />
       )}
+      {meta && (
+        <h1 className="mx-auto w-full max-w-6xl px-4 pt-6 text-lg font-semibold text-slate-100 md:text-xl">
+          {buildStoreFullName(meta)}の混雑状況
+        </h1>
+      )}
       <StorePageClient />
     </>
   );

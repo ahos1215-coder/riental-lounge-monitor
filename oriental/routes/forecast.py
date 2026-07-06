@@ -130,7 +130,12 @@ def forecast_next_hour():
         "api_forecast.success store=%s points=%d", store, len(points)
     )
 
-    result = {"ok": True, "data": points, "reasoning": raw.get("reasoning", {})}
+    result = {
+        "ok": True,
+        "data": points,
+        "reasoning": raw.get("reasoning", {}),
+        "insufficient_history": bool(raw.get("insufficient_history", False)),
+    }
     _set_cached(cache_key, result)
     return jsonify(result)
 
@@ -166,7 +171,12 @@ def forecast_today():
         "api_forecast.success store=%s points=%d", store, len(points)
     )
 
-    result = {"ok": True, "data": points, "reasoning": raw.get("reasoning", {})}
+    result = {
+        "ok": True,
+        "data": points,
+        "reasoning": raw.get("reasoning", {}),
+        "insufficient_history": bool(raw.get("insufficient_history", False)),
+    }
     _set_cached(cache_key, result)
     return jsonify(result)
 
