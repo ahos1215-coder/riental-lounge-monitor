@@ -8,6 +8,17 @@ import { serializeJsonLd } from "@/lib/jsonLd";
 
 const base = getMetadataBaseUrl();
 
+// Service Worker のキャッシュを毎デプロイで確実に入れ替えるためのバージョン識別子。
+// public/sw.js はビルドパイプラインを通らない静的ファイルなのでファイル自体は変わらないが、
+// 登録URLにクエリを付ければブラウザは新しい SW として再インストールし、
+// activate ハンドラの古キャッシュ削除（sw.js 側で CACHE_NAME にこの値を含める）が効くようになる。
+// Vercel が自動設定する VERCEL_GIT_COMMIT_SHA を優先し、無ければビルド時刻でフォールバックする
+// （どちらもサーバー専用envで足りる。sw.js 登録スクリプトはビルド時にこの値で埋め込まれる）。
+const SW_VERSION =
+  process.env.VERCEL_GIT_COMMIT_SHA?.trim().slice(0, 12) ||
+  process.env.NEXT_PUBLIC_BUILD_ID?.trim() ||
+  String(Date.now());
+
 const siteJsonLd = serializeJsonLd([
   {
     "@context": "https://schema.org",
@@ -84,7 +95,7 @@ export default function RootLayout({
         </Suspense>
         <script
           dangerouslySetInnerHTML={{
-            __html: `if("serviceWorker"in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js")})}`,
+            __html: `if("serviceWorker"in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js?v=${SW_VERSION}")})}`,
           }}
         />
         <MeguribiHeader />

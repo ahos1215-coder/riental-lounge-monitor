@@ -124,8 +124,15 @@ class ForecastService:
             future_times = future_builder(df)
             self.logger.info("forecast.service.future size=%d", len(future_times))
 
-            if df.empty:
-                data = _zero_payload(future_times)
+            insufficient_history = df.empty
+            if insufficient_history:
+                # 履歴が無い店舗で men_pred/women_pred/total_pred を 0.0 で埋めると、
+                # フロントが「実際に0人と予測された」と区別できず「今夜ずっと0人」の
+                # 平坦な予測ラインとして表示してしまう(過去のバグ)。0.0 ではなく None
+                # (JSON では null) を返し、「予測不能」であることをそのまま伝える。
+                # future_times の形状(タイムスタンプ数・窓の開始/終了)は維持するため、
+                # forecast_today の夜間セッション境界ロジックのテストへの影響はない。
+                data = _null_payload(future_times)
                 reasoning = {"signals": {}, "notes": ["履歴データ不足のため根拠情報なし"]}
             else:
                 data = self._predict_with_history(df, future_times, store_id=store_id)
@@ -135,7 +142,14 @@ class ForecastService:
                 reasoning = self._build_reasoning(df, store_id=store_id)
             self.logger.info("forecast.service.predicted size=%d", len(data))
 
-            result = {"ok": True, "store": store_id, "freq_min": freq_min, "data": data, "reasoning": reasoning}
+            result = {
+                "ok": True,
+                "store": store_id,
+                "freq_min": freq_min,
+                "data": data,
+                "reasoning": reasoning,
+                "insufficient_history": insufficient_history,
+            }
             if extra_meta:
                 result.update(extra_meta)
             return result
@@ -361,9 +375,16 @@ def _future_range(start_dt, freq_min: int, periods: int, tz: str):
     return pd.date_range(start=start, periods=periods, freq=f"{freq_min}min", tz=tz)
 
 
-def _zero_payload(future_times):
+def _null_payload(future_times):
+    """履歴不足で予測できないスロット向けのペイロード。
+
+    men_pred/women_pred/total_pred を 0.0 ではなく None にすることで、
+    フロントエンドが「予測値0」と「予測不能（履歴データ不足）」を区別できるようにする。
+    ts の形状（件数・時刻）は future_times のまま維持するため、
+    forecast_today の夜間セッション境界（開始/終了時刻）を検証するテストには影響しない。
+    """
     return [
-        {"ts": ts.isoformat(), "men_pred": 0.0, "women_pred": 0.0, "total_pred": 0.0}
+        {"ts": ts.isoformat(), "men_pred": None, "women_pred": None, "total_pred": None}
         for ts in future_times
     ]
 

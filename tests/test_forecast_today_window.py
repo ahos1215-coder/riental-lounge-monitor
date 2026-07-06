@@ -25,7 +25,7 @@ TZ = "Asia/Tokyo"
 
 class _EmptyProvider:
     """履歴を返さないフェイクプロバイダ。forecast_today は履歴が空でも
-    _zero_payload 経由で future_times の形状をそのまま返すため、モデル
+    _null_payload 経由で future_times の形状をそのまま返すため、モデル
     レジストリなしで窓ロジックだけを検証できる。"""
 
     def __init__(self):
