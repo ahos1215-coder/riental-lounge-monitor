@@ -1,0 +1,153 @@
+# Vercel CDN warming for store APIs.
+#
+# 目的: Vercel の Edge/CDN キャッシュ（/api/range・/api/forecast_today に付いている
+# s-maxage/stale-while-revalidate）を定期的に温め続け、実訪問者がコールドキャッシュ
+# （〜1.8秒）ではなく温キャッシュ（〜50ms）を引くようにする。グラフ描画のクリティカル
+# パスに乗る2エンドポイントのみを対象にし、それ以外（重い/低価値なもの）は温めない。
+#
+# コスト試算（無料枠を前提に保守的に設計）:
+#   - 店舗数: 44（frontend/src/data/stores.json から動的取得。ハードコードしない）
+#   - 対象: /api/range?limit=240, /api/forecast_today （店舗あたり2本）
+#   - 実行間隔: 10分毎 → 24時間で 144回/日
+#   - リクエスト数: 44店舗 × 2本 × 144回/日 ≒ 12,672 リクエスト/日（≒ 38万/月）
+#     Vercel Hobby の Function Invocations 無料枠に対して十分小さい想定。
+#     ただし将来 Hobby の実際の枠に照らして超過が心配な場合は、下記チューニング欄を参照。
+#
+# バックエンド保護:
+#   - Render は gunicorn シングルワーカー1台のみ。44店舗を同時に叩くと自分自身で
+#     詰まらせてしまう（self-inflicted contention）ため、店舗ループに 0.3秒 の
+#     sleep を挟んで平準化する（サンダリングハードを避ける）。
+#   - 10分毎より高頻度にはしないこと（5分毎にすると Render 1台に対して
+#     44×2 リクエストのバーストが2倍の頻度で発生し、収集/予測など他のリクエストと
+#     衝突するリスクが上がる）。
+#
+# GitHub Actions の cron に関する注意:
+#   - `schedule` は「最短5分間隔」が目安とされ、GitHub 側の負荷状況によっては
+#     指定した時刻より遅延して実行される・場合によってはスキップされることがある
+#     （GitHub Actions の既知の制約）。本ワークフローは「定期的に温め続ければよい」
+#     性質のものなので、多少の遅延・欠番があっても実害は小さい設計にしている。
+#
+# チューニング方法:
+#   - 間隔を変える: 下の `cron: "*/10 * * * *"` を変更（10分未満にはしないこと）。
+#   - 対象を減らす: matrix ではなく単一ジョブの for ループなので、下の
+#     STORES 取得・ENDPOINTS 配列を編集するだけで調整できる。
+#   - 無効化する: このファイルを削除するか、`schedule:` セクションをコメントアウトし
+#     `workflow_dispatch` のみ残す（手動実行はいつでも可能なまま）。
+#
+# 必要な Secrets: なし（本番URLは公開URLのため secrets 化していない）。
+
+name: Warm CDN (store APIs)
+
+on:
+  # 【既定OFF】自動巡回は月38万リクエストの自己負荷になるため、オーナーの判断で
+  # 明示的に有効化する運用にしている。有効化するには下の schedule 2行のコメントを外す。
+  # まずは Phase A/B のキャッシュ改善の効果を本番で見てから判断すること。手動実行
+  # (workflow_dispatch) と全ロジックはこのままでも動く。
+  # schedule:
+  #   # 10分毎。5分未満にはしないこと（Render 単一ワーカーへの負荷配慮。上記コメント参照）。
+  #   - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "警告: 通常は変更不要。対象のベースURL（末尾スラッシュなし）"
+        required: false
+        default: "https://www.meguribi.jp"
+
+# 1回の実行が10分以上かかった場合に多重実行しないためのガード
+# （Render 単一ワーカーへの同時アクセスを増やさないため、前回の実行を待たずに
+# 新しい実行が来ても古い方をキャンセルし、常に高々1本だけが走る状態にする）。
+concurrency:
+  group: warm-cdn
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  warm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Warm range + forecast_today for each store
+        env:
+          BASE_URL: ${{ github.event.inputs.base_url || 'https://www.meguribi.jp' }}
+        run: |
+          set -euo pipefail
+          BASE="${BASE_URL%/}"
+          STORES_JSON="frontend/src/data/stores.json"
+
+          if [ ! -f "$STORES_JSON" ]; then
+            echo "::error::${STORES_JSON} が見つかりません。"
+            exit 1
+          fi
+
+          # 店舗スラッグは stores.json から動的に読む（ハードコードしない → 追加/削除に自動追従）。
+          mapfile -t SLUGS < <(jq -r '.[].slug' "$STORES_JSON")
+          TOTAL_STORES="${#SLUGS[@]}"
+          echo "対象店舗数: ${TOTAL_STORES}"
+
+          if [ "$TOTAL_STORES" -eq 0 ]; then
+            echo "::error::stores.json から店舗を1件も読み取れませんでした。"
+            exit 1
+          fi
+
+          OK_COUNT=0
+          FAIL_COUNT=0
+          FAILED_SLUGS=()
+
+          warm_one() {
+            local url="$1"
+            local label="$2"
+            # 失敗してもワークフロー全体は止めない（CDN warming はベストエフォート）。
+            # -o /dev/null: ボディは不要（キャッシュに乗ればよい）。--max-time で1本あたりの
+            # 詰まりを打ち切る（Render コールド起動想定で少し長め）。
+            local status
+            status="$(curl -s -o /dev/null -w '%{http_code}' \
+              --connect-timeout 10 \
+              --max-time 20 \
+              -H 'User-Agent: GitHub-Actions-warm-cdn' \
+              "$url" || echo "000")"
+            if [ "$status" = "200" ]; then
+              OK_COUNT=$((OK_COUNT + 1))
+            else
+              FAIL_COUNT=$((FAIL_COUNT + 1))
+              FAILED_SLUGS+=("${label}(${status})")
+            fi
+          }
+
+          for SLUG in "${SLUGS[@]}"; do
+            # クリティカルパスの2本のみ（重い/低価値なエンドポイントは温めない）。
+            warm_one "${BASE}/api/range?store=${SLUG}&limit=240" "${SLUG}:range"
+            warm_one "${BASE}/api/forecast_today?store=${SLUG}" "${SLUG}:forecast_today"
+            # Render 単一ワーカーへのサンダリングハードを避けるための平準化。
+            sleep 0.3
+          done
+
+          echo "OK=${OK_COUNT} FAIL=${FAIL_COUNT} (対象 ${TOTAL_STORES}店舗 × 2本 = $((TOTAL_STORES * 2)) リクエスト)"
+          {
+            echo "## CDN warming 結果"
+            echo "- 対象店舗数: ${TOTAL_STORES}"
+            echo "- 成功: ${OK_COUNT} / 失敗: ${FAIL_COUNT}"
+            if [ "${#FAILED_SLUGS[@]}" -gt 0 ]; then
+              echo "- 失敗内訳: ${FAILED_SLUGS[*]}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # 個別の失敗（一時的なコールドスタート等）はよくあるため許容するが、
+          # 大半（半数超）が失敗した場合はバックエンド自体の障害を疑い、ジョブを失敗させて通知する。
+          THRESHOLD=$((TOTAL_STORES))  # 2本/店舗 × 店舗数 の半数 = TOTAL_STORES
+          if [ "$FAIL_COUNT" -gt "$THRESHOLD" ]; then
+            echo "::error::失敗が過半数（${FAIL_COUNT}/$((TOTAL_STORES * 2))）。バックエンド障害の可能性があります。"
+            exit 1
+          fi
+
+  notify-on-failure:
+    needs: [warm]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "Warm CDN (store APIs)"
