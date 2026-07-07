@@ -44,8 +44,8 @@ function formatJstLabel(iso: string | undefined): string {
   return r === "-" ? "—" : r;
 }
 
-/** AIレポートは 18:00/21:30 (Daily) と毎週水曜 (Weekly) で更新 — 60s CDN + 5 分 stale */
-const CACHE_HEADER = "public, s-maxage=60, stale-while-revalidate=300";
+/** AIレポートは 1日2回更新 (18:00/21:30 Daily, 毎週水曜 Weekly) — 10分 CDN + 30分 stale */
+const CACHE_HEADER = "public, s-maxage=600, stale-while-revalidate=1800";
 
 export async function GET(req: Request) {
   const url = new URL(req.url);

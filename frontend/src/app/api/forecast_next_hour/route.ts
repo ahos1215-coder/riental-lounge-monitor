@@ -4,6 +4,9 @@ import { DEFAULT_STORE } from "../../config/stores";
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:5000";
 
+/** 予測モデルは15分ごとに再計算 → 5分CDNキャッシュ、15分stale-while-revalidate（forecast_today と同一方針） */
+const CACHE_HEADER = "public, s-maxage=300, stale-while-revalidate=900";
+
 type ErrorBody = {
   ok: false;
   error: string;
@@ -27,7 +30,7 @@ export async function GET(req: NextRequest) {
   )}`;
 
   try {
-    const backendRes = await fetch(apiUrl, { next: { revalidate: 0 } });
+    const backendRes = await fetch(apiUrl, { next: { revalidate: 300 } });
     const buf = await backendRes.arrayBuffer();
 
     const headers = new Headers();
@@ -35,6 +38,7 @@ export async function GET(req: NextRequest) {
     if (contentType) {
       headers.set("content-type", contentType);
     }
+    if (backendRes.ok) headers.set("cache-control", CACHE_HEADER);
 
     return new NextResponse(buf, {
       status: backendRes.status,

@@ -3,8 +3,8 @@ import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit/apiRateLimit";
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:5000";
 
-/** 実測データは5分おきに更新 → 60秒CDNキャッシュ、300秒stale-while-revalidate */
-const CACHE_HEADER = "public, s-maxage=60, stale-while-revalidate=300";
+/** 実測データは5分おきに更新 → 240秒CDNキャッシュ、300秒stale-while-revalidate（/api/range と同一方針） */
+const CACHE_HEADER = "public, s-maxage=240, stale-while-revalidate=300";
 
 export async function GET(req: NextRequest) {
   const rl = await rateLimit(req, "range_multi", 30);
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
     : `${base}/api/range_multi`;
 
   try {
-    const backendRes = await fetch(targetUrl, { next: { revalidate: 60 } });
+    const backendRes = await fetch(targetUrl, { next: { revalidate: 240 } });
     const buf = await backendRes.arrayBuffer();
 
     const headers = new Headers();

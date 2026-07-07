@@ -3,8 +3,8 @@ import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit/apiRateLimit";
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:5000";
 
-/** 1分CDNキャッシュ（forecast_today と同じTTL） */
-const CACHE_HEADER = "public, s-maxage=60, stale-while-revalidate=300";
+/** 予測モデルは15分ごとに再計算 → 5分CDNキャッシュ、15分stale-while-revalidate（forecast_today と同じTTL） */
+const CACHE_HEADER = "public, s-maxage=300, stale-while-revalidate=900";
 
 type ErrorBody = {
   ok: false;
@@ -22,7 +22,7 @@ export async function GET(req: NextRequest) {
   const apiUrl = `${base}/api/forecast_today_multi?stores=${encodeURIComponent(stores)}`;
 
   try {
-    const backendRes = await fetch(apiUrl, { next: { revalidate: 60 } });
+    const backendRes = await fetch(apiUrl, { next: { revalidate: 300 } });
     const buf = await backendRes.arrayBuffer();
 
     const headers = new Headers();
