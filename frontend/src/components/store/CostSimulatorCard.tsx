@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 
-import type { PricingTable } from "@/data/pricing/nagasaki";
+import type { PricingTable } from "@/data/pricing/types";
 import {
   computeStayCost,
   computeStayPlans,
@@ -31,10 +31,12 @@ function yen(n: number): string {
   return `¥${YEN.format(Math.max(0, Math.round(n)))}`;
 }
 
-/** 18:00〜翌05:30 の30分刻み選択肢 */
-function buildEntryTimeOptions(): { value: string; label: string }[] {
+/** 店舗の openTime〜closeTime(曜日タイプ別) を30分刻みで列挙する */
+function buildEntryTimeOptions(pricing: PricingTable, dayType: DayType): { value: string; label: string }[] {
   const options: { value: string; label: string }[] = [];
-  for (let m = timeToMinutes("18:00"); m <= timeToMinutes("29:30"); m += 30) {
+  const openMinutes = timeToMinutes(pricing.openTimeByDayType[dayType]);
+  const closeMinutes = timeToMinutes(pricing.closeTimeByDayType[dayType]);
+  for (let m = openMinutes; m < closeMinutes; m += 30) {
     const h = Math.floor(m / 60);
     const min = m % 60;
     const label = `${(h % 24).toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
@@ -43,23 +45,32 @@ function buildEntryTimeOptions(): { value: string; label: string }[] {
   return options;
 }
 
-/** entry+30分〜06:00 の30分刻み選択肢 */
-function buildExitTimeOptions(entryHHMM: string): { value: string; label: string }[] {
+/** entry+30分〜曜日タイプ別の実閉店時刻 を30分刻みで列挙する */
+function buildExitTimeOptions(
+  pricing: PricingTable,
+  dayType: DayType,
+  entryHHMM: string,
+): { value: string; label: string }[] {
   const entryMinutes = timeToMinutes(entryHHMM);
-  const closeMinutes = timeToMinutes("30:00");
+  const closeMinutes = timeToMinutes(pricing.closeTimeByDayType[dayType]);
+  const closeLabelHHMM = minutesToTimeLabel(closeMinutes);
   const options: { value: string; label: string }[] = [];
   for (let m = entryMinutes + 30; m <= closeMinutes; m += 30) {
     const h = Math.floor(m / 60);
     const min = m % 60;
-    const label = m === closeMinutes ? "06:00（Close）" : `${(h % 24).toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
+    const label =
+      m === closeMinutes
+        ? `${closeLabelHHMM}（Close）`
+        : `${(h % 24).toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`;
     options.push({ value: `${h.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`, label });
   }
   return options;
 }
 
-/** 入店時刻の次に単価が上がる境界（バンド）を返す */
-function nextPriceJump(pricing: PricingTable, entryMinutes: number) {
+/** 入店時刻の次に単価が上がる境界（バンド）を返す。曜日タイプで販売されていない(null)バンドはスキップする */
+function nextPriceJump(pricing: PricingTable, dayType: DayType, entryMinutes: number) {
   for (const band of pricing.bands) {
+    if (band[dayType] === null) continue;
     const start = timeToMinutes(band.start);
     if (start > entryMinutes) {
       return band;
@@ -138,9 +149,17 @@ function BreakdownTable({ result }: { result: CostResult }) {
 
 /** 自由計算（アコーディオン内）。曜日タイプはカード上部の共通トグルを使う */
 function FreeCalcSection({ pricing, dayType }: { pricing: PricingTable; dayType: DayType }) {
-  const entryOptions = useMemo(() => buildEntryTimeOptions(), []);
-  const [entryHHMM, setEntryHHMM] = useState("22:00");
-  const exitOptions = useMemo(() => buildExitTimeOptions(entryHHMM), [entryHHMM]);
+  const entryOptions = useMemo(() => buildEntryTimeOptions(pricing, dayType), [pricing, dayType]);
+  const [entryHHMM, setEntryHHMM] = useState(() => {
+    // 既定の22:00がその曜日タイプの選択肢に存在しない店舗（例: 開店が22時以降の
+    // 特殊なケースは無いが、念のため）は先頭の選択肢にフォールバックする
+    const opts = buildEntryTimeOptions(pricing, dayType);
+    return opts.some((o) => o.value === "22:00") ? "22:00" : opts[0]?.value ?? "22:00";
+  });
+  const exitOptions = useMemo(
+    () => buildExitTimeOptions(pricing, dayType, entryHHMM),
+    [pricing, dayType, entryHHMM],
+  );
   const [exitHHMM, setExitHHMM] = useState(() => exitOptions[3]?.value ?? exitOptions[0]?.value ?? "24:00");
   const [appCheckin, setAppCheckin] = useState(true);
   const [solo, setSolo] = useState(false);
@@ -169,7 +188,7 @@ function FreeCalcSection({ pricing, dayType }: { pricing: PricingTable; dayType:
             onChange={(e) => {
               const nextEntry = e.target.value;
               setEntryHHMM(nextEntry);
-              const nextExitOptions = buildExitTimeOptions(nextEntry);
+              const nextExitOptions = buildExitTimeOptions(pricing, dayType, nextEntry);
               if (!nextExitOptions.some((o) => o.value === exitHHMM)) {
                 setExitHHMM(nextExitOptions[3]?.value ?? nextExitOptions[0]?.value ?? nextEntry);
               }
@@ -208,7 +227,7 @@ function FreeCalcSection({ pricing, dayType }: { pricing: PricingTable; dayType:
             onChange={(e) => setAppCheckin(e.target.checked)}
             className="h-4 w-4 shrink-0 rounded border-white/20 bg-black/40"
           />
-          アプリチェックイン済み（チャージ¥550→無料）
+          アプリチェックイン済み（チャージ{yen(pricing.charges.entry)}→無料）
         </label>
         <label className="flex min-h-[44px] items-center gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-2.5 text-[12px] text-slate-300">
           <input
@@ -217,7 +236,7 @@ function FreeCalcSection({ pricing, dayType }: { pricing: PricingTable; dayType:
             onChange={(e) => setSolo(e.target.checked)}
             className="h-4 w-4 shrink-0 rounded border-white/20 bg-black/40"
           />
-          おひとり利用（シングルチャージ +¥1,100）
+          おひとり利用（シングルチャージ +{yen(pricing.charges.single)}）
         </label>
       </div>
 
@@ -253,10 +272,15 @@ export function CostSimulatorCard({ pricing, series, hasForecast }: Props) {
     [hasForecast, series, pricing, dayType],
   );
 
-  // コスト帯の起点: 目安が出ていればその時刻、無ければ22:00の例
+  // コスト帯の起点: 目安が出ていればその時刻、無ければ22:00（店舗の営業時間外なら開店時刻）の例
+  const exampleAnchorHHMM = (() => {
+    const openMin = timeToMinutes(pricing.openTimeByDayType[dayType]);
+    const candidate = normalizeStayMinutes("22:00", pricing.openTime);
+    return candidate >= openMin ? "22:00" : pricing.openTimeByDayType[dayType];
+  })();
   const anchorMinutes = recommendation
     ? recommendation.entryDisplayMinutes
-    : normalizeStayMinutes("22:00", pricing.openTime);
+    : normalizeStayMinutes(exampleAnchorHHMM, pricing.openTime);
   const anchorLabel = minutesToTimeLabel(anchorMinutes);
 
   const stayChips = useMemo(
@@ -267,7 +291,7 @@ export function CostSimulatorCard({ pricing, series, hasForecast }: Props) {
     [pricing, dayType, anchorMinutes],
   );
 
-  const jumpBand = nextPriceJump(pricing, anchorMinutes);
+  const jumpBand = nextPriceJump(pricing, dayType, anchorMinutes);
   const detectionLabel =
     detection.reason === "祝前日" ? `${detection.dowLabel}・祝前日` : detection.dowLabel;
 
@@ -319,7 +343,7 @@ export function CostSimulatorCard({ pricing, series, hasForecast }: Props) {
                 {recommendation.reasons.map((r) => (
                   <p key={r}>・{r}</p>
                 ))}
-                <p>・開店直後（19:30より前）と、終電後（24:00以降）の時間帯は対象外にしています。</p>
+                <p>・開店直後（90分以内）と、終電後（24:00以降）の時間帯は対象外にしています。</p>
                 <p>・入店後90分間の「女性の人数」と「女性比」の予測平均で比較しています。</p>
                 <p>・予測人数がとても少ない時間帯は除いています。</p>
               </div>
@@ -357,10 +381,15 @@ export function CostSimulatorCard({ pricing, series, hasForecast }: Props) {
             </div>
           ))}
         </div>
-        {jumpBand && (
+        {jumpBand && jumpBand[dayType] !== null && (
           <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-100/90">
-            {jumpBand.start} 以降は相席 10分 {yen(jumpBand[dayType])}
-            （{dayType === "weekday" ? `週末 ${yen(jumpBand.weekend)}` : `平日 ${yen(jumpBand.weekday)}`}）に上がります
+            {jumpBand.start} 以降は相席 10分 {yen(jumpBand[dayType] as number)}
+            {jumpBand.weekday !== null && jumpBand.weekend !== null && (
+              <>
+                （{dayType === "weekday" ? `週末 ${yen(jumpBand.weekend)}` : `平日 ${yen(jumpBand.weekday)}`}）
+              </>
+            )}
+            に上がります
           </p>
         )}
       </div>
@@ -377,6 +406,15 @@ export function CostSimulatorCard({ pricing, series, hasForecast }: Props) {
           <FreeCalcSection pricing={pricing} dayType={dayType} />
         </div>
       </details>
+
+      {/* ④ 店舗固有の注記（nagoya_ag の開店直後ギャップ補完など） */}
+      {pricing.assumptionNotes && pricing.assumptionNotes.length > 0 && (
+        <div className="mt-3 space-y-1 rounded-lg border border-white/[0.06] bg-black/20 px-2.5 py-2 text-[10px] leading-relaxed text-slate-500">
+          {pricing.assumptionNotes.map((note) => (
+            <p key={note}>※ {note}</p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

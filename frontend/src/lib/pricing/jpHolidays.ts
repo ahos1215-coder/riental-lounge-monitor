@@ -11,7 +11,7 @@
 // 年末年始・GW・お盆などの「特別期間の週末料金」は店舗ごとの運用で期間が明示されて
 // いないため、自動判定には含めない（UI側で「特別期間は手動で週末を選択」と案内する）。
 
-import type { DayType } from "@/data/pricing/nagasaki";
+import type { DayType } from "@/data/pricing/types";
 
 export const JP_HOLIDAYS_2026_2027: ReadonlySet<string> = new Set<string>([
   // ---- 2026年 ----

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { ORIENTAL_PRICING_REGISTRY } from "@/data/pricing/build";
 import { NAGASAKI_PRICING } from "@/data/pricing/nagasaki";
 import { recommendEntryTime, type ForecastSlotLike } from "./recommendEntryTime";
 
@@ -109,5 +110,75 @@ describe("recommendEntryTime", () => {
 
   it("returns null for an empty series", () => {
     expect(recommendEntryTime([], pricing)).toBeNull();
+  });
+});
+
+// ============================================================================
+// 全36店舗ロールアウト: openH が異なる店舗での候補ウィンドウのスケーリング検証
+// 「開店+90分より前を除外」ルールが店舗のopenTimeに正しく追従することを確認する。
+// ============================================================================
+
+describe("recommendEntryTime - candidate window scales with the store's openTime", () => {
+  it("18:00-open store (nagasaki): candidates never before 19:30 (=18:00+90min)", () => {
+    expect(pricing.openTime).toBe("18:00");
+    // 19:00にピークで急減する夜 → 除外境界の19:30に張り付くはず
+    const series = buildForecastSeries(
+      (m) => Math.max(0, 10 - (m - 19 * 60) / 20),
+      () => 6,
+    );
+    const rec = recommendEntryTime(series, pricing);
+    expect(rec).not.toBeNull();
+    expect(rec!.entryMinutes).toBeGreaterThanOrEqual(19 * 60 + 30);
+    expect(rec!.entryMinutes).toBe(19 * 60 + 30);
+  });
+
+  it("19:00-open store (namba): candidates never before 20:30 (=19:00+90min)", () => {
+    const namba = ORIENTAL_PRICING_REGISTRY.namba;
+    expect(namba.openTime).toBe("19:00");
+
+    // namba用の予測系列（19:00始まり、女性が19:00にピークして急減する夜）
+    const slots: ForecastSlotLike[] = [];
+    for (let m = 19 * 60; m <= 29 * 60; m += 15) {
+      const h = Math.floor(m / 60) % 24;
+      const min = m % 60;
+      const women = Math.max(0, 10 - (m - 19 * 60) / 20);
+      slots.push({
+        label: `${h.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`,
+        menActual: null,
+        womenActual: null,
+        menForecast: 6,
+        womenForecast: women,
+      });
+    }
+
+    const rec = recommendEntryTime(slots, namba);
+    expect(rec).not.toBeNull();
+    // 19:00+90分=20:30が下限。18:00基準のnagasakiと違い19:30ではなく20:30になることを確認
+    expect(rec!.entryMinutes).toBeGreaterThanOrEqual(20 * 60 + 30);
+    expect(rec!.entryMinutes).toBe(20 * 60 + 30);
+  });
+
+  it("17:00-open store (umeda_ag): candidates never before 18:30 (=17:00+90min)", () => {
+    const umedaAg = ORIENTAL_PRICING_REGISTRY.umeda_ag;
+    expect(umedaAg.openTime).toBe("17:00");
+
+    const slots: ForecastSlotLike[] = [];
+    for (let m = 17 * 60; m <= 29 * 60; m += 15) {
+      const h = Math.floor(m / 60) % 24;
+      const min = m % 60;
+      const women = Math.max(0, 10 - (m - 17 * 60) / 20);
+      slots.push({
+        label: `${h.toString().padStart(2, "0")}:${min.toString().padStart(2, "0")}`,
+        menActual: null,
+        womenActual: null,
+        menForecast: 6,
+        womenForecast: women,
+      });
+    }
+
+    const rec = recommendEntryTime(slots, umedaAg);
+    expect(rec).not.toBeNull();
+    expect(rec!.entryMinutes).toBeGreaterThanOrEqual(17 * 60 + 90);
+    expect(rec!.entryMinutes).toBe(17 * 60 + 90); // 18:30
   });
 });

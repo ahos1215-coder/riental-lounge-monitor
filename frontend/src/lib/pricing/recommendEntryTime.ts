@@ -1,18 +1,22 @@
 // frontend/src/lib/pricing/recommendEntryTime.ts
 //
-// 「今夜の入店の目安」ロジック（純粋関数・APIコールなし）。
+// 「今夜の入店の目安」ロジック（純粋関数・APIコールなし）。全36店舗の
+// PricingTable（openTimeが店舗ごとに異なる = 17:00/18:00/19:00など）に対応する。
 //
 // useStorePreviewData が既に取得しているタイムライン系列（実測+予測、約15分刻み）を
 // 入力として、男性視点で「何時ごろ入店すると良さそうか」の目安時刻を算出する。
 // 判定はすべて予測データの数値に基づき、UI側は「目安」として提示する（断定しない）。
 //
 // アルゴリズム上のメタ知見（オーナー要望に基づく除外ルール）:
-//   - 開店直後（19:30より前）は候補から除外する。開店直後に来店する女性は
-//     無料の飲食のみが目的である可能性があり、シグナルとして信頼しにくいため。
-//   - 24:00以降は候補から除外する。終電後で帰宅制約が強く、料金も最高価格帯
-//     （10分¥770/週末¥800）に入り、多くの店で人数も下り坂になるため。
+//   - 開店直後（開店+90分より前）は候補から除外する。開店直後に来店する女性は
+//     無料の飲食のみが目的である可能性があり、シグナルとして信頼しにくいため
+//     （長崎店プロトタイプ時代は openH=18 固定で「19:30より前」と表現していたが、
+//     全店舗対応にあたり openH+1.5h の相対表現に一般化した。店舗ごとの
+//     openTimeByDayType[dayType] を基準にする）。
+//   - 24:00以降は候補から除外する。終電後で帰宅制約が強く、料金も最高価格帯に入り、
+//     多くの店で人数も下り坂になるため（この境界は全店舗共通で24:00固定のまま）。
 
-import type { DayType, PricingTable } from "@/data/pricing/nagasaki";
+import type { DayType, PricingTable } from "@/data/pricing/types";
 import { minutesToTimeLabel, timeToMinutes, unitPriceAtMinute } from "./computeCost";
 
 /** useStorePreviewData の TimeSeriesPoint と構造互換の最小型（labelは "HH:MM"） */
@@ -53,9 +57,9 @@ export type EntryRecommendation = {
 
 // ---- 調整用定数（名前付き。変更時はコメントの根拠も更新すること） ----
 
-/** 候補の下限 19:30。開店直後の女性はただ飯目的の可能性（オーナーのメタ知見）→除外 */
-const CANDIDATE_START_MIN = 19 * 60 + 30;
-/** 候補の上限 24:00（含まない）。終電後・最高価格帯・多くの店で下り坂→除外 */
+/** 候補の下限を開店から何分後にするか。開店直後の女性はただ飯目的の可能性（オーナーのメタ知見）→除外 */
+const CANDIDATE_START_OFFSET_MIN = 90;
+/** 候補の上限 24:00（含まない）。終電後・最高価格帯・多くの店で下り坂→除外。全店舗共通で固定 */
 const CANDIDATE_END_MIN = 24 * 60;
 /** 入店後の評価ウィンドウ（典型的な滞在の見込み時間） */
 const WINDOW_MIN = 90;
@@ -71,8 +75,8 @@ const RATIO_MIDPOINT = 0.5;
 const RATIO_CAP = 1.15;
 /** 女性が増加中の候補へのボーナス（同数なら「増えている最中」の入店が有利） */
 const MOMENTUM_BONUS = 1.05;
-/** 20:30より前のソフトペナルティ。宵の口の女性数はシグナルとして弱い（ただ飯根拠の延長） */
-const EARLY_CAUTION_BEFORE_MIN = 20 * 60 + 30;
+/** 候補下限から何分間をソフトペナルティ対象にするか。宵の口の女性数はシグナルとして弱い（ただ飯根拠の延長） */
+const EARLY_CAUTION_WINDOW_MIN = 60;
 const EARLY_CAUTION_FACTOR = 0.8;
 /** タイブレーク対象（ベストスコアに対する比率） */
 const TIEBREAK_RATIO = 0.95;
@@ -85,7 +89,7 @@ type ParsedSlot = {
   men: number;
 };
 
-/** "HH:MM" ラベルを openTime(18:00) 基準の分に正規化（朝方は翌日側 24:00〜） */
+/** "HH:MM" ラベルを openTime 基準の分に正規化（朝方は翌日側 24:00〜） */
 function slotMinuteFromLabel(label: string, openMinutes: number): number | null {
   const m = /^(\d{1,2}):(\d{2})$/.exec(label.trim());
   if (!m) return null;
@@ -128,7 +132,9 @@ export function recommendEntryTime(
   opts: RecommendOptions = {},
 ): EntryRecommendation | null {
   const dayType: DayType = opts.dayType ?? "weekday";
-  const openMinutes = timeToMinutes(pricing.openTime);
+  const openMinutes = timeToMinutes(pricing.openTimeByDayType[dayType]);
+  const candidateStartMin = openMinutes + CANDIDATE_START_OFFSET_MIN;
+  const earlyCautionBeforeMin = candidateStartMin + EARLY_CAUTION_WINDOW_MIN;
 
   // 予測が1点も無い夜（実測のみ/データなし）は目安を出さない
   const hasAnyForecast = series.some(
@@ -167,7 +173,7 @@ export function recommendEntryTime(
   const candidates: Candidate[] = [];
   for (const slot of slots) {
     const t = slot.minute;
-    if (t < CANDIDATE_START_MIN || t >= CANDIDATE_END_MIN) continue;
+    if (t < candidateStartMin || t >= CANDIDATE_END_MIN) continue;
 
     const windowSlots = slots.filter((s) => s.minute >= t && s.minute < t + WINDOW_MIN);
     if (windowSlots.length === 0) continue;
@@ -187,7 +193,7 @@ export function recommendEntryTime(
     } else {
       const ratioFactor = clamp(ratio / RATIO_MIDPOINT, 0, RATIO_CAP);
       const momentumBonus = rising ? MOMENTUM_BONUS : 1.0;
-      const earlyCaution = t < EARLY_CAUTION_BEFORE_MIN ? EARLY_CAUTION_FACTOR : 1.0;
+      const earlyCaution = t < earlyCautionBeforeMin ? EARLY_CAUTION_FACTOR : 1.0;
       score = womenAvg * ratioFactor * momentumBonus * earlyCaution;
     }
 
