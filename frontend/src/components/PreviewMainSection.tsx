@@ -22,11 +22,13 @@ import SecondVenuesList from "./SecondVenuesList";
 import { StoreRealtimeStatusCard } from "./store/StoreRealtimeStatusCard";
 import { LatestForecastSummaryCard } from "./store/LatestForecastSummaryCard";
 import { LongHolidayBanner } from "./store/LongHolidayBanner";
+import { CostSimulatorCard } from "./store/CostSimulatorCard";
 import type {
   PreviewRangeMode,
   StoreSnapshot,
 } from "../app/hooks/useStorePreviewData";
 import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
+import { getStorePricing } from "@/lib/pricing";
 
 const cardClass = "rounded-3xl border border-slate-800 bg-slate-950/80";
 
@@ -223,6 +225,11 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
     el.focus();
     el.showPicker?.();
   };
+
+  // 料金シミュレーターは対応データがある店舗のみ表示（オリエンタルラウンジ36店舗対応）。
+  // 「今夜の入店の目安」は today モードで予測が取得できている時だけ算出する。
+  const pricing = getStorePricing(storeSlug);
+  const hasForecastForSim = activeRangeMode === "today" && snapshot.forecastStatus === "ok";
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-5">
@@ -454,6 +461,17 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
         <LongHolidayBanner />
         <LatestForecastSummaryCard storeSlug={storeSlug} snapshot={snapshot} />
       </section>
+
+      {/* ③ 料金の目安 — 対応データがある店舗のみ（プロトタイプ: 長崎店） */}
+      {pricing && (
+        <section className="space-y-3">
+          <CostSimulatorCard
+            pricing={pricing}
+            series={snapshot.series}
+            hasForecast={hasForecastForSim}
+          />
+        </section>
+      )}
 
       {/* ④ フィードバック・二次会（下位） */}
       <section className={`${cardClass} p-3 text-xs`}>
