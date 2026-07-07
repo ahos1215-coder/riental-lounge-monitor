@@ -84,6 +84,12 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="めぐりび" />
+        {/* GA (gtag.js) は afterInteractive で別ホストから読み込まれるため、早期に名前解決/接続しておく。
+            同一オリジンの /api はプリコネクト不要。 */}
+        <link rel="preconnect" href="https://www.googletagmanager.com" crossOrigin="" />
+        <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
+        <link rel="preconnect" href="https://www.google-analytics.com" crossOrigin="" />
+        <link rel="dns-prefetch" href="https://www.google-analytics.com" />
       </head>
       <body className="bg-black">
         <script
