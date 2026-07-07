@@ -17,8 +17,6 @@ export type StoreMeta = {
   /** 店舗の緯度・経度（公式サイトの地図から取得）。おすすめ店舗の距離判定に使う。 */
   lat: number | null;
   lon: number | null;
-  /** ブランド公式サイトの店舗ページ URL（stores.json の `url`）。無ければ null。 */
-  officialUrl: string | null;
 };
 
 /** 2地点間の距離(km)。ハバサイン公式。おすすめ店舗の「近い順」に使う。 */
@@ -65,16 +63,6 @@ export function seatFullnessPercent(
   return Math.max(0, Math.min(100, pct));
 }
 
-/** 店舗の Google マップ検索 URL（mapsQueryBase を検索クエリに使う）。 */
-export function buildStoreMapsUrl(meta: {
-  mapsQueryBase: string;
-  areaLabel: string;
-  label: string;
-}): string {
-  const query = meta.mapsQueryBase || meta.areaLabel || meta.label;
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
-}
-
 /** ブランドの表示ラベル (StoreCard 等で使用) */
 export const BRAND_DISPLAY_LABEL: Record<BrandId, string> = {
   oriental: "ORIENTAL LOUNGE",
@@ -109,10 +97,6 @@ export const STORES: StoreMeta[] = rawStores.map((s) => {
         : null,
     lat: typeof (s as { lat?: number }).lat === "number" ? (s as { lat: number }).lat : null,
     lon: typeof (s as { lon?: number }).lon === "number" ? (s as { lon: number }).lon : null,
-    officialUrl:
-      typeof (s as { url?: string }).url === "string" && (s as { url: string }).url
-        ? (s as { url: string }).url
-        : null,
   };
 });
 
