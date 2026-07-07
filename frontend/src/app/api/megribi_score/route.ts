@@ -3,7 +3,8 @@ import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit/apiRateLimit";
 
 const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:5000";
 
-const CACHE_HEADER = "public, s-maxage=120, stale-while-revalidate=600";
+/** スコアは実測データ(5分毎更新)から算出 → 180秒CDNキャッシュ、600秒stale-while-revalidate */
+const CACHE_HEADER = "public, s-maxage=180, stale-while-revalidate=600";
 
 export async function GET(req: NextRequest) {
   const rl = await rateLimit(req, "megribi_score", 30);
@@ -15,7 +16,7 @@ export async function GET(req: NextRequest) {
     : `${base}/api/megribi_score`;
 
   try {
-    const backendRes = await fetch(targetUrl, { next: { revalidate: 120 } });
+    const backendRes = await fetch(targetUrl, { next: { revalidate: 180 } });
     const buf = await backendRes.arrayBuffer();
 
     const headers = new Headers();

@@ -3,6 +3,9 @@
 import { NextResponse } from "next/server";
 import { fetchLatestPublishedReportByStore, isBlogDraftsConfigured } from "@/lib/supabase/blogDrafts";
 
+/** AIレポートは 1日2回更新 (18:00/21:30) — 10分 CDN + 30分 stale（reports/store-summary と同一方針） */
+const CACHE_HEADER = "public, s-maxage=600, stale-while-revalidate=1800";
+
 function normalizeStoreSlug(v: string | null): string {
   return (v ?? "").trim().toLowerCase();
 }
@@ -79,11 +82,19 @@ export async function GET(req: Request) {
   if (!store) return NextResponse.json({ ok: false, error: "store is required" }, { status: 400 });
 
   if (!isBlogDraftsConfigured()) {
-    return NextResponse.json({ ok: true, hasData: false }, { status: 200 });
+    return NextResponse.json(
+      { ok: true, hasData: false },
+      { status: 200, headers: { "cache-control": CACHE_HEADER } },
+    );
   }
 
   const row = await fetchLatestPublishedReportByStore(store, "daily");
-  if (!row) return NextResponse.json({ ok: true, hasData: false }, { status: 200 });
+  if (!row) {
+    return NextResponse.json(
+      { ok: true, hasData: false },
+      { status: 200, headers: { "cache-control": CACHE_HEADER } },
+    );
+  }
 
   const href = `/reports/daily/${encodeURIComponent(row.store_slug)}`;
   const title = `今日の傾向まとめ`;
@@ -101,7 +112,7 @@ export async function GET(req: Request) {
     },
     {
       status: 200,
-      headers: { "cache-control": "public, s-maxage=60, stale-while-revalidate=300" },
+      headers: { "cache-control": CACHE_HEADER },
     },
   );
 }

@@ -23,47 +23,12 @@ const nextConfig: NextConfig = {
     ];
   },
   async headers() {
-    return [
-      {
-        // 実測データ: 60秒CDNキャッシュ
-        source: "/api/range",
-        headers: [
-          { key: "Cache-Control", value: "public, s-maxage=60, stale-while-revalidate=300" },
-        ],
-      },
-      {
-        source: "/api/range_multi",
-        headers: [
-          { key: "Cache-Control", value: "public, s-maxage=60, stale-while-revalidate=300" },
-        ],
-      },
-      {
-        // 予測データ: 1分CDNキャッシュ（Flask側キャッシュと合わせて最大2分で更新）
-        source: "/api/forecast_today",
-        headers: [
-          { key: "Cache-Control", value: "public, s-maxage=60, stale-while-revalidate=300" },
-        ],
-      },
-      {
-        source: "/api/forecast_next_hour",
-        headers: [
-          { key: "Cache-Control", value: "public, s-maxage=60, stale-while-revalidate=300" },
-        ],
-      },
-      {
-        source: "/api/megribi_score",
-        headers: [
-          { key: "Cache-Control", value: "public, s-maxage=120, stale-while-revalidate=600" },
-        ],
-      },
-      {
-        // AIレポート: 10分CDNキャッシュ（18:00/21:30のみ更新）
-        source: "/api/reports/:path*",
-        headers: [
-          { key: "Cache-Control", value: "public, s-maxage=600, stale-while-revalidate=1800" },
-        ],
-      },
-    ];
+    // APIのCache-Controlは各 route.ts の CACHE_HEADER に一元化(二重定義解消 2026-07)。
+    // 以前はここで /api/* の Cache-Control を上書きしており、各 route.ts が設定した
+    // 値と競合して常に next.config 側が勝っていた（route.ts の意図が握りつぶされる）。
+    // 今後 /api 配下にキャッシュ関連の非Cache-Controlヘッダーが必要になった場合のみ、
+    // ここに source ごとのエントリを追加する。
+    return [];
   },
 };
 

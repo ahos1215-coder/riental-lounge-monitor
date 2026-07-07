@@ -111,7 +111,7 @@ def api_range():
                 len(limited),
                 query.limit,
             )
-            return jsonify({"ok": True, "rows": limited})
+            return jsonify({"ok": True, "rows": _trim_range_rows(limited)})
 
     if query.start and query.end:
         rows = list(storage.rows_in_range(cfg, start=query.start, end=query.end))
@@ -148,7 +148,7 @@ def api_range():
         len(limited),
         query.limit,
     )
-    return jsonify({"ok": True, "rows": limited})
+    return jsonify({"ok": True, "rows": _trim_range_rows(limited)})
 
 
 def _parse_multi_store_slugs(raw: str, *, max_stores: int) -> list[str]:
@@ -238,7 +238,7 @@ def api_range_multi():
             return slug, {"ok": False, "error": str(exc), "rows": []}
         deduped = _deduplicate_by_ts(supabase_rows)
         limited = deduped[-query.limit :]
-        return slug, {"rows": limited}
+        return slug, {"rows": _trim_range_rows(limited)}
 
     by_slug: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=min(12, len(slugs))) as pool:
@@ -394,6 +394,27 @@ def _parse_range_query(cfg: AppConfig) -> RangeQuery:
 
     limit = max(1, min(limit, cfg.max_range_limit))
     return RangeQuery(start=start, end=end, limit=limit)
+
+
+# /api/range 系はポーリング頻度が高く、フロントは ts/men/women/total しか使わない
+# （useStorePreviewData 等の全消費側で確認済み・詳細は 2026-07 の perf 監査参照）。
+# weather_label/src_brand は表示に使われず、store_id は行ごとに重複しても意味がない
+# ため、HTTPレスポンス直前にここで落としてペイロードを削減する。
+# 注意: provider.fetch_range() の select 自体（weather_code/temp_c/precip_mm を含む）
+# は ML 前処理 (ml/preprocess.py) が消費する get_records() 経由の呼び出しとも共有して
+# いるため変更しない。ここでのトリムはこのモジュール内のHTTPレスポンス生成箇所のみに
+# 適用され、ML学習パスには一切影響しない。
+_RANGE_ROW_FIELDS_TO_DROP = ("weather_label", "src_brand", "store_id")
+
+
+def _trim_range_row(row: dict) -> dict:
+    if not any(f in row for f in _RANGE_ROW_FIELDS_TO_DROP):
+        return row
+    return {k: v for k, v in row.items() if k not in _RANGE_ROW_FIELDS_TO_DROP}
+
+
+def _trim_range_rows(rows: list[dict]) -> list[dict]:
+    return [_trim_range_row(r) for r in rows]
 
 
 def _deduplicate_by_ts(rows: list[dict]) -> list[dict]:
