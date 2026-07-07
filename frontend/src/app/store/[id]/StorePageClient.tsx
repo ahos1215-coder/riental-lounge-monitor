@@ -21,6 +21,7 @@ import {
 } from "@/lib/storeCardRangeSparkline";
 import { ForecastAccuracyCard } from "@/components/ForecastAccuracyCard";
 import { BRAND_DISPLAY_LABEL, DEFAULT_STORE, STORES, STORE_REGION_FILTER_ORDER, distanceKm, getStoreMetaBySlug, getStoreMetaBySlugStrict } from "../../config/stores";
+import type { StoreSnapshot } from "../../hooks/useStorePreviewData";
 
 type ReportSummaryItem = {
   bullets: string[];
@@ -69,7 +70,7 @@ function StorePageFallback() {
   );
 }
 
-function StorePageInner() {
+function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | null }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const params = useParams();
@@ -258,7 +259,7 @@ function StorePageInner() {
 
   return (
     <div className="space-y-8">
-      <MeguribiDashboardPreview headerActions={favoriteButton} />
+      <MeguribiDashboardPreview headerActions={favoriteButton} initialSnapshot={initialSnapshot} pathSlug={slug} />
 
       {/* AI レポート要約セクション（Weekly Report のみ） */}
       {hasWeeklyReport && (
@@ -342,10 +343,19 @@ function StorePageInner() {
   );
 }
 
-export default function StorePageClient() {
+type StorePageClientProps = {
+  /**
+   * サーバー（page.tsx）で取得済みの初回スナップショット。today モード・現在の店舗と
+   * 一致する場合のみ useStorePreviewData 側で採用され、グラフ/数値がハイドレーション直後に
+   * 即座に表示される。取得失敗/タイムアウト時は null（=今まで通りの CSR フォールバック）。
+   */
+  initialSnapshot?: StoreSnapshot | null;
+};
+
+export default function StorePageClient({ initialSnapshot = null }: StorePageClientProps) {
   return (
     <Suspense fallback={<StorePageFallback />}>
-      <StorePageInner />
+      <StorePageInner initialSnapshot={initialSnapshot} />
     </Suspense>
   );
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import {
   Area,
   CartesianGrid,
@@ -224,9 +224,6 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
     el.showPicker?.();
   };
 
-  const [isClient, setIsClient] = useState(false);
-  useEffect(() => setIsClient(true), []);
-
   return (
     <div className="flex w-full min-w-0 flex-col gap-5">
       {/* ① 今どうなの？ — 統合リアルタイム */}
@@ -292,115 +289,115 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
           </div>
 
           <div className="mt-3 h-72 w-full min-w-0 rounded-2xl bg-gradient-to-b from-slate-950 via-black to-black p-3">
-            {isClient && (
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart
-                  data={chartData}
-                  margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 10, fill: "#9ca3af" }}
-                    stroke="#4b5563"
-                    minTickGap={22}
-                    interval="preserveStartEnd"
-                  />
-                  <YAxis
-                    tick={{ fontSize: 10, fill: "#9ca3af" }}
-                    stroke="#4b5563"
-                    allowDecimals={false}
-                    domain={percentMode ? [0, 100] : undefined}
-                    unit={percentMode ? "%" : undefined}
-                  />
-                  <Tooltip content={<TimelineTooltip unit={percentMode ? "%" : "人"} />} />
-                  <Legend content={<TimelineLegend />} />
+            {/* PreviewMainSection 自体が dynamic(ssr:false) の対象なので、この時点で常にクライアント側。
+                以前あった isClient ゲートは冗長で、マウント後1フレーム余計にチャート描画を遅らせていた。 */}
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart
+                data={chartData}
+                margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fontSize: 10, fill: "#9ca3af" }}
+                  stroke="#4b5563"
+                  minTickGap={22}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: "#9ca3af" }}
+                  stroke="#4b5563"
+                  allowDecimals={false}
+                  domain={percentMode ? [0, 100] : undefined}
+                  unit={percentMode ? "%" : undefined}
+                />
+                <Tooltip content={<TimelineTooltip unit={percentMode ? "%" : "人"} />} />
+                <Legend content={<TimelineLegend />} />
 
-                  {forecastStartLabel && forecastEndLabel && (
-                    <ReferenceArea
-                      x1={forecastStartLabel}
-                      x2={forecastEndLabel}
-                      fill="#334155"
-                      fillOpacity={0.14}
-                      ifOverflow="extendDomain"
-                    />
-                  )}
-                  {currentLabel && (
-                    <ReferenceLine
-                      x={currentLabel}
-                      stroke="#94a3b8"
-                      strokeDasharray="3 3"
-                      strokeOpacity={0.8}
-                      label={{
-                        value: "現在",
-                        position: "top",
-                        fill: "#94a3b8",
-                        fontSize: 10,
-                      }}
-                    />
-                  )}
+                {forecastStartLabel && forecastEndLabel && (
+                  <ReferenceArea
+                    x1={forecastStartLabel}
+                    x2={forecastEndLabel}
+                    fill="#334155"
+                    fillOpacity={0.14}
+                    ifOverflow="extendDomain"
+                  />
+                )}
+                {currentLabel && (
+                  <ReferenceLine
+                    x={currentLabel}
+                    stroke="#94a3b8"
+                    strokeDasharray="3 3"
+                    strokeOpacity={0.8}
+                    label={{
+                      value: "現在",
+                      position: "top",
+                      fill: "#94a3b8",
+                      fontSize: 10,
+                    }}
+                  />
+                )}
 
-                  <Area
-                    type="monotone"
-                    dataKey="menActual"
-                    stroke="none"
-                    fill="#38bdf8"
-                    fillOpacity={0.24}
-                    connectNulls
-                    legendType="none"
-                  />
-                  <Area
-                    type="monotone"
-                    dataKey="womenActual"
-                    stroke="none"
-                    fill="#f472b6"
-                    fillOpacity={0.24}
-                    connectNulls
-                    legendType="none"
-                  />
+                <Area
+                  type="monotone"
+                  dataKey="menActual"
+                  stroke="none"
+                  fill="#38bdf8"
+                  fillOpacity={0.24}
+                  connectNulls
+                  legendType="none"
+                />
+                <Area
+                  type="monotone"
+                  dataKey="womenActual"
+                  stroke="none"
+                  fill="#f472b6"
+                  fillOpacity={0.24}
+                  connectNulls
+                  legendType="none"
+                />
 
-                  <Line
-                    type="monotone"
-                    dataKey="menActual"
-                    name="男性：実測"
-                    stroke="#38bdf8"
-                    strokeWidth={2}
-                    dot={false}
-                    connectNulls
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="womenActual"
-                    name="女性：実測"
-                    stroke="#f472b6"
-                    strokeWidth={2}
-                    dot={false}
-                    connectNulls
-                  />
+                <Line
+                  type="monotone"
+                  dataKey="menActual"
+                  name="男性：実測"
+                  stroke="#38bdf8"
+                  strokeWidth={2}
+                  dot={false}
+                  connectNulls
+                />
+                <Line
+                  type="monotone"
+                  dataKey="womenActual"
+                  name="女性：実測"
+                  stroke="#f472b6"
+                  strokeWidth={2}
+                  dot={false}
+                  connectNulls
+                />
 
-                  <Line
-                    type="monotone"
-                    dataKey="menForecast"
-                    name="男性：予測"
-                    stroke="#38bdf8"
-                    strokeWidth={2.5}
-                    dot={false}
-                    strokeDasharray="5 4"
-                    connectNulls
-                  />
-                  <Line
-                    type="monotone"
-                    dataKey="womenForecast"
-                    name="女性：予測"
-                    stroke="#f472b6"
-                    strokeWidth={2.5}
-                    dot={false}
-                    strokeDasharray="5 4"
-                    connectNulls
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            )}
+                <Line
+                  type="monotone"
+                  dataKey="menForecast"
+                  name="男性：予測"
+                  stroke="#38bdf8"
+                  strokeWidth={2.5}
+                  dot={false}
+                  strokeDasharray="5 4"
+                  connectNulls
+                />
+                <Line
+                  type="monotone"
+                  dataKey="womenForecast"
+                  name="女性：予測"
+                  stroke="#f472b6"
+                  strokeWidth={2.5}
+                  dot={false}
+                  strokeDasharray="5 4"
+                  connectNulls
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
           </div>
         </div>
 
