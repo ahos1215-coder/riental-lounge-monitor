@@ -22,11 +22,13 @@ import SecondVenuesList from "./SecondVenuesList";
 import { StoreRealtimeStatusCard } from "./store/StoreRealtimeStatusCard";
 import { LatestForecastSummaryCard } from "./store/LatestForecastSummaryCard";
 import { LongHolidayBanner } from "./store/LongHolidayBanner";
+import { CostSimulatorCard } from "./store/CostSimulatorCard";
 import type {
   PreviewRangeMode,
   StoreSnapshot,
 } from "../app/hooks/useStorePreviewData";
 import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
+import { getStorePricing } from "@/lib/pricing";
 
 const cardClass = "rounded-3xl border border-slate-800 bg-slate-950/80";
 
@@ -226,6 +228,11 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
 
   const [isClient, setIsClient] = useState(false);
   useEffect(() => setIsClient(true), []);
+
+  // 料金シミュレーターは対応データがある店舗のみ表示（現状は長崎店のみのプロトタイプ）。
+  const pricing = getStorePricing(storeSlug);
+  const peakTimeLabel = snapshot.peakTimeLabel && snapshot.peakTimeLabel !== "--:--" ? snapshot.peakTimeLabel : null;
+  const hasForecastPeak = hasData && !!peakTimeLabel;
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-5">
@@ -457,6 +464,17 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
         <LongHolidayBanner />
         <LatestForecastSummaryCard storeSlug={storeSlug} snapshot={snapshot} />
       </section>
+
+      {/* ③ 料金の目安 — 対応データがある店舗のみ（プロトタイプ: 長崎店） */}
+      {pricing && (
+        <section className="space-y-3">
+          <CostSimulatorCard
+            pricing={pricing}
+            peakTimeLabel={peakTimeLabel}
+            hasForecast={hasForecastPeak}
+          />
+        </section>
+      )}
 
       {/* ④ フィードバック・二次会（下位） */}
       <section className={`${cardClass} p-3 text-xs`}>
