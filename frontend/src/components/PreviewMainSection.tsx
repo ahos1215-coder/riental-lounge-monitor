@@ -22,14 +22,11 @@ import SecondVenuesList from "./SecondVenuesList";
 import { StoreRealtimeStatusCard } from "./store/StoreRealtimeStatusCard";
 import { LatestForecastSummaryCard } from "./store/LatestForecastSummaryCard";
 import { LongHolidayBanner } from "./store/LongHolidayBanner";
-import { TonightVerdictCard } from "./store/TonightVerdictCard";
-import { ArrivalForecastChip } from "./store/ArrivalForecastChip";
-import { GoThereActionRow } from "./store/GoThereActionRow";
 import type {
   PreviewRangeMode,
   StoreSnapshot,
 } from "../app/hooks/useStorePreviewData";
-import { getStoreMetaBySlug, isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
+import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
 
 const cardClass = "rounded-3xl border border-slate-800 bg-slate-950/80";
 
@@ -187,8 +184,6 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
   const hasData = snapshot.hasData;
   const activeRangeMode = rangeMode ?? "today";
   const canControlRange = typeof onChangeRangeMode === "function";
-  // 地図リンク・公式サイトリンク用に店舗メタ（mapsQueryBase/officialUrl）を取得。
-  const storeMeta = getStoreMetaBySlug(storeSlug);
 
   // 相席屋は在店人数を公開しておらず「席の埋まり具合(%)」表示なので、タイムラインも
   // 人数ではなく % に変換して描画する（見出しの数値と整合させる）。
@@ -273,29 +268,6 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
             )}
           </div>
         </div>
-
-        {loading ? (
-          <div className="h-40 w-full animate-pulse rounded-3xl bg-slate-900/70" />
-        ) : (
-          <>
-            <TonightVerdictCard storeSlug={storeSlug} snapshot={snapshot} />
-            <div className="flex flex-wrap items-center gap-2">
-              <ArrivalForecastChip
-                storeSlug={storeSlug}
-                brand={snapshot.brand}
-                capacity={snapshot.capacity}
-              />
-            </div>
-            <GoThereActionRow
-              storeSlug={storeSlug}
-              storeLabel={storeMeta.label}
-              areaLabel={storeMeta.areaLabel}
-              mapsQueryBase={storeMeta.mapsQueryBase}
-              brand={storeMeta.brand}
-              officialUrl={storeMeta.officialUrl}
-            />
-          </>
-        )}
 
         <StoreRealtimeStatusCard snapshot={snapshot} loading={!!loading} />
       </section>
@@ -448,8 +420,7 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
                         if (opt.id === "custom") openDatePicker();
                       }}
                       className={[
-                        // 見た目のピル(px-3 py-1)はそのまま、min-h-11 でタップ領域だけ44pxに広げる
-                        "flex min-h-11 items-center justify-center rounded-full border px-3 py-1 text-[11px] font-semibold transition",
+                        "rounded-full border px-3 py-1 text-[11px] font-semibold transition",
                         active
                           ? "border-amber-300/80 bg-amber-400/10 text-amber-100"
                           : "border-slate-700 bg-slate-950 text-slate-200 hover:border-slate-500",

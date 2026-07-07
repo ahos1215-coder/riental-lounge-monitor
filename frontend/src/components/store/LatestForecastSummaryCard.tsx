@@ -20,6 +20,7 @@ function mlHighlightChips(snapshot: StoreSnapshot): string[] {
   const total = Math.max(0, Math.round(Number(snapshot.nowTotal ?? 0)));
   const peakTime = snapshot.peakTimeLabel?.trim() || "";
   const updated = snapshot.forecastUpdatedLabel?.trim() || "";
+  const rec = snapshot.recommendation?.trim() || "";
 
   const chips: string[] = [];
   if (peak > 0 && peakTime && peakTime !== "—") {
@@ -50,11 +51,15 @@ function mlHighlightChips(snapshot: StoreSnapshot): string[] {
     const deltaPct = Math.max(0, peakPct - nowPct);
     if (deltaPct > 0) {
       chips.push(`ピークまで あと約${deltaPct}%`);
+    } else if (rec && rec !== "データなし" && rec !== "データ取得済み") {
+      chips.push(`おすすめ度 ${rec}`);
     }
   } else {
     const delta = peak > 0 ? Math.max(0, peak - total) : 0;
     if (delta > 0) {
       chips.push(`ピークまで あと約${delta}人`);
+    } else if (rec && rec !== "データなし" && rec !== "データ取得済み") {
+      chips.push(`おすすめ度 ${rec}`);
     }
   }
   return chips.slice(0, 3);
@@ -111,7 +116,7 @@ export function LatestForecastSummaryCard({
   if (!p || (!p.ok && "error" in p)) {
     return (
       <section className="rounded-2xl border border-white/5 bg-white/[0.02] px-4 py-3">
-        <p className="text-[11px] text-white/50">
+        <p className="text-[11px] text-white/30">
           予測レポートを取得できませんでした。しばらくすると自動的に更新されます。
         </p>
       </section>

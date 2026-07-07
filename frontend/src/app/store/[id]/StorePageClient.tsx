@@ -245,7 +245,7 @@ function StorePageInner() {
         setFavorite(next);
         sendEvent(next ? "favorite_add" : "favorite_remove", { store_slug: slug });
       }}
-      className="flex min-h-11 items-center justify-center rounded-full border border-amber-400/35 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-100 transition hover:border-amber-300/60 hover:bg-amber-500/20"
+      className="rounded-full border border-amber-400/35 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-100 transition hover:border-amber-300/60 hover:bg-amber-500/20"
       aria-pressed={favorite}
       aria-label={favorite ? "お気に入りから外す" : "お気に入りに追加"}
     >
@@ -272,7 +272,7 @@ function StorePageInner() {
                   <span className="inline-flex items-center rounded-md bg-amber-500/20 px-2 py-0.5 text-[11px] font-bold text-amber-200">
                     Weekly Report
                   </span>
-                  <span className="text-[11px] text-white/60">{reportSummary.weekly.updatedAt} 更新</span>
+                  <span className="text-[11px] text-white/40">{reportSummary.weekly.updatedAt} 更新</span>
                 </div>
                 {reportSummary.weekly.heading && (
                   <p className="mt-2 text-sm font-bold leading-snug text-white line-clamp-2">
