@@ -41,10 +41,10 @@ describe("normalizeStayMinutes", () => {
 });
 
 describe("computeStayCost - weekday 2h from 22:00", () => {
-  // 公式サイト実測値: 22:00〜24:00 バンドは平日¥660/10分（発注時の共有表は¥550だったが
+  // 公式サイト実測値: 22:00〜24:00 バンドは相席 平日¥660/10分（発注時の共有表は¥550だったが
   // 生HTML確認の結果ズレがあり、公式サイトの実測値を正としている。詳細は
   // frontend/src/data/pricing/nagasaki.ts の先頭コメント参照）。
-  it("charges 12 units x ¥660 = ¥7920 for men, no charges toggles", () => {
+  it("max = 12 units x ¥660, min = 12 units x ¥220, both + entry charge", () => {
     const entry = minutesFor("22:00");
     const exit = minutesFor("24:00");
     const result = computeStayCost(pricing, "weekday", entry, exit, {
@@ -52,6 +52,7 @@ describe("computeStayCost - weekday 2h from 22:00", () => {
       solo: false,
     });
 
+    expect(result.totalUnits).toBe(12);
     expect(result.unitsBreakdown).toHaveLength(1);
     expect(result.unitsBreakdown[0].units).toBe(12);
     expect(result.unitsBreakdown[0].unitPrice).toBe(660);
@@ -60,7 +61,9 @@ describe("computeStayCost - weekday 2h from 22:00", () => {
 
     // charges: entry charge applies since appCheckin=false
     expect(result.charges).toEqual([{ label: "チャージ", amount: 550 }]);
-    expect(result.total).toBe(7920 + 550);
+    // 上限=ずっと相席 / 下限=相席なし(12×¥220)。チャージは両方に乗る
+    expect(result.maxTotal).toBe(7920 + 550);
+    expect(result.minTotal).toBe(12 * 220 + 550);
   });
 });
 
@@ -92,7 +95,9 @@ describe("computeStayCost - span crossing 24:00 mixes band prices", () => {
     expect(result.charges).toEqual([
       { label: "チャージ（アプリチェックインで無料）", amount: 0 },
     ]);
-    expect(result.total).toBe(3960 + 4620);
+    expect(result.maxTotal).toBe(3960 + 4620);
+    // 下限は時間帯に関係なく全12ユニット×¥220（相席なし単価は深夜も同額）
+    expect(result.minTotal).toBe(12 * 220);
   });
 });
 
@@ -107,7 +112,9 @@ describe("computeStayCost - weekend rates", () => {
     expect(result.unitsBreakdown).toHaveLength(1);
     expect(result.unitsBreakdown[0].unitPrice).toBe(600);
     expect(result.unitsBreakdown[0].units).toBe(12);
-    expect(result.total).toBe(600 * 12);
+    expect(result.maxTotal).toBe(600 * 12);
+    // 相席なし単価(¥220)は平日・週末同額なので下限は曜日タイプに依存しない
+    expect(result.minTotal).toBe(12 * 220);
   });
 });
 
@@ -126,17 +133,32 @@ describe("computeStayCost - charges", () => {
     // 18:00-19:00 = 6 units @ 440 (Open〜20:00 band)
     expect(result.unitsBreakdown[0].unitPrice).toBe(440);
     expect(result.unitsBreakdown[0].units).toBe(6);
-    expect(result.total).toBe(440 * 6 + 550 + 1100);
+    // チャージ類は上限・下限の両方に同額で乗る
+    expect(result.maxTotal).toBe(440 * 6 + 550 + 1100);
+    expect(result.minTotal).toBe(220 * 6 + 550 + 1100);
   });
 
-  it("rounds up partial units (25 minutes = 3 units)", () => {
+  it("rounds up partial units (25 minutes = 3 units) for both bounds", () => {
     const entry = minutesFor("18:00");
     const exit = entry + 25;
     const result = computeStayCost(pricing, "weekday", entry, exit, {
       appCheckin: true,
       solo: false,
     });
+    expect(result.totalUnits).toBe(3);
     expect(result.unitsBreakdown[0].units).toBe(3);
+    expect(result.minTotal).toBe(3 * 220);
+  });
+
+  it("min bound: 2h stay = 12 x ¥220 + charges", () => {
+    const entry = minutesFor("21:00");
+    const exit = minutesFor("23:00");
+    const result = computeStayCost(pricing, "weekday", entry, exit, {
+      appCheckin: false,
+      solo: true,
+    });
+    expect(result.minTotal).toBe(12 * 220 + 550 + 1100);
+    expect(result.minTotal).toBeLessThan(result.maxTotal);
   });
 });
 
@@ -181,9 +203,10 @@ describe("computeStayPlans", () => {
     });
     const labels = plans.map((p) => p.label);
     expect(labels).toEqual(["1時間", "2時間", "3時間", "クローズまで"]);
-    // totals should be non-decreasing as duration grows
+    // totals should be non-decreasing as duration grows (both bounds)
     for (let i = 1; i < plans.length; i += 1) {
-      expect(plans[i].result.total).toBeGreaterThanOrEqual(plans[i - 1].result.total);
+      expect(plans[i].result.maxTotal).toBeGreaterThanOrEqual(plans[i - 1].result.maxTotal);
+      expect(plans[i].result.minTotal).toBeGreaterThanOrEqual(plans[i - 1].result.minTotal);
     }
   });
 

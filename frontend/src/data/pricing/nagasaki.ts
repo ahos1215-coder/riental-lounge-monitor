@@ -8,6 +8,20 @@
 // `.dl-table-inner` の DOM 構造（<dt>ラベル</dt> と対応する <dd><span>¥xxx</span></dd>）を
 // 目視で確認して転記した。以後の再検証もこの「生HTML直読み」方式を推奨する。
 //
+// ■ 料金モデル（コーポレートトップページで確定・2026-07-07 生HTML検証済み）
+// https://oriental-lounge.com/ の #price セクションからの引用:
+//   「チャージ」「飲み放題 単独10分 220円～」「飲み放題 相席10分 440円～」
+//   「アプリインストールでチャージ無料」
+// つまり10分単価は「その時間に相席しているかどうか」で切り替わる:
+//   - 相席していない時間（待機・単独で着席）: ¥220/10分（平日・週末同額 = 店舗ページの「単独」行）
+//   - 相席中の時間: 下記 bands の時間帯別単価（¥440/500 〜 ¥770/800）
+// シングルチャージ¥1,100は「男性1名での来店」に対する別建ての固定費で、上記とは独立。
+//
+// ■ チャージ金額の注記
+// 店舗ページ本文・入店ルールは「チャージ料 550 円」だが、同ページおよびトップページの
+// フッターバナーは「チャージ料(500円)」と表記されており、公式サイト内で不整合がある。
+// 本データは本文の ¥550 を正として採用する。
+//
 // 発注時に共有された料金表との差分:
 //   共有表: 24:00〜Close = 平日¥660 / 週末¥700
 //   公式サイト実測: 24:00〜Close = 平日¥770 / 週末¥800
@@ -21,7 +35,7 @@
 export type DayType = "weekday" | "weekend";
 
 /**
- * 課金バンド。start/end は「開店からの分」ではなく、素直な時刻表現として
+ * 相席中の課金バンド。start/end は「開店からの分」ではなく、素直な時刻表現として
  * 24時間表記+オーバーナイト延長（24:00〜30:00 = 翌0:00〜6:00）を使う。
  * 例: 24:00〜Close(06:00) は end="30:00" として表現する。
  */
@@ -40,8 +54,20 @@ export type PricingBand = {
 export type PricingCharges = {
   /** 通常チャージ（円）。アプリチェックインで無料になる */
   entry: number;
-  /** 男性1名利用時に加算されるシングルチャージ（円） */
+  /** 男性1名での来店に加算されるシングルチャージ（円）。相席の有無とは独立の固定費 */
   single: number;
+};
+
+/**
+ * 相席していない時間の10分単価（店舗ページの「単独」行 = トップページの「単独10分」）。
+ * 平日・週末同額。実際の会計は「相席していた時間 × バンド単価 + それ以外 × この単価」に
+ * なるため、シミュレーターは上限（ずっと相席）と下限（相席なし）の両方を計算する。
+ */
+export type SoloRate = {
+  perUnit: number;
+  label: string;
+  /** モデルの根拠となるコーポレートトップページ */
+  sourceUrl: string;
 };
 
 export type PricingTable = {
@@ -52,8 +78,10 @@ export type PricingTable = {
   /** 営業時間（開店・閉店）。閉店は翌日側なので "30:00" 表記 */
   openTime: string;
   closeTime: string;
-  /** 男性の時間帯別バンド（開店から閉店まで連続で埋まっている） */
+  /** 男性・相席中の時間帯別バンド（開店から閉店まで連続で埋まっている） */
   bands: PricingBand[];
+  /** 男性・相席していない時間の単価 */
+  soloRate: SoloRate;
   charges: PricingCharges;
   /** 女性は現状フラット¥0（一部有料商品あり） */
   women: {
@@ -65,19 +93,6 @@ export type PricingTable = {
   sourceUrl: string;
   /** データを検証した日付（YYYY-MM-DD） */
   verifiedAt: string;
-  /**
-   * 公式サイトの料金表には「単独」という行が Open〜20時 行とは別に独立して存在する
-   * （¥220、平日/週末同額）。DOM 上は他の時間帯バンドと同じ形式の行だが、時刻の
-   * start/end を持たず、意味を断定できる注釈・脚注がサイト側に無かった。
-   * シングルチャージ（男性1名利用+¥1,100）とは別の記載であることは確認済み。
-   * 曖昧なため、時間帯バンドには組み込まず注記としてのみ保持する。
-   */
-  soloRowNote: {
-    label: string;
-    weekdayPrice: number;
-    weekendPrice: number;
-    caveat: string;
-  };
 };
 
 export const NAGASAKI_PRICING: PricingTable = {
@@ -92,6 +107,11 @@ export const NAGASAKI_PRICING: PricingTable = {
     { label: "22:00〜24:00", start: "22:00", end: "24:00", weekday: 660, weekend: 700 },
     { label: "24:00〜Close", start: "24:00", end: "30:00", weekday: 770, weekend: 800 },
   ],
+  soloRate: {
+    perUnit: 220,
+    label: "相席していない時間",
+    sourceUrl: "https://oriental-lounge.com/",
+  },
   charges: {
     entry: 550,
     single: 1100,
@@ -103,11 +123,4 @@ export const NAGASAKI_PRICING: PricingTable = {
   weekendRule: "金・土曜日および祝日前は週末料金が適用されます。年末年始・GW・お盆などの期間も週末料金となります。",
   sourceUrl: "https://oriental-lounge.com/stores/38",
   verifiedAt: "2026-07-07",
-  soloRowNote: {
-    label: "単独",
-    weekdayPrice: 220,
-    weekendPrice: 220,
-    caveat:
-      "公式サイトの料金表に「単独」という行がありますが、時間帯の指定が無く意味を断定できないため、本シミュレーターの計算には含めていません（詳細は公式サイトでご確認ください）。",
-  },
 };

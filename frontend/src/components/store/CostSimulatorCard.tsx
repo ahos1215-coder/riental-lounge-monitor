@@ -107,7 +107,7 @@ function BreakdownTable({ result }: { result: CostResult }) {
           <tr className="border-b border-white/10 text-slate-400">
             <th className="px-2.5 py-1.5 font-medium">時間帯</th>
             <th className="px-2.5 py-1.5 font-medium">分</th>
-            <th className="px-2.5 py-1.5 font-medium">単価/10分</th>
+            <th className="px-2.5 py-1.5 font-medium">相席単価/10分</th>
             <th className="px-2.5 py-1.5 text-right font-medium">小計</th>
           </tr>
         </thead>
@@ -223,9 +223,25 @@ function FreeCalcSection({ pricing, dayType }: { pricing: PricingTable; dayType:
 
       {result && (
         <>
-          <div className="mt-3 flex items-baseline gap-2">
+          <div className="mt-3">
             <span className="text-[11px] text-slate-400">男性 合計（目安）</span>
-            <span className="text-2xl font-black tabular-nums text-cyan-200">{yen(result.total)}</span>
+            <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="inline-flex items-baseline gap-1.5">
+                <span className="text-[10px] text-slate-500">ずっと相席</span>
+                <span className="text-2xl font-black tabular-nums text-cyan-200">
+                  {yen(result.maxTotal)}
+                </span>
+              </span>
+              <span className="inline-flex items-baseline gap-1.5">
+                <span className="text-[10px] text-slate-500">相席なし</span>
+                <span className="text-lg font-bold tabular-nums text-slate-300">
+                  {yen(result.minTotal)}
+                </span>
+              </span>
+            </div>
+            <p className="mt-1 text-[10px] text-slate-500">
+              実際は相席していた時間に応じて、この間の金額になります。
+            </p>
           </div>
 
           <BreakdownTable result={result} />
@@ -266,6 +282,9 @@ export function CostSimulatorCard({ pricing, series, hasForecast }: Props) {
   );
 
   const jumpBand = nextPriceJump(pricing, anchorMinutes);
+  // 下限（相席なし）の例示に使うチップ。2時間を優先し、無ければ最後の選択肢
+  const boundsExampleChip =
+    stayChips.find((p) => p.label === "2時間") ?? stayChips[stayChips.length - 1] ?? null;
   const detectionLabel =
     detection.reason === "祝前日" ? `${detection.dowLabel}・祝前日` : detection.dowLabel;
 
@@ -335,7 +354,7 @@ export function CostSimulatorCard({ pricing, series, hasForecast }: Props) {
         )}
       </div>
 
-      {/* ② コスト帯（入店目安の時刻に連動） */}
+      {/* ② コスト帯（入店目安の時刻に連動）。表示額は「ずっと相席した場合」の上限 */}
       <div className="mt-3">
         <p className="text-[11px] text-slate-400">
           <span className="font-semibold text-slate-200">{anchorLabel}</span> 入店・男性の目安
@@ -349,15 +368,22 @@ export function CostSimulatorCard({ pricing, series, hasForecast }: Props) {
             >
               <span className="text-[10px] text-slate-400">{p.label}</span>
               <span className="mt-0.5 text-[15px] font-bold tabular-nums text-slate-100">
-                {yen(p.result.total)}
+                〜{yen(p.result.maxTotal)}
               </span>
               <span className="text-[9px] text-slate-500">〜{p.exitLabel} 退店</span>
             </div>
           ))}
         </div>
+        {boundsExampleChip && (
+          <p className="mt-2 text-[10px] leading-relaxed text-slate-500">
+            表示額は“ずっと相席した場合”の上限。相席していない時間は 10分{" "}
+            {yen(pricing.soloRate.perUnit)} — {boundsExampleChip.label}
+            ずっと相席しなかった場合は {yen(boundsExampleChip.result.minTotal)}。
+          </p>
+        )}
         {jumpBand && (
           <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-100/90">
-            {jumpBand.start} 以降は 10分 {yen(jumpBand[dayType])}
+            {jumpBand.start} 以降は相席 10分 {yen(jumpBand[dayType])}
             （{dayType === "weekday" ? `週末 ${yen(jumpBand.weekend)}` : `平日 ${yen(jumpBand.weekday)}`}）に上がります
           </p>
         )}
@@ -376,9 +402,9 @@ export function CostSimulatorCard({ pricing, series, hasForecast }: Props) {
         </div>
       </details>
 
-      {/* ④ 注記（1行） */}
+      {/* ④ 注記 */}
       <p className="mt-3 border-t border-white/10 pt-2.5 text-[10px] leading-relaxed text-slate-500">
-        公式サイトの料金表（{pricing.verifiedAt}時点）に基づく参考計算です（10分毎課金・切り上げの前提）。実際の料金・適用条件は
+        公式サイトの料金表（{pricing.verifiedAt}時点）に基づく参考計算です（10分毎課金・切り上げの前提）。料金は相席中かどうかで10分単価が変わる公式の仕組みに基づき、上限（ずっと相席）と下限（相席なし）を表示しています。実際の料金・適用条件は
         <a
           href={pricing.sourceUrl}
           target="_blank"

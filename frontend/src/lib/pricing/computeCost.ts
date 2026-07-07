@@ -3,6 +3,14 @@
 // 料金シミュレーターの計算ロジック（純粋関数・APIコールなし）。
 //
 // 課金モデルの前提:
+//   公式の10分単価は「その時間に相席しているかどうか」で切り替わる
+//   （トップページ #price: 単独10分 220円〜 / 相席10分 440円〜。詳細は
+//   data/pricing/nagasaki.ts の先頭コメント参照）。相席していた時間の割合は
+//   事前に分からないため、本シミュレーターは両端を計算する:
+//     - maxTotal = 滞在の全時間が相席だった場合（時間帯バンド単価）＝予算安全側の上限
+//     - minTotal = 相席が一度も無かった場合（全ユニット soloRate ¥220）＝下限
+//   実際の会計はこの間に収まる。
+//
 //   公式サイトは「10分毎課金」とだけ記載しており、明示的な端数処理ルールの記載は無い。
 //   本シミュレーターは一般的な「10分毎自動延長」の考え方に基づき、
 //     - 滞在時間を10分単位に切り上げる（例: 25分滞在 = 3ユニット）
@@ -52,11 +60,17 @@ export type PriceBoundary = {
 };
 
 export type CostResult = {
-  total: number;
+  /** 上限: 滞在の全時間が相席だった場合（時間帯バンド単価 + チャージ類） */
+  maxTotal: number;
+  /** 下限: 相席が一度も無かった場合（全ユニット soloRate + チャージ類） */
+  minTotal: number;
+  /** 相席ケース（上限側）のバンド別内訳 */
   unitsBreakdown: UnitBreakdownRow[];
   charges: ChargeLine[];
-  /** entry〜exit の間に単価が変わる境界（値上がりの事実のみを示す。演出的な言い回しはしない） */
+  /** entry〜exit の間に相席単価が変わる境界（値上がりの事実のみを示す。演出的な言い回しはしない） */
   boundaries: PriceBoundary[];
+  /** 合計ユニット数（10分単位・切り上げ） */
+  totalUnits: number;
 };
 
 export type ComputeCostOptions = {
@@ -122,8 +136,9 @@ export function validateStayWindow(
 }
 
 /**
- * 男性の滞在料金を計算する。
- * - 10分単位に切り上げ、各ユニットは「ユニット開始時刻」が属するバンドの単価で計算する。
+ * 男性の滞在料金を計算する（上限=ずっと相席 / 下限=相席なし の両方）。
+ * - 10分単位に切り上げ、上限側は各ユニットの「開始時刻」が属するバンドの単価、
+ *   下限側は全ユニット soloRate（¥220・平日週末同額）で計算する。
  * - entry/exitMinutes は openTime(18:00)を基準に正規化済みの「分」であること
  *   （normalizeStayMinutes で変換してから渡す）。
  */
@@ -200,11 +215,16 @@ export function computeStayCost(
 
   const chargesTotal = charges.reduce((sum, c) => sum + c.amount, 0);
 
+  // 下限: 相席が一度も無かった場合（全ユニットが soloRate。平日・週末同額）
+  const soloStayTotal = totalUnits * pricing.soloRate.perUnit;
+
   return {
-    total: stayTotal + chargesTotal,
+    maxTotal: stayTotal + chargesTotal,
+    minTotal: soloStayTotal + chargesTotal,
     unitsBreakdown,
     charges,
     boundaries,
+    totalUnits,
   };
 }
 

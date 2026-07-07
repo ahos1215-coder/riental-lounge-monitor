@@ -16,4 +16,4 @@ export function getStorePricing(slug: string | null | undefined): PricingTable |
   return PRICING_REGISTRY[slug.toLowerCase()] ?? null;
 }
 
-export type { PricingTable, PricingBand, PricingCharges, DayType } from "@/data/pricing/nagasaki";
+export type { PricingTable, PricingBand, PricingCharges, SoloRate, DayType } from "@/data/pricing/nagasaki";
