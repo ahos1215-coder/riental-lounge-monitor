@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { GenderRatioBar } from "@/components/home/GenderRatioBar";
 import { recordStoreVisit } from "@/lib/browser/meguribiStorage";
 import {
@@ -159,7 +159,7 @@ function MegribiScoreBadge({ score }: { score: number | null | undefined }) {
   );
 }
 
-export function StoreCard({
+function StoreCardImpl({
   slug,
   label,
   brandLabel,
@@ -345,3 +345,61 @@ export function StoreCard({
     </Link>
   );
 }
+
+function numArrayEqual(a?: number[], b?: number[]): boolean {
+  if (a === b) return true;
+  if (!a || !b) return a === b;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+function statsEqual(
+  a: StoreCardProps["stats"],
+  b: StoreCardProps["stats"],
+): boolean {
+  if (a === b) return true;
+  if (!a || !b) return a === b;
+  return (
+    a.menCount === b.menCount &&
+    a.womenCount === b.womenCount &&
+    a.nowTotal === b.nowTotal &&
+    a.peakPredTotal === b.peakPredTotal &&
+    a.genderRatio === b.genderRatio &&
+    a.crowdLevel === b.crowdLevel &&
+    a.recommendLabel === b.recommendLabel
+  );
+}
+
+/**
+ * /stores は12枚のカードを並べ、各カードのデータは range_multi → megribi_score →
+ * forecast_today_multi の順に非同期で個別に setState される。素の StoreCard だと
+ * 1店舗分の到着のたびに親が再レンダーされ12枚全部が再評価されてしまうため、
+ * memo で「自分のデータが変わった時だけ」再レンダーされるようにする。
+ * 親（stores-list-client / home-client）は該当 slug のエントリだけを差し替える
+ * setState を使っており、他 slug の stats/sparkline 配列は参照が保たれるが、
+ * 念のため値ベースの比較にして参照の作り方に依存しないようにしている。
+ */
+export const StoreCard = memo(StoreCardImpl, (prev, next) => {
+  return (
+    prev.slug === next.slug &&
+    prev.label === next.label &&
+    prev.brandLabel === next.brandLabel &&
+    prev.areaLabel === next.areaLabel &&
+    prev.brand === next.brand &&
+    prev.capacity === next.capacity &&
+    prev.href === next.href &&
+    prev.isHighlight === next.isHighlight &&
+    prev.forecastPending === next.forecastPending &&
+    prev.isLoading === next.isLoading &&
+    prev.megribiScore === next.megribiScore &&
+    statsEqual(prev.stats, next.stats) &&
+    numArrayEqual(prev.sparklinePoints, next.sparklinePoints) &&
+    numArrayEqual(prev.sparklineMen, next.sparklineMen) &&
+    numArrayEqual(prev.sparklineWomen, next.sparklineWomen)
+  );
+});
+
+StoreCard.displayName = "StoreCard";

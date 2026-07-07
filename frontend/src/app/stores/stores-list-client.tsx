@@ -22,7 +22,8 @@ import {
 
 type BrandFilter = "all" | "oriental" | "jis" | "aisekiya";
 type ForecastPoint = { ts: string; total_pred?: number };
-type StoreRealtimeCard = {
+/** page.tsx（サーバー snapshot）とクライアント側 fetch の両方で使う共通シェイプ。 */
+export type StoreRealtimeCard = {
   slug: string;
   stats: {
     menCount: number;
@@ -49,15 +50,36 @@ const BRAND_TABS: { id: BrandFilter; label: string }[] = [
 
 const STORES_PER_PAGE = 12;
 
-export default function StoresListClient() {
+export type StoresListClientProps = {
+  /**
+   * サーバー側 (page.tsx) で先取りした「デフォルト表示（フィルタ無し・1ページ目）」12店舗分の
+   * range_multi + megribi_score スナップショット。forecast（crowdLevel/recommendLabel等）は
+   * 含まない“部分カード”状態（クライアント側が range 到着直後に出す状態と同じ形）。
+   * URL にフィルタ/ページ指定がある場合はこの prop を無視し、従来通りクライアント fetch のみで描画する。
+   */
+  initialCards?: Record<string, StoreRealtimeCard> | null;
+};
+
+export default function StoresListClient({ initialCards }: StoresListClientProps = {}) {
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const router = useRouter();
 
+  // サーバー snapshot (initialCards) は「フィルタ無し・1ページ目」の12店舗分でのみ有効。
+  // region/page が URL に付いている初回マウントでは使わない（対象店舗が一致しないため）。
+  // useState の lazy initializer はマウント時の1回しか評価されないため、ここでの
+  // searchParams 参照は「初回レンダー時点の値」として固定される（ref化は不要）。
+  const [storeRealtime, setStoreRealtime] = useState<Record<string, StoreRealtimeCard>>(() => {
+    const isDefaultViewOnMount = !searchParams.get("region") && !searchParams.get("page");
+    return isDefaultViewOnMount && initialCards ? initialCards : {};
+  });
+  const [realtimeLoading, setRealtimeLoading] = useState(() => {
+    const isDefaultViewOnMount = !searchParams.get("region") && !searchParams.get("page");
+    return !(isDefaultViewOnMount && initialCards);
+  });
+
   const [brandFilter, setBrandFilter] = useState<BrandFilter>("all");
   const [query, setQuery] = useState("");
-  const [storeRealtime, setStoreRealtime] = useState<Record<string, StoreRealtimeCard>>({});
-  const [realtimeLoading, setRealtimeLoading] = useState(false);
 
   const replaceQueryParams = useCallback(
     (mutate: (p: URLSearchParams) => void) => {
@@ -173,6 +195,11 @@ export default function StoresListClient() {
     const controller = new AbortController();
     const { signal } = controller;
     const targets = pagedStores;
+    // 対象12店舗すべてのカードが既にある（サーバー snapshot による seed、または
+    // 直前の取得結果）なら、裏で最新データを取りに行きつつ既存カードを表示し続ける
+    // （setStoreRealtime({}) でスケルトンに戻すとサーバー snapshot の意味が無くなるため）。
+    const alreadyHasAllTargets =
+      targets.length > 0 && targets.every((t) => storeRealtime[t.slug] !== undefined);
 
     if (targets.length === 0) {
       setStoreRealtime({});
@@ -180,8 +207,10 @@ export default function StoresListClient() {
       return () => controller.abort();
     }
 
-    setRealtimeLoading(true);
-    setStoreRealtime({});
+    if (!alreadyHasAllTargets) {
+      setRealtimeLoading(true);
+      setStoreRealtime({});
+    }
 
     function isAbortError(err: unknown): boolean {
       return (
@@ -459,7 +488,9 @@ export default function StoresListClient() {
       controller.abort();
       setRealtimeLoading(false);
     };
-  }, [pagedStores]);
+    // storeRealtime は「初回マウント時に seed 済みか」を1回だけ判定するために読むだけで、
+    // 依存に加えると更新のたびにこの取得エフェクト自体が再実行されてしまうため意図的に除外。
+  }, [pagedStores]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // JIS は未実装 (スクレイピング未対応)。相席屋は対応済み
   const isComingSoonBrand = brandFilter === "jis";

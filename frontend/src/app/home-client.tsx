@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { TrendingUp, Clock, MapPin, ChevronRight, Sparkles, BookOpen } from "lucide-react";
 import { FadeIn } from "@/components/ui/FadeIn";
 import {
@@ -30,6 +30,11 @@ export type HomeBlogTeaser = {
 
 type HomePageProps = {
   latestBlogPosts: HomeBlogTeaser[];
+  /**
+   * サーバー側 (page.tsx) で先取りした /api/megribi_score のスナップショット。
+   * 取得失敗・タイムアウト時は null（従来通りクライアント fetch のみで描画）。
+   */
+  initialTop5?: HomeMegribiScoreItem[] | null;
 };
 
 const FALLBACK_LAST_STORE = {
@@ -161,6 +166,14 @@ type MegribiScoreItem = {
   women_seat_pct: number | null;
 };
 
+/** page.tsx（サーバー側）から渡す初期スナップショットの型。クライアント型と同一形状。 */
+export type HomeMegribiScoreItem = MegribiScoreItem;
+
+/** 相席屋 (ay_*) は total が null（%表示のみ）のため、席の埋まり(%)で判定する */
+function hasActivity(d: MegribiScoreItem): boolean {
+  return (d.total ?? 0) > 0 || (d.men_seat_pct ?? 0) > 0 || (d.women_seat_pct ?? 0) > 0;
+}
+
 function ScoreBar({ score }: { score: number }) {
   const pct = Math.round(score * 100);
   const color =
@@ -179,15 +192,21 @@ function ScoreBar({ score }: { score: number }) {
   );
 }
 
-export default function HomePage({ latestBlogPosts }: HomePageProps) {
+export default function HomePage({ latestBlogPosts, initialTop5 }: HomePageProps) {
   const [lastStore, setLastStore] = useState<StoreMeta | null>(null);
   const [lastVisitFetched, setLastVisitFetched] = useState<LastVisitFetchedTrend>({
     loading: true,
     men: [],
     women: [],
   });
-  const [topStores, setTopStores] = useState<MegribiScoreItem[]>([]);
-  const [topStoresLoading, setTopStoresLoading] = useState(true);
+  // initialTop5 があれば初期HTMLから実データで描画（スケルトン無し）。
+  // 無ければ従来通り loading スケルトン→クライアント fetch。
+  const seededTop5 = useMemo(
+    () => (initialTop5 ? initialTop5.filter(hasActivity).slice(0, 5) : null),
+    [initialTop5],
+  );
+  const [topStores, setTopStores] = useState<MegribiScoreItem[]>(seededTop5 ?? []);
+  const [topStoresLoading, setTopStoresLoading] = useState(seededTop5 === null);
 
   useEffect(() => {
     const ac = new AbortController();
@@ -197,9 +216,6 @@ export default function HomePage({ latestBlogPosts }: HomePageProps) {
         if (!res.ok) { setTopStoresLoading(false); return; }
         const json = (await res.json()) as { ok: boolean; data?: MegribiScoreItem[] };
         if (!ac.signal.aborted && json.ok && Array.isArray(json.data)) {
-          // 相席屋 (ay_*) は total が null（%表示のみ）のため、席の埋まり(%)で判定する
-          const hasActivity = (d: MegribiScoreItem) =>
-            (d.total ?? 0) > 0 || (d.men_seat_pct ?? 0) > 0 || (d.women_seat_pct ?? 0) > 0;
           setTopStores(json.data.filter(hasActivity).slice(0, 5));
         }
       } catch {
