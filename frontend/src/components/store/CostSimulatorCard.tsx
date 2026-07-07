@@ -6,16 +6,23 @@ import type { PricingTable } from "@/data/pricing/nagasaki";
 import {
   computeStayCost,
   computeStayPlans,
+  minutesToTimeLabel,
   normalizeStayMinutes,
   timeToMinutes,
   type CostResult,
 } from "@/lib/pricing/computeCost";
 import type { DayType } from "@/lib/pricing";
+import { detectDayTypeJst } from "@/lib/pricing/jpHolidays";
+import {
+  recommendEntryTime,
+  type ForecastSlotLike,
+} from "@/lib/pricing/recommendEntryTime";
 
 type Props = {
   pricing: PricingTable;
-  /** タイムラインのピーク予測（あれば入店プラン試算をそれに連動させる） */
-  peakTimeLabel?: string | null;
+  /** タイムライン系列（実測+予測）。「今夜の入店の目安」の算出に使う */
+  series: ForecastSlotLike[];
+  /** 今夜の予測が取得できているか（false なら例示ベースの表示にフォールバック） */
   hasForecast?: boolean;
 };
 
@@ -24,13 +31,7 @@ function yen(n: number): string {
   return `¥${YEN.format(Math.max(0, Math.round(n)))}`;
 }
 
-/** 今日の曜日から平日/週末の初期値を決める（金・土は週末扱い。祝前日は手動選択が必要）。 */
-function defaultDayType(): DayType {
-  const day = new Date().getDay(); // 0=Sun .. 6=Sat
-  return day === 5 || day === 6 ? "weekend" : "weekday";
-}
-
-/** 18:00〜翌05:30 の30分刻み選択肢（表示は "HH:MM"、24時以降も24時間表記のまま） */
+/** 18:00〜翌05:30 の30分刻み選択肢 */
 function buildEntryTimeOptions(): { value: string; label: string }[] {
   const options: { value: string; label: string }[] = [];
   for (let m = timeToMinutes("18:00"); m <= timeToMinutes("29:30"); m += 30) {
@@ -56,10 +57,52 @@ function buildExitTimeOptions(entryHHMM: string): { value: string; label: string
   return options;
 }
 
-function BreakdownTable({ result, dayType }: { result: CostResult; dayType: DayType }) {
+/** 入店時刻の次に単価が上がる境界（バンド）を返す */
+function nextPriceJump(pricing: PricingTable, entryMinutes: number) {
+  for (const band of pricing.bands) {
+    const start = timeToMinutes(band.start);
+    if (start > entryMinutes) {
+      return band;
+    }
+  }
+  return null;
+}
+
+function DayTypeToggle({
+  dayType,
+  onChange,
+}: {
+  dayType: DayType;
+  onChange: (d: DayType) => void;
+}) {
+  return (
+    <div className="flex overflow-hidden rounded-full border border-white/10 text-[11px]">
+      <button
+        type="button"
+        onClick={() => onChange("weekday")}
+        className={`min-h-[32px] px-3 font-medium transition ${
+          dayType === "weekday" ? "bg-cyan-500/20 text-cyan-100" : "text-slate-400"
+        }`}
+      >
+        平日
+      </button>
+      <button
+        type="button"
+        onClick={() => onChange("weekend")}
+        className={`min-h-[32px] px-3 font-medium transition ${
+          dayType === "weekend" ? "bg-pink-500/20 text-pink-100" : "text-slate-400"
+        }`}
+      >
+        週末
+      </button>
+    </div>
+  );
+}
+
+function BreakdownTable({ result }: { result: CostResult }) {
   return (
     <div className="mt-3 overflow-x-auto rounded-xl border border-white/10 bg-black/30">
-      <table className="w-full min-w-[320px] text-left text-[11px]">
+      <table className="w-full min-w-[300px] text-left text-[11px]">
         <thead>
           <tr className="border-b border-white/10 text-slate-400">
             <th className="px-2.5 py-1.5 font-medium">時間帯</th>
@@ -89,169 +132,22 @@ function BreakdownTable({ result, dayType }: { result: CostResult; dayType: DayT
           ))}
         </tbody>
       </table>
-      {dayType && null}
     </div>
   );
 }
 
-function PriceBoundaryNote({ result, dayType }: { result: CostResult; dayType: DayType }) {
-  if (result.boundaries.length === 0) return null;
-  return (
-    <div className="mt-3 space-y-1.5">
-      {result.boundaries.map((b) => (
-        <p
-          key={b.atLabel}
-          className="rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-100/90"
-        >
-          {b.atLabel} 以降は 10分 {yen(b.newPrice)}
-          {dayType === "weekday" ? "（週末は別料金）" : ""} に上がります。
-        </p>
-      ))}
-    </div>
-  );
-}
-
-/** ピーク連動の入店プラン試算セクション */
-function PeakPlanSection({
-  pricing,
-  peakTimeLabel,
-  hasForecast,
-}: {
-  pricing: PricingTable;
-  peakTimeLabel?: string | null;
-  hasForecast?: boolean;
-}) {
-  const [dayType, setDayType] = useState<DayType>(defaultDayType());
-  const [appCheckin, setAppCheckin] = useState(true);
-
-  // ピーク予測の1時間前を入店時刻の目安にする。予測が無ければ22:00をデフォルト例にする。
-  const { entryLabel, isFromForecast } = useMemo(() => {
-    if (hasForecast && peakTimeLabel && /^\d{1,2}:\d{2}$/.test(peakTimeLabel)) {
-      const peakMinutes = normalizeStayMinutes(peakTimeLabel, pricing.openTime);
-      const oneHourBefore = peakMinutes - 60;
-      const openMinutes = timeToMinutes(pricing.openTime);
-      const clamped = Math.max(openMinutes, oneHourBefore);
-      // 30分刻みに丸める
-      const rounded = Math.round(clamped / 30) * 30;
-      const h = Math.floor(rounded / 60);
-      const m = rounded % 60;
-      return {
-        entryLabel: `${(h % 24).toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`,
-        isFromForecast: true,
-      };
-    }
-    return { entryLabel: "22:00", isFromForecast: false };
-  }, [hasForecast, peakTimeLabel, pricing.openTime]);
-
-  const entryMinutes = useMemo(
-    () => normalizeStayMinutes(entryLabel, pricing.openTime),
-    [entryLabel, pricing.openTime],
-  );
-
-  const plans = useMemo(
-    () =>
-      computeStayPlans(pricing, dayType, entryMinutes, {
-        appCheckin,
-        solo: false,
-      }),
-    [pricing, dayType, entryMinutes, appCheckin],
-  );
-
-  // 表示中のプランをまとめた1つの CostResult から境界（値上がり）を集める。
-  // 一番長い「クローズまで」プランの境界が、他の短いプランの境界も内包する。
-  const longestPlan = plans[plans.length - 1];
-
-  return (
-    <div>
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-[12px] font-semibold text-slate-100">ピーク連動の入店プラン試算</h3>
-        <div className="flex overflow-hidden rounded-full border border-white/10 text-[11px]">
-          <button
-            type="button"
-            onClick={() => setDayType("weekday")}
-            className={`min-h-[28px] px-2.5 font-medium transition ${
-              dayType === "weekday" ? "bg-cyan-500/20 text-cyan-100" : "text-slate-400"
-            }`}
-          >
-            平日
-          </button>
-          <button
-            type="button"
-            onClick={() => setDayType("weekend")}
-            className={`min-h-[28px] px-2.5 font-medium transition ${
-              dayType === "weekend" ? "bg-pink-500/20 text-pink-100" : "text-slate-400"
-            }`}
-          >
-            週末
-          </button>
-        </div>
-      </div>
-
-      <p className="mt-1.5 text-[11px] leading-relaxed text-slate-400">
-        {isFromForecast ? (
-          <>
-            ピーク予測 <span className="font-semibold text-slate-200">{peakTimeLabel}</span> — 1時間前の{" "}
-            <span className="font-semibold text-slate-200">{entryLabel}</span> に入店した場合
-          </>
-        ) : (
-          <>
-            例として <span className="font-semibold text-slate-200">{entryLabel}</span> 入店の場合を試算しています（ピーク予測が出たら自動で連動します）。
-          </>
-        )}
-      </p>
-
-      <label className="mt-2 flex min-h-[28px] items-center gap-2 text-[11px] text-slate-400">
-        <input
-          type="checkbox"
-          checked={appCheckin}
-          onChange={(e) => setAppCheckin(e.target.checked)}
-          className="h-4 w-4 shrink-0 rounded border-white/20 bg-black/40"
-        />
-        アプリチェックイン済み（チャージ¥550→無料）
-      </label>
-
-      <div className="mt-3 overflow-x-auto rounded-xl border border-white/10 bg-black/30">
-        <table className="w-full min-w-[320px] text-left text-[11px]">
-          <thead>
-            <tr className="border-b border-white/10 text-slate-400">
-              <th className="px-2.5 py-1.5 font-medium">滞在</th>
-              <th className="px-2.5 py-1.5 font-medium">退店時刻</th>
-              <th className="px-2.5 py-1.5 text-right font-medium">料金（男性）</th>
-            </tr>
-          </thead>
-          <tbody>
-            {plans.map((p) => (
-              <tr key={p.label} className="border-b border-white/5 last:border-0">
-                <td className="px-2.5 py-1.5 text-slate-200">{p.label}</td>
-                <td className="px-2.5 py-1.5 text-slate-400">{p.exitLabel}</td>
-                <td className="px-2.5 py-1.5 text-right font-semibold text-slate-100">
-                  {yen(p.result.total)}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {longestPlan && <PriceBoundaryNote result={longestPlan.result} dayType={dayType} />}
-    </div>
-  );
-}
-
-/** 自由計算（任意の時間でいくら）セクション */
-function FreeCalcSection({ pricing }: { pricing: PricingTable }) {
+/** 自由計算（アコーディオン内）。曜日タイプはカード上部の共通トグルを使う */
+function FreeCalcSection({ pricing, dayType }: { pricing: PricingTable; dayType: DayType }) {
   const entryOptions = useMemo(() => buildEntryTimeOptions(), []);
-  const [dayType, setDayType] = useState<DayType>(defaultDayType());
   const [entryHHMM, setEntryHHMM] = useState("22:00");
   const exitOptions = useMemo(() => buildExitTimeOptions(entryHHMM), [entryHHMM]);
   const [exitHHMM, setExitHHMM] = useState(() => exitOptions[3]?.value ?? exitOptions[0]?.value ?? "24:00");
   const [appCheckin, setAppCheckin] = useState(true);
   const [solo, setSolo] = useState(false);
 
-  const validExitOptions = useMemo(() => buildExitTimeOptions(entryHHMM), [entryHHMM]);
-  const effectiveExit = validExitOptions.some((o) => o.value === exitHHMM)
+  const effectiveExit = exitOptions.some((o) => o.value === exitHHMM)
     ? exitHHMM
-    : validExitOptions[0]?.value ?? exitHHMM;
+    : exitOptions[0]?.value ?? exitHHMM;
 
   const result = useMemo(() => {
     try {
@@ -264,35 +160,8 @@ function FreeCalcSection({ pricing }: { pricing: PricingTable }) {
   }, [pricing, dayType, entryHHMM, effectiveExit, appCheckin, solo]);
 
   return (
-    <div className="mt-6 border-t border-white/10 pt-5">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="text-[12px] font-semibold text-slate-100">自由計算（任意の時間でいくら）</h3>
-        <div className="flex overflow-hidden rounded-full border border-white/10 text-[11px]">
-          <button
-            type="button"
-            onClick={() => setDayType("weekday")}
-            className={`min-h-[28px] px-2.5 font-medium transition ${
-              dayType === "weekday" ? "bg-cyan-500/20 text-cyan-100" : "text-slate-400"
-            }`}
-          >
-            平日
-          </button>
-          <button
-            type="button"
-            onClick={() => setDayType("weekend")}
-            className={`min-h-[28px] px-2.5 font-medium transition ${
-              dayType === "weekend" ? "bg-pink-500/20 text-pink-100" : "text-slate-400"
-            }`}
-          >
-            週末
-          </button>
-        </div>
-      </div>
-      <p className="mt-1 text-[10px] text-slate-500">
-        今日は自動で{defaultDayType() === "weekend" ? "週末" : "平日"}を選択しています。祝前日などは手動で切り替えてください。
-      </p>
-
-      <div className="mt-3 grid grid-cols-2 gap-2">
+    <div className="pt-3">
+      <div className="grid grid-cols-2 gap-2">
         <label className="flex flex-col gap-1 text-[11px] text-slate-400">
           入店時刻
           <select
@@ -331,7 +200,7 @@ function FreeCalcSection({ pricing }: { pricing: PricingTable }) {
         </label>
       </div>
 
-      <div className="mt-3 flex flex-col gap-2">
+      <div className="mt-2 flex flex-col gap-2">
         <label className="flex min-h-[44px] items-center gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-2.5 text-[12px] text-slate-300">
           <input
             type="checkbox"
@@ -339,7 +208,7 @@ function FreeCalcSection({ pricing }: { pricing: PricingTable }) {
             onChange={(e) => setAppCheckin(e.target.checked)}
             className="h-4 w-4 shrink-0 rounded border-white/20 bg-black/40"
           />
-          アプリチェックイン済み（チャージ¥550→無料・デフォルトON）
+          アプリチェックイン済み（チャージ¥550→無料）
         </label>
         <label className="flex min-h-[44px] items-center gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-2.5 text-[12px] text-slate-300">
           <input
@@ -354,15 +223,14 @@ function FreeCalcSection({ pricing }: { pricing: PricingTable }) {
 
       {result && (
         <>
-          <div className="mt-4 flex items-baseline gap-2">
+          <div className="mt-3 flex items-baseline gap-2">
             <span className="text-[11px] text-slate-400">男性 合計（目安）</span>
-            <span className="text-3xl font-black tabular-nums text-cyan-200">{yen(result.total)}</span>
+            <span className="text-2xl font-black tabular-nums text-cyan-200">{yen(result.total)}</span>
           </div>
 
-          <BreakdownTable result={result} dayType={dayType} />
-          <PriceBoundaryNote result={result} dayType={dayType} />
+          <BreakdownTable result={result} />
 
-          <div className="mt-3 rounded-xl border border-pink-500/20 bg-pink-500/5 px-3 py-2 text-[11px] text-pink-100/90">
+          <div className="mt-2 rounded-xl border border-pink-500/20 bg-pink-500/5 px-3 py-2 text-[11px] text-pink-100/90">
             女性: <span className="font-semibold">{yen(pricing.women.price)}</span>
             <span className="ml-1 text-pink-200/60">（{pricing.women.note}）</span>
           </div>
@@ -372,44 +240,155 @@ function FreeCalcSection({ pricing }: { pricing: PricingTable }) {
   );
 }
 
-export function CostSimulatorCard({ pricing, peakTimeLabel, hasForecast }: Props) {
+export function CostSimulatorCard({ pricing, series, hasForecast }: Props) {
+  // 今日の平日/週末を自動判定（金・土・祝前日→週末。深夜〜朝6時は前日の夜として扱う）
+  const detection = useMemo(() => detectDayTypeJst(new Date()), []);
+  const [dayType, setDayType] = useState<DayType>(detection.dayType);
+  const [showRationale, setShowRationale] = useState(false);
+
+  const recommendation = useMemo(
+    () => (hasForecast ? recommendEntryTime(series, pricing, { dayType }) : null),
+    [hasForecast, series, pricing, dayType],
+  );
+
+  // コスト帯の起点: 目安が出ていればその時刻、無ければ22:00の例
+  const anchorMinutes = recommendation
+    ? recommendation.entryDisplayMinutes
+    : normalizeStayMinutes("22:00", pricing.openTime);
+  const anchorLabel = minutesToTimeLabel(anchorMinutes);
+
+  const stayChips = useMemo(
+    () =>
+      computeStayPlans(pricing, dayType, anchorMinutes, { appCheckin: true, solo: false }).filter(
+        (p) => p.label !== "クローズまで",
+      ),
+    [pricing, dayType, anchorMinutes],
+  );
+
+  const jumpBand = nextPriceJump(pricing, anchorMinutes);
+  const detectionLabel =
+    detection.reason === "祝前日" ? `${detection.dowLabel}・祝前日` : detection.dowLabel;
+
   return (
     <div className="rounded-2xl border border-slate-800 bg-gradient-to-b from-slate-950/95 to-black/90 p-4 shadow-[0_12px_40px_rgba(0,0,0,0.45)] ring-1 ring-white/[0.05]">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
-            料金の目安
-          </p>
-          <p className="mt-0.5 text-[11px] text-slate-400">
-            {pricing.storeName}の公式料金表をもとに、入店・退店時刻からその場で計算します。
-          </p>
+      {/* ヘッダー: タイトル + 曜日タイプ（自動判定チップ + 手動トグル） */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">
+          料金の目安
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] text-slate-300">
+            今日（{detectionLabel}）→ {detection.dayType === "weekend" ? "週末" : "平日"}料金
+          </span>
+          <DayTypeToggle dayType={dayType} onChange={setDayType} />
         </div>
       </div>
+      <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">
+        週末料金の対象: 金・土・祝前日（年末年始・GW・お盆も週末料金 → 特別期間は手動で週末を選択）
+      </p>
 
-      <div className="mt-4">
-        <PeakPlanSection pricing={pricing} peakTimeLabel={peakTimeLabel} hasForecast={hasForecast} />
+      {/* ① 今夜の入店の目安（ひと目ブロック） */}
+      <div className="mt-3 rounded-xl border border-cyan-500/20 bg-cyan-950/20 px-3 py-3">
+        <p className="text-[10px] font-semibold tracking-wide text-cyan-200/80">今夜の入店の目安</p>
+        {recommendation ? (
+          <>
+            <p className="mt-1 text-3xl font-black tabular-nums leading-none text-cyan-100">
+              {recommendation.entryDisplayLabel}
+              <span className="ml-1 text-base font-bold text-cyan-200/70">ごろ</span>
+            </p>
+            <p className="mt-2 text-[11px] leading-relaxed text-slate-300">
+              予測: 女性 約{Math.round(recommendation.womenAvg)}人・男性 約
+              {Math.round(recommendation.menAvg)}人／女性比 {recommendation.ratioPct}%
+              {recommendation.rising && "・増加中"}
+            </p>
+            {recommendation.quietNight && (
+              <p className="mt-1 text-[11px] text-amber-200/80">今夜は全体的に静かな予測です</p>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowRationale((v) => !v)}
+              className="mt-2 min-h-[32px] rounded-full border border-white/10 bg-white/[0.03] px-3 text-[10px] text-slate-400 transition hover:text-slate-200"
+              aria-expanded={showRationale}
+            >
+              根拠 {showRationale ? "−" : "+"}
+            </button>
+            {showRationale && (
+              <div className="mt-2 space-y-1 rounded-lg border border-white/[0.06] bg-black/30 px-2.5 py-2 text-[10px] leading-relaxed text-slate-400">
+                {recommendation.reasons.map((r) => (
+                  <p key={r}>・{r}</p>
+                ))}
+                <p>・開店直後（19:30より前）と、終電後（24:00以降）の時間帯は対象外にしています。</p>
+                <p>・入店後90分間の「女性の人数」と「女性比」の予測平均で比較しています。</p>
+                <p>・予測人数がとても少ない時間帯は除いています。</p>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="mt-1 text-[13px] font-semibold text-slate-200">
+              今夜の予測が出たら表示されます
+            </p>
+            <p className="mt-1 text-[10px] text-slate-500">
+              それまでは {anchorLabel} 入店の例で料金を試算しています。
+            </p>
+          </>
+        )}
       </div>
 
-      <FreeCalcSection pricing={pricing} />
-
-      <div className="mt-5 space-y-1 border-t border-white/10 pt-3 text-[10px] leading-relaxed text-slate-500">
-        <p>
-          公式サイトの料金表（{pricing.verifiedAt}時点）に基づく参考計算です。実際の料金・適用条件は
-          <a
-            href={pricing.sourceUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="ml-1 text-slate-400 underline underline-offset-2 hover:text-slate-300"
-          >
-            公式サイト
-          </a>
-          でご確認ください。
+      {/* ② コスト帯（入店目安の時刻に連動） */}
+      <div className="mt-3">
+        <p className="text-[11px] text-slate-400">
+          <span className="font-semibold text-slate-200">{anchorLabel}</span> 入店・男性の目安
+          <span className="ml-1 text-[10px] text-slate-500">（アプリチェックインでチャージ無料の場合）</span>
         </p>
-        <p>
-          料金は10分毎の課金を前提に、滞在時間を10分単位に切り上げて計算しています（各10分の単価は開始時刻の時間帯で決まります）。
-        </p>
-        <p>{pricing.weekendRule}</p>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {stayChips.map((p) => (
+            <div
+              key={p.label}
+              className="flex min-w-[96px] flex-1 flex-col items-center rounded-xl border border-white/10 bg-black/30 px-2 py-2"
+            >
+              <span className="text-[10px] text-slate-400">{p.label}</span>
+              <span className="mt-0.5 text-[15px] font-bold tabular-nums text-slate-100">
+                {yen(p.result.total)}
+              </span>
+              <span className="text-[9px] text-slate-500">〜{p.exitLabel} 退店</span>
+            </div>
+          ))}
+        </div>
+        {jumpBand && (
+          <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-100/90">
+            {jumpBand.start} 以降は 10分 {yen(jumpBand[dayType])}
+            （{dayType === "weekday" ? `週末 ${yen(jumpBand.weekend)}` : `平日 ${yen(jumpBand.weekday)}`}）に上がります
+          </p>
+        )}
       </div>
+
+      {/* ③ 自由計算（アコーディオン・初期は閉じる） */}
+      <details className="group mt-3 rounded-xl border border-white/10 bg-white/[0.02]">
+        <summary className="flex min-h-[44px] cursor-pointer list-none items-center justify-between px-3 text-[12px] font-semibold text-slate-200 [&::-webkit-details-marker]:hidden">
+          自由に計算する（任意の入店・退店時刻）
+          <span className="text-slate-500 transition group-open:rotate-180" aria-hidden>
+            ▾
+          </span>
+        </summary>
+        <div className="border-t border-white/[0.06] px-3 pb-3">
+          <FreeCalcSection pricing={pricing} dayType={dayType} />
+        </div>
+      </details>
+
+      {/* ④ 注記（1行） */}
+      <p className="mt-3 border-t border-white/10 pt-2.5 text-[10px] leading-relaxed text-slate-500">
+        公式サイトの料金表（{pricing.verifiedAt}時点）に基づく参考計算です（10分毎課金・切り上げの前提）。実際の料金・適用条件は
+        <a
+          href={pricing.sourceUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mx-0.5 text-slate-400 underline underline-offset-2 hover:text-slate-300"
+        >
+          公式サイト
+        </a>
+        でご確認ください。
+      </p>
     </div>
   );
 }

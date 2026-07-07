@@ -88,6 +88,16 @@ function findBandForMinute(bands: PricingBand[], minute: number): PricingBand | 
   return null;
 }
 
+/** 指定した「分」（openTime基準に正規化済み）が属するバンドの10分単価。営業時間外は null。 */
+export function unitPriceAtMinute(
+  pricing: PricingTable,
+  dayType: DayType,
+  minute: number,
+): number | null {
+  const band = findBandForMinute(pricing.bands, minute);
+  return band ? band[dayType] : null;
+}
+
 export type ValidationResult = { ok: true } | { ok: false; reason: string };
 
 /** 入店・退店時刻の妥当性チェック（営業時間内・entry<exit・上限06:00など） */

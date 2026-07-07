@@ -230,9 +230,9 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
   useEffect(() => setIsClient(true), []);
 
   // 料金シミュレーターは対応データがある店舗のみ表示（現状は長崎店のみのプロトタイプ）。
+  // 「今夜の入店の目安」は today モードで予測が取得できている時だけ算出する。
   const pricing = getStorePricing(storeSlug);
-  const peakTimeLabel = snapshot.peakTimeLabel && snapshot.peakTimeLabel !== "--:--" ? snapshot.peakTimeLabel : null;
-  const hasForecastPeak = hasData && !!peakTimeLabel;
+  const hasForecastForSim = activeRangeMode === "today" && snapshot.forecastStatus === "ok";
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-5">
@@ -470,8 +470,8 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
         <section className="space-y-3">
           <CostSimulatorCard
             pricing={pricing}
-            peakTimeLabel={peakTimeLabel}
-            hasForecast={hasForecastPeak}
+            series={snapshot.series}
+            hasForecast={hasForecastForSim}
           />
         </section>
       )}
