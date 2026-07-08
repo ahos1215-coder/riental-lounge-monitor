@@ -1,16 +1,12 @@
 import { cache } from "react";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   buildStoreFullName,
-  distanceKm,
   getStoreMetaBySlugStrict,
-  isPercentCrowdBrand,
   STORES,
   type StoreMeta,
 } from "../../config/stores";
-import { getAreaConfigForStoreSlug } from "../../config/areas";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { serializeJsonLd } from "@/lib/jsonLd";
 import {
@@ -253,45 +249,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-/**
- * 「近隣の店舗」用に、地理的に近い他店を選ぶ。座標が揃っている店同士はハバサイン距離で、
- * 欠けている店は同じ region_label 内の並び順で近似する（StorePageClient の digestStores と
- * 同じ考え方の簡易版）。まず同じ area_label（例: 東京・渋谷）の店を優先し、次点で近距離順。
- * 該当が薄い場合は同ブランドの店で補う。
- */
-function pickNearbyStores(meta: StoreMeta, max = 6): StoreMeta[] {
-  const others = STORES.filter((s) => s.slug !== meta.slug);
-
-  const sameArea = others.filter((s) => s.areaLabel === meta.areaLabel);
-  const sameRegion = others.filter(
-    (s) => s.areaLabel !== meta.areaLabel && s.regionLabel === meta.regionLabel,
-  );
-  const sameBrand = others.filter(
-    (s) => s.areaLabel !== meta.areaLabel && s.regionLabel !== meta.regionLabel && s.brand === meta.brand,
-  );
-
-  const byDistance = (list: StoreMeta[]) =>
-    [...list].sort((a, b) => {
-      const da = distanceKm(meta, a);
-      const db = distanceKm(meta, b);
-      if (da == null && db == null) return 0;
-      if (da == null) return 1;
-      if (db == null) return -1;
-      return da - db;
-    });
-
-  const ordered = [...byDistance(sameArea), ...byDistance(sameRegion), ...byDistance(sameBrand)];
-  const seen = new Set<string>();
-  const result: StoreMeta[] = [];
-  for (const s of ordered) {
-    if (seen.has(s.slug)) continue;
-    seen.add(s.slug);
-    result.push(s);
-    if (result.length >= max) break;
-  }
-  return result;
-}
-
 export default async function StorePage({ params }: Props) {
   const { id } = await params;
   const meta = getStoreMetaBySlugStrict(id);
@@ -339,14 +296,6 @@ export default async function StorePage({ params }: Props) {
 
   const initialSnapshot = await resolveInitialSnapshot(meta.slug);
 
-  // SSR 説明文: ライブ数値には触れず「このページが何を見せるか」だけを事実として書く。
-  // 相席屋(ay_*)は人数を約束しない％表現、それ以外は男女比・混雑の実測+予測という共通表現。
-  const crowdPhrase = isPercentCrowdBrand(meta.brand) ? "混み具合（％）" : "混雑状況・男女比";
-  const description = `${fullName}（${meta.areaLabel}）の混雑状況を実測データと機械学習の予測でお伝えします。現在の${crowdPhrase}、今夜の混雑ピーク予測を時間帯別に確認でき、データは営業時間中の更新にあわせて反映されます。毎日の傾向をまとめたレポートも公開しているので、来店タイミングの参考にご利用いただけます。`;
-
-  const nearbyStores = pickNearbyStores(meta);
-  const areaConfig = getAreaConfigForStoreSlug(meta.slug);
-
   return (
     <>
       <script
@@ -357,75 +306,7 @@ export default async function StorePage({ params }: Props) {
         {fullName}の混雑状況
       </h1>
 
-      {/* SSR: crawler向けの事実ベース説明文。ライブ数値は書かず「何が見られるか」のみ記述するため
-          initialSnapshot の有無（コールド/ウォーム）に依存せず常に描画できる。 */}
-      <p className="mx-auto w-full max-w-6xl px-4 pt-2 text-sm leading-relaxed text-slate-400">
-        {description}
-      </p>
-
-      {/* SSR: クライアント側の数値セクション（グラフ・男女比・時間帯別予測）を見出しで
-          ラベル付けする構造上のアウトライン。実データ(数値・グラフ)は StorePageClient 配下で
-          クライアント描画するため、ここでは見出しテキストのみを raw HTML に載せる。
-          initialSnapshot が null（コールド/取得失敗）でも静的な店舗情報のみで組み立てられる
-          ため常に描画される。 */}
-      <div className="mx-auto w-full max-w-6xl space-y-1 px-4 pt-4">
-        <h2 className="text-sm font-semibold text-slate-100">{fullName}の今夜の混雑予測</h2>
-        <h2 className="text-sm font-semibold text-slate-100">現在の男女比・混み具合</h2>
-        <h2 className="text-sm font-semibold text-slate-100">混雑しやすい時間帯</h2>
-      </div>
-
       <StorePageClient initialSnapshot={initialSnapshot} />
-
-      {/* SSR: レポート・近隣店舗への内部リンク（生HTML、curlでも見える） */}
-      <section className="mx-auto w-full max-w-6xl space-y-3 px-4 pt-4">
-        <h2 className="text-sm font-semibold text-slate-100">{fullName}のレポート</h2>
-        <ul className="flex flex-wrap gap-3 text-xs">
-          <li>
-            <Link
-              href={`/reports/weekly/${encodeURIComponent(meta.slug)}`}
-              className="text-indigo-300 hover:text-indigo-200"
-            >
-              このお店の週次レポート →
-            </Link>
-          </li>
-          <li>
-            <Link
-              href={`/reports/daily/${encodeURIComponent(meta.slug)}`}
-              className="text-indigo-300 hover:text-indigo-200"
-            >
-              このお店の日次レポート →
-            </Link>
-          </li>
-        </ul>
-      </section>
-
-      {nearbyStores.length > 0 && (
-        <section className="mx-auto w-full max-w-6xl space-y-3 px-4 pb-8 pt-4">
-          <h2 className="text-sm font-semibold text-slate-100">近隣の店舗</h2>
-          <ul className="flex flex-wrap gap-x-4 gap-y-2 text-xs">
-            {nearbyStores.map((s) => (
-              <li key={s.slug}>
-                <Link
-                  href={`/store/${encodeURIComponent(s.slug)}`}
-                  className="text-slate-300 hover:text-slate-100"
-                >
-                  {buildStoreFullName(s)}（{s.areaLabel}）
-                </Link>
-              </li>
-            ))}
-          </ul>
-          {areaConfig && (
-            <p className="pt-1 text-xs">
-              <Link
-                href={`/area/${encodeURIComponent(areaConfig.id)}`}
-                className="text-indigo-300 hover:text-indigo-200"
-              >
-                {areaConfig.displayName}の相席ラウンジ一覧 →
-              </Link>
-            </p>
-          )}
-        </section>
-      )}
     </>
   );
 }

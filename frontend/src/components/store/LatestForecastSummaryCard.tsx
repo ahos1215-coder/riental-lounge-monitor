@@ -197,10 +197,6 @@ export function LatestForecastSummaryCard({
           </li>
         ))}
       </ul>
-
-      <p className="mt-3 text-[10px] text-slate-500">
-        記事は自動生成です。まずはタイムラインの点線（予測）で全体傾向を確認するのがおすすめです。
-      </p>
     </section>
   );
 }

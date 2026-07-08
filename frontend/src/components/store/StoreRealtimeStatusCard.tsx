@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { GenderRatioBar } from "@/components/home/GenderRatioBar";
 import type { StoreSnapshot } from "@/app/hooks/useStorePreviewData";
 import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
@@ -11,66 +10,6 @@ function crowdHintFromTotals(nowTotal: number, peakTotal: number): string {
   if (r >= 0.85) return "混雑に近い目安";
   if (r >= 0.45) return "ほどよい目安";
   return "空いている目安";
-}
-
-/**
- * 「正直な鮮度」表示: 最新実測データの ts から経過分を計算し、鮮度バッジ文言を返す。
- * 30分を超えたら「最終計測」表現にして、あたかも今の値かのように見せない。
- */
-function freshnessLabel(latestActualTs: string | null, nowMs: number): string | null {
-  if (!latestActualTs) return null;
-  const t = new Date(latestActualTs).getTime();
-  if (Number.isNaN(t)) return null;
-  const diffMin = Math.max(0, Math.round((nowMs - t) / 60000));
-  if (diffMin <= 0) return "たった今更新";
-  if (diffMin < 30) return `${diffMin}分前更新`;
-  if (diffMin < 60) return `最終計測 ${diffMin}分前`;
-  const diffHour = Math.round(diffMin / 60);
-  return `最終計測 約${diffHour}時間前`;
-}
-
-/**
- * 鮮度バッジ。SSR時点と初回クライアント描画時点で経過時間の計算結果がズレる
- * （ハイドレーションミスマッチになる）のを避けるため、mounted になるまでは何も出さず
- * useEffect 後に描画する。60秒ごとに再計算してバッジを生きた状態に保つ。
- */
-function FreshnessBadge({ latestActualTs }: { latestActualTs: string | null }) {
-  const [nowMs, setNowMs] = useState<number | null>(null);
-
-  useEffect(() => {
-    setNowMs(Date.now());
-    const timer = setInterval(() => setNowMs(Date.now()), 60_000);
-    return () => clearInterval(timer);
-  }, []);
-
-  if (nowMs === null) return null;
-  const label = freshnessLabel(latestActualTs, nowMs);
-  if (!label) return null;
-
-  const isStale = (() => {
-    if (!latestActualTs) return false;
-    const t = new Date(latestActualTs).getTime();
-    if (Number.isNaN(t)) return false;
-    return nowMs - t > 30 * 60000;
-  })();
-
-  return (
-    <span
-      className={[
-        "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium",
-        isStale
-          ? "border-amber-500/30 bg-amber-500/10 text-amber-200/90"
-          : "border-emerald-500/25 bg-emerald-500/10 text-emerald-200/90",
-      ].join(" ")}
-      title="最新の実測データが取得された時刻からの経過時間"
-    >
-      <span
-        className={["h-1.5 w-1.5 rounded-full", isStale ? "bg-amber-400" : "bg-emerald-400"].join(" ")}
-        aria-hidden
-      />
-      {label}
-    </span>
-  );
 }
 
 type Props = {
@@ -141,7 +80,6 @@ export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
                 </p>
               )}
         </div>
-        <FreshnessBadge latestActualTs={snapshot.latestActualTs} />
       </div>
 
       {percentMode ? (
