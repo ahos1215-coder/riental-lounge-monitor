@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import { GenderRatioBar } from "@/components/home/GenderRatioBar";
 import { recordStoreVisit } from "@/lib/browser/meguribiStorage";
 import {
@@ -159,6 +159,14 @@ function MegribiScoreBadge({ score }: { score: number | null | undefined }) {
   );
 }
 
+/**
+ * コールド店舗では forecast_today_multi が 7〜22秒かかることがあり、その間チップは
+ * ずっと「取得中」のまま点滅し続けて「壊れている」ように見える。8秒経っても届かない場合は
+ * 静かに「--」へフォールバックする（正直な表示・スピナーを回し続けない）。
+ * データが後から届けば forecastPending が false になり通常表示へ自動的に戻る。
+ */
+const FORECAST_PENDING_TIMEOUT_MS = 8_000;
+
 function StoreCardImpl({
   slug,
   label,
@@ -180,6 +188,21 @@ function StoreCardImpl({
     () => href ?? `/store/${slug}?store=${slug}`,
     [href, slug],
   );
+
+  // forecastPending が true になってから FORECAST_PENDING_TIMEOUT_MS 経っても
+  // まだ pending のままなら「取得中」の点滅を諦めて「--」に切り替える。
+  // slug が変わった（別カードを使い回すインスタンスではない想定だが念のため）場合や
+  // forecastPending が false に戻った場合はタイムアウト状態をリセットする。
+  const [pendingTimedOut, setPendingTimedOut] = useState(false);
+  useEffect(() => {
+    if (!forecastPending) {
+      setPendingTimedOut(false);
+      return;
+    }
+    setPendingTimedOut(false);
+    const t = setTimeout(() => setPendingTimedOut(true), FORECAST_PENDING_TIMEOUT_MS);
+    return () => clearTimeout(t);
+  }, [forecastPending, slug]);
 
   const hasStats = Boolean(stats);
   const menCount = Math.max(0, Math.round(Number(stats?.menCount ?? 0)));
@@ -278,7 +301,9 @@ function StoreCardImpl({
             <div className="flex items-center gap-1">
               <span className="text-white/50">ピーク予測</span>
               {forecastPending ? (
-                <span className="font-semibold text-white/35">取得中</span>
+                <span className="font-semibold text-white/35">
+                  {pendingTimedOut ? "--" : "取得中"}
+                </span>
               ) : (
                 <span className="font-semibold text-indigo-200">
                   {percentMode ? `約${peakPredPct}%` : `${peakPredTotal}人`}
@@ -296,7 +321,9 @@ function StoreCardImpl({
             <div className="flex items-center gap-1">
               <span className="text-white/50">混雑</span>
               {forecastPending ? (
-                <span className="font-semibold text-white/35">取得中</span>
+                <span className="font-semibold text-white/35">
+                  {pendingTimedOut ? "--" : "取得中"}
+                </span>
               ) : (
                 <span className={`font-semibold ${crowdClass}`}>
                   {crowdIcon} {crowd}
@@ -308,7 +335,9 @@ function StoreCardImpl({
             <div className="flex items-center gap-1 text-right">
               <span className="text-white/50">狙い目</span>
               {forecastPending ? (
-                <span className="max-w-[7rem] truncate font-semibold text-white/35">取得中</span>
+                <span className="max-w-[7rem] truncate font-semibold text-white/35">
+                  {pendingTimedOut ? "--" : "取得中"}
+                </span>
               ) : (
                 <span className="max-w-[7rem] truncate font-semibold text-white">{recommend}</span>
               )}
