@@ -56,7 +56,7 @@ export const revalidate = 120;
  */
 export const dynamicParams = false;
 
-/** ビルド時に全店舗ページを静的生成する（44店） */
+/** ビルド時に全店舗ページを静的生成する（43店） */
 export function generateStaticParams(): { id: string }[] {
   return STORES.map((s) => ({ id: s.slug }));
 }
@@ -320,7 +320,9 @@ export default async function StorePage({ params }: Props) {
       "@type": "PostalAddress",
       addressRegion: meta.regionLabel,
       addressLocality: meta.areaLabel,
-      addressCountry: "JP",
+      // 海外(韓国・江南)店のみ KR。それ以外は国内 JP。構造化データの国情報を実体に一致させる。
+      addressCountry:
+        meta.regionLabel === "海外" && meta.areaLabel.includes("韓国") ? "KR" : "JP",
     },
     url: storeUrl,
   };
