@@ -119,15 +119,26 @@ jobs:
             fi
           }
 
+          # 【重要】CDNキャッシュはURLの完全一致がキー。クライアント(useStorePreviewData.ts)が
+          # 実際に発行するURLと同じ形式・同じパラメータ順で温めること。
+          #   今日:   /api/range?store=X&from=<JST今日>&to=<JST明日>&limit=240
+          #   昨日:   /api/range?store=X&from=<JST昨日>&to=<JST今日>&limit=1200
+          # (旧実装は from/to 無しの limit=240 だけを温めており、クライアントの実URLと
+          #  キャッシュキーが一致せず range の温めが空振りしていた。2026-07-08修正)
+          JST_TODAY="$(date -u -d '+9 hours' +%F)"
+          JST_TOMORROW="$(date -u -d '+9 hours +1 day' +%F)"
+          JST_YESTERDAY="$(date -u -d '+9 hours -1 day' +%F)"
+
           for SLUG in "${SLUGS[@]}"; do
-            # クリティカルパスの2本のみ（重い/低価値なエンドポイントは温めない）。
-            warm_one "${BASE}/api/range?store=${SLUG}&limit=240" "${SLUG}:range"
+            # クリティカルパスの3本のみ（重い/低価値なエンドポイントは温めない）。
+            warm_one "${BASE}/api/range?store=${SLUG}&from=${JST_TODAY}&to=${JST_TOMORROW}&limit=240" "${SLUG}:range_today"
+            warm_one "${BASE}/api/range?store=${SLUG}&from=${JST_YESTERDAY}&to=${JST_TODAY}&limit=1200" "${SLUG}:range_yesterday"
             warm_one "${BASE}/api/forecast_today?store=${SLUG}" "${SLUG}:forecast_today"
-            # Render 単一ワーカーへのサンダリングハードを避けるための平準化。
+            # Render ワーカーへのサンダリングハードを避けるための平準化。
             sleep 0.3
           done
 
-          echo "OK=${OK_COUNT} FAIL=${FAIL_COUNT} (対象 ${TOTAL_STORES}店舗 × 2本 = $((TOTAL_STORES * 2)) リクエスト)"
+          echo "OK=${OK_COUNT} FAIL=${FAIL_COUNT} (対象 ${TOTAL_STORES}店舗 × 3本 = $((TOTAL_STORES * 3)) リクエスト)"
           {
             echo "## CDN warming 結果"
             echo "- 対象店舗数: ${TOTAL_STORES}"
