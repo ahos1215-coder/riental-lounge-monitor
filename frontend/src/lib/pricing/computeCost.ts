@@ -1,0 +1,348 @@
+// frontend/src/lib/pricing/computeCost.ts
+//
+// 料金シミュレーターの計算ロジック（純粋関数・APIコールなし）。全36店舗の
+// PricingTable（openH/closeHのばらつき・バンド数のばらつき・曜日タイプ別の
+// 営業時間・null バンドを含む）に対応する。
+//
+// 課金モデルの前提:
+//   公式の10分単価は「その時間に相席しているかどうか」で切り替わる
+//   （トップページ #price: 単独10分 220円〜 / 相席10分 440円〜。詳細は
+//   data/pricing/raw.ts の先頭コメント参照）。相席していた時間の割合は
+//   事前に分からないため、本シミュレーターは両端を計算する:
+//     - maxTotal = 滞在の全時間が相席だった場合（時間帯バンド単価）＝予算安全側の上限
+//     - minTotal = 相席が一度も無かった場合（全ユニット soloRate）＝下限
+//   実際の会計はこの間に収まる。UI表示は現状 maxTotal のみを見せる方針
+//   （オーナー要望、CostSimulatorCard.tsx 参照）だが、エンジンは両方を返す。
+//
+//   公式サイトは「10分毎課金」とだけ記載しており、明示的な端数処理ルールの記載は無い。
+//   本シミュレーターは一般的な「10分毎自動延長」の考え方に基づき、
+//     - 滞在時間を10分単位に切り上げる（例: 25分滞在 = 3ユニット）
+//     - 各ユニットの単価は、そのユニットの「開始時刻」が属する時間帯バンドで決まる
+//   という前提で計算する。実際の課金タイミング（入店時刻基準の10分区切りか、
+//   00分/10分単位の壁時計基準か）は公式サイトに明記が無いため、入店時刻を起点に
+//   10分区切りで計算している（UIにも前提として注記する）。
+//
+// ■ 最終バンドの「Close」延長ルール（全36店舗共通の一般化ポイント）
+//   多くの店舗は平日と週末で実際の閉店時刻が異なるが（例: 小倉は平日02:00・
+//   週末05:00）、価格表は「24時〜Close」のような単一バンドを両曜日タイプで
+//   共有しており、専用の延長バンド行を持たない店舗が大半（2026-07-08 の
+//   全36店舗クロスチェックで確認）。この場合「Close」は各曜日の実際の閉店を
+//   指す動的な意味と解釈し、最終バンド（その曜日タイプで null でない最後の
+//   バンド）の単価を、そのバンド自身の end を超えて実際の閉店時刻
+//   （closeTimeByDayType[dayType]）まで延長して適用する。
+//   渋谷店のように専用の延長バンド（weekday:null の「6時〜Close」）を明示的に
+//   持つ店舗は、そのバンド自身の値をそのまま使うので、この延長ロジックは
+//   実質的に発火しない（延長対象がそもそも無いため）。
+
+import type { DayType, PricingBand, PricingTable } from "@/data/pricing/types";
+
+/** "HH:MM" を「開店日からの分」に変換。24時以降（翌日側）は 24:00〜59:59 の表記を想定。 */
+function timeToMinutes(hhmm: string): number {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!m) throw new Error(`Invalid time string: ${hhmm}`);
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  return h * 60 + min;
+}
+
+/** 表示用に「分」を "HH:MM" へ戻す。30:00 は "06:00"、24:30 は "24:30" のまま表示する（翌日感を残す）。 */
+export function minutesToTimeLabel(totalMinutes: number): string {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  const displayH = h % 24;
+  return `${displayH.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+}
+
+export type UnitBreakdownRow = {
+  band: PricingBand;
+  minutes: number;
+  unitPrice: number;
+  units: number;
+  subtotal: number;
+};
+
+export type ChargeLine = {
+  label: string;
+  amount: number;
+};
+
+export type PriceBoundary = {
+  /** "HH:MM" 表記（24時以降は 24:00〜59:59 のまま） */
+  atLabel: string;
+  atMinutes: number;
+  oldPrice: number;
+  newPrice: number;
+};
+
+export type CostResult = {
+  /** 上限: 滞在の全時間が相席だった場合（時間帯バンド単価 + チャージ類） */
+  maxTotal: number;
+  /** 下限: 相席が一度も無かった場合（全ユニット soloRate + チャージ類） */
+  minTotal: number;
+  /** 相席ケース（上限側）のバンド別内訳 */
+  unitsBreakdown: UnitBreakdownRow[];
+  charges: ChargeLine[];
+  /** entry〜exit の間に相席単価が変わる境界（値上がりの事実のみを示す。演出的な言い回しはしない） */
+  boundaries: PriceBoundary[];
+  /** 合計ユニット数（10分単位・切り上げ） */
+  totalUnits: number;
+};
+
+export type ComputeCostOptions = {
+  appCheckin: boolean;
+  solo: boolean;
+};
+
+/**
+ * 指定した曜日タイプの営業ウィンドウ（分・openTime基準）を返す。
+ * openTimeByDayType/closeTimeByDayType が店舗ごとに異なるため、店舗+曜日タイプ
+ * ごとに動的に決まる。
+ */
+function windowMinutes(pricing: PricingTable, dayType: DayType): { minEntry: number; maxExit: number } {
+  const minEntry = timeToMinutes(pricing.openTimeByDayType[dayType]);
+  const maxExit = timeToMinutes(pricing.closeTimeByDayType[dayType]);
+  return { minEntry, maxExit };
+}
+
+/**
+ * "HH:MM" を、店舗の営業ウィンドウ内の「分」に正規化する。openTime（両曜日タイプの
+ * うち早い方）より前の時刻（00:00〜openTime未満）は自動的に翌日側とみなす。
+ */
+export function normalizeStayMinutes(hhmm: string, openTime: string): number {
+  const t = timeToMinutes(hhmm);
+  const open = timeToMinutes(openTime);
+  return t < open ? t + 24 * 60 : t;
+}
+
+/**
+ * 指定した曜日タイプにおける「実際に販売されている最後のバンド」を返す
+ * （= その曜日タイプで weekday/weekend が null でない最後のバンド）。
+ * 渋谷店のような weekday:null バンドがある店舗では、平日の最終バンドは
+ * その1つ手前になる。
+ */
+function lastActiveBand(bands: PricingBand[], dayType: DayType): PricingBand | null {
+  for (let i = bands.length - 1; i >= 0; i -= 1) {
+    if (bands[i][dayType] !== null) return bands[i];
+  }
+  return null;
+}
+
+/**
+ * 指定した「分」が属するバンドを探す。見つからず、かつ実際の閉店時刻
+ * （closeTimeByDayType[dayType]）の範囲内であれば、最終バンド（lastActiveBand）を
+ * 「Close」延長として返す（コメント冒頭「最終バンドのClose延長ルール」参照）。
+ * 完全に範囲外（開店前・実閉店後）は null。
+ */
+function findBandForMinute(
+  pricing: PricingTable,
+  dayType: DayType,
+  minute: number,
+): PricingBand | null {
+  for (const band of pricing.bands) {
+    if (band[dayType] === null) continue; // この曜日タイプでは販売されていないバンドはスキップ
+    const start = timeToMinutes(band.start);
+    const end = timeToMinutes(band.end);
+    if (minute >= start && minute < end) return band;
+  }
+
+  // どのバンドにも一致しなかった場合、実際の閉店時刻までは最終バンドの単価を延長する
+  const { maxExit } = windowMinutes(pricing, dayType);
+  const last = lastActiveBand(pricing.bands, dayType);
+  if (last) {
+    const lastEnd = timeToMinutes(last.end);
+    if (minute >= lastEnd && minute < maxExit) return last;
+  }
+
+  return null;
+}
+
+/** 指定した「分」（openTime基準に正規化済み）が属するバンドの10分単価。営業時間外・該当バンド無しは null。 */
+export function unitPriceAtMinute(
+  pricing: PricingTable,
+  dayType: DayType,
+  minute: number,
+): number | null {
+  const band = findBandForMinute(pricing, dayType, minute);
+  if (!band) return null;
+  return band[dayType]; // findBandForMinute が null バンドを除外済みなので number のはず
+}
+
+export type ValidationResult = { ok: true } | { ok: false; reason: string };
+
+/** 入店・退店時刻の妥当性チェック（曜日タイプ別の営業時間内・entry<exit・実閉店時刻まで） */
+export function validateStayWindow(
+  pricing: PricingTable,
+  dayType: DayType,
+  entryMinutes: number,
+  exitMinutes: number,
+): ValidationResult {
+  const { minEntry, maxExit } = windowMinutes(pricing, dayType);
+  const openLabel = minutesToTimeLabel(minEntry);
+  const closeLabel = minutesToTimeLabel(maxExit);
+
+  if (entryMinutes < minEntry) {
+    return { ok: false, reason: `入店時刻は${openLabel}以降にしてください。` };
+  }
+  if (entryMinutes >= maxExit) {
+    return { ok: false, reason: `入店時刻は${closeLabel}（Close）より前にしてください。` };
+  }
+  if (exitMinutes <= entryMinutes) {
+    return { ok: false, reason: "退店時刻は入店時刻より後にしてください。" };
+  }
+  if (exitMinutes > maxExit) {
+    return { ok: false, reason: `退店時刻は${closeLabel}（Close）までにしてください。` };
+  }
+  return { ok: true };
+}
+
+/**
+ * 男性の滞在料金を計算する（上限=ずっと相席 / 下限=相席なし の両方）。
+ * - 10分単位に切り上げ、上限側は各ユニットの「開始時刻」が属するバンドの単価、
+ *   下限側は全ユニット soloRate[dayType] で計算する。
+ * - entry/exitMinutes は openTime を基準に正規化済みの「分」であること
+ *   （normalizeStayMinutes で変換してから渡す）。
+ * - null バンド（その曜日タイプでは販売されていない時間帯）に滞在が入り込んだ
+ *   場合はエラーを投げる（¥0やNaNへのフォールバックは行わない。通常は
+ *   validateStayWindow が曜日タイプ別の実閉店時刻で先に弾くため到達しないはず）。
+ */
+export function computeStayCost(
+  pricing: PricingTable,
+  dayType: DayType,
+  entryMinutes: number,
+  exitMinutes: number,
+  opts: ComputeCostOptions,
+): CostResult {
+  const validation = validateStayWindow(pricing, dayType, entryMinutes, exitMinutes);
+  if (!validation.ok) {
+    throw new Error(validation.reason);
+  }
+
+  const totalMinutesRaw = exitMinutes - entryMinutes;
+  const unitMinutes = pricing.unitMinutes;
+  const totalUnits = Math.ceil(totalMinutesRaw / unitMinutes);
+
+  // バンドごとに「ユニット数・単価」を集計する
+  const perBandUnits = new Map<PricingBand, number>();
+  const boundaries: PriceBoundary[] = [];
+  let prevBand: PricingBand | null = null;
+
+  for (let i = 0; i < totalUnits; i += 1) {
+    const unitStart = entryMinutes + i * unitMinutes;
+    const band = findBandForMinute(pricing, dayType, unitStart);
+    if (!band) {
+      throw new Error(
+        `No pricing band found for minute ${unitStart} (${minutesToTimeLabel(unitStart)}, dayType=${dayType})`,
+      );
+    }
+    const price = band[dayType];
+    if (price === null) {
+      // findBandForMinute が null バンドを除外しているため通常到達しないが、
+      // ¥0/NaNへの暗黙フォールバックを防ぐための明示ガード
+      throw new Error(
+        `Band "${band.label}" has no ${dayType} price at minute ${unitStart} (${minutesToTimeLabel(unitStart)})`,
+      );
+    }
+    perBandUnits.set(band, (perBandUnits.get(band) ?? 0) + 1);
+
+    if (prevBand && prevBand !== band) {
+      const oldPrice = prevBand[dayType];
+      if (oldPrice !== null && price !== oldPrice) {
+        boundaries.push({
+          atLabel: minutesToTimeLabel(unitStart),
+          atMinutes: unitStart,
+          oldPrice,
+          newPrice: price,
+        });
+      }
+    }
+    prevBand = band;
+  }
+
+  const unitsBreakdown: UnitBreakdownRow[] = pricing.bands
+    .map((band) => {
+      const units = perBandUnits.get(band) ?? 0;
+      if (units === 0) return null;
+      const unitPrice = band[dayType];
+      if (unitPrice === null) return null; // ガード（理論上到達しない）
+      return {
+        band,
+        minutes: units * unitMinutes,
+        unitPrice,
+        units,
+        subtotal: units * unitPrice,
+      };
+    })
+    .filter((row): row is UnitBreakdownRow => row !== null);
+
+  const stayTotal = unitsBreakdown.reduce((sum, row) => sum + row.subtotal, 0);
+
+  const charges: ChargeLine[] = [];
+  if (opts.appCheckin) {
+    charges.push({ label: "チャージ（アプリチェックインで無料）", amount: 0 });
+  } else {
+    charges.push({ label: "チャージ", amount: pricing.charges.entry });
+  }
+  if (opts.solo) {
+    charges.push({ label: "シングルチャージ（お一人様利用）", amount: pricing.charges.single });
+  }
+
+  const chargesTotal = charges.reduce((sum, c) => sum + c.amount, 0);
+
+  // 下限: 相席が一度も無かった場合（全ユニットが soloRate[dayType]）
+  const soloStayTotal = totalUnits * pricing.soloRate[dayType];
+
+  return {
+    maxTotal: stayTotal + chargesTotal,
+    minTotal: soloStayTotal + chargesTotal,
+    unitsBreakdown,
+    charges,
+    boundaries,
+    totalUnits,
+  };
+}
+
+/**
+ * 「ピーク◯時間前に入店し、◯時間滞在／クローズまで滞在した場合」のプラン用に、
+ * entry からの滞在時間バリエーション（1h/2h/3h/クローズまで）をまとめて計算する。
+ */
+export type StayPlanOption = {
+  label: string;
+  exitLabel: string;
+  exitMinutes: number;
+  result: CostResult;
+};
+
+export function computeStayPlans(
+  pricing: PricingTable,
+  dayType: DayType,
+  entryMinutes: number,
+  opts: ComputeCostOptions,
+): StayPlanOption[] {
+  const { maxExit } = windowMinutes(pricing, dayType);
+  const durations: { label: string; minutes: number | null }[] = [
+    { label: "1時間", minutes: 60 },
+    { label: "2時間", minutes: 120 },
+    { label: "3時間", minutes: 180 },
+    { label: "クローズまで", minutes: null },
+  ];
+
+  const plans: StayPlanOption[] = [];
+  for (const d of durations) {
+    const exitMinutes = d.minutes == null ? maxExit : Math.min(entryMinutes + d.minutes, maxExit);
+    if (exitMinutes <= entryMinutes) continue;
+    try {
+      const result = computeStayCost(pricing, dayType, entryMinutes, exitMinutes, opts);
+      plans.push({
+        label: d.label,
+        exitLabel: minutesToTimeLabel(exitMinutes),
+        exitMinutes,
+        result,
+      });
+    } catch {
+      // 営業時間外などで計算不能な場合はそのプランをスキップ
+    }
+  }
+  return plans;
+}
+
+export { timeToMinutes };

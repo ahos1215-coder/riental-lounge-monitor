@@ -1,0 +1,372 @@
+import { describe, expect, it } from "vitest";
+
+import { ORIENTAL_PRICING_REGISTRY } from "@/data/pricing/build";
+import {
+  computeStayCost,
+  computeStayPlans,
+  minutesToTimeLabel,
+  normalizeStayMinutes,
+  timeToMinutes,
+  unitPriceAtMinute,
+  validateStayWindow,
+} from "./computeCost";
+
+const pricing = ORIENTAL_PRICING_REGISTRY.nagasaki;
+
+function minutesFor(hhmm: string): number {
+  return normalizeStayMinutes(hhmm, pricing.openTime);
+}
+
+describe("timeToMinutes / minutesToTimeLabel", () => {
+  it("round-trips a normal time", () => {
+    expect(timeToMinutes("18:00")).toBe(18 * 60);
+    expect(minutesToTimeLabel(18 * 60)).toBe("18:00");
+  });
+
+  it("handles overnight minutes (24:00-29:59) and labels them as 00:00-05:59", () => {
+    expect(timeToMinutes("24:00")).toBe(24 * 60);
+    expect(minutesToTimeLabel(24 * 60)).toBe("00:00");
+    expect(minutesToTimeLabel(25 * 60 + 30)).toBe("01:30");
+  });
+});
+
+describe("normalizeStayMinutes", () => {
+  it("keeps evening times as-is", () => {
+    expect(minutesFor("22:00")).toBe(22 * 60);
+  });
+
+  it("shifts early-morning times (before open) to the next-day range", () => {
+    expect(minutesFor("02:00")).toBe(26 * 60);
+    expect(minutesFor("00:00")).toBe(24 * 60);
+  });
+});
+
+describe("computeStayCost - weekday 2h from 22:00 (nagasaki)", () => {
+  // 公式サイト実測値: 22:00〜24:00 バンドは相席 平日¥660/10分（発注時の共有表は¥550だったが
+  // 生HTML確認の結果ズレがあり、公式サイトの実測値を正としている。詳細は
+  // frontend/src/data/pricing/raw.ts の先頭コメント参照）。
+  it("max = 12 units x ¥660, min = 12 units x ¥220, both + entry charge", () => {
+    const entry = minutesFor("22:00");
+    const exit = minutesFor("24:00");
+    const result = computeStayCost(pricing, "weekday", entry, exit, {
+      appCheckin: false,
+      solo: false,
+    });
+
+    expect(result.totalUnits).toBe(12);
+    expect(result.unitsBreakdown).toHaveLength(1);
+    expect(result.unitsBreakdown[0].units).toBe(12);
+    expect(result.unitsBreakdown[0].unitPrice).toBe(660);
+    expect(result.unitsBreakdown[0].subtotal).toBe(7920);
+    expect(result.boundaries).toHaveLength(0);
+
+    // charges: entry charge applies since appCheckin=false
+    expect(result.charges).toEqual([{ label: "チャージ", amount: 550 }]);
+    // 上限=ずっと相席 / 下限=相席なし(12×¥220)。チャージは両方に乗る
+    expect(result.maxTotal).toBe(7920 + 550);
+    expect(result.minTotal).toBe(12 * 220 + 550);
+  });
+});
+
+describe("computeStayCost - span crossing 24:00 mixes band prices (nagasaki)", () => {
+  it("weekday 23:00-01:00 mixes ¥660 (22-24) and ¥770 (24-Close)", () => {
+    const entry = minutesFor("23:00");
+    const exit = minutesFor("01:00");
+    const result = computeStayCost(pricing, "weekday", entry, exit, {
+      appCheckin: true,
+      solo: false,
+    });
+
+    // 23:00-24:00 = 6 units @660, 24:00-01:00 = 6 units @770
+    const bandA = result.unitsBreakdown.find((r) => r.band.label === "22時〜24時");
+    const bandB = result.unitsBreakdown.find((r) => r.band.label === "24時〜Close");
+    expect(bandA?.units).toBe(6);
+    expect(bandA?.unitPrice).toBe(660);
+    expect(bandA?.subtotal).toBe(3960);
+    expect(bandB?.units).toBe(6);
+    expect(bandB?.unitPrice).toBe(770);
+    expect(bandB?.subtotal).toBe(4620);
+
+    expect(result.boundaries).toHaveLength(1);
+    expect(result.boundaries[0].atLabel).toBe("00:00");
+    expect(result.boundaries[0].oldPrice).toBe(660);
+    expect(result.boundaries[0].newPrice).toBe(770);
+
+    // appCheckin=true => entry charge waived, shown as 0
+    expect(result.charges).toEqual([
+      { label: "チャージ（アプリチェックインで無料）", amount: 0 },
+    ]);
+    expect(result.maxTotal).toBe(3960 + 4620);
+    // 下限は時間帯に関係なく全12ユニット×¥220（相席なし単価は深夜も同額）
+    expect(result.minTotal).toBe(12 * 220);
+  });
+});
+
+describe("computeStayCost - weekend rates (nagasaki)", () => {
+  it("uses weekend prices for the same window", () => {
+    const entry = minutesFor("20:00");
+    const exit = minutesFor("22:00");
+    const result = computeStayCost(pricing, "weekend", entry, exit, {
+      appCheckin: true,
+      solo: false,
+    });
+    expect(result.unitsBreakdown).toHaveLength(1);
+    expect(result.unitsBreakdown[0].unitPrice).toBe(600);
+    expect(result.unitsBreakdown[0].units).toBe(12);
+    expect(result.maxTotal).toBe(600 * 12);
+    // 相席なし単価(¥220)は平日・週末同額なので下限は曜日タイプに依存しない
+    expect(result.minTotal).toBe(12 * 220);
+  });
+});
+
+describe("computeStayCost - charges (nagasaki)", () => {
+  it("adds both entry charge and single charge when solo and no app checkin", () => {
+    const entry = minutesFor("18:00");
+    const exit = minutesFor("19:00");
+    const result = computeStayCost(pricing, "weekday", entry, exit, {
+      appCheckin: false,
+      solo: true,
+    });
+    expect(result.charges).toEqual([
+      { label: "チャージ", amount: 550 },
+      { label: "シングルチャージ（お一人様利用）", amount: 1100 },
+    ]);
+    // 18:00-19:00 = 6 units @ 440 (Open〜20:00 band)
+    expect(result.unitsBreakdown[0].unitPrice).toBe(440);
+    expect(result.unitsBreakdown[0].units).toBe(6);
+    // チャージ類は上限・下限の両方に同額で乗る
+    expect(result.maxTotal).toBe(440 * 6 + 550 + 1100);
+    expect(result.minTotal).toBe(220 * 6 + 550 + 1100);
+  });
+
+  it("rounds up partial units (25 minutes = 3 units) for both bounds", () => {
+    const entry = minutesFor("18:00");
+    const exit = entry + 25;
+    const result = computeStayCost(pricing, "weekday", entry, exit, {
+      appCheckin: true,
+      solo: false,
+    });
+    expect(result.totalUnits).toBe(3);
+    expect(result.unitsBreakdown[0].units).toBe(3);
+    expect(result.minTotal).toBe(3 * 220);
+  });
+
+  it("min bound: 2h stay = 12 x ¥220 + charges", () => {
+    const entry = minutesFor("21:00");
+    const exit = minutesFor("23:00");
+    const result = computeStayCost(pricing, "weekday", entry, exit, {
+      appCheckin: false,
+      solo: true,
+    });
+    expect(result.minTotal).toBe(12 * 220 + 550 + 1100);
+    expect(result.minTotal).toBeLessThan(result.maxTotal);
+  });
+});
+
+describe("women's pricing", () => {
+  it("is flat ¥0 regardless of time", () => {
+    expect(pricing.women.price).toBe(0);
+  });
+});
+
+describe("validateStayWindow (nagasaki)", () => {
+  it("rejects entry before 18:00", () => {
+    const r = validateStayWindow(pricing, "weekday", timeToMinutes("17:00"), timeToMinutes("19:00"));
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects exit before/equal entry", () => {
+    const entry = minutesFor("22:00");
+    const r = validateStayWindow(pricing, "weekday", entry, entry);
+    expect(r.ok).toBe(false);
+  });
+
+  it("rejects exit after 06:00 (30:00)", () => {
+    const entry = minutesFor("22:00");
+    const r = validateStayWindow(pricing, "weekday", entry, timeToMinutes("30:30"));
+    expect(r.ok).toBe(false);
+  });
+
+  it("accepts a valid overnight window", () => {
+    const entry = minutesFor("23:00");
+    const exit = minutesFor("02:00");
+    const r = validateStayWindow(pricing, "weekday", entry, exit);
+    expect(r.ok).toBe(true);
+  });
+});
+
+describe("computeStayPlans (nagasaki)", () => {
+  it("returns 1h/2h/3h/close options with increasing totals", () => {
+    const entry = minutesFor("22:00");
+    const plans = computeStayPlans(pricing, "weekday", entry, {
+      appCheckin: true,
+      solo: false,
+    });
+    const labels = plans.map((p) => p.label);
+    expect(labels).toEqual(["1時間", "2時間", "3時間", "クローズまで"]);
+    // totals should be non-decreasing as duration grows (both bounds)
+    for (let i = 1; i < plans.length; i += 1) {
+      expect(plans[i].result.maxTotal).toBeGreaterThanOrEqual(plans[i - 1].result.maxTotal);
+      expect(plans[i].result.minTotal).toBeGreaterThanOrEqual(plans[i - 1].result.minTotal);
+    }
+  });
+
+  it("caps the 'close' plan at closeTime even if entry is late", () => {
+    const entry = minutesFor("05:00"); // 29:00
+    const plans = computeStayPlans(pricing, "weekday", entry, {
+      appCheckin: true,
+      solo: false,
+    });
+    const closePlan = plans.find((p) => p.label === "クローズまで");
+    expect(closePlan?.exitLabel).toBe("06:00");
+  });
+});
+
+// ============================================================================
+// 全36店舗ロールアウト: 多様な店舗での追加検証（手計算した金額をアサートする）
+// ============================================================================
+
+describe("computeStayCost - shibuya (high-rate, day-type-varying close, null band)", () => {
+  const shibuya = ORIENTAL_PRICING_REGISTRY.shibuya;
+
+  it("weekend 22:00-24:00 (2h) = 12 x ¥1100 (手計算: 12*1100=13200)", () => {
+    const entry = normalizeStayMinutes("22:00", shibuya.openTime);
+    const exit = normalizeStayMinutes("24:00", shibuya.openTime);
+    const result = computeStayCost(shibuya, "weekend", entry, exit, { appCheckin: true, solo: false });
+    expect(result.totalUnits).toBe(12);
+    expect(result.unitsBreakdown).toHaveLength(1);
+    expect(result.unitsBreakdown[0].unitPrice).toBe(1100);
+    expect(result.maxTotal).toBe(12 * 1100);
+  });
+
+  it("weekend stay crossing into the weekday-null '6時〜Close' band (05:30-06:30) prices at ¥1200", () => {
+    // 渋谷店は週末のみ 06:00〜07:00 も営業（平日はnullバンド=到達しない）。
+    // 05:30入店で1h滞在=6ユニット、うち05:30-06:00は「24時〜6時」バンド(¥1200)、
+    // 06:00-06:30は「6時〜Close」バンド(週末のみ、¥1200)。同額なので境界(boundaries)は出ない。
+    const entry = normalizeStayMinutes("05:30", shibuya.openTime); // = 29:30
+    const exit = normalizeStayMinutes("06:30", shibuya.openTime); // = 30:30
+    const result = computeStayCost(shibuya, "weekend", entry, exit, { appCheckin: true, solo: false });
+    expect(result.totalUnits).toBe(6);
+    // 手計算: 6 units x ¥1200 = 7200
+    expect(result.maxTotal).toBe(6 * 1200);
+  });
+
+  it("weekday validateStayWindow rejects exit past the true weekday close (05:00)", () => {
+    // 渋谷店は平日 18:00〜05:00（週末は18:00〜07:00）。平日に05:30退店を試みると
+    // closeTimeByDayType.weekday=29:00(=05:00)を超えるため弾かれるべき
+    // （バンド自体の「24時〜6時」の見た目のendHは30:00=06:00まであるが、
+    // 平日の実閉店は05:00で先に切れる）。
+    const entry = normalizeStayMinutes("23:00", shibuya.openTime);
+    const exit = normalizeStayMinutes("05:30", shibuya.openTime);
+    const r = validateStayWindow(shibuya, "weekday", entry, exit);
+    expect(r.ok).toBe(false);
+  });
+
+  it("weekend validateStayWindow accepts exit up to the true weekend close (07:00)", () => {
+    const entry = normalizeStayMinutes("23:00", shibuya.openTime);
+    const exit = normalizeStayMinutes("07:00", shibuya.openTime);
+    const r = validateStayWindow(shibuya, "weekend", entry, exit);
+    expect(r.ok).toBe(true);
+  });
+
+  it("weekday unitPriceAtMinute returns null once past the true weekday close", () => {
+    // 06:00(=30:00)は平日には存在しない時間帯（平日は05:00閉店）
+    const minute = normalizeStayMinutes("06:00", shibuya.openTime);
+    expect(unitPriceAtMinute(shibuya, "weekday", minute)).toBeNull();
+  });
+});
+
+describe("computeStayCost - nagoya_ag (19:00-open with opening-gap fill)", () => {
+  const nagoyaAg = ORIENTAL_PRICING_REGISTRY.nagoya_ag;
+
+  it("openTime is 19:00 and a synthetic Open〜20時 gap-fill band exists at the 20時〜22時 rate", () => {
+    expect(nagoyaAg.openTime).toBe("19:00");
+    expect(nagoyaAg.bands[0].label).toContain("Open");
+    expect(nagoyaAg.bands[0].start).toBe("19:00");
+    expect(nagoyaAg.bands[0].end).toBe("20:00");
+    // 公式サイトに明示バンドが無いため、最初に掲載されている「20時〜22時」の単価を暫定適用
+    expect(nagoyaAg.bands[0].weekday).toBe(660);
+    expect(nagoyaAg.bands[0].weekend).toBe(770);
+    expect(nagoyaAg.assumptionNotes?.length).toBeGreaterThan(0);
+  });
+
+  it("weekday 19:00-20:00 (gap window) bills at the borrowed ¥660 rate, never ¥0/NaN", () => {
+    const entry = normalizeStayMinutes("19:00", nagoyaAg.openTime);
+    const exit = normalizeStayMinutes("20:00", nagoyaAg.openTime);
+    const result = computeStayCost(nagoyaAg, "weekday", entry, exit, { appCheckin: true, solo: false });
+    expect(result.totalUnits).toBe(6);
+    // 手計算: 6 units x ¥660 = 3960（¥0にならないことを明示的に確認）
+    expect(result.maxTotal).toBe(6 * 660);
+    expect(result.maxTotal).toBeGreaterThan(0);
+    expect(Number.isNaN(result.maxTotal)).toBe(false);
+  });
+
+  it("weekend 19:30-22:30 (3h, crosses gap into 20時〜22時 and 22時〜24時) mixes rates correctly", () => {
+    const entry = normalizeStayMinutes("19:30", nagoyaAg.openTime);
+    const exit = normalizeStayMinutes("22:30", nagoyaAg.openTime);
+    const result = computeStayCost(nagoyaAg, "weekend", entry, exit, { appCheckin: true, solo: false });
+    // 19:30-20:00 = 3 units @770(gap-fill), 20:00-22:00 = 12 units @770, 22:00-22:30 = 3 units @880
+    // 手計算: 3*770 + 12*770 + 3*880 = 2310 + 9240 + 2640 = 14190
+    expect(result.maxTotal).toBe(3 * 770 + 12 * 770 + 3 * 880);
+    expect(result.totalUnits).toBe(18);
+  });
+});
+
+describe("computeStayCost - umeda_ag (17:00-open, early opening)", () => {
+  const umedaAg = ORIENTAL_PRICING_REGISTRY.umeda_ag;
+
+  it("openTime is 17:00 with no gap-fill needed (Open〜20時 band starts exactly at 17:00)", () => {
+    expect(umedaAg.openTime).toBe("17:00");
+    expect(umedaAg.bands[0].start).toBe("17:00");
+    expect(umedaAg.assumptionNotes).toBeUndefined();
+  });
+
+  it("weekday 17:00-20:00 (3h, the wide first band) = 18 x ¥660 (手計算: 18*660=11880)", () => {
+    const entry = normalizeStayMinutes("17:00", umedaAg.openTime);
+    const exit = normalizeStayMinutes("20:00", umedaAg.openTime);
+    const result = computeStayCost(umedaAg, "weekday", entry, exit, { appCheckin: true, solo: false });
+    expect(result.totalUnits).toBe(18);
+    expect(result.unitsBreakdown).toHaveLength(1);
+    expect(result.maxTotal).toBe(18 * 660);
+  });
+
+  it("solo (男性1名) rate is ¥330/10min, unlike nagasaki's ¥220", () => {
+    expect(umedaAg.soloRate.weekday).toBe(330);
+    expect(umedaAg.soloRate.weekend).toBe(330);
+  });
+});
+
+describe("computeStayCost - kokura (day-type-varying close via last-band extension, no null band)", () => {
+  const kokura = ORIENTAL_PRICING_REGISTRY.kokura;
+
+  it("closeTimeByDayType differs: weekday 02:00, weekend 05:00", () => {
+    expect(kokura.closeTimeByDayType.weekday).toBe("26:00"); // 翌02:00
+    expect(kokura.closeTimeByDayType.weekend).toBe("29:00"); // 翌05:00
+  });
+
+  it("weekday validateStayWindow rejects exit past 02:00", () => {
+    const entry = normalizeStayMinutes("23:00", kokura.openTime);
+    const exit = normalizeStayMinutes("03:00", kokura.openTime);
+    const r = validateStayWindow(kokura, "weekday", entry, exit);
+    expect(r.ok).toBe(false);
+  });
+
+  it("weekend 03:00-05:00 (2h, past the last band's own end=24:00-26:00 but within true close) extends the last band's rate", () => {
+    // 小倉店の価格表は「24時〜Close」バンド1本(startH24,endH26)しか無いが、
+    // 週末の実閉店は05:00(=29:00)。価格表のendH(26=02:00)を超えても
+    // 実閉店までは最終バンドの単価(¥880)を延長適用する（Close延長ルール）。
+    const entry = normalizeStayMinutes("03:00", kokura.openTime); // = 27:00
+    const exit = normalizeStayMinutes("05:00", kokura.openTime); // = 29:00
+    const result = computeStayCost(kokura, "weekend", entry, exit, { appCheckin: true, solo: false });
+    expect(result.totalUnits).toBe(12);
+    // 手計算: 12 units x ¥880 = 10560（延長された最終バンドの単価）
+    expect(result.maxTotal).toBe(12 * 880);
+  });
+
+  it("weekend validateStayWindow accepts exit exactly at the extended true close (05:00)", () => {
+    const entry = normalizeStayMinutes("23:00", kokura.openTime);
+    const exit = normalizeStayMinutes("05:00", kokura.openTime);
+    const r = validateStayWindow(kokura, "weekend", entry, exit);
+    expect(r.ok).toBe(true);
+  });
+});
