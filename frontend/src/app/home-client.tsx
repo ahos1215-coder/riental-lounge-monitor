@@ -28,6 +28,12 @@ export type HomeBlogTeaser = {
   dateLabel: string;
 };
 
+export type HomeRepresentativeStore = {
+  slug: string;
+  name: string;
+  areaLabel: string;
+};
+
 type HomePageProps = {
   latestBlogPosts: HomeBlogTeaser[];
   /**
@@ -35,6 +41,12 @@ type HomePageProps = {
    * 取得失敗・タイムアウト時は null（従来通りクライアント fetch のみで描画）。
    */
   initialTop5?: HomeMegribiScoreItem[] | null;
+  /**
+   * サーバー側 (page.tsx) が STORES（静的データ）から地域ごとに選んだ代表店舗。
+   * バックエンドの成否に関係なく raw HTML に /store/ への実アンカーを出すために使う
+   * （「今夜のおすすめ」は megribi_score 取得成功時のみリンクが埋まるため、それとは独立）。
+   */
+  representativeStores?: HomeRepresentativeStore[];
 };
 
 const FALLBACK_LAST_STORE = {
@@ -192,7 +204,11 @@ function ScoreBar({ score }: { score: number }) {
   );
 }
 
-export default function HomePage({ latestBlogPosts, initialTop5 }: HomePageProps) {
+export default function HomePage({
+  latestBlogPosts,
+  initialTop5,
+  representativeStores = [],
+}: HomePageProps) {
   const [lastStore, setLastStore] = useState<StoreMeta | null>(null);
   const [lastVisitFetched, setLastVisitFetched] = useState<LastVisitFetchedTrend>({
     loading: true,
@@ -522,6 +538,20 @@ export default function HomePage({ latestBlogPosts, initialTop5 }: HomePageProps
               <p className="mt-2 text-[13px] text-slate-400">
                 トップでは「直前に見た店」の推移だけを表示し、特定店の抜粋一覧は出しません（一覧と役割が重なるため）。
               </p>
+              {representativeStores.length > 0 && (
+                <ul className="mt-4 flex flex-wrap gap-2">
+                  {representativeStores.map((store) => (
+                    <li key={store.slug}>
+                      <Link
+                        href={`/store/${store.slug}`}
+                        className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition hover:border-indigo-400/60 hover:text-indigo-200"
+                      >
+                        {store.name}（{store.areaLabel}）
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <div className="mt-4">
                 <Link
                   href="/stores"

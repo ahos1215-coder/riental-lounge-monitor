@@ -1,7 +1,11 @@
 import { Suspense } from "react";
+import type { Metadata } from "next";
+import Link from "next/link";
 import StoresListClient, { type StoreRealtimeCard } from "./stores-list-client";
-import { STORES } from "@/app/config/stores";
+import { STORES, buildStoreFullName } from "@/app/config/stores";
 import { fetchBackendSnapshot } from "@/lib/serverSnapshot";
+import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { buildBreadcrumbList, serializeJsonLd } from "@/lib/jsonLd";
 import {
   STORE_CARD_RANGE_LIMIT,
   STORE_CARD_SPARKLINE_POINTS,
@@ -13,6 +17,12 @@ import {
 
 /** /api/range_multi のCDN TTL(60s)に合わせる。一覧1ページ目の初期表示はこの粒度で十分。 */
 export const revalidate = 60;
+
+const base = getMetadataBaseUrl();
+
+export const metadata: Metadata = {
+  alternates: { canonical: new URL("/stores", base).href },
+};
 
 /** デフォルト表示（フィルタ無し・1ページ目）の店舗数と一致させる。 */
 const INITIAL_PAGE_SIZE = 12;
@@ -117,12 +127,74 @@ async function fetchInitialStoreCards(): Promise<Record<string, StoreRealtimeCar
   return Object.keys(cards).length > 0 ? cards : null;
 }
 
+/**
+ * /store/{slug} への実アンカーを raw HTML に載せるための SSR ナビブロック。
+ * StoresListClient はカードをクライアント側 fetch 完了後に描画するため、フィルタ無しの
+ * 初回 HTML には <a href="/store/..."> が1つも出ない（クローラーが読む raw HTML に内部リンクが
+ * 無い状態になる）。ここで全店舗（登録済み・新潟等の閉店店舗は STORES に含まれない）を
+ * サーバー側で列挙し、地域ごとに実アンカーとして出力する。クライアント側のフィルタ/検索UIとは
+ * 独立した別ブロックなので、CSR の絞り込みロジックには一切触れない。
+ */
+function AllStoresSsrNav() {
+  const byRegion = new Map<string, typeof STORES>();
+  for (const store of STORES) {
+    const list = byRegion.get(store.regionLabel);
+    if (list) list.push(store);
+    else byRegion.set(store.regionLabel, [store]);
+  }
+
+  return (
+    <section aria-labelledby="all-stores-heading" className="border-t border-white/10 pb-10 pt-6">
+      <h2 id="all-stores-heading" className="text-sm font-semibold text-white/70">
+        全店舗一覧
+      </h2>
+      <p className="mt-1 text-[11px] text-white/40">
+        地域ごとの全{STORES.length}店舗です。店舗名をタップすると混雑状況ページへ移動します。
+      </p>
+      <nav aria-label="全店舗一覧" className="mt-3 space-y-4">
+        {[...byRegion.entries()].map(([region, stores]) => (
+          <div key={region}>
+            <p className="text-[11px] font-medium text-white/45">{region}</p>
+            <ul className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1.5">
+              {stores.map((store) => (
+                <li key={store.slug}>
+                  <Link
+                    href={`/store/${store.slug}`}
+                    className="text-xs text-white/60 underline decoration-white/20 underline-offset-2 transition hover:text-indigo-200 hover:decoration-indigo-300"
+                  >
+                    {buildStoreFullName(store)}（{store.areaLabel}）
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </nav>
+    </section>
+  );
+}
+
 export default async function StoresPage() {
   const initialCards = await fetchInitialStoreCards();
 
+  const breadcrumbJsonLd = serializeJsonLd(
+    buildBreadcrumbList([
+      { name: "ホーム", item: base.href.replace(/\/+$/, "") || base.href },
+      { name: "店舗一覧", item: new URL("/stores", base).href },
+    ]),
+  );
+
   return (
-    <Suspense fallback={<StoresFallback />}>
-      <StoresListClient initialCards={initialCards} />
-    </Suspense>
+    <>
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: breadcrumbJsonLd }} />
+      <Suspense fallback={<StoresFallback />}>
+        <StoresListClient initialCards={initialCards} />
+      </Suspense>
+      <div className="relative z-10 flex justify-center bg-[#050505]">
+        <div className="w-full max-w-[1080px] px-4">
+          <AllStoresSsrNav />
+        </div>
+      </div>
+    </>
   );
 }
