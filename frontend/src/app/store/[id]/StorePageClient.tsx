@@ -46,6 +46,26 @@ type RealtimeCardStats = {
   recommendLabel?: string;
 };
 
+/**
+ * コールド店舗（CDN MISS + バックエンド輻輳）での初回表示を守るためのフェッチ延期ゲート。
+ * グラフの生命線である range/forecast_today（useStorePreviewData）は絶対に遅延させず、
+ * それ以外の非クリティカルな並列フェッチ（関連店舗・レポート要約など）だけを
+ * 「メインデータの初回解決（loading=false）」または「フォールバックタイマー」のどちらか
+ * 早い方まで遅らせる。initialSnapshot が既にある（ISRスナップショット命中）場合は
+ * mainReady が最初のレンダーから true になるため、ほぼ即座に発火する。
+ */
+function useDeferredFetchGate(mainReady: boolean, fallbackMs = 2_500): boolean {
+  const [timerElapsed, setTimerElapsed] = useState(mainReady);
+
+  useEffect(() => {
+    if (mainReady || timerElapsed) return;
+    const t = setTimeout(() => setTimerElapsed(true), fallbackMs);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mainReady, fallbackMs]);
+
+  return mainReady || timerElapsed;
+}
 
 function StorePageFallback() {
   return (
@@ -94,6 +114,16 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
   const meta = getStoreMetaBySlug(slugFromPath || searchParams.get("store") || DEFAULT_STORE);
   const slug = meta.slug;
 
+  // メインのグラフ用データ（range/forecast_today）は MeguribiDashboardPreview 配下の
+  // useStorePreviewData が持つが、ここ（StorePageInner）からは loading state を直接
+  // 観測できない。ただし initialSnapshot が存在する場合、useStorePreviewData は
+  // 最初のレンダーから loading:false で即描画する（storePreviewSnapshot 側の既存仕様）ため、
+  // 「initialSnapshot の有無」をメインデータ即時性の代理シグナルとして使える。
+  // initialSnapshot が無いコールド店舗では、フォールバックタイマー（既定 2500ms）だけで
+  // 非クリティカルな並列フェッチをゲートする。
+  const mainReady = initialSnapshot !== null;
+  const canFireDeferred = useDeferredFetchGate(mainReady);
+
   useEffect(() => {
     if (!slug) return;
 
@@ -138,8 +168,10 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
 
   const [reportSummary, setReportSummary] = useState<ReportSummaryData>({ weekly: null });
 
+  // 非クリティカル: グラフ本体（range/forecast_today）を待たせないよう、メインデータの
+  // 初回解決かフォールバックタイマーまで発火を遅らせる（コールド店舗のバックエンド輻輳回避）。
   useEffect(() => {
-    if (!slug) return;
+    if (!slug || !canFireDeferred) return;
     let active = true;
     fetch(`/api/reports/store-summary?store=${encodeURIComponent(slug)}`, { cache: "no-store" })
       .then((r) => r.json())
@@ -151,7 +183,7 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
       })
       .catch(() => {/* サイレント */});
     return () => { active = false; };
-  }, [slug]);
+  }, [slug, canFireDeferred]);
 
   const [favorite, setFavorite] = useState(false);
   const [relatedRealtime, setRelatedRealtime] = useState<
@@ -171,7 +203,10 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
     setFavorite(isFavoriteStore(slug));
   }, [slug]);
 
+  // 非クリティカル: 関連店舗カードはグラフより後に見える位置にあるため、メインデータの
+  // 初回解決かフォールバックタイマーまで発火を遅らせる（コールド店舗のバックエンド輻輳回避）。
   useEffect(() => {
+    if (!canFireDeferred) return;
     let mounted = true;
 
     (async () => {
@@ -236,7 +271,7 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
     return () => {
       mounted = false;
     };
-  }, [digestStores]);
+  }, [digestStores, canFireDeferred]);
 
   const favoriteButton = (
     <button
@@ -310,11 +345,15 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
         </section>
       )}
 
-      <section className="mx-auto w-full max-w-6xl px-4">
-        <div className="max-w-xs">
-          <ForecastAccuracyCard storeSlug={slug} brand={meta.brand} capacity={meta.capacity} />
-        </div>
-      </section>
+      {/* 非クリティカル: モジュールレベルで長期キャッシュ済みだが、コールド店舗での
+          初回輻輳を避けるため他の付随フェッチと同じゲートで遅らせる（trivial な変更）。 */}
+      {canFireDeferred && (
+        <section className="mx-auto w-full max-w-6xl px-4">
+          <div className="max-w-xs">
+            <ForecastAccuracyCard storeSlug={slug} brand={meta.brand} capacity={meta.capacity} />
+          </div>
+        </section>
+      )}
 
       <section className="mx-auto w-full max-w-6xl space-y-3 px-4">
         <h2 className="text-sm font-semibold text-slate-100">ほかの店舗を見る</h2>
