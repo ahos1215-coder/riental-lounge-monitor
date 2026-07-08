@@ -10,6 +10,7 @@ import {
   STORES,
   type StoreMeta,
 } from "../../config/stores";
+import { getAreaConfigForStoreSlug } from "../../config/areas";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { serializeJsonLd } from "@/lib/jsonLd";
 import {
@@ -344,6 +345,7 @@ export default async function StorePage({ params }: Props) {
   const description = `${fullName}（${meta.areaLabel}）の混雑状況を実測データと機械学習の予測でお伝えします。現在の${crowdPhrase}、今夜の混雑ピーク予測を時間帯別に確認でき、データは営業時間中の更新にあわせて反映されます。毎日の傾向をまとめたレポートも公開しているので、来店タイミングの参考にご利用いただけます。`;
 
   const nearbyStores = pickNearbyStores(meta);
+  const areaConfig = getAreaConfigForStoreSlug(meta.slug);
 
   return (
     <>
@@ -412,6 +414,16 @@ export default async function StorePage({ params }: Props) {
               </li>
             ))}
           </ul>
+          {areaConfig && (
+            <p className="pt-1 text-xs">
+              <Link
+                href={`/area/${encodeURIComponent(areaConfig.id)}`}
+                className="text-indigo-300 hover:text-indigo-200"
+              >
+                {areaConfig.displayName}の相席ラウンジ一覧 →
+              </Link>
+            </p>
+          )}
         </section>
       )}
     </>

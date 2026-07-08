@@ -5,6 +5,7 @@ import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { getAllPostMetas } from "@/lib/blog/content";
 import { fetchAllPublishedEditorialSlugs } from "@/lib/supabase/blogDrafts";
 import { STORES } from "./config/stores";
+import { AREAS } from "./config/areas";
 
 /**
  * frontend/content/insights/weekly/{slug}/{YYYY-MM-DD}.json のうち最新のファイル名を
@@ -48,6 +49,15 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.9,
   }));
 
+  // SEO Phase2続き: エリア横断ハブページ（大阪・名古屋・渋谷・上野・横浜の5エリア）。
+  // ビッグキーワード（例:「大阪 相席ラウンジ」）向けの集約ページ。店舗ページに準じた優先度。
+  const areaRoutes: MetadataRoute.Sitemap = AREAS.map((a) => ({
+    url: `${base}/area/${encodeURIComponent(a.id)}`,
+    lastModified: now,
+    changeFrequency: "daily",
+    priority: 0.85,
+  }));
+
   // ファイルシステム記事（frontend/content/blog/*.mdx）
   const blogRoutes: MetadataRoute.Sitemap = getAllPostMetas().map((p) => ({
     url: `${base}/blog/${encodeURIComponent(p.slug)}`,
@@ -84,5 +94,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.8,
   }));
 
-  return [...staticRoutes, ...storeRoutes, ...blogRoutes, ...editorialRoutes, ...weeklyReportRoutes];
+  return [
+    ...staticRoutes,
+    ...storeRoutes,
+    ...areaRoutes,
+    ...blogRoutes,
+    ...editorialRoutes,
+    ...weeklyReportRoutes,
+  ];
 }

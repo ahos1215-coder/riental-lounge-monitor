@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import StoresListClient, { type StoreRealtimeCard } from "./stores-list-client";
 import { STORES, buildStoreFullName } from "@/app/config/stores";
+import { AREAS } from "@/app/config/areas";
 import { fetchBackendSnapshot } from "@/lib/serverSnapshot";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { buildBreadcrumbList, serializeJsonLd } from "@/lib/jsonLd";
@@ -135,6 +136,37 @@ async function fetchInitialStoreCards(): Promise<Record<string, StoreRealtimeCar
  * サーバー側で列挙し、地域ごとに実アンカーとして出力する。クライアント側のフィルタ/検索UIとは
  * 独立した別ブロックなので、CSR の絞り込みロジックには一切触れない。
  */
+/**
+ * 大阪・名古屋・渋谷・上野・横浜など、複数店舗が集まるエリアのハブページ（/area/{id}）への
+ * 導線。エリアページは店舗ページ側から到達できるが、一覧ページからも張っておくことで
+ * 孤立ページ化を防ぐ（SEO Phase2の内部リンク方針と同じ考え方）。
+ */
+function AreaHubsSsrNav() {
+  if (AREAS.length === 0) return null;
+  return (
+    <section aria-labelledby="area-hubs-heading" className="border-t border-white/10 pb-8 pt-6">
+      <h2 id="area-hubs-heading" className="text-sm font-semibold text-white/70">
+        エリア特集
+      </h2>
+      <p className="mt-1 text-[11px] text-white/40">
+        複数店舗が集まるエリアは、まとめて混雑状況を比較できるページも用意しています。
+      </p>
+      <ul className="mt-3 flex flex-wrap gap-x-3 gap-y-1.5">
+        {AREAS.map((area) => (
+          <li key={area.id}>
+            <Link
+              href={`/area/${area.id}`}
+              className="text-xs text-white/60 underline decoration-white/20 underline-offset-2 transition hover:text-indigo-200 hover:decoration-indigo-300"
+            >
+              {area.displayName}の相席ラウンジ一覧 →
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 function AllStoresSsrNav() {
   const byRegion = new Map<string, typeof STORES>();
   for (const store of STORES) {
@@ -192,6 +224,7 @@ export default async function StoresPage() {
       </Suspense>
       <div className="relative z-10 flex justify-center bg-[#050505]">
         <div className="w-full max-w-[1080px] px-4">
+          <AreaHubsSsrNav />
           <AllStoresSsrNav />
         </div>
       </div>

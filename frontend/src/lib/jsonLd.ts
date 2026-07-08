@@ -82,3 +82,38 @@ export function buildNightClubJsonLd(store: NightClubStoreInput): Record<string,
   }
   return localBusiness;
 }
+
+/** buildAreaCollectionPageJsonLd に渡す1店舗分。position は配列順から自動採番する。 */
+export type AreaListItemInput = {
+  name: string;
+  url: string;
+};
+
+/**
+ * エリアハブページ (/area/[area]) 用の schema.org CollectionPage + ItemList を組み立てる。
+ * ItemList の各要素は店舗ページへの ListItem（url/name/position）。
+ * name/description はページ側で組み立てた文言をそのまま渡す（ここでは文言生成しない）。
+ */
+export function buildAreaCollectionPageJsonLd(input: {
+  name: string;
+  description: string;
+  url: string;
+  stores: AreaListItemInput[];
+}): Record<string, unknown> {
+  return {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    name: input.name,
+    description: input.description,
+    url: input.url,
+    mainEntity: {
+      "@type": "ItemList",
+      itemListElement: input.stores.map((store, idx) => ({
+        "@type": "ListItem",
+        position: idx + 1,
+        name: store.name,
+        url: store.url,
+      })),
+    },
+  };
+}
