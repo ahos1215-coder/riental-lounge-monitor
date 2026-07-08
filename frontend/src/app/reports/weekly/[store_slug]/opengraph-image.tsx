@@ -78,7 +78,7 @@ export default async function WeeklyReportOGImage({ params }: Props) {
                 borderRadius: "100px",
               }}
             >
-              AI 予測 Weekly Report
+              ML 予測 Weekly Report
             </span>
             <span style={{ color: "rgba(255,255,255,0.3)", fontSize: "16px" }}>{weekLabel}</span>
           </div>

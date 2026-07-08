@@ -119,7 +119,7 @@ export default async function BlogOGImage({ params }: Props) {
           }}
         >
           <span style={{ color: "rgba(255,255,255,0.3)", fontSize: "18px" }}>
-            AI 分析レポート
+            ML 予測レポート
           </span>
           <span style={{ color: "rgba(99,102,241,0.7)", fontSize: "18px" }}>
             meguribi.jp

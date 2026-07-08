@@ -98,7 +98,7 @@ export default async function DailyReportOGImage({ params }: Props) {
                 borderRadius: "100px",
               }}
             >
-              AI 予測 Daily Report
+              ML 予測 Daily Report
             </span>
             <span style={{ color: "rgba(255,255,255,0.3)", fontSize: "16px" }}>{today}</span>
           </div>
