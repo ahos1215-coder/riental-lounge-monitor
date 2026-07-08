@@ -300,7 +300,12 @@ export async function fetchLatestPublishedReportByStore(
     `&store_slug=eq.${encodeURIComponent(slug)}` +
     `&content_type=eq.${encodeURIComponent(contentType)}` +
     `&is_published=eq.true&error_message=is.null` +
-    `&order=created_at.desc&limit=1`;
+    // 「最後に更新された」レポートを表示する。daily は evening_preview / late_update の
+    // 2 edition があり facts_id が異なる別行になる。created_at.desc だと「後から先に作られた
+    // edition」が固定で勝ち、直近に再生成した edition(例: 手動再実行や 18:00→21:30 の進行)が
+    // 表示されない不整合が起きる(表示の「更新」時刻は updated_at を使うため二重に不整合)。
+    // updated_at.desc(nulls last) + created_at.desc をタイブレークにして最新の再生成を出す。
+    `&order=updated_at.desc.nullslast,created_at.desc&limit=1`;
   try {
     const res = await fetch(url, {
       method: "GET",
