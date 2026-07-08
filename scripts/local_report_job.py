@@ -3,7 +3,7 @@
 """MEGRIBI 日次レポート生成ジョブ（ローカルLLM版）
 
 目的:
-  失敗している Gemini パイプラインを置き換え、ローカルの Ollama (gemma4:12b) で
+  失敗している Gemini パイプラインを置き換え、ローカルの Ollama (gemma3n:e4b) で
   日次レポート（今夜の見どころ）を生成し、Supabase の blog_drafts テーブルに書き込む。
 
 参照実装（このファイルはこれらを踏襲する）:
@@ -57,14 +57,15 @@ except Exception:  # noqa: BLE001
     gpu_lock = None
 
 JST = timezone(timedelta(hours=9))
-MODEL = "gemma4:12b"
+MODEL = "gemma3n:e4b"
 DEFAULT_USER_AGENT = "MEGRIBI-local-report-job"
 VALID_EDITIONS = ("evening_preview", "late_update")
 VALID_MODES = ("dry-run", "shadow", "publish")
 
 # tune_local_llm.py (自己改善ハーネス) が書き出す推奨設定。存在すれば生成時に適用する。
-# 2026-07-03 実測: num_ctx=2048 + num_gpu=999 で全層 GPU 常駐 (7.94GB/8.19GB) となり
-# 13.7 → 24.8 tok/s (1.8倍)。daily のプロンプトは ~1000 tokens なので ctx2048 で安全。
+# 2026-07-08: モデルを gemma3n:e4b に変更。省メモリ設計で実行時 VRAM 3.0GB・100% GPU。
+# num_gpu=999 で全層 GPU を明示 (tuning_results.json が無くても下の or で常に適用)。
+# num_ctx は既定 8192 のままで余裕。旧 gemma4:12b は 7.9GB でギリギリ CPU に溢れていた。
 TUNING_RESULTS_PATH = Path(__file__).resolve().parents[1] / "local_llm_spike_out" / "tuning_results.json"
 
 
@@ -296,7 +297,7 @@ def build_record(
 
     # 2) Ollama 生成（呼び出し側で gpu_lock を取得済みの前提）
     user_prompt = prompt_daily(store_label, facts)
-    tuned = _load_tuned_options()
+    tuned = _load_tuned_options() or {"num_gpu": 999}
     text, elapsed, err = spk.run_ollama(MODEL, spk.SYSTEM, user_prompt, options=tuned)
     if err and tuned and "num_gpu" in tuned:
         # 全層 GPU 強制 (num_gpu) は VRAM が他プロセスに部分占有されていると

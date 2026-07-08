@@ -726,7 +726,7 @@ def _generate_ai_commentary(
     """週報の自然文解説を 2 セクション分生成する (Phase C v2)。
 
     バックエンドは `INSIGHTS_LLM_BACKEND` (既定 "ollama") で切り替える:
-      - "ollama": ローカル Ollama (gemma4:12b) を使用。GEMINI_API_KEY 不要。コスト削減版。
+      - "ollama": ローカル Ollama (gemma3n:e4b) を使用。GEMINI_API_KEY 不要。コスト削減版。
       - "gemini": 従来通り Gemini REST API (要 GEMINI_API_KEY)。
 
     system_instruction / user_prompt はモデル非依存のため共通で組み立て、
@@ -812,7 +812,8 @@ def _generate_ai_commentary(
         "■ 内容ガイド\n"
         "- 0-4 時のデータは前日の夜セッションとして集計済み (例: 日曜 00:00 は土曜の夜)。\n"
         "- 具体的な曜日・時間帯・%値を必要なだけ盛り込む (羅列しすぎない)。\n"
-        "- 「先週」と「来週」で異なる時制を保つ (先週=過去/観察、来週=推量)。\n\n"
+        "- 「先週」と「来週」で異なる時制を保つ (先週=過去/観察、来週=推量)。\n"
+        "- データに無い事柄 (予約の可否・待ち時間・特典など) は書かない。数値の裏付けがある事実のみ。\n\n"
         "■ 出力 (JSON 形式)\n"
         "{\n"
         '  "last_week_summary": "<リード 1 文 + 改行 + 箇条書き 3-5 項目。過去形・観察>",\n'
@@ -925,7 +926,7 @@ def _sanitize_commentary_text(text: str) -> str:
 
 
 def _ollama_commentary_call(system_instruction: str, user_prompt: str) -> str | None:
-    """ローカル Ollama (gemma4:12b) を呼び出し、応答テキスト (JSON 文字列想定) を返す。
+    """ローカル Ollama (gemma3n:e4b) を呼び出し、応答テキスト (JSON 文字列想定) を返す。
 
     共有 GPU ロック (gpu_lock) 配下で呼ぶ (local_report_job.py と同じ取り込み方)。
     gpu_lock が見つからない場合はロック無しで続行 (best-effort)。
@@ -940,15 +941,25 @@ def _ollama_commentary_call(system_instruction: str, user_prompt: str) -> str | 
     from contextlib import nullcontext
 
     body = {
-        "model": "gemma4:12b",
+        "model": "gemma3n:e4b",
         "messages": [
             {"role": "system", "content": system_instruction},
             {"role": "user", "content": user_prompt},
         ],
         "stream": False,
         "keep_alive": 0,
-        "format": "json",
-        "options": {"num_ctx": 8192, "temperature": 0.7},
+        # Gemini 側の responseSchema と同様、キー名を綴りごと強制する。小型モデル(e4b)は
+        # "json" 指定だけだとキーを稀に誤字る(例: last_week_summaary)ため、スキーマで固定する。
+        "format": {
+            "type": "object",
+            "properties": {
+                "last_week_summary": {"type": "string"},
+                "next_week_forecast": {"type": "string"},
+            },
+            "required": ["last_week_summary", "next_week_forecast"],
+        },
+        # num_gpu=999 で全層 GPU を明示。e4b は VRAM 3.0GB なので ctx8192 でも 100% GPU。
+        "options": {"num_ctx": 8192, "num_gpu": 999, "temperature": 0.7},
     }
 
     # タイムアウト等の一過性エラーで 1 店だけ本文が欠けるのを防ぐため 1 回だけ再試行する
