@@ -3,7 +3,7 @@
 """MEGRIBI 日次レポート生成ジョブ（ローカルLLM版）
 
 目的:
-  失敗している Gemini パイプラインを置き換え、ローカルの Ollama (gemma3n:e4b) で
+  失敗している Gemini パイプラインを置き換え、ローカルの Ollama (gemma4:e4b) で
   日次レポート（今夜の見どころ）を生成し、Supabase の blog_drafts テーブルに書き込む。
 
 参照実装（このファイルはこれらを踏襲する）:
@@ -57,15 +57,18 @@ except Exception:  # noqa: BLE001
     gpu_lock = None
 
 JST = timezone(timedelta(hours=9))
-MODEL = "gemma3n:e4b"
+MODEL = "gemma4:e4b"
 DEFAULT_USER_AGENT = "MEGRIBI-local-report-job"
 VALID_EDITIONS = ("evening_preview", "late_update")
 VALID_MODES = ("dry-run", "shadow", "publish")
 
 # tune_local_llm.py (自己改善ハーネス) が書き出す推奨設定。存在すれば生成時に適用する。
-# 2026-07-08: モデルを gemma3n:e4b に変更。省メモリ設計で実行時 VRAM 3.0GB・100% GPU。
+# 2026-07-08: モデルを gemma4:e4b (Gemma 4 の Effective-4B。2026-04リリース) に変更。
+# PLE (Per-Layer Embeddings) の省メモリ設計でディスク9.6GBでも実行時 VRAM 3.3GB・100% GPU。
 # num_gpu=999 で全層 GPU を明示 (tuning_results.json が無くても下の or で常に適用)。
-# num_ctx は既定 8192 のままで余裕。旧 gemma4:12b は 7.9GB でギリギリ CPU に溢れていた。
+# num_ctx は既定 8192 のままで余裕。旧 gemma4:12b(11.9B) は 7.9GB でギリギリ CPU に溢れていた。
+# think=False: gemma4 は既定で reasoning ON だが、短いレポートに推論は不要。ONだと思考で
+# 数千トークン消費し遅く・発熱増になるため OFF にする (実測: weekly 29.4s→13.7s)。
 TUNING_RESULTS_PATH = Path(__file__).resolve().parents[1] / "local_llm_spike_out" / "tuning_results.json"
 
 
@@ -298,12 +301,12 @@ def build_record(
     # 2) Ollama 生成（呼び出し側で gpu_lock を取得済みの前提）
     user_prompt = prompt_daily(store_label, facts)
     tuned = _load_tuned_options() or {"num_gpu": 999}
-    text, elapsed, err = spk.run_ollama(MODEL, spk.SYSTEM, user_prompt, options=tuned)
+    text, elapsed, err = spk.run_ollama(MODEL, spk.SYSTEM, user_prompt, options=tuned, think=False)
     if err and tuned and "num_gpu" in tuned:
         # 全層 GPU 強制 (num_gpu) は VRAM が他プロセスに部分占有されていると
         # ロード失敗し得るため、安全既定 (Ollama 自動配分) で 1 回だけ再試行する。
         _pr(f"[local-report] tuned options failed ({err[:120]}); retrying with default options")
-        text, elapsed, err = spk.run_ollama(MODEL, spk.SYSTEM, user_prompt)
+        text, elapsed, err = spk.run_ollama(MODEL, spk.SYSTEM, user_prompt, think=False)
 
     if err or not text or not text.strip():
         reason = err or "empty output from ollama"

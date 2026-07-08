@@ -726,7 +726,7 @@ def _generate_ai_commentary(
     """週報の自然文解説を 2 セクション分生成する (Phase C v2)。
 
     バックエンドは `INSIGHTS_LLM_BACKEND` (既定 "ollama") で切り替える:
-      - "ollama": ローカル Ollama (gemma3n:e4b) を使用。GEMINI_API_KEY 不要。コスト削減版。
+      - "ollama": ローカル Ollama (gemma4:e4b) を使用。GEMINI_API_KEY 不要。コスト削減版。
       - "gemini": 従来通り Gemini REST API (要 GEMINI_API_KEY)。
 
     system_instruction / user_prompt はモデル非依存のため共通で組み立て、
@@ -926,7 +926,7 @@ def _sanitize_commentary_text(text: str) -> str:
 
 
 def _ollama_commentary_call(system_instruction: str, user_prompt: str) -> str | None:
-    """ローカル Ollama (gemma3n:e4b) を呼び出し、応答テキスト (JSON 文字列想定) を返す。
+    """ローカル Ollama (gemma4:e4b) を呼び出し、応答テキスト (JSON 文字列想定) を返す。
 
     共有 GPU ロック (gpu_lock) 配下で呼ぶ (local_report_job.py と同じ取り込み方)。
     gpu_lock が見つからない場合はロック無しで続行 (best-effort)。
@@ -941,13 +941,16 @@ def _ollama_commentary_call(system_instruction: str, user_prompt: str) -> str | 
     from contextlib import nullcontext
 
     body = {
-        "model": "gemma3n:e4b",
+        "model": "gemma4:e4b",
         "messages": [
             {"role": "system", "content": system_instruction},
             {"role": "user", "content": user_prompt},
         ],
         "stream": False,
         "keep_alive": 0,
+        # gemma4 は既定で reasoning ON だが、週次要約に推論は不要。ON だと思考で数千トークン
+        # 消費し遅く・発熱増になるため OFF (実測 29.4s→13.7s)。
+        "think": False,
         # Gemini 側の responseSchema と同様、キー名を綴りごと強制する。小型モデル(e4b)は
         # "json" 指定だけだとキーを稀に誤字る(例: last_week_summaary)ため、スキーマで固定する。
         "format": {

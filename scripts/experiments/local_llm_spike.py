@@ -141,16 +141,19 @@ def prompt_compare(a_label: str, fa: dict, b_label: str, fb: dict) -> str:
     )
 
 
-def run_ollama(model: str, system: str, user: str, options: dict | None = None) -> tuple[str, float, str]:
+def run_ollama(model: str, system: str, user: str, options: dict | None = None,
+               think: bool | None = None) -> tuple[str, float, str]:
     """Ollama /api/chat を叩く。返り値 (text, elapsed_sec, error)。keep_alive:0 で即アンロード。
 
     options: 既定 (num_ctx=NUM_CTX, temperature=0.7) に上書きマージする追加オプション。
     tune_local_llm.py の計測結果 (例: num_ctx=2048 + num_gpu=999 で 13.7→24.8 tok/s) を
-    呼び出し側から注入するために使う。"""
+    呼び出し側から注入するために使う。
+    think: reasoning モードの明示切替 (gemma4 等 thinking 対応モデル用)。None=モデル既定。
+    レポート用途は think=False 推奨 (推論不要。ON だと思考で数千トークン消費し遅く・発熱増)。"""
     opts: dict = {"num_ctx": NUM_CTX, "temperature": 0.7}
     if options:
         opts.update(options)
-    payload = json.dumps({
+    body: dict = {
         "model": model,
         "messages": [
             {"role": "system", "content": system},
@@ -159,7 +162,10 @@ def run_ollama(model: str, system: str, user: str, options: dict | None = None) 
         "stream": False,
         "keep_alive": 0,
         "options": opts,
-    }).encode("utf-8")
+    }
+    if think is not None:
+        body["think"] = think
+    payload = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         f"{OLLAMA}/api/chat", data=payload,
         headers={"Content-Type": "application/json"}, method="POST",
