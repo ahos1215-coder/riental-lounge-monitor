@@ -42,8 +42,20 @@ const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:5000";
  * サーバー側の初回スナップショット取得タイムアウト。Render 等のコールドスタート時に
  * ISR の再生成コストを一定時間で打ち切るための安全弁。超過/失敗時は null を返し、
  * StorePageClient 側は initialSnapshot 無しの通常 CSR フローにフォールバックする。
+ *
+ * ISR の再生成はバックグラウンドの stale-while-revalidate であり、訪問者のレスポンスを
+ * ブロックしない（再生成が遅くても既存キャッシュが即返る）。一方 initialSnapshot が null に
+ * なった場合の代償（クライアント側でコールドウォーターフォール全部を踏む）の方がはるかに大きい
+ * ため、多少再生成が遅くなってもタイムアウトは長めに倒す。
  */
-const SERVER_SNAPSHOT_TIMEOUT_MS = 2_500;
+const SERVER_SNAPSHOT_TIMEOUT_MS = 5_000;
+
+/** タイムアウト/失敗時に一度だけ再試行するまでの待機時間 */
+const SERVER_SNAPSHOT_RETRY_DELAY_MS = 400;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unknown> {
   const controller = new AbortController();
@@ -76,7 +88,7 @@ async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unk
  *
  * 失敗・タイムアウト時は null を返す（呼び出し側は今日通りの CSR 挙動にフォールバックする）。
  */
-async function fetchInitialSnapshot(meta: StoreMeta): Promise<StoreSnapshot | null> {
+async function fetchInitialSnapshotOnce(meta: StoreMeta): Promise<StoreSnapshot | null> {
   try {
     const base = BACKEND_URL.replace(/\/+$/, "");
     const now = new Date();
@@ -157,6 +169,20 @@ async function fetchInitialSnapshot(meta: StoreMeta): Promise<StoreSnapshot | nu
     // 予期しない例外もフェイルセーフ。initialSnapshot 無しの CSR にフォールバックする。
     return null;
   }
+}
+
+/**
+ * fetchInitialSnapshotOnce の結果が null（タイムアウト/データ無し/失敗）だった場合、
+ * 短い待機を挟んで一度だけ再試行する。ISR 再生成の背後にあるバックエンドの一時的な混雑
+ * （同時発火した range/forecast_today が gunicorn のワーカーキューに詰まっている等）は
+ * 数百ms で解消することが多く、1回だけの再試行で initialSnapshot が null になる確率を
+ * 大きく下げられる。再試行分の AbortController は新規に張り直す（初回のものを使い回さない）。
+ */
+async function fetchInitialSnapshot(meta: StoreMeta): Promise<StoreSnapshot | null> {
+  const first = await fetchInitialSnapshotOnce(meta);
+  if (first) return first;
+  await delay(SERVER_SNAPSHOT_RETRY_DELAY_MS);
+  return fetchInitialSnapshotOnce(meta);
 }
 
 /**

@@ -65,6 +65,29 @@ function mlHighlightChips(snapshot: StoreSnapshot): string[] {
   return chips.slice(0, 3);
 }
 
+/**
+ * コールド店舗（CDN MISS + バックエンド輻輳）でグラフ本体の取得を待たせないよう、
+ * このカードのフェッチは「親から渡された snapshot が実データを持つ（hasData）」または
+ * 「フォールバックタイマー」のどちらか早い方まで遅らせる。
+ * snapshot.hasData は useStorePreviewData 側で実データ解決時にのみ true になる
+ * （初期 baseSnapshot は false）ため、loading プロップが無くても main データの
+ * 準備状況を近似できる。
+ */
+const DEFERRED_FETCH_FALLBACK_MS = 2_500;
+
+function useDeferredFetchGate(mainReady: boolean, fallbackMs = DEFERRED_FETCH_FALLBACK_MS): boolean {
+  const [timerElapsed, setTimerElapsed] = useState(mainReady);
+
+  useEffect(() => {
+    if (mainReady || timerElapsed) return;
+    const t = setTimeout(() => setTimerElapsed(true), fallbackMs);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mainReady, fallbackMs]);
+
+  return mainReady || timerElapsed;
+}
+
 export function LatestForecastSummaryCard({
   storeSlug,
   snapshot,
@@ -78,7 +101,10 @@ export function LatestForecastSummaryCard({
     payload: null,
   });
 
+  const canFireDeferred = useDeferredFetchGate(!!snapshot?.hasData);
+
   useEffect(() => {
+    if (!canFireDeferred) return;
     let mounted = true;
     (async () => {
       setState({ loading: true, payload: null });
@@ -97,7 +123,7 @@ export function LatestForecastSummaryCard({
     return () => {
       mounted = false;
     };
-  }, [storeSlug]);
+  }, [storeSlug, canFireDeferred]);
 
   if (state.loading) {
     return (
