@@ -79,10 +79,9 @@ export function buildAisekiyaPricingTable(raw: AisekiyaRawStorePricing): Aisekiy
 }
 
 /**
- * 相席屋6店舗ぶんの AisekiyaPricingTable レジストリ（slug -> table）。
- * ay_niigata は2026-07-08時点で閉店済み（aisekiyaRaw.ts 冒頭コメント参照）のため
- * RAW_AISEKIYA_PRICING に収録しておらず、このレジストリにも含まれない
- * （getStorePricing は "ay_niigata" に対し null を返す）。
+ * 相席屋の営業中5店舗（渋谷・池袋東口・上野・千葉中央・横浜西口）ぶんの
+ * AisekiyaPricingTable レジストリ（slug -> table）。RAW_AISEKIYA_PRICING を
+ * そのまま変換したもの。
  */
 export const AISEKIYA_PRICING_REGISTRY: Record<string, AisekiyaPricingTable> = Object.fromEntries(
   Object.entries(RAW_AISEKIYA_PRICING).map(([slug, raw]) => [slug, buildAisekiyaPricingTable(raw)]),

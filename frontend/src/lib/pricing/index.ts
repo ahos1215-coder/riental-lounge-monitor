@@ -1,9 +1,9 @@
 // frontend/src/lib/pricing/index.ts
 //
 // 店舗slug -> 料金テーブルのレジストリ。オリエンタルラウンジ日本国内36店舗
-// （frontend/src/data/pricing/raw.ts）と相席屋6店舗
+// （frontend/src/data/pricing/raw.ts）と相席屋の営業中5店舗
 // （frontend/src/data/pricing/aisekiyaRaw.ts）の両方に対応する。
-// 未対応の店舗（海外店舗・sapporo_ag・閉店済みのay_niigataなど）は null を返す
+// 未対応の店舗（海外店舗・sapporo_ag など）は null を返す
 // （UI 側は null なら何も描画しない = CostSimulatorCard は非表示になる）。
 
 import { ORIENTAL_PRICING_REGISTRY } from "@/data/pricing/build";

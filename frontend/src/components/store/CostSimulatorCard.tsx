@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 
 import type { AisekiyaPricingTable, OrientalPricingTable, PricingTable } from "@/data/pricing/types";
 import {
+  aisekiyaUnitPrice,
   computeAisekiyaStayCost,
   computeAisekiyaStayPlans,
   computeStayCost,
@@ -154,17 +155,18 @@ function BreakdownTable({ result }: { result: CostResult }) {
   );
 }
 
-/** 相席屋版の内訳テーブル。時間帯バンドが無いため「相席（フラット単価）」の1行 + チャージ類のみ。 */
+/**
+ * 相席屋版の内訳テーブル。22:00より前の相席行と、22:00以降（深夜10%加算）の相席行を
+ * それぞれ該当ユニットがある場合のみ表示し、下にチャージ類を並べる。
+ */
 function AisekiyaBreakdownTable({
   result,
-  dayType,
   pricing,
 }: {
   result: AisekiyaCostResult;
-  dayType: DayType;
   pricing: AisekiyaPricingTable;
 }) {
-  const taxIncludedUnit = pricing.josekiRateTaxIncluded[dayType];
+  const unitMinutes = pricing.unitMinutes;
   return (
     <div className="mt-3 overflow-x-auto rounded-xl border border-white/10 bg-black/30">
       <table className="w-full min-w-[300px] text-left text-[11px]">
@@ -177,17 +179,30 @@ function AisekiyaBreakdownTable({
           </tr>
         </thead>
         <tbody>
-          <tr className="border-b border-white/5 last:border-0">
-            <td className="px-2.5 py-1.5 text-slate-200">相席（税抜）</td>
-            <td className="px-2.5 py-1.5 text-slate-400">{result.totalUnits * pricing.unitMinutes}分</td>
-            <td className="px-2.5 py-1.5 text-slate-400">
-              {yen(result.unitPrice)}
-              <span className="ml-1 text-[9px] text-slate-500">（税込{yen(taxIncludedUnit)}）</span>
-            </td>
-            <td className="px-2.5 py-1.5 text-right font-medium text-slate-100">
-              {yen(result.staySubtotal)}
-            </td>
-          </tr>
+          {result.normalUnits > 0 && (
+            <tr className="border-b border-white/5 last:border-0">
+              <td className="px-2.5 py-1.5 text-slate-200">
+                相席{result.lateNightUnits > 0 ? "（22:00まで）" : ""}
+              </td>
+              <td className="px-2.5 py-1.5 text-slate-400">{result.normalUnits * unitMinutes}分</td>
+              <td className="px-2.5 py-1.5 text-slate-400">{yen(result.unitPrice)}</td>
+              <td className="px-2.5 py-1.5 text-right font-medium text-slate-100">
+                {yen(result.normalSubtotal)}
+              </td>
+            </tr>
+          )}
+          {result.lateNightUnits > 0 && (
+            <tr className="border-b border-white/5 last:border-0">
+              <td className="px-2.5 py-1.5 text-slate-200">
+                相席（22:00以降・深夜10%加算）
+              </td>
+              <td className="px-2.5 py-1.5 text-slate-400">{result.lateNightUnits * unitMinutes}分</td>
+              <td className="px-2.5 py-1.5 text-slate-400">{yen(result.lateNightUnitPrice)}</td>
+              <td className="px-2.5 py-1.5 text-right font-medium text-slate-100">
+                {yen(result.lateNightSubtotal)}
+              </td>
+            </tr>
+          )}
           {result.charges.map((c) => (
             <tr key={c.label} className="border-b border-white/5 last:border-0">
               <td className="px-2.5 py-1.5 text-slate-400" colSpan={3}>
@@ -404,7 +419,7 @@ function AisekiyaFreeCalcSection({ pricing, dayType }: { pricing: AisekiyaPricin
             <span className="text-2xl font-black tabular-nums text-cyan-200">{yen(result.total)}</span>
           </div>
 
-          <AisekiyaBreakdownTable result={result} dayType={dayType} pricing={pricing} />
+          <AisekiyaBreakdownTable result={result} pricing={pricing} />
 
           <div className="mt-2 rounded-xl border border-cyan-500/20 bg-cyan-500/5 px-3 py-2 text-[11px] text-cyan-100/80">
             相席していない時間は<span className="font-semibold">¥0</span>です。上の金額は「滞在時間すべて相席だった場合」の目安（上限）です。
@@ -692,7 +707,7 @@ function AisekiyaCostSimulatorCard({
         )}
       </div>
 
-      {/* ② コスト帯（入店目安の時刻に連動）。相席屋はフラット単価のため値上がり注意行は出さない */}
+      {/* ② コスト帯（入店目安の時刻に連動）。22:00以降は10%加算されるため値上がり注意行を出す */}
       <div className="mt-3">
         <p className="text-[11px] text-slate-400">
           <span className="font-semibold text-slate-200">{anchorLabel}</span> 入店・男性の目安（相席時間ぶん）
@@ -712,6 +727,15 @@ function AisekiyaCostSimulatorCard({
             </div>
           ))}
         </div>
+        {/* 22:00以降の10%加算をオリエンタルの値上がり注意行と同じスタイルで表示する
+            （¥715/¥825は josekiRate×1.1 を四捨五入した独立の計算値。税込値とは無関係） */}
+        <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-amber-100/90">
+          22:00以降は相席 10分 {yen(aisekiyaUnitPrice(pricing.josekiRate[dayType], true))}（
+          {dayType === "weekday"
+            ? `週末 ${yen(aisekiyaUnitPrice(pricing.josekiRate.weekend, true))}`
+            : `平日 ${yen(aisekiyaUnitPrice(pricing.josekiRate.weekday, true))}`}
+          ）に上がります
+        </p>
         <p className="mt-2 rounded-lg border border-cyan-500/20 bg-cyan-500/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-cyan-100/80">
           相席していない時間は¥0です。上の金額は「滞在時間すべて相席だった場合」の目安です。
         </p>
