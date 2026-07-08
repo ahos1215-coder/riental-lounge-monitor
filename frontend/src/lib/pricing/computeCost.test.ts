@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { ORIENTAL_PRICING_REGISTRY } from "@/data/pricing/build";
+import { AISEKIYA_PRICING_REGISTRY } from "@/data/pricing/aisekiyaBuild";
 import {
+  aisekiyaUnitPrice,
+  computeAisekiyaStayCost,
+  computeAisekiyaStayPlans,
   computeStayCost,
   computeStayPlans,
   minutesToTimeLabel,
@@ -368,5 +372,240 @@ describe("computeStayCost - kokura (day-type-varying close via last-band extensi
     const exit = normalizeStayMinutes("05:00", kokura.openTime);
     const r = validateStayWindow(kokura, "weekend", entry, exit);
     expect(r.ok).toBe(true);
+  });
+});
+
+// ============================================================================
+// 相席屋（6店舗）: フラット10分単価モデルの追加検証
+// ============================================================================
+
+describe("aisekiya pricing registry", () => {
+  it("includes exactly the 5 operating aisekiya stores", () => {
+    expect(Object.keys(AISEKIYA_PRICING_REGISTRY).sort()).toEqual(
+      ["ay_chiba", "ay_ikebukuro", "ay_shibuya", "ay_ueno", "ay_yokohama"].sort(),
+    );
+  });
+
+  it("every store uses model:'aisekiya' and the chain-wide ¥650/¥750 rate unless flagged otherwise", () => {
+    for (const [slug, table] of Object.entries(AISEKIYA_PRICING_REGISTRY)) {
+      expect(table.model, slug).toBe("aisekiya");
+      expect(table.josekiRate.weekday, slug).toBe(650);
+      expect(table.josekiRate.weekend, slug).toBe(750);
+      expect(table.charges.entry, slug).toBe(550);
+      expect(table.nonJosekiRate, slug).toBe(0);
+      expect(table.women.price, slug).toBe(0);
+    }
+  });
+});
+
+describe("computeAisekiyaStayCost - ay_shibuya (uniform 17:00-29:00 hours, no waiver-method quirks)", () => {
+  const shibuya = AISEKIYA_PRICING_REGISTRY.ay_shibuya;
+
+  it("weekday 2h stay ENTIRELY before 22:00 (20:00-22:00) = 12 x ¥650 = ¥7,800, + charge when app off", () => {
+    // 20:00入店・22:00退店。各ユニットの開始は20:00〜21:50（=分 1200〜1310）で
+    // すべて22:00(1320)より前のため、深夜加算は一切かからない。
+    const entry = normalizeStayMinutes("20:00", shibuya.openTime);
+    const exit = normalizeStayMinutes("22:00", shibuya.openTime);
+    const result = computeAisekiyaStayCost(shibuya, "weekday", entry, exit, { appCheckin: false });
+    expect(result.totalUnits).toBe(12);
+    expect(result.normalUnits).toBe(12);
+    expect(result.lateNightUnits).toBe(0);
+    expect(result.unitPrice).toBe(650);
+    expect(result.staySubtotal).toBe(7800);
+    expect(result.charges).toEqual([{ label: "チャージ", amount: 550 }]);
+    expect(result.total).toBe(7800 + 550);
+  });
+
+  it("weekend 2h stay ENTIRELY before 22:00 (20:00-22:00) = 12 x ¥750 = ¥9,000, app checkin waives the charge", () => {
+    const entry = normalizeStayMinutes("20:00", shibuya.openTime);
+    const exit = normalizeStayMinutes("22:00", shibuya.openTime);
+    const result = computeAisekiyaStayCost(shibuya, "weekend", entry, exit, { appCheckin: true });
+    expect(result.totalUnits).toBe(12);
+    expect(result.lateNightUnits).toBe(0);
+    expect(result.unitPrice).toBe(750);
+    expect(result.staySubtotal).toBe(9000);
+    expect(result.charges).toEqual([{ label: "チャージ（アプリチェックインで無料）", amount: 0 }]);
+    expect(result.total).toBe(9000);
+  });
+
+  it("weekday stay SPANNING 22:00 (21:30-23:30) mixes ¥650 and ¥715 (手計算: 3*650 + 9*715 = 1950 + 6435 = 8385)", () => {
+    // 21:30入店・23:30退店=120分=12ユニット。開始分 1290,1300,1310 が22:00前(3本)、
+    // 1320,1330,...,1400 が22:00以降(9本)。深夜単価=650*1.1=715。
+    const entry = normalizeStayMinutes("21:30", shibuya.openTime);
+    const exit = normalizeStayMinutes("23:30", shibuya.openTime);
+    const result = computeAisekiyaStayCost(shibuya, "weekday", entry, exit, { appCheckin: true });
+    expect(result.totalUnits).toBe(12);
+    expect(result.normalUnits).toBe(3);
+    expect(result.lateNightUnits).toBe(9);
+    expect(result.unitPrice).toBe(650);
+    expect(result.lateNightUnitPrice).toBe(715);
+    expect(result.normalSubtotal).toBe(3 * 650);
+    expect(result.lateNightSubtotal).toBe(9 * 715);
+    expect(result.staySubtotal).toBe(1950 + 6435);
+    expect(result.total).toBe(8385); // appCheckin=trueなのでチャージ¥0
+  });
+
+  it("weekend stay SPANNING 22:00 (21:30-23:30) mixes ¥750 and ¥825 (手計算: 3*750 + 9*825 = 2250 + 7425 = 9675)", () => {
+    const entry = normalizeStayMinutes("21:30", shibuya.openTime);
+    const exit = normalizeStayMinutes("23:30", shibuya.openTime);
+    const result = computeAisekiyaStayCost(shibuya, "weekend", entry, exit, { appCheckin: true });
+    expect(result.normalUnits).toBe(3);
+    expect(result.lateNightUnits).toBe(9);
+    expect(result.lateNightUnitPrice).toBe(825);
+    expect(result.staySubtotal).toBe(2250 + 7425);
+    expect(result.total).toBe(9675);
+  });
+
+  it("stay ENTIRELY at/after 22:00 (22:00-24:00) applies the surcharge to all units (手計算 weekday: 12*715=8580)", () => {
+    // 22:00入店・24:00退店=12ユニット、開始分 1320..1430 すべて22:00以降。
+    const entry = normalizeStayMinutes("22:00", shibuya.openTime);
+    const exit = normalizeStayMinutes("24:00", shibuya.openTime);
+    const wd = computeAisekiyaStayCost(shibuya, "weekday", entry, exit, { appCheckin: true });
+    expect(wd.normalUnits).toBe(0);
+    expect(wd.lateNightUnits).toBe(12);
+    expect(wd.total).toBe(12 * 715);
+    const we = computeAisekiyaStayCost(shibuya, "weekend", entry, exit, { appCheckin: true });
+    expect(we.total).toBe(12 * 825); // 9900
+  });
+
+  it("post-midnight units are still surcharged (24:00-01:00 = 6 units @¥715 weekday)", () => {
+    // 深夜0:00〜1:00。openTime基準では 1440〜1500分。すべて1320以降なので深夜単価。
+    const entry = normalizeStayMinutes("24:00", shibuya.openTime);
+    const exit = normalizeStayMinutes("01:00", shibuya.openTime);
+    const result = computeAisekiyaStayCost(shibuya, "weekday", entry, exit, { appCheckin: true });
+    expect(result.totalUnits).toBe(6);
+    expect(result.lateNightUnits).toBe(6);
+    expect(result.total).toBe(6 * 715);
+  });
+
+  it("rounds up partial units (25 minutes = 3 units), matching the oriental 10-min rounding rule", () => {
+    const entry = normalizeStayMinutes("20:00", shibuya.openTime);
+    const exit = entry + 25;
+    const result = computeAisekiyaStayCost(shibuya, "weekday", entry, exit, { appCheckin: true });
+    expect(result.totalUnits).toBe(3);
+    expect(result.staySubtotal).toBe(3 * 650);
+  });
+
+  it("late-night unit price is josekiRate×1.1 rounded, NOT a reuse of the tax-included field", () => {
+    // ¥650×1.1=¥715, ¥750×1.1=¥825。税込参考値と数値は一致するが別物として独立計算。
+    expect(aisekiyaUnitPrice(650, true)).toBe(715);
+    expect(aisekiyaUnitPrice(750, true)).toBe(825);
+    expect(aisekiyaUnitPrice(650, false)).toBe(650);
+    expect(aisekiyaUnitPrice(750, false)).toBe(750);
+  });
+
+  it("women's rate is flat ¥0 regardless of day type", () => {
+    expect(shibuya.women.price).toBe(0);
+  });
+});
+
+describe("computeAisekiyaStayPlans - ay_shibuya", () => {
+  const shibuya = AISEKIYA_PRICING_REGISTRY.ay_shibuya;
+
+  it("returns 1h/2h/3h/close options with non-decreasing totals", () => {
+    const entry = normalizeStayMinutes("20:00", shibuya.openTime);
+    const plans = computeAisekiyaStayPlans(shibuya, "weekday", entry, { appCheckin: true });
+    const labels = plans.map((p) => p.label);
+    expect(labels).toEqual(["1時間", "2時間", "3時間", "クローズまで"]);
+    for (let i = 1; i < plans.length; i += 1) {
+      expect(plans[i].result.total).toBeGreaterThanOrEqual(plans[i - 1].result.total);
+    }
+  });
+
+  it("a peak-plan chip that crosses 22:00 reflects the surcharge (21:00 entry, 2h plan)", () => {
+    // 21:00入店の2時間プラン=21:00〜23:00=12ユニット。開始分 1260,1270,1280,1290,1300,1310
+    // が22:00前(6本)、1320..1370が22:00以降(6本)。手計算: 6*650 + 6*715 = 3900 + 4290 = 8190。
+    const entry = normalizeStayMinutes("21:00", shibuya.openTime);
+    const plans = computeAisekiyaStayPlans(shibuya, "weekday", entry, { appCheckin: true });
+    const twoHour = plans.find((p) => p.label === "2時間");
+    expect(twoHour?.result.normalUnits).toBe(6);
+    expect(twoHour?.result.lateNightUnits).toBe(6);
+    expect(twoHour?.result.total).toBe(6 * 650 + 6 * 715);
+  });
+});
+
+describe("computeAisekiyaStayCost - ay_ueno (widest weekend-bucket hours: Sat/Sun open earliest at 15:00)", () => {
+  const ueno = AISEKIYA_PRICING_REGISTRY.ay_ueno;
+
+  it("openTimeByDayType.weekend is 15:00 (widest across Fri/Sat/Sun/holiday/holiday-eve)", () => {
+    expect(ueno.openTimeByDayType.weekend).toBe("15:00");
+    expect(ueno.openTimeByDayType.weekday).toBe("17:00");
+  });
+
+  it("weekend 1h stay from 22:00 = 6 x ¥825 (all late-night; 手計算: 6*825=4950)", () => {
+    // 22:00〜23:00の6ユニットはすべて22:00以降＝深夜単価¥825（旧テストの¥4,500は加算前の誤り）。
+    const entry = normalizeStayMinutes("22:00", ueno.openTime);
+    const exit = normalizeStayMinutes("23:00", ueno.openTime);
+    const result = computeAisekiyaStayCost(ueno, "weekend", entry, exit, { appCheckin: true });
+    expect(result.totalUnits).toBe(6);
+    expect(result.lateNightUnits).toBe(6);
+    expect(result.total).toBe(4950);
+  });
+
+  it("weekend early stay entirely before 22:00 (18:00-20:00) stays at ¥750 flat = ¥9,000", () => {
+    const entry = normalizeStayMinutes("18:00", ueno.openTime);
+    const exit = normalizeStayMinutes("20:00", ueno.openTime);
+    const result = computeAisekiyaStayCost(ueno, "weekend", entry, exit, { appCheckin: true });
+    expect(result.lateNightUnits).toBe(0);
+    expect(result.total).toBe(12 * 750);
+  });
+});
+
+describe("computeAisekiyaStayCost - ay_chiba (LINE@ waiver; surcharge now applied like every store)", () => {
+  const chiba = AISEKIYA_PRICING_REGISTRY.ay_chiba;
+
+  it("bills ¥650 for a pre-22:00 window (20:00-22:00) — no surcharge on units before 22:00", () => {
+    const entry = normalizeStayMinutes("20:00", chiba.openTime);
+    const exit = normalizeStayMinutes("22:00", chiba.openTime);
+    const result = computeAisekiyaStayCost(chiba, "weekday", entry, exit, { appCheckin: true });
+    expect(result.lateNightUnits).toBe(0);
+    expect(result.unitPrice).toBe(650);
+    expect(result.staySubtotal).toBe(12 * 650);
+  });
+
+  it("still carries the Sunday hours/pricing-mismatch note (but the surcharge note is gone — surcharge is now computed)", () => {
+    expect(chiba.assumptionNotes?.some((n) => n.includes("日曜日"))).toBe(true);
+    // 加算は計算に反映済みなので「加算を含めていません」という受動的な注記は削除した
+    expect(chiba.assumptionNotes?.some((n) => n.includes("加算を含めていません"))).toBe(false);
+  });
+});
+
+describe("22:00+ 10% surcharge is applied in computation for every live aisekiya store (chain-wide)", () => {
+  // 検証当初は千葉店固有の注記と誤認し、かつ本体金額に反映していなかった。
+  // 現在は全店で「各ユニット開始が22:00以降なら×1.1」を計算に組み込んでいる。
+  it("a 22:00-23:00 stay is surcharged (6 units @ josekiRate×1.1) at all 5 stores, both day types", () => {
+    for (const [slug, table] of Object.entries(AISEKIYA_PRICING_REGISTRY)) {
+      for (const dayType of ["weekday", "weekend"] as const) {
+        const entry = normalizeStayMinutes("22:00", table.openTime);
+        const exit = normalizeStayMinutes("23:00", table.openTime);
+        const result = computeAisekiyaStayCost(table, dayType, entry, exit, { appCheckin: true });
+        const expectedUnit = Math.round(table.josekiRate[dayType] * 1.1);
+        expect(result.lateNightUnits, `${slug}/${dayType}`).toBe(6);
+        expect(result.total, `${slug}/${dayType}`).toBe(6 * expectedUnit);
+      }
+    }
+  });
+});
+
+describe("validateStayWindow works unchanged for aisekiya tables (brand-agnostic, PricingTableBase only)", () => {
+  const shibuya = AISEKIYA_PRICING_REGISTRY.ay_shibuya;
+
+  it("rejects entry before open (17:00)", () => {
+    const r = validateStayWindow(shibuya, "weekday", timeToMinutes("16:00"), timeToMinutes("18:00"));
+    expect(r.ok).toBe(false);
+  });
+
+  it("accepts a valid overnight window within 17:00-29:00", () => {
+    const entry = normalizeStayMinutes("23:00", shibuya.openTime);
+    const exit = normalizeStayMinutes("02:00", shibuya.openTime);
+    const r = validateStayWindow(shibuya, "weekday", entry, exit);
+    expect(r.ok).toBe(true);
+  });
+});
+
+describe("minutesToTimeLabel / normalizeStayMinutes sanity check for aisekiya (shared utility, no aisekiya-specific behavior expected)", () => {
+  it("round-trips like the oriental case", () => {
+    expect(minutesToTimeLabel(17 * 60)).toBe("17:00");
+    expect(minutesToTimeLabel(29 * 60)).toBe("05:00");
   });
 });

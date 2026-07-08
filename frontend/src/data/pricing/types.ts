@@ -12,6 +12,15 @@
 //     価格データが取得できないため対象外とし、getStorePricing は null を返す
 //     （UI側は元々 null で非表示になるので追加のガードは不要）。
 // 上記2件を除く37店舗のうち、価格ページが正常に確認できた36店舗を registry.ts に収録する。
+//
+// ■ 相席屋ブランドの追加（2026-07-08）
+// オリエンタルラウンジとは異なる料金モデル（時間帯バンド無し・フラット10分単価、
+// 曜日区分も金・土・日・祝日・祝前日が「週末/高単価」というオリエンタルとは異なる
+// ルール）を持つため、PricingTable を model 判別ユニオン
+// （"oriental" | "aisekiya"）にした。既存のオリエンタル向けフィールド名・意味は
+// 一切変更していない（model: "oriental" のケースが従来の PricingTable と同型）。
+// 両モデル共通で使うフィールド（recommendEntryTime.ts が参照する
+// openTimeByDayType など）は PricingTableBase に切り出している。
 
 export type DayType = "weekday" | "weekend";
 
@@ -58,7 +67,12 @@ export type SoloRate = {
   sourceUrl: string;
 };
 
-export type PricingTable = {
+/**
+ * 両モデル（oriental/aisekiya）で共通に使うフィールド。
+ * recommendEntryTime.ts はこのサブセットしか触らないため、model を問わず
+ * PricingTableBase を受け取れるようにしている（ブランド非依存ロジック）。
+ */
+export type PricingTableBase = {
   storeSlug: string;
   storeName: string;
   /** 課金単位（分）。10分毎課金・切り上げ */
@@ -77,6 +91,8 @@ export type PricingTable = {
   /**
    * 曜日タイプ別の実際の開店時刻（"HH:MM"）。ほとんどの店舗は平日・週末で
    * 同一だが、天満店（週末のみ17時開店・平日18時開店）などは異なる。
+   * 相席屋の曜日タイプは「金・土・日・祝日・祝前日」が weekend 側になる点が
+   * オリエンタルと異なる（jpHolidays.ts の detectAisekiyaDayTypeJst 参照）。
    */
   openTimeByDayType: Record<DayType, string>;
   /**
@@ -85,11 +101,6 @@ export type PricingTable = {
    * UIの退店時刻セレクトや validateStayWindow はこちらを優先して使うこと。
    */
   closeTimeByDayType: Record<DayType, string>;
-  /** 男性・相席中の時間帯別バンド（開店から閉店まで連続で埋まっている） */
-  bands: PricingBand[];
-  /** 男性・相席していない時間の単価（曜日タイプ別） */
-  soloRate: SoloRate;
-  charges: PricingCharges;
   /** 女性は現状フラット¥0（一部有料商品あり） */
   women: {
     price: number;
@@ -107,3 +118,40 @@ export type PricingTable = {
    */
   assumptionNotes?: string[];
 };
+
+/** オリエンタルラウンジ36店舗向け。時間帯バンド制・曜日区分は金/土/祝前日。 */
+export type OrientalPricingTable = PricingTableBase & {
+  model: "oriental";
+  /** 男性・相席中の時間帯別バンド（開店から閉店まで連続で埋まっている） */
+  bands: PricingBand[];
+  /** 男性・相席していない時間の単価（曜日タイプ別） */
+  soloRate: SoloRate;
+  charges: PricingCharges;
+};
+
+/**
+ * 相席屋の1名あたりチャージ。オリエンタルの PricingCharges とは異なり
+ * シングルチャージの概念が無い（相席屋は男性1名利用でも追加課金は無い）。
+ */
+export type AisekiyaCharges = {
+  /** 通常チャージ（円）。アプリパスポート等で無料になる店舗が多い */
+  entry: number;
+};
+
+/**
+ * 相席屋6店舗向け。時間帯バンドが無く、相席時はフラット10分単価
+ * （曜日タイプ別）。曜日区分は「金・土・日・祝日・祝前日」が高単価側になる
+ * （オリエンタルの「金・土・祝前日」とは異なる。日曜を含む点に注意）。
+ */
+export type AisekiyaPricingTable = PricingTableBase & {
+  model: "aisekiya";
+  /** 相席時の10分単価（税抜・曜日タイプ別） */
+  josekiRate: { weekday: number; weekend: number };
+  /** 税込参考値（表示は税抜が基本、注記用の小さい表示にのみ使う） */
+  josekiRateTaxIncluded: { weekday: number; weekend: number };
+  /** 相席していない時間の単価。全店 ¥0（無料）。表示の一貫性のため明示保持する */
+  nonJosekiRate: 0;
+  charges: AisekiyaCharges;
+};
+
+export type PricingTable = OrientalPricingTable | AisekiyaPricingTable;

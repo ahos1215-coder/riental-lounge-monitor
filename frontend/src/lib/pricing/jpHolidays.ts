@@ -134,3 +134,57 @@ export function detectDayTypeJst(now: Date): DayTypeDetection {
   }
   return { dayType: "weekday", anchorYmd, dowLabel, reason: "平日" };
 }
+
+export type AisekiyaDayTypeDetection = {
+  dayType: DayType;
+  /** 判定に使った基準日（JST・夜営業の基準日）"YYYY-MM-DD" */
+  anchorYmd: string;
+  /** 基準日の曜日ラベル（"火" など） */
+  dowLabel: string;
+  /** 判定理由（"金曜" | "土曜" | "日曜" | "祝日" | "祝前日" | "平日"） */
+  reason: "金曜" | "土曜" | "日曜" | "祝日" | "祝前日" | "平日";
+};
+
+/**
+ * 相席屋の「今日は平日料金か高料金（週末）か」をJST基準で自動判定する。
+ *
+ * 判定ルール（相席屋公式サイトの表記「金〜日曜日・祝日・祝前日」に準拠）:
+ *   金曜・土曜・日曜・祝日・祝前日（翌日が祝日）→ 高料金
+ *   それ以外（月〜木曜）→ 平日料金
+ *
+ * detectDayTypeJst（オリエンタル用）との唯一の違いは「日曜日」と「祝日当日」を
+ * 高料金側に含める点（オリエンタルの週末判定は金・土・祝前日のみで日曜・祝日
+ * 当日は平日扱い）。オリエンタル用の関数は無改変のまま、この関数を別途追加した
+ * （両ブランドの曜日区分ロジックが混ざらないようにするため）。
+ *
+ * 基準日の考え方は detectDayTypeJst と同じ（深夜〜早朝は前日の夜営業の続きとみなす）。
+ */
+export function detectAisekiyaDayTypeJst(now: Date): AisekiyaDayTypeDetection {
+  const p = jstParts(now);
+  let anchorMs = Date.UTC(p.year, p.month - 1, p.day);
+  if (p.hour < 6) {
+    anchorMs -= DAY_MS; // 深夜〜早朝は前日の夜営業として扱う
+  }
+  const anchor = new Date(anchorMs);
+  const dow = anchor.getUTCDay();
+  const anchorYmd = formatUtcYmd(anchorMs);
+  const dowLabel = DOW_LABELS[dow];
+
+  if (dow === 5) {
+    return { dayType: "weekend", anchorYmd, dowLabel, reason: "金曜" };
+  }
+  if (dow === 6) {
+    return { dayType: "weekend", anchorYmd, dowLabel, reason: "土曜" };
+  }
+  if (dow === 0) {
+    return { dayType: "weekend", anchorYmd, dowLabel, reason: "日曜" };
+  }
+  if (isJpHoliday(anchorYmd)) {
+    return { dayType: "weekend", anchorYmd, dowLabel, reason: "祝日" };
+  }
+  const nextYmd = formatUtcYmd(anchorMs + DAY_MS);
+  if (isJpHoliday(nextYmd)) {
+    return { dayType: "weekend", anchorYmd, dowLabel, reason: "祝前日" };
+  }
+  return { dayType: "weekday", anchorYmd, dowLabel, reason: "平日" };
+}
