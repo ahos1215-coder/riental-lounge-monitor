@@ -96,7 +96,7 @@ class TestSparseStoreFallback:
         women_pred = np.full(8, 0.01)
 
         men_out, women_out, total_out = svc._sparse_store_fallback(
-            history, future_times, men_pred, women_pred, total_pred, store_id="ay_niigata"
+            history, future_times, men_pred, women_pred, total_pred, store_id="ay_yokohama"
         )
 
         pred_peak = float(np.max(total_pred))

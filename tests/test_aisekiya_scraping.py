@@ -64,7 +64,7 @@ SAMPLE_HTML = """
 
 def test_aisekiya_stores_master_data():
     """マスタデータが期待される 6 店舗を含むこと"""
-    expected_slugs = {"shibuya2", "ikebukurohigashiguchi", "ueno", "chibachuo", "yokonishi", "nigatabandai"}
+    expected_slugs = {"shibuya2", "ikebukurohigashiguchi", "ueno", "chibachuo", "yokonishi"}
     assert set(AISEKIYA_STORES.keys()) == expected_slugs
 
     # 全店舗に必須キーが含まれること
@@ -86,8 +86,6 @@ def test_aisekiya_capacity_formula():
     assert _aisekiya_capacity("chibachuo") == 44
     # 横浜: 10卓 + VIP7 = 17 × 2 = 34
     assert _aisekiya_capacity("yokonishi") == 34
-    # 新潟: 13卓 + VIP2 = 15 × 2 = 30
-    assert _aisekiya_capacity("nigatabandai") == 30
     # 池袋: 11卓 + VIP3 = 14 × 2 = 28
     assert _aisekiya_capacity("ikebukurohigashiguchi") == 28
 
