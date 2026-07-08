@@ -142,14 +142,17 @@ def prompt_compare(a_label: str, fa: dict, b_label: str, fb: dict) -> str:
 
 
 def run_ollama(model: str, system: str, user: str, options: dict | None = None,
-               think: bool | None = None) -> tuple[str, float, str]:
-    """Ollama /api/chat を叩く。返り値 (text, elapsed_sec, error)。keep_alive:0 で即アンロード。
+               think: bool | None = None, keep_alive: str | int = 0) -> tuple[str, float, str]:
+    """Ollama /api/chat を叩く。返り値 (text, elapsed_sec, error)。
 
     options: 既定 (num_ctx=NUM_CTX, temperature=0.7) に上書きマージする追加オプション。
     tune_local_llm.py の計測結果 (例: num_ctx=2048 + num_gpu=999 で 13.7→24.8 tok/s) を
     呼び出し側から注入するために使う。
     think: reasoning モードの明示切替 (gemma4 等 thinking 対応モデル用)。None=モデル既定。
-    レポート用途は think=False 推奨 (推論不要。ON だと思考で数千トークン消費し遅く・発熱増)。"""
+    レポート用途は think=False 推奨 (推論不要。ON だと思考で数千トークン消費し遅く・発熱増)。
+    keep_alive: モデルのメモリ常駐時間。0=生成後すぐアンロード(既定・実験用)。
+    バッチ処理では "10m" 等にして全店の間ロードを維持し、1店ごとの再ロード(8-11s)を無くす
+    (終了時は unload_ollama() で明示解放すること)。"""
     opts: dict = {"num_ctx": NUM_CTX, "temperature": 0.7}
     if options:
         opts.update(options)
@@ -160,7 +163,7 @@ def run_ollama(model: str, system: str, user: str, options: dict | None = None,
             {"role": "user", "content": user},
         ],
         "stream": False,
-        "keep_alive": 0,
+        "keep_alive": keep_alive,
         "options": opts,
     }
     if think is not None:
@@ -185,6 +188,21 @@ def run_ollama(model: str, system: str, user: str, options: dict | None = None,
         return "", time.time() - t0, f"HTTP {e.code}: {body}"
     except Exception as e:  # noqa: BLE001
         return "", time.time() - t0, str(e)
+
+
+def unload_ollama(model: str) -> None:
+    """モデルを即アンロードして VRAM を解放する (keep_alive:0 の空生成)。best-effort。
+    keep_alive>0 でバッチ実行した後、ラン終了時に呼んで GPU を音楽PJ等へ明け渡す。"""
+    try:
+        payload = json.dumps({"model": model, "keep_alive": 0, "prompt": ""}).encode("utf-8")
+        req = urllib.request.Request(
+            f"{OLLAMA}/api/generate", data=payload,
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=30) as r:
+            r.read()
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def check_ollama() -> list[str]:

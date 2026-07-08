@@ -947,7 +947,9 @@ def _ollama_commentary_call(system_instruction: str, user_prompt: str) -> str | 
             {"role": "user", "content": user_prompt},
         ],
         "stream": False,
-        "keep_alive": 0,
+        # keep_alive="10m": 全店の間モデルのロードを維持し、1店ごとの再ロード(8-11s)を無くす。
+        # ラン終了時に main() 末尾で明示アンロードして GPU を音楽PJ等へ返す。
+        "keep_alive": "10m",
         # gemma4 は既定で reasoning ON だが、週次要約に推論は不要。ON だと思考で数千トークン
         # 消費し遅く・発熱増になるため OFF (実測 29.4s→13.7s)。
         "think": False,
@@ -1331,6 +1333,18 @@ def main() -> int:
                 generated_at=generated_at,
                 payload=payload,
             )
+
+    # 全店処理後、keep_alive="10m" で常駐させていたモデルをアンロードし GPU を音楽PJ等へ返す。
+    # (Request/urlopen は未 import のためここで自己完結して呼ぶ。best-effort)
+    try:
+        import urllib.request as _u
+        _u.urlopen(_u.Request(
+            "http://localhost:11434/api/generate",
+            data=json.dumps({"model": "gemma4:e4b", "keep_alive": 0, "prompt": ""}).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST",
+        ), timeout=30).read()
+    except Exception:  # noqa: BLE001
+        pass
 
     if args.skip_index:
         return 0

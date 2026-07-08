@@ -301,12 +301,12 @@ def build_record(
     # 2) Ollama 生成（呼び出し側で gpu_lock を取得済みの前提）
     user_prompt = prompt_daily(store_label, facts)
     tuned = _load_tuned_options() or {"num_gpu": 999}
-    text, elapsed, err = spk.run_ollama(MODEL, spk.SYSTEM, user_prompt, options=tuned, think=False)
+    text, elapsed, err = spk.run_ollama(MODEL, spk.SYSTEM, user_prompt, options=tuned, think=False, keep_alive="10m")
     if err and tuned and "num_gpu" in tuned:
         # 全層 GPU 強制 (num_gpu) は VRAM が他プロセスに部分占有されていると
         # ロード失敗し得るため、安全既定 (Ollama 自動配分) で 1 回だけ再試行する。
         _pr(f"[local-report] tuned options failed ({err[:120]}); retrying with default options")
-        text, elapsed, err = spk.run_ollama(MODEL, spk.SYSTEM, user_prompt, think=False)
+        text, elapsed, err = spk.run_ollama(MODEL, spk.SYSTEM, user_prompt, think=False, keep_alive="10m")
 
     if err or not text or not text.strip():
         reason = err or "empty output from ollama"
@@ -518,9 +518,13 @@ def main() -> int:
             write_err += 1
             _pr(f"      [write][ERROR] upsert failed for {slug}: {exc}")
 
+    # バッチ完了後、全店の間 keep_alive="10m" で常駐させていたモデルを明示アンロードし、
+    # GPU(VRAM)を音楽PJ等へ即返す。1店ごとに再ロードしていた旧設計(8-11s×43店)を解消しつつ、
+    # ラン終了後は GPU を占有しない良き市民に保つ。
+    spk.unload_ollama(MODEL)
     _pr(
         f"\n[summary] mode={args.mode} stores={total} generated_ok={gen_ok} "
-        f"generated_fail={gen_fail} written={wrote} write_errors={write_err}"
+        f"generated_fail={gen_fail} written={wrote} write_errors={write_err} (model unloaded)"
     )
     if args.mode == "dry-run":
         _pr("[info] mode=dry-run -> NOTHING was written to Supabase.")
