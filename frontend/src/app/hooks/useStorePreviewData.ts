@@ -204,9 +204,27 @@ export function useStorePreviewData(
           setState({ loading: false, error: null, snapshot: baseSnapshotResolved });
         }
 
+        // 非 today モード（昨日/先週/カスタム）は予測を取得しない代わりに実測 range が
+        // 生命線。コールド店舗＋営業ピークの輻輳で range が一過性に空応答になると、以前は
+        // グラフが空のまま自己回復せず「昨日のグラフが出ない」と誤認されていた。実測が
+        // 1 件も取れなかった場合だけ、今日モードの予測再試行と同じバックオフで range を
+        // 再取得する（データが元々存在しない過去日では空が正なので、上限到達後は静かに終了）。
+        if (rangeMode !== "today") {
+          if (!hasData && forecastRetryAttempt < FORECAST_MAX_RETRIES) {
+            if (cancelled) return;
+            const delay = FORECAST_RETRY_DELAYS_MS[forecastRetryAttempt] ?? 12_000;
+            retryTimer = setTimeout(() => {
+              if (!cancelled) {
+                run(forecastRetryAttempt + 1);
+              }
+            }, delay);
+          }
+          return;
+        }
+
         // forecast が完了したら合流（range と並行で既にリクエスト済み）
         const forecastJson = await forecastPromise;
-        if (!forecastJson || rangeMode !== "today") {
+        if (!forecastJson) {
           return;
         }
 
