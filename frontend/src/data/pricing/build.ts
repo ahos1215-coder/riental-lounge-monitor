@@ -15,7 +15,7 @@
 
 import { getStoreMetaBySlugStrict, buildStoreFullName } from "@/app/config/stores";
 import { PRICING_VERIFIED_AT, RAW_ORIENTAL_PRICING, type RawStorePricing } from "./raw";
-import type { DayType, PricingBand, PricingTable } from "./types";
+import type { DayType, OrientalPricingTable, PricingBand } from "./types";
 
 /** 24h+表記の時（0〜59を許容）を "HH:MM" へ。分は常に00（バンド境界は必ず正時のため）。 */
 function hToLabel(h: number): string {
@@ -132,8 +132,8 @@ const WOMEN_NOTE = "食べ放題・飲み放題ともに¥0（一部有料の商
 
 const SOLO_RATE_SOURCE_URL = "https://oriental-lounge.com/";
 
-/** RawStorePricing 1件を PricingTable へ変換する。 */
-export function buildPricingTable(raw: RawStorePricing): PricingTable {
+/** RawStorePricing 1件を OrientalPricingTable へ変換する。 */
+export function buildPricingTable(raw: RawStorePricing): OrientalPricingTable {
   // バンド境界の「翌日側」判定基準には、両曜日タイプのうち早い方の開店時刻を使う
   // （例: 天満店は週末openH=17を基準にしないと、17時が「前日」誤判定になる）。
   const baseOpenH = Math.min(raw.openH, raw.openHWeekend ?? raw.openH);
@@ -164,6 +164,7 @@ export function buildPricingTable(raw: RawStorePricing): PricingTable {
   }
 
   return {
+    model: "oriental",
     storeSlug: raw.slug,
     storeName,
     unitMinutes: 10,
@@ -195,6 +196,6 @@ function timeLabelToMinutes(hhmm: string): number {
 }
 
 /** 全36店舗ぶんの PricingTable レジストリ（slug -> table）。モジュール読み込み時に一度だけ構築する。 */
-export const ORIENTAL_PRICING_REGISTRY: Record<string, PricingTable> = Object.fromEntries(
+export const ORIENTAL_PRICING_REGISTRY: Record<string, OrientalPricingTable> = Object.fromEntries(
   Object.entries(RAW_ORIENTAL_PRICING).map(([slug, raw]) => [slug, buildPricingTable(raw)]),
 );

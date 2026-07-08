@@ -14,4 +14,11 @@ import { ORIENTAL_PRICING_REGISTRY } from "./build";
 
 export const NAGASAKI_PRICING = ORIENTAL_PRICING_REGISTRY.nagasaki;
 
-export type { DayType, PricingBand, PricingCharges, PricingTable, SoloRate } from "./types";
+export type {
+  DayType,
+  OrientalPricingTable,
+  PricingBand,
+  PricingCharges,
+  PricingTable,
+  SoloRate,
+} from "./types";

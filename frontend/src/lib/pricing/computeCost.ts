@@ -34,7 +34,13 @@
 //   持つ店舗は、そのバンド自身の値をそのまま使うので、この延長ロジックは
 //   実質的に発火しない（延長対象がそもそも無いため）。
 
-import type { DayType, PricingBand, PricingTable } from "@/data/pricing/types";
+import type {
+  AisekiyaPricingTable,
+  DayType,
+  OrientalPricingTable,
+  PricingBand,
+  PricingTableBase,
+} from "@/data/pricing/types";
 
 /** "HH:MM" を「開店日からの分」に変換。24時以降（翌日側）は 24:00〜59:59 の表記を想定。 */
 function timeToMinutes(hhmm: string): number {
@@ -96,9 +102,10 @@ export type ComputeCostOptions = {
 /**
  * 指定した曜日タイプの営業ウィンドウ（分・openTime基準）を返す。
  * openTimeByDayType/closeTimeByDayType が店舗ごとに異なるため、店舗+曜日タイプ
- * ごとに動的に決まる。
+ * ごとに動的に決まる。PricingTableBase のみに依存するためブランド非依存
+ * （オリエンタル・相席屋どちらの PricingTable も渡せる）。
  */
-function windowMinutes(pricing: PricingTable, dayType: DayType): { minEntry: number; maxExit: number } {
+function windowMinutes(pricing: PricingTableBase, dayType: DayType): { minEntry: number; maxExit: number } {
   const minEntry = timeToMinutes(pricing.openTimeByDayType[dayType]);
   const maxExit = timeToMinutes(pricing.closeTimeByDayType[dayType]);
   return { minEntry, maxExit };
@@ -134,7 +141,7 @@ function lastActiveBand(bands: PricingBand[], dayType: DayType): PricingBand | n
  * 完全に範囲外（開店前・実閉店後）は null。
  */
 function findBandForMinute(
-  pricing: PricingTable,
+  pricing: OrientalPricingTable,
   dayType: DayType,
   minute: number,
 ): PricingBand | null {
@@ -156,12 +163,24 @@ function findBandForMinute(
   return null;
 }
 
-/** 指定した「分」（openTime基準に正規化済み）が属するバンドの10分単価。営業時間外・該当バンド無しは null。 */
+/**
+ * 指定した「分」（openTime基準に正規化済み）における10分単価。営業時間外は null。
+ * オリエンタル（時間帯バンド制）・相席屋（フラット単価制）どちらの PricingTable
+ * も受け取れる（recommendEntryTime.ts のタイブレーク用途がブランド非依存で
+ * 動くようにするため）。相席屋は時間帯によらずフラットなので、営業時間内なら
+ * 常に josekiRate[dayType] を返す（= 相席屋のタイブレークは実質no-opになる。
+ * オリエンタルのように「安いバンドを優先する」余地がそもそも無いため正しい挙動）。
+ */
 export function unitPriceAtMinute(
-  pricing: PricingTable,
+  pricing: OrientalPricingTable | AisekiyaPricingTable,
   dayType: DayType,
   minute: number,
 ): number | null {
+  if (pricing.model === "aisekiya") {
+    const { minEntry, maxExit } = windowMinutes(pricing, dayType);
+    if (minute < minEntry || minute >= maxExit) return null;
+    return pricing.josekiRate[dayType];
+  }
   const band = findBandForMinute(pricing, dayType, minute);
   if (!band) return null;
   return band[dayType]; // findBandForMinute が null バンドを除外済みなので number のはず
@@ -169,9 +188,12 @@ export function unitPriceAtMinute(
 
 export type ValidationResult = { ok: true } | { ok: false; reason: string };
 
-/** 入店・退店時刻の妥当性チェック（曜日タイプ別の営業時間内・entry<exit・実閉店時刻まで） */
+/**
+ * 入店・退店時刻の妥当性チェック（曜日タイプ別の営業時間内・entry<exit・実閉店時刻まで）。
+ * PricingTableBase のみに依存するためブランド非依存（相席屋の自由計算にも使う）。
+ */
 export function validateStayWindow(
-  pricing: PricingTable,
+  pricing: PricingTableBase,
   dayType: DayType,
   entryMinutes: number,
   exitMinutes: number,
@@ -206,7 +228,7 @@ export function validateStayWindow(
  *   validateStayWindow が曜日タイプ別の実閉店時刻で先に弾くため到達しないはず）。
  */
 export function computeStayCost(
-  pricing: PricingTable,
+  pricing: OrientalPricingTable,
   dayType: DayType,
   entryMinutes: number,
   exitMinutes: number,
@@ -313,7 +335,7 @@ export type StayPlanOption = {
 };
 
 export function computeStayPlans(
-  pricing: PricingTable,
+  pricing: OrientalPricingTable,
   dayType: DayType,
   entryMinutes: number,
   opts: ComputeCostOptions,
@@ -332,6 +354,127 @@ export function computeStayPlans(
     if (exitMinutes <= entryMinutes) continue;
     try {
       const result = computeStayCost(pricing, dayType, entryMinutes, exitMinutes, opts);
+      plans.push({
+        label: d.label,
+        exitLabel: minutesToTimeLabel(exitMinutes),
+        exitMinutes,
+        result,
+      });
+    } catch {
+      // 営業時間外などで計算不能な場合はそのプランをスキップ
+    }
+  }
+  return plans;
+}
+
+// ============================================================================
+// 相席屋（AisekiyaPricingTable）向けの計算ロジック
+// ============================================================================
+//
+// オリエンタルとの違い:
+//   - 時間帯バンドが無く、相席時はフラット10分単価（曜日タイプ別）。
+//     「24時以降に単価が上がる」ような境界（boundaries）の概念が無いため、
+//     PriceBoundary は常に空配列になる。
+//   - 相席していない時間は無料（¥0）。オーナー承認済みの簡素化方針により、
+//     見出しの1数値は「滞在時間すべてが相席だった場合」の金額（=オリエンタルの
+//     maxTotal と同じ考え方）を表示する。実際の会計は¥0〜この金額の間に収まる。
+//   - シングルチャージ（お一人様追加課金）の概念が無い（AisekiyaCharges に
+//     single フィールドが無い）ため、ComputeCostOptions の solo は使わない。
+//   - 6店舗全店に「22時以降10%加算」（深夜料金/サービス料、店舗により表現は
+//     異なるが同趣旨）というチェーン共通ルールがあるが、本関数は時間帯を見ない
+//     設計のため加算は反映しない（安全側＝実際より少なめに出る可能性がある。
+//     UIのassumptionNotesで案内する。aisekiyaRaw.ts参照）。
+
+export type AisekiyaCostResult = {
+  /** 滞在時間すべてが相席だった場合の合計（相席レート × ユニット数 + チャージ） */
+  total: number;
+  /** 相席10分単価（曜日タイプ別、参考表示用） */
+  unitPrice: number;
+  /** 合計ユニット数（10分単位・切り上げ） */
+  totalUnits: number;
+  /** 相席ぶんの小計（チャージ抜き） */
+  staySubtotal: number;
+  charges: ChargeLine[];
+};
+
+export type ComputeAisekiyaCostOptions = {
+  /** アプリパスポート等でチャージが無料になっている場合 true */
+  appCheckin: boolean;
+};
+
+/**
+ * 相席屋の男性滞在料金を計算する（見出しの1数値=ずっと相席だった場合の金額）。
+ * - 10分単位に切り上げ、フラット単価 josekiRate[dayType] を全ユニットに適用する。
+ * - entry/exitMinutes は openTime を基準に正規化済みの「分」であること
+ *   （normalizeStayMinutes で変換してから渡す。オリエンタルと共通の関数）。
+ * - 営業時間外・entry>=exit は validateStayWindow が先に弾く（オリエンタルと共通）。
+ */
+export function computeAisekiyaStayCost(
+  pricing: AisekiyaPricingTable,
+  dayType: DayType,
+  entryMinutes: number,
+  exitMinutes: number,
+  opts: ComputeAisekiyaCostOptions,
+): AisekiyaCostResult {
+  const validation = validateStayWindow(pricing, dayType, entryMinutes, exitMinutes);
+  if (!validation.ok) {
+    throw new Error(validation.reason);
+  }
+
+  const totalMinutesRaw = exitMinutes - entryMinutes;
+  const unitMinutes = pricing.unitMinutes;
+  const totalUnits = Math.ceil(totalMinutesRaw / unitMinutes);
+  const unitPrice = pricing.josekiRate[dayType];
+  const staySubtotal = totalUnits * unitPrice;
+
+  const charges: ChargeLine[] = [];
+  if (opts.appCheckin) {
+    charges.push({ label: "チャージ（アプリチェックインで無料）", amount: 0 });
+  } else {
+    charges.push({ label: "チャージ", amount: pricing.charges.entry });
+  }
+  const chargesTotal = charges.reduce((sum, c) => sum + c.amount, 0);
+
+  return {
+    total: staySubtotal + chargesTotal,
+    unitPrice,
+    totalUnits,
+    staySubtotal,
+    charges,
+  };
+}
+
+export type AisekiyaStayPlanOption = {
+  label: string;
+  exitLabel: string;
+  exitMinutes: number;
+  result: AisekiyaCostResult;
+};
+
+/**
+ * オリエンタルの computeStayPlans と同じ考え方（1h/2h/3h/クローズまでの
+ * バリエーションをまとめて計算する）を相席屋向けに提供する。
+ */
+export function computeAisekiyaStayPlans(
+  pricing: AisekiyaPricingTable,
+  dayType: DayType,
+  entryMinutes: number,
+  opts: ComputeAisekiyaCostOptions,
+): AisekiyaStayPlanOption[] {
+  const { maxExit } = windowMinutes(pricing, dayType);
+  const durations: { label: string; minutes: number | null }[] = [
+    { label: "1時間", minutes: 60 },
+    { label: "2時間", minutes: 120 },
+    { label: "3時間", minutes: 180 },
+    { label: "クローズまで", minutes: null },
+  ];
+
+  const plans: AisekiyaStayPlanOption[] = [];
+  for (const d of durations) {
+    const exitMinutes = d.minutes == null ? maxExit : Math.min(entryMinutes + d.minutes, maxExit);
+    if (exitMinutes <= entryMinutes) continue;
+    try {
+      const result = computeAisekiyaStayCost(pricing, dayType, entryMinutes, exitMinutes, opts);
       plans.push({
         label: d.label,
         exitLabel: minutesToTimeLabel(exitMinutes),
