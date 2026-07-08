@@ -605,20 +605,5 @@
     "lon": 139.6125,
     "capacity": 34,
     "brand": "aisekiya"
-  },
-  {
-    "slug": "ay_niigata",
-    "store_id": "ay_niigata",
-    "store": "新潟万代店",
-    "label": "新潟万代店",
-    "area_label": "新潟・万代",
-    "region_label": "中部",
-    "maps_query_base": "新潟 万代",
-    "url": "https://aiseki-ya.com/shop/nigatabandai/",
-    "pref": "niigata",
-    "lat": 37.916231,
-    "lon": 139.052318,
-    "capacity": 30,
-    "brand": "aisekiya"
   }
 ]

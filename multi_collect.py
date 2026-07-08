@@ -66,7 +66,6 @@ AISEKIYA_STORES: dict[str, dict] = {
     "ueno":                  {"name": "上野店",     "store_id": "ay_ueno",        "pref": "tokyo",     "tables": 14, "vip": 1},
     "chibachuo":             {"name": "千葉中央店", "store_id": "ay_chiba",       "pref": "chiba",     "tables": 19, "vip": 3},
     "yokonishi":             {"name": "横浜西口店", "store_id": "ay_yokohama",    "pref": "kanagawa",  "tables": 10, "vip": 7},
-    "nigatabandai":          {"name": "新潟万代店", "store_id": "ay_niigata",     "pref": "niigata",   "tables": 13, "vip": 2},
 }
 
 # 男女別の最大収容枠 = (テーブル数 + VIP数) × 2名
@@ -153,7 +152,6 @@ PREF_COORDS: dict[str, tuple[float, float]] = {
     "hyogo": (34.6901, 135.1955),
     "okayama": (34.6551, 133.9195),
     "hiroshima": (34.3853, 132.4553),
-    "niigata": (37.9161, 139.0364),
     "seoul": (37.5665, 126.9780),
 }
 

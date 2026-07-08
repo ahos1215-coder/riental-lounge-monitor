@@ -53,7 +53,6 @@ AISEKIYA_STORE_IDS = [
     "ay_ueno",
     "ay_chiba",
     "ay_yokohama",
-    "ay_niigata",
 ]
 
 # ブランド横断の全 store_id。store 解決はこれを正とする。
