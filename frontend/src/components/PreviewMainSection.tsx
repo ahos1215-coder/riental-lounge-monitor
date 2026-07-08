@@ -215,7 +215,19 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
       .reverse()
       .find((p) => p.menActual !== null || p.womenActual !== null)?.label ?? null;
 
-  
+  // 日付切替（今日→昨日/先週/カスタム）でフェッチ中は、series が空の baseSnapshot に
+  // 一旦リセットされる。以前はその間チャートが「空っぽ」に見え、コールド/低速回線では
+  // 「昨日のグラフが表示されない（＝壊れている）」と誤認されていた。実測点がまだ 1 つも
+  // 無い読み込み中はチャート面にローディングを重ねて、空表示と区別できるようにする。
+  const hasAnySeriesPoint = snapshot.series.some(
+    (p) =>
+      p.menActual !== null ||
+      p.womenActual !== null ||
+      p.menForecast !== null ||
+      p.womenForecast !== null,
+  );
+  const showChartLoading = !!loading && !hasAnySeriesPoint;
+
   const dateInputRef = useRef<HTMLInputElement | null>(null);
 
   const openDatePicker = () => {
@@ -295,7 +307,22 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
             </div>
           </div>
 
-          <div className="mt-3 h-72 w-full min-w-0 rounded-2xl bg-gradient-to-b from-slate-950 via-black to-black p-3">
+          <div className="relative mt-3 h-72 w-full min-w-0 rounded-2xl bg-gradient-to-b from-slate-950 via-black to-black p-3">
+            {/* 日付切替のフェッチ中（まだ実測/予測点が 1 つも無い）はチャート面にローディングを
+                重ねる。空グラフと「読み込み中」を見た目で区別でき、コールド/低速回線で
+                「昨日のグラフが出ない＝壊れている」という誤認を防ぐ（グラフ自体の描画は下の
+                ResponsiveContainer がそのまま担い、線のスタイル・色は一切変えない）。 */}
+            {showChartLoading && (
+              <div
+                className="pointer-events-none absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 rounded-2xl bg-black/40"
+                role="status"
+                aria-live="polite"
+                data-testid="timeline-loading"
+              >
+                <span className="h-6 w-6 animate-spin rounded-full border-2 border-slate-600 border-t-sky-400" />
+                <span className="text-[11px] text-slate-300">グラフを読み込み中…</span>
+              </div>
+            )}
             {/* PreviewMainSection 自体が dynamic(ssr:false) の対象なので、この時点で常にクライアント側。
                 以前あった isClient ゲートは冗長で、マウント後1フレーム余計にチャート描画を遅らせていた。 */}
             <ResponsiveContainer width="100%" height="100%">
