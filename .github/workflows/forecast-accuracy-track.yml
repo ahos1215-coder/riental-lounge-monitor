@@ -56,6 +56,10 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           BACKEND_URL: ${{ vars.BACKEND_URL }}
           FORECAST_MODEL_BUCKET: ${{ vars.FORECAST_MODEL_BUCKET }}
+          # 本番の答え合わせで ML がナイーブ基準に負けた/劣化した夜、score_forecasts.py の
+          # _alert() が直接 Slack/Discord に通知するためのフック（Act 断線の修理）。
+          # ジョブ失敗時の notify-on-failure(secrets: inherit) とは別経路の即時アラート。
+          OPS_NOTIFY_WEBHOOK_URL: ${{ secrets.OPS_NOTIFY_WEBHOOK_URL }}
           TIMEZONE: Asia/Tokyo
           MODE: ${{ steps.decide.outputs.mode }}
         run: |

@@ -416,11 +416,15 @@ def _fetch_live_accuracy(cfg: AppConfig) -> dict | None:
             ]
             return round(sum(vals) / len(vals), 2) if vals else None
 
+        # mae_30d は「本当に30夜以上」蓄積されるまで null にする。7夜しか無いのに
+        # mae_7d と同値を「30日平均」と称するのは不誠実なラベルになるため。
+        # フロントは nights_count と合わせて「n=X夜」表示にフォールバックする。
+        n_nights = len(nights)
         live: dict = {
             "mae_7d": _avg("overall_live_mae", 7),
-            "mae_30d": _avg("overall_live_mae", 30),
+            "mae_30d": _avg("overall_live_mae", 30) if n_nights >= 30 else None,
             "baseline_7d": _avg("overall_baseline_mae", 7),
-            "nights_count": len(nights),
+            "nights_count": n_nights,
             "updated_at": summary.get("updated_at_utc"),
             "stores_scored_latest": nights[0].get("stores_scored"),
             "per_store": {},

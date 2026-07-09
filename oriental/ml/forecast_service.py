@@ -21,11 +21,14 @@ class ForecastService:
         provider,
         timezone: str,
         *,
-        history_days: int = 7,
+        history_days: int = 8,
         history_limit: int | None = None,
         fallback_provider=None,
         model_registry=None,
         backend: str = "legacy",
+        storage_url: str | None = None,
+        storage_key: str | None = None,
+        storage_bucket: str = "ml-models",
     ):
         self.provider = provider
         self.timezone = timezone
@@ -36,6 +39,13 @@ class ForecastService:
         self.fallback_provider = fallback_provider
         self.model_registry = model_registry
         self.backend = backend
+        # closed-loop ベースライン・ブレンド用の重み (blend_weights.json) 取得設定。
+        self._storage_url = (storage_url or "").rstrip("/")
+        self._storage_key = storage_key or ""
+        self._storage_bucket = (storage_bucket or "ml-models").strip()
+        # プロセス内キャッシュ（~1時間）。Storage 障害時は空 {} → w_ml=1.0(純ML)へ graceful fallback。
+        self._blend_weights: dict[str, float] | None = None
+        self._blend_weights_at: float = 0.0
 
     @classmethod
     def from_app(cls, app):
@@ -63,11 +73,16 @@ class ForecastService:
         return cls(
             provider=provider,
             timezone=cfg.timezone,
-            history_days=7,
+            # 8日分の履歴を取得する: (1) 深夜帯クランプの直近同一スロット max、
+            # (2) ベースライン・ブレンドの「7日前・同一スロット実測」の両方に必要。
+            history_days=8,
             history_limit=history_limit,
             fallback_provider=fallback_provider,
             model_registry=model_registry,
             backend=backend,
+            storage_url=cfg.supabase_url,
+            storage_key=cfg.supabase_service_role_key,
+            storage_bucket=cfg.forecast_model_bucket,
         )
 
     def forecast_next_hour(self, store_id: str, freq_min: int) -> dict:
@@ -124,6 +139,9 @@ class ForecastService:
             future_times = future_builder(df)
             self.logger.info("forecast.service.future size=%d", len(future_times))
 
+            clamped_slots = 0
+            blended_slots = 0
+            w_ml_used = 1.0
             insufficient_history = df.empty
             if insufficient_history:
                 # 履歴が無い店舗で men_pred/women_pred/total_pred を 0.0 で埋めると、
@@ -139,8 +157,20 @@ class ForecastService:
                 # 今夜のここまでの実測で残り時間の予測をスケール補正（21時半便など）。
                 # 経過スロットが無い予測（次の1時間など）では自動的に no-op。
                 data = _anchor_to_tonight(df, data, freq_min, self.tz)
+                # closed-loop 後処理: ①ベースライン・ブレンド → ②深夜帯クランプ の順。
+                # クランプは最終出力を店舗自身の履歴で上限クランプする（overshoot 抑制）。
+                from .postprocess import blend_with_baseline, late_night_clamp
+
+                w_ml_used = self._blend_weight_for(store_id)
+                data, blended_slots = blend_with_baseline(
+                    data, df, self.tz, w_ml=w_ml_used, freq_min=freq_min
+                )
+                data, clamped_slots = late_night_clamp(data, df, self.tz, freq_min=freq_min)
                 reasoning = self._build_reasoning(df, store_id=store_id)
-            self.logger.info("forecast.service.predicted size=%d", len(data))
+            self.logger.info(
+                "forecast.service.predicted size=%d w_ml=%.3f blended=%d clamped=%d",
+                len(data), w_ml_used, blended_slots, clamped_slots,
+            )
 
             result = {
                 "ok": True,
@@ -149,6 +179,9 @@ class ForecastService:
                 "data": data,
                 "reasoning": reasoning,
                 "insufficient_history": insufficient_history,
+                "blend_w_ml": round(float(w_ml_used), 3),
+                "blended_slots": blended_slots,
+                "clamped_slots": clamped_slots,
             }
             if extra_meta:
                 result.update(extra_meta)
@@ -195,6 +228,75 @@ class ForecastService:
                 self.logger.warning("forecast.service.supabase_fallback store=%s", store_id)
                 return self.fallback_provider.get_records(store_id)
             raise
+
+    def _fetch_blend_weights(self) -> dict[str, float]:
+        """Storage の accuracy/blend_weights.json（score_forecasts.py が毎晩書き出す
+        本番スコア由来の逆誤差ブレンド重み）を取得し、プロセス内に ~1時間キャッシュする。
+
+        {store_id: w_ml} を返す。取得不能/未作成/パース失敗時は空 {} を返し、呼び出し側は
+        w_ml=1.0（純ML＝現行動作）へ graceful fallback する。Storage 障害で serving 全体を
+        落とさないよう例外はすべてここで握りつぶす。
+        """
+        import time as _time
+
+        ttl = 3600.0
+        try:
+            ttl = float(os.getenv("FORECAST_BLEND_WEIGHTS_TTL", "3600"))
+        except (TypeError, ValueError):
+            ttl = 3600.0
+        now = _time.time()
+        if self._blend_weights is not None and (now - self._blend_weights_at) < ttl:
+            return self._blend_weights
+
+        weights: dict[str, float] = {}
+        if self._storage_url and self._storage_key:
+            import json as _json
+            import urllib.error
+            import urllib.request
+
+            endpoint = (
+                f"{self._storage_url}/storage/v1/object/"
+                f"{self._storage_bucket}/accuracy/blend_weights.json"
+            )
+            req = urllib.request.Request(
+                endpoint,
+                headers={"apikey": self._storage_key, "Authorization": f"Bearer {self._storage_key}"},
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    payload = _json.loads(resp.read().decode())
+                raw = payload.get("weights") if isinstance(payload, dict) else None
+                if isinstance(raw, dict):
+                    for k, v in raw.items():
+                        try:
+                            fv = float(v)
+                        except (TypeError, ValueError):
+                            continue
+                        if np.isfinite(fv):
+                            weights[str(k)] = fv
+                self.logger.info("forecast.service.blend_weights_loaded count=%d", len(weights))
+            except Exception as exc:  # noqa: BLE001 — 重み取得失敗は純MLへフォールバック
+                self.logger.warning("forecast.service.blend_weights_fetch_failed detail=%s", exc)
+                # 直近に有効な重みがあれば陳腐化しても使い続ける（毎リクエストの再取得を避ける）。
+                if self._blend_weights:
+                    return self._blend_weights
+
+        self._blend_weights = weights
+        self._blend_weights_at = now
+        return weights
+
+    def _blend_weight_for(self, store_id: str) -> float:
+        """店舗の w_ml を返す。ブレンド無効/重み未定義なら 1.0（純ML）。"""
+        if os.getenv("FORECAST_BASELINE_BLEND", "1").strip() != "1":
+            return 1.0
+        weights = self._fetch_blend_weights()
+        try:
+            w = float(weights.get(store_id, 1.0))
+        except (TypeError, ValueError):
+            return 1.0
+        if not np.isfinite(w):
+            return 1.0
+        return w
 
     def _predict_with_history(self, history: pd.DataFrame, future_times: pd.DatetimeIndex, *, store_id: str) -> list[dict]:
         if self.model_registry is None:

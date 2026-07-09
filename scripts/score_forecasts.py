@@ -162,6 +162,122 @@ def _alert(message: str) -> None:
         print(f"[score][alert] failed: {str(exc)[:150]}")
 
 
+def _store_id_for(slug: str) -> str:
+    """score の per_store キー(slug)を serving が使う store_id に変換する。
+    相席屋は slug==store_id ("ay_*")、オリエンタルは短縮 slug に "ol_" を付与。
+    """
+    return slug if slug.startswith("ay_") else f"ol_{slug}"
+
+
+def blend_weight(ml_mae: float, baseline_mae: float, nights: int) -> float:
+    """逆誤差ブレンド重み w_ml。
+
+    w = baseline_mae / (ml_mae + baseline_mae) — ML が強い(誤差小)ほど 1 に、
+    ベースラインが強いほど 0 に寄る。夜数が 4 未満のときは 0.5 へ収縮
+    （w = (n*w + (4-n)*0.5)/4）し、最後に [0.15, 0.9] にクランプする。
+    """
+    try:
+        ml = float(ml_mae)
+        bl = float(baseline_mae)
+    except (TypeError, ValueError):
+        return 0.5
+    denom = ml + bl
+    w = (bl / denom) if denom > 0 else 0.5
+    n = max(0, int(nights))
+    if n < 4:
+        w = (n * w + (4 - n) * 0.5) / 4
+    return max(0.15, min(0.9, w))
+
+
+def compute_blend_weights(
+    bucket: str, supabase_url: str, key: str, night_dates: list[str]
+) -> dict[str, float]:
+    """直近最大7夜の本番スコア(accuracy/scores/<date>.json)を読み、店舗別に
+    live_mae / live_baseline_mae を平均して逆誤差ブレンド重み {store_id: w_ml} を返す。
+
+    ネットワーク I/O を伴うため、純粋な重み計算は blend_weight() に切り出してある
+    （こちらは集計＋取得のオーケストレーション）。取得失敗した夜はスキップする。
+    """
+    agg: dict[str, dict[str, list[float]]] = {}
+    for d in night_dates[:7]:
+        raw = _storage_get(bucket, f"accuracy/scores/{d}.json", supabase_url, key)
+        if raw is None:
+            continue
+        try:
+            doc = json.loads(raw.decode())
+        except Exception:  # noqa: BLE001
+            continue
+        per_store = doc.get("per_store") if isinstance(doc, dict) else None
+        if not isinstance(per_store, dict):
+            continue
+        for slug, entry in per_store.items():
+            if not isinstance(entry, dict):
+                continue
+            ml = entry.get("live_mae")
+            bl = entry.get("live_baseline_mae")
+            if not isinstance(ml, (int, float)) or not isinstance(bl, (int, float)):
+                continue
+            store_id = _store_id_for(slug)
+            a = agg.setdefault(store_id, {"ml": [], "bl": []})
+            a["ml"].append(float(ml))
+            a["bl"].append(float(bl))
+
+    weights: dict[str, float] = {}
+    for store_id, a in agg.items():
+        n = len(a["ml"])
+        if n == 0:
+            continue
+        ml_mae = sum(a["ml"]) / n
+        bl_mae = sum(a["bl"]) / n
+        weights[store_id] = round(blend_weight(ml_mae, bl_mae, n), 4)
+    return weights
+
+
+def _write_step_summary(
+    night_date: str,
+    overall: float | None,
+    overall_baseline: float | None,
+    per_store: dict[str, dict],
+    weights: dict[str, float],
+    nights_used: int,
+) -> None:
+    """GITHUB_STEP_SUMMARY に艦隊 ML vs ベースライン、負け店一覧、ブレンド重み幅を書く。
+    未設定(ローカル実行)や書き込み失敗時は何もしない。"""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    losing = [
+        (s, v)
+        for s, v in per_store.items()
+        if isinstance(v.get("live_baseline_mae"), (int, float)) and v["live_mae"] > v["live_baseline_mae"]
+    ]
+    verdict = "✅ ML beating baseline"
+    if overall is not None and overall_baseline is not None and overall > overall_baseline:
+        verdict = "❌ ML LOSING to baseline"
+    lines: list[str] = []
+    lines.append(f"## Forecast accuracy — night {night_date}\n\n")
+    lines.append(f"- Fleet live MAE: **{overall}** vs seasonal-naive baseline MAE: **{overall_baseline}**\n")
+    lines.append(f"- Verdict: **{verdict}**\n")
+    lines.append(f"- Stores losing to baseline: **{len(losing)}** / {len(per_store)}\n")
+    if weights:
+        ws = sorted(weights.values())
+        lines.append(
+            f"- Blend weights w_ml: min **{ws[0]:.2f}**, max **{ws[-1]:.2f}** "
+            f"(stores={len(ws)}, nights_used={nights_used})\n"
+        )
+    else:
+        lines.append("- Blend weights: (none computed yet)\n")
+    if losing:
+        lines.append("\n| store | live MAE | baseline MAE |\n|---|---|---|\n")
+        for s, v in sorted(losing, key=lambda kv: kv[1]["live_mae"] - kv[1]["live_baseline_mae"], reverse=True)[:15]:
+            lines.append(f"| {s} | {v['live_mae']} | {v['live_baseline_mae']} |\n")
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("".join(lines))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[score] step summary write failed: {str(exc)[:120]}")
+
+
 def main() -> int:
     _load_env()
     supabase_url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
@@ -262,6 +378,29 @@ def main() -> int:
     summary["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
     _storage_put(bucket, "accuracy/scores/summary.json", json.dumps(summary, ensure_ascii=False).encode("utf-8"), supabase_url, key)
 
+    # --- closed-loop feedback: 直近最大7夜の本番スコアから店舗別ブレンド重みを算出し、
+    # serving が取り込む accuracy/blend_weights.json を更新する（本丸③）。
+    weights: dict[str, float] = {}
+    try:
+        recent_dates = [n.get("night_date") for n in summary["nights"] if n.get("night_date")][:7]
+        weights = compute_blend_weights(bucket, supabase_url, key, recent_dates)
+        weights_payload = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "nights_used": len(recent_dates),
+            "weights": weights,
+        }
+        _storage_put(
+            bucket, "accuracy/blend_weights.json",
+            json.dumps(weights_payload, ensure_ascii=False).encode("utf-8"), supabase_url, key,
+        )
+        if weights:
+            ws = sorted(weights.values())
+            print(f"[score] blend_weights: {len(weights)} stores, w_ml {ws[0]:.2f}..{ws[-1]:.2f} (nights_used={len(recent_dates)})")
+        else:
+            print("[score] blend_weights: no per-store scores yet (wrote empty weights)")
+    except Exception as exc:  # noqa: BLE001 — 重み算出失敗は scoring 本体を落とさない
+        print(f"[score] blend_weights compute failed: {str(exc)[:150]}")
+
     # --- Act (close the PDCA loop): alert on production degradation ---
     alerts: list[str] = []
     if overall is not None and overall_baseline is not None and overall > overall_baseline:
@@ -297,7 +436,21 @@ def main() -> int:
     if not per_store:
         print("[score] no stores could be scored (no overlapping actual slots).")
 
+    # GitHub Actions のジョブ画面に艦隊サマリを表示（PDCAの可視化）。
+    _write_step_summary(night_date, overall, overall_baseline, per_store, weights, len(summary["nights"][:7]))
+
+    # 艦隊 ML がナイーブ・ベースラインに負けた夜はジョブを RED にして notify-on-failure を
+    # 発火させる（Act 断線の修理）。ACCURACY_FAIL_ON_BASELINE_LOSS=0 で無効化可。
+    baseline_loss = (
+        overall is not None and overall_baseline is not None and overall > overall_baseline
+    )
+    fail_on_loss = os.environ.get("ACCURACY_FAIL_ON_BASELINE_LOSS", "1").strip() == "1"
+
     if coverage_failure:
+        return 1
+    if baseline_loss and fail_on_loss:
+        print(f"[score] FAIL: fleet ML lost to baseline (live {overall} > baseline {overall_baseline}). "
+              "Set ACCURACY_FAIL_ON_BASELINE_LOSS=0 to silence.")
         return 1
     return 0
 
