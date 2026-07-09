@@ -332,3 +332,24 @@ def test_service_blend_weight_lookup_and_toggle(monkeypatch):
 
     monkeypatch.setenv("FORECAST_BASELINE_BLEND", "0")
     assert service._blend_weight_for("ol_gangnam") == 1.0  # blend disabled -> pure ML
+
+
+def test_history_window_covers_blend_baseline_requirement():
+    """回帰ガード: from_app の履歴取得上限は「8日分の5分毎データ(=960行)」を必ず賄うこと。
+
+    旧上限600行は最新5夜に黙って切り詰められ、ベースライン・ブレンドの
+    「7日前・同一スロット実測」が常に窓の外＝全店で空振りするバグだった
+    (2026-07-09 に gangnam 実データ 960行/8日 で確認)。
+    """
+    import inspect
+    from oriental.ml import forecast_service as fs
+
+    src = inspect.getsource(fs.ForecastService.from_app)
+    # from_app 内の履歴上限が 8日×120行/夜=960 以上であることをソースレベルで担保する。
+    import re
+
+    m = re.search(r"history_limit\s*=\s*min\(cfg\.max_range_limit,\s*(\d+)\)", src)
+    assert m, "from_app の history_limit 定義が見つからない(リファクタ時はこのテストを更新)"
+    assert int(m.group(1)) >= 8 * 120, (
+        f"history_limit 上限 {m.group(1)} が 8日分(960行) 未満: ブレンドの7日前参照が壊れる"
+    )

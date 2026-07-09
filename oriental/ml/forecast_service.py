@@ -67,7 +67,10 @@ class ForecastService:
             )
             fallback_provider = legacy_provider
 
-        history_limit = min(cfg.max_range_limit, 600)
+        # 旧上限600行は5分毎×8日=960行に足りず「最新5夜のみ」に黙って切り詰められ、
+        # ブレンドの「7日前・同一スロット」が常に窓の外＝全店で空振りするバグだった
+        # (2026-07-09 gangnam実データ960行で確認)。8日分+余裕の1200行に引き上げる。
+        history_limit = min(cfg.max_range_limit, 1200)
         model_registry = ForecastModelRegistry.from_app(app)
 
         return cls(
