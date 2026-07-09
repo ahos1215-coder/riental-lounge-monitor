@@ -141,6 +141,11 @@ def forecast_next_hour():
         "data": points,
         "reasoning": raw.get("reasoning", {}),
         "insufficient_history": bool(raw.get("insufficient_history", False)),
+        # closed-loop 後処理（ベースライン・ブレンド/深夜帯クランプ）が実際に効いたかを
+        # 観測できるよう、service の raw 結果からそのまま透過する（後方互換の追加のみ）。
+        "blend_w_ml": raw.get("blend_w_ml"),
+        "blended_slots": raw.get("blended_slots"),
+        "clamped_slots": raw.get("clamped_slots"),
     }
     _set_cached(cache_key, result)
     return jsonify(result)
@@ -182,6 +187,11 @@ def forecast_today():
         "data": points,
         "reasoning": raw.get("reasoning", {}),
         "insufficient_history": bool(raw.get("insufficient_history", False)),
+        # closed-loop 後処理（ベースライン・ブレンド/深夜帯クランプ）が実際に効いたかを
+        # 観測できるよう、service の raw 結果からそのまま透過する（後方互換の追加のみ）。
+        "blend_w_ml": raw.get("blend_w_ml"),
+        "blended_slots": raw.get("blended_slots"),
+        "clamped_slots": raw.get("clamped_slots"),
     }
     _set_cached(cache_key, result)
     return jsonify(result)
@@ -229,7 +239,14 @@ def forecast_today_multi():
 
         data = raw.get("data")
         points = [d for d in data if isinstance(d, dict) and "ts" in d] if isinstance(data, list) else []
-        result = {"ok": True, "data": points}
+        result = {
+            "ok": True,
+            "data": points,
+            # forecast_today と同様、後処理の効き具合を店舗別に観測できるよう透過する。
+            "blend_w_ml": raw.get("blend_w_ml"),
+            "blended_slots": raw.get("blended_slots"),
+            "clamped_slots": raw.get("clamped_slots"),
+        }
         cache[cache_key] = {"at": time.time(), "data": result}
         return slug, result
 
