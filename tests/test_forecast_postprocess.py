@@ -12,10 +12,12 @@ import pandas as pd
 import pytest
 
 from oriental.ml.postprocess import (
+    _night_bucket,
     actual_slot_map,
     blend_with_baseline,
     late_night_clamp,
     same_slot_stats,
+    same_slot_stats_by_bucket,
 )
 
 TZ = "Asia/Tokyo"
@@ -157,6 +159,141 @@ def test_clamp_off_switch(monkeypatch):
     assert out[0]["total_pred"] == pytest.approx(50.0)
 
 
+# --------------------------- night-session bucket classification ---------------------------
+
+def test_night_bucket_shifts_6h_across_weekday_boundaries():
+    # Real 2026 calendar: 07-03=Fri, 07-04=Sat, 07-05=Sun, 07-06=Mon, 07-07=Tue.
+    cases = [
+        ("2026-07-04 02:00", "weekend"),  # Sat 02:00 -6h -> Fri 20:00 -> Fri -> weekend
+        ("2026-07-07 02:00", "weekday"),  # Tue 02:00 -6h -> Mon 20:00 -> Mon -> weekday
+        ("2026-07-05 02:00", "weekend"),  # Sun 02:00 -6h -> Sat 20:00 -> Sat -> weekend
+        ("2026-07-06 02:00", "weekday"),  # Mon 02:00 -6h -> Sun 20:00 -> Sun -> weekday
+        ("2026-07-03 23:30", "weekend"),  # Fri 23:30 -6h -> Fri 17:30 -> Fri -> weekend
+    ]
+    for ts_str, expected in cases:
+        ts = pd.Timestamp(ts_str, tz=TZ)
+        assert _night_bucket(ts) == expected, ts_str
+
+
+# --------------------------- late_night_clamp: DOW-bucket awareness ---------------------------
+
+def test_dow_aware_clamp_closes_weekday_hole_but_preserves_weekend():
+    """Core fix: an aisekiya-like store closed on weekday deep-night, busy Fri/Sat.
+
+    Old (all-days) clamp: the weekend actuals (30/32/28) inflate the combined cap to
+    1.3*32=41.6, so a bogus weekday ML=25 sails through un-clamped (the proven bug:
+    ay_chiba/ay_ueno weekday 02:00 ghost predictions). New (DOW-bucket) clamp: the
+    weekday bucket sees its own all-zero history (n=5 >= CLAMP_MIN_NIGHTS_WEEKDAY) so
+    its cap collapses to 0. The weekend bucket (n=3 >= CLAMP_MIN_NIGHTS_WEEKEND) keeps
+    its own high cap and the weekend prediction is left untouched.
+    """
+    hist = _hist(
+        [
+            ("2026-06-27 02:00", 0, 0, 30),  # Sat -> weekend bucket (Fri-night session)
+            ("2026-06-28 02:00", 0, 0, 32),  # Sun -> weekend bucket (Sat-night session)
+            ("2026-06-29 02:00", 0, 0, 0),   # Mon -> weekday bucket
+            ("2026-06-30 02:00", 0, 0, 0),   # Tue -> weekday bucket
+            ("2026-07-01 02:00", 0, 0, 0),   # Wed -> weekday bucket
+            ("2026-07-02 02:00", 0, 0, 0),   # Thu -> weekday bucket
+            ("2026-07-03 02:00", 0, 0, 0),   # Fri -> weekday bucket
+            ("2026-07-04 02:00", 0, 0, 28),  # Sat -> weekend bucket (Fri-night session)
+        ]
+    )
+    weekday_point = _pt("2026-07-08 02:00", 15, 10)  # Wed 02:00, bogus ML total=25
+    weekend_point = _pt("2026-07-11 02:00", 12, 8)   # Sat 02:00, real weekend total=20
+
+    out, n = late_night_clamp([weekday_point, weekend_point], hist, TZ)
+    assert n == 1
+    assert out[0]["clamped"] is True
+    assert out[0]["clamp_bucket"] == "weekday"
+    assert out[0]["total_pred"] == pytest.approx(0.0)
+    assert out[0]["men_pred"] == pytest.approx(0.0)
+    assert out[0]["women_pred"] == pytest.approx(0.0)
+    # Weekend slot: cap = 1.3*32 = 41.6, prediction (20) is under cap -> untouched.
+    assert "clamped" not in out[1]
+    assert out[1]["total_pred"] == pytest.approx(20.0)
+
+
+def test_bucket_below_min_nights_falls_back_to_legacy_all_days_max():
+    """A bucket with too little history (< its MIN_NIGHTS) must fall back to the
+    legacy all-days max — never a stricter (bucket-only) cap, never skipped either.
+    """
+    hist = _hist(
+        [
+            ("2026-06-29 23:30", 0, 0, 6),   # Mon -> weekday bucket (n=1 so far)
+            ("2026-06-30 23:30", 0, 0, 6),   # Tue -> weekday bucket (n=2 < MIN_NIGHTS_WEEKDAY=3)
+            ("2026-06-27 23:30", 0, 0, 20),  # Sat -> weekend bucket
+            ("2026-07-04 23:30", 0, 0, 20),  # Sat -> weekend bucket
+        ]
+    )
+    point = _pt("2026-07-08 23:30", 25, 15)  # Wed 23:30 -> weekday bucket, ML total=40
+
+    out, n = late_night_clamp([point], hist, TZ)
+    assert n == 1
+    # weekday bucket has only 2 nights (< 3) -> fall back to legacy all-days stat:
+    # max=20 (from the two Sat rows), n=4 nights -> cap = 1.3*20 = 26.
+    assert out[0]["clamp_bucket"] == "all_days"
+    assert out[0]["total_pred"] == pytest.approx(26.0)
+    assert out[0]["men_pred"] == pytest.approx(25 * 26.0 / 40.0)
+    assert out[0]["women_pred"] == pytest.approx(15 * 26.0 / 40.0)
+
+
+def test_clamp_dow_aware_off_switch_reverts_to_legacy_all_days(monkeypatch):
+    """FORECAST_CLAMP_DOW_AWARE=0 must reproduce the exact legacy (pre-fix) behavior,
+    including its bug: the weekend actuals inflate the weekday cap so the ghost
+    prediction is NOT clamped. This documents the fallback path is byte-for-byte the
+    old code path (see test_dow_aware_clamp_closes_weekday_hole_but_preserves_weekend
+    for the fixed behavior with the flag left at its default "1").
+    """
+    monkeypatch.setenv("FORECAST_CLAMP_DOW_AWARE", "0")
+    hist = _hist(
+        [
+            ("2026-06-27 02:00", 0, 0, 30),
+            ("2026-06-28 02:00", 0, 0, 32),
+            ("2026-06-29 02:00", 0, 0, 0),
+            ("2026-06-30 02:00", 0, 0, 0),
+            ("2026-07-01 02:00", 0, 0, 0),
+            ("2026-07-02 02:00", 0, 0, 0),
+            ("2026-07-03 02:00", 0, 0, 0),
+            ("2026-07-04 02:00", 0, 0, 28),
+        ]
+    )
+    weekday_point = _pt("2026-07-08 02:00", 15, 10)  # ML total=25
+
+    out, n = late_night_clamp([weekday_point], hist, TZ)
+    # Legacy (all-days) cap = 1.3 * max(30, 32, 0, 0, 0, 0, 0, 28) = 1.3*32 = 41.6 > 25.
+    assert n == 0
+    assert "clamped" not in out[0]
+    assert out[0]["total_pred"] == pytest.approx(25.0)
+
+
+def test_same_slot_stats_by_bucket_splits_weekday_and_weekend():
+    hist = _hist(
+        [
+            ("2026-07-01 23:30", 0, 0, 10),  # Wed -> weekday
+            ("2026-07-02 23:30", 0, 0, 8),   # Thu -> weekday
+            ("2026-07-03 23:30", 0, 0, 6),   # Fri -> weekend (Fri-night session)
+        ]
+    )
+    stats = same_slot_stats_by_bucket(hist, 15)
+    assert stats[("weekday", 23, 30)] == (10.0, 2)
+    assert stats[("weekend", 23, 30)] == (6.0, 1)
+
+
+def test_clamp_exception_logs_warning_and_returns_input_unchanged(monkeypatch, caplog):
+    def _boom(*_a, **_k):
+        raise RuntimeError("boom-clamp")
+
+    monkeypatch.setattr("oriental.ml.postprocess.same_slot_stats", _boom)
+    hist = _hist([("2026-07-01 23:30", 0, 0, 10)])
+    points = [_pt("2026-07-08 23:30", 25, 25)]
+    with caplog.at_level(logging.WARNING):
+        out, n = late_night_clamp(points, hist, TZ)
+    assert n == 0
+    assert out == points
+    assert any("boom-clamp" in rec.message for rec in caplog.records)
+
+
 # --------------------------- blend_with_baseline ---------------------------
 
 def test_blend_basic_inverse_weight():
@@ -205,6 +342,20 @@ def test_blend_off_switch(monkeypatch):
     out, n = blend_with_baseline(points, hist, TZ, w_ml=0.2)
     assert n == 0
     assert out[0]["total_pred"] == pytest.approx(77.0)
+
+
+def test_blend_exception_logs_warning_and_returns_input_unchanged(monkeypatch, caplog):
+    def _boom(*_a, **_k):
+        raise RuntimeError("boom-blend")
+
+    monkeypatch.setattr("oriental.ml.postprocess.actual_slot_map", _boom)
+    hist = _hist([("2026-07-01 23:00", 10, 10, 20)])
+    points = [_pt("2026-07-08 23:00", 40, 37)]
+    with caplog.at_level(logging.WARNING):
+        out, n = blend_with_baseline(points, hist, TZ, w_ml=0.2)
+    assert n == 0
+    assert out == points
+    assert any("boom-blend" in rec.message for rec in caplog.records)
 
 
 # --------------------------- blend + clamp together ---------------------------
