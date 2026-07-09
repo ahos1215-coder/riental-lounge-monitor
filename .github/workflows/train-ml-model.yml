@@ -58,6 +58,10 @@ jobs:
             echo "[train-ml] Manual dispatch — Optuna=${{ vars.ML_OPTUNA_ENABLED || '1' }}"
           fi
 
+      # train_ml_model.py writes the job summary itself (gate decisions table +
+      # coverage stats) via the GITHUB_STEP_SUMMARY file, which GitHub Actions
+      # exposes as an environment variable to every step automatically — no
+      # extra wiring needed here beyond running the script.
       - name: Train and upload model artifacts
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -73,6 +77,15 @@ jobs:
           ML_TRAIN_WEIGHT_RAIN: ${{ vars.ML_TRAIN_WEIGHT_RAIN }}
           ML_OPTUNA_ENABLED: ${{ steps.optuna.outputs.enabled }}
           ML_OPTUNA_TRIALS: ${{ vars.ML_OPTUNA_TRIALS }}
+          # 新規安全ネット群 (champion/challenger gate・稼働店舗allow-list+stale guard・
+          # recency 重み調整)。すべて train_ml_model.py 側でデフォルト値を持つため、
+          # リポジトリ変数が未設定でも安全に動く。
+          ML_GATE_MAX_REGRESSION_PCT: ${{ vars.ML_GATE_MAX_REGRESSION_PCT }}
+          ML_STALE_STORE_DAYS: ${{ vars.ML_STALE_STORE_DAYS }}
+          # 直近データをより強く重視する調整（旧: 90日半減・floor 0.5）。
+          # gate が per-store の悪化を弾くので、ここを崩しても本番モデルは安全。
+          ML_RECENCY_HALFLIFE_DAYS: "45"
+          ML_RECENCY_FLOOR: "0.25"
           # workflow_dispatch の入力はシェルに直接展開せず env 経由で受ける（コマンドインジェクション対策）
           INPUT_DAYS: ${{ github.event.inputs.days }}
           INPUT_LIMIT: ${{ github.event.inputs.limit }}
@@ -91,6 +104,10 @@ jobs:
           export ML_TRAIN_WEIGHT_RAIN="${ML_TRAIN_WEIGHT_RAIN:-1.8}"
           export ML_OPTUNA_ENABLED="${ML_OPTUNA_ENABLED:-1}"
           export ML_OPTUNA_TRIALS="${ML_OPTUNA_TRIALS:-30}"
+          export ML_GATE_MAX_REGRESSION_PCT="${ML_GATE_MAX_REGRESSION_PCT:-20}"
+          export ML_STALE_STORE_DAYS="${ML_STALE_STORE_DAYS:-7}"
+          export ML_RECENCY_HALFLIFE_DAYS="${ML_RECENCY_HALFLIFE_DAYS:-90}"
+          export ML_RECENCY_FLOOR="${ML_RECENCY_FLOOR:-0.5}"
           EXTRA_ARGS=()
           if [ -n "$INPUT_DAYS" ]; then
             EXTRA_ARGS+=(--days "$INPUT_DAYS")

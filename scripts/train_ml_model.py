@@ -31,6 +31,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from oriental.ml.preprocess import FEATURE_COLUMNS, prepare_dataframe
+from oriental.utils.stores import ALL_STORE_IDS
 
 
 def _load_env() -> None:
@@ -117,6 +118,10 @@ class TrainingConfig:
     optuna_enabled: bool
     objective: str
     optuna_max_rows: int
+    gate_max_regression_pct: float
+    stale_store_days: float
+    recency_halflife_days: float
+    recency_floor: float
 
     @classmethod
     def from_env(cls) -> "TrainingConfig":
@@ -155,6 +160,21 @@ class TrainingConfig:
             # ~1M-row table, set ML_OPTUNA_MAX_ROWS (e.g. 8000) to run HPO on each store's
             # most-recent N rows; the FINAL model still trains on the full data.
             optuna_max_rows=_env_int("ML_OPTUNA_MAX_ROWS", 0),
+            # Champion/challenger gate (a): if a freshly-trained store's held-out test
+            # total_mae is worse than the currently-deployed model's by more than this
+            # percentage, the new model is NOT uploaded — the existing (champion) model
+            # keeps serving and its old metadata entry is carried forward unchanged.
+            gate_max_regression_pct=_env_float("ML_GATE_MAX_REGRESSION_PCT", 20.0),
+            # Stale-store guard (b): stores whose newest fetched row is older than this
+            # many days are skipped entirely (closed/dead stores keep their last-known
+            # good model instead of being retrained on stale data forever).
+            stale_store_days=_env_float("ML_STALE_STORE_DAYS", 7.0),
+            # Recency weighting knobs (e): half-life (days) and floor for the exponential
+            # decay in _sample_weights. Defaults (90 / 0.5) reproduce the prior hardcoded
+            # behavior exactly; the daily workflow tightens these (see train-ml-model.yml)
+            # to track regime shifts faster, protected by the gate above.
+            recency_halflife_days=_env_float("ML_RECENCY_HALFLIFE_DAYS", 90.0),
+            recency_floor=_env_float("ML_RECENCY_FLOOR", 0.5),
         )
 
     def validate(self) -> None:
@@ -172,6 +192,14 @@ class TrainingConfig:
             raise SystemExit("sample weights must be >= 1.0")
         if self.objective not in {"regression", "poisson", "tweedie"}:
             raise SystemExit("ML_OBJECTIVE must be one of: regression, poisson, tweedie")
+        if self.gate_max_regression_pct < 0:
+            raise SystemExit("ML_GATE_MAX_REGRESSION_PCT must be >= 0")
+        if self.stale_store_days <= 0:
+            raise SystemExit("ML_STALE_STORE_DAYS must be > 0")
+        if self.recency_halflife_days <= 0:
+            raise SystemExit("ML_RECENCY_HALFLIFE_DAYS must be > 0")
+        if not (0.0 <= self.recency_floor <= 1.0):
+            raise SystemExit("ML_RECENCY_FLOOR must be within [0, 1]")
 
 
 def _fetch_training_rows(cfg: TrainingConfig, session: requests.Session) -> list[dict[str, Any]]:
@@ -262,11 +290,15 @@ def _sample_weights(df: pd.DataFrame, cfg: TrainingConfig) -> np.ndarray:
     # 激戦区と雨天の重みを 1.5-2.0 に引き上げる
     weights[peak_mask.to_numpy()] = np.maximum(weights[peak_mask.to_numpy()], min(2.0, cfg.sample_weight_peak))
     weights[rain_mask.to_numpy()] = np.maximum(weights[rain_mask.to_numpy()], min(2.0, cfg.sample_weight_rain))
-    # 時間減衰: 直近データを重視（90日で半減する指数減衰）
+    # 時間減衰: 直近データを重視（ML_RECENCY_HALFLIFE_DAYS 日で floor まで減衰する指数減衰）
+    # floor=0.5, halflife=90 のとき、以前のハードコード式 0.5 + 0.5*exp(-days_ago/90) と
+    # 完全に一致する（デフォルト挙動は不変）。
     if "ts" in df.columns:
         max_ts = df["ts"].max()
         days_ago = (max_ts - df["ts"]).dt.total_seconds() / 86400.0
-        recency = 0.5 + 0.5 * np.exp(-days_ago.to_numpy() / 90.0)
+        floor = cfg.recency_floor
+        halflife = max(cfg.recency_halflife_days, 1e-6)
+        recency = floor + (1.0 - floor) * np.exp(-days_ago.to_numpy() / halflife)
         weights *= recency
     return weights
 
@@ -566,6 +598,145 @@ def _log_metrics_by_store(
     return all_metrics
 
 
+def _filter_allowed_stores(store_ids: list[str], allow_list: set[str]) -> tuple[list[str], list[str]]:
+    """Split ``store_ids`` (found in the fetched training data) into those present
+    in the active-store allow-list (``oriental/utils/stores.ALL_STORE_IDS``) and
+    those that are not (closed/dead/unknown store_ids that must never be retrained
+    just because a stray row exists for them)."""
+    allowed = [s for s in store_ids if s in allow_list]
+    rejected = [s for s in store_ids if s not in allow_list]
+    return allowed, rejected
+
+
+def _is_stale_store(last_ts: "pd.Timestamp", now: "pd.Timestamp", stale_days: float) -> bool:
+    """True if a store's most recent training row is older than ``stale_days``
+    days relative to ``now`` (e.g. a store that stopped reporting/closed)."""
+    age_days = (now - last_ts).total_seconds() / 86400.0
+    return age_days > stale_days
+
+
+def _gate_decision(
+    new_mae: float | None,
+    old_mae: float | None,
+    max_regression_pct: float,
+) -> tuple[str, str]:
+    """Champion/challenger gate for a single store's new (challenger) model vs. the
+    currently-deployed (champion) model, compared by held-out test total_mae.
+
+    Returns ``(decision, reason)`` where ``decision`` is ``"replaced"`` (upload the
+    new model) or ``"skipped"`` (keep serving the existing model). Missing/invalid
+    old metrics (first run, or old entry had no comparable MAE) always resolve to
+    ``"replaced"`` since there is nothing safe to gate against.
+    """
+    if old_mae is None or new_mae is None or old_mae <= 0:
+        return "replaced", "no_prior_metrics"
+    regression_pct = (new_mae - old_mae) / old_mae * 100.0
+    if regression_pct > max_regression_pct:
+        return "skipped", (
+            f"new_mae={new_mae:.4f} old_mae={old_mae:.4f} "
+            f"regression_pct={regression_pct:.1f}>{max_regression_pct:.1f}"
+        )
+    return "replaced", (
+        f"new_mae={new_mae:.4f} old_mae={old_mae:.4f} regression_pct={regression_pct:.1f}"
+    )
+
+
+def _reused_hpo_params(existing_metrics: dict[str, Any], store_id: str) -> dict[str, Any]:
+    """When Optuna is disabled (daily fixed-param retrain), reuse the per-store
+    ``hpo_params`` the weekly Optuna run previously wrote into the deployed
+    metadata, instead of always falling back to fixed defaults. Returns {} if no
+    usable tuned params exist (first run, or store never went through Optuna)."""
+    entry = existing_metrics.get(store_id) if isinstance(existing_metrics, dict) else None
+    if not isinstance(entry, dict):
+        return {}
+    params = entry.get("hpo_params")
+    return dict(params) if isinstance(params, dict) and params else {}
+
+
+def _carry_forward_store(
+    store_id: str,
+    reason: str,
+    *,
+    existing_store_models: dict[str, Any],
+    existing_metrics: dict[str, Any],
+    store_models: dict[str, Any],
+    all_metrics: dict[str, Any],
+    gate_decisions: list[dict[str, Any]],
+) -> None:
+    """Carry forward a store's existing (already-deployed) model/metrics entries
+    unchanged, because this run intentionally skipped it (allow-list, stale-store
+    guard, gate regression, insufficient rows, ...) or never saw it at all. The
+    carried-forward ``store_models`` entry keeps pointing at whatever model files
+    were uploaded by a PRIOR run — since uploads never delete old files (x-upsert
+    only adds/overwrites the SAME name), those files remain valid in storage.
+    """
+    old_sm = existing_store_models.get(store_id)
+    if isinstance(old_sm, dict):
+        store_models[store_id] = dict(old_sm)
+    old_entry = existing_metrics.get(store_id)
+    if isinstance(old_entry, dict):
+        carried = dict(old_entry)
+        carried["gate_skipped"] = True
+        carried["gate_reason"] = reason
+        all_metrics[store_id] = carried
+    gate_decisions.append({"store_id": store_id, "decision": "skipped", "reason": reason})
+
+
+def _coverage_stats(
+    df: pd.DataFrame, requested_days: int, train_limit: int, rows_fetched: int,
+) -> dict[str, Any]:
+    """Coverage visibility (c): how much history did this run actually train on,
+    vs. what was requested — and did the row LIMIT (not the day window) silently
+    cut the window short? ``row_limit_hit`` mirrors the exact symptom that caused
+    the July regression: ``rows_fetched == train_limit`` with a much smaller
+    ``effective_days`` than ``requested_days``.
+    """
+    stats: dict[str, Any] = {
+        "requested_days": requested_days,
+        "total_rows": int(rows_fetched),
+        "row_limit_hit": bool(rows_fetched >= train_limit),
+    }
+    if df.empty or "ts" not in df.columns:
+        stats.update({"oldest_ts": None, "newest_ts": None, "effective_days": 0.0})
+        return stats
+    oldest = df["ts"].min()
+    newest = df["ts"].max()
+    effective_days = (newest - oldest).total_seconds() / 86400.0
+    stats.update({
+        "oldest_ts": oldest.isoformat(),
+        "newest_ts": newest.isoformat(),
+        "effective_days": round(float(effective_days), 2),
+    })
+    return stats
+
+
+def _write_github_step_summary(
+    coverage: dict[str, Any], gate_decisions: list[dict[str, Any]],
+) -> None:
+    """Append a human-readable coverage + gate-decision table to the GitHub
+    Actions job summary (no-op outside GHA / when GITHUB_STEP_SUMMARY is unset)."""
+    path = os.getenv("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    lines = ["## Train ML model — summary", ""]
+    lines.append(f"- requested_days: {coverage.get('requested_days')}")
+    lines.append(f"- effective_days: {coverage.get('effective_days')}")
+    lines.append(f"- total_rows: {coverage.get('total_rows')}")
+    lines.append(f"- row_limit_hit: {coverage.get('row_limit_hit')}")
+    lines.append(f"- oldest_ts: {coverage.get('oldest_ts')}")
+    lines.append(f"- newest_ts: {coverage.get('newest_ts')}")
+    lines.append("")
+    lines.append("| store_id | decision | reason |")
+    lines.append("|---|---|---|")
+    for d in gate_decisions:
+        lines.append(f"| {d.get('store_id')} | {d.get('decision')} | {d.get('reason', '')} |")
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError as exc:  # noqa: BLE001 - best-effort, never fail the run over this
+        print(f"[train-ml][summary] could not write GITHUB_STEP_SUMMARY: {exc}")
+
+
 def _build_metadata(
     cfg: TrainingConfig,
     df: pd.DataFrame,
@@ -574,6 +745,8 @@ def _build_metadata(
     date_tag: str,
     store_models: dict[str, dict[str, Any]],
     metrics: dict[str, dict[str, Any]] | None = None,
+    coverage: dict[str, Any] | None = None,
+    gate_decisions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     meta: dict[str, Any] = {
         "schema_version": cfg.schema_version,
@@ -592,12 +765,25 @@ def _build_metadata(
         "store_models": store_models,
         "sample_weight_peak": cfg.sample_weight_peak,
         "sample_weight_rain": cfg.sample_weight_rain,
+        "recency_halflife_days": cfg.recency_halflife_days,
+        "recency_floor": cfg.recency_floor,
+        "gate_max_regression_pct": cfg.gate_max_regression_pct,
+        "stale_store_days": cfg.stale_store_days,
         "objective": cfg.objective,
         "python_version": platform.python_version(),
         "xgboost_version": xgb.__version__,
     }
     if metrics:
         meta["metrics"] = metrics
+    if coverage:
+        # Task (c): coverage visibility, both as a nested detail block and as the
+        # specifically-named top-level fields the audit asked to track.
+        meta["coverage"] = coverage
+        meta["requested_days"] = coverage.get("requested_days")
+        meta["effective_days"] = coverage.get("effective_days")
+        meta["row_limit_hit"] = coverage.get("row_limit_hit")
+    if gate_decisions is not None:
+        meta["gate_decisions"] = gate_decisions
     return meta
 
 
@@ -638,7 +824,10 @@ def _upload_file(
 
 
 def _download_existing_metadata(cfg: TrainingConfig, session: requests.Session) -> dict[str, Any] | None:
-    """Fetch the current metadata.json from Storage (for subset-training merge)."""
+    """Fetch the current (deployed) metadata.json from Storage. Used for: the
+    champion/challenger gate's prior per-store MAE, per-store hpo_params reuse on
+    Optuna-disabled runs, and carrying forward any store this run skips/doesn't
+    touch (subset training, allow-list, stale-store guard, gate rejection)."""
     object_path = f"{cfg.prefix}/metadata.json".strip("/")
     endpoint = f"{cfg.supabase_url}/storage/v1/object/{cfg.bucket}/{object_path}"
     headers = {"apikey": cfg.supabase_service_key, "Authorization": f"Bearer {cfg.supabase_service_key}"}
@@ -689,38 +878,147 @@ def main() -> int:
 
     trained_at = datetime.now(timezone.utc).isoformat()
     date_tag = datetime.now(timezone.utc).strftime("%Y%m%d")
+
+    coverage = _coverage_stats(df, cfg.train_days, cfg.train_limit, len(rows))
+    print("[train-ml][coverage]", json.dumps(coverage, ensure_ascii=True))
+
+    # Download the currently-deployed metadata ONCE, up front. It feeds three
+    # things: the champion/challenger gate (b's prior per-store test MAE), HPO
+    # param reuse on Optuna-disabled (daily) runs, and carry-forward of any store
+    # this run intentionally skips or never touches — so metadata.json always
+    # stays complete/valid for every store still being served.
+    existing_meta = _download_existing_metadata(cfg, session)
+    if existing_meta and str(existing_meta.get("schema_version")) == cfg.schema_version:
+        existing_store_models = existing_meta.get("store_models")
+        existing_store_models = existing_store_models if isinstance(existing_store_models, dict) else {}
+        existing_metrics = existing_meta.get("metrics")
+        existing_metrics = existing_metrics if isinstance(existing_metrics, dict) else {}
+    else:
+        if existing_meta:
+            print(
+                f"[train-ml][merge] existing metadata schema "
+                f"({existing_meta.get('schema_version')}) != {cfg.schema_version}; ignoring for gate/carry-forward"
+            )
+        existing_store_models = {}
+        existing_metrics = {}
+
     store_models: dict[str, dict[str, Any]] = {}
     all_metrics: dict[str, dict[str, Any]] = {}
+    gate_decisions: list[dict[str, Any]] = []
+    replaced_stores: list[str] = []
+
+    def _carry_forward(store_id: str, reason: str) -> None:
+        _carry_forward_store(
+            store_id,
+            reason,
+            existing_store_models=existing_store_models,
+            existing_metrics=existing_metrics,
+            store_models=store_models,
+            all_metrics=all_metrics,
+            gate_decisions=gate_decisions,
+        )
 
     with tempfile.TemporaryDirectory(prefix="train-ml-") as tmp:
         work_dir = Path(tmp)
-        stores = [cfg.store_id] if cfg.store_id else sorted(df["store_id"].dropna().unique().tolist())
-        if not stores:
+        stores_in_data = [cfg.store_id] if cfg.store_id else sorted(df["store_id"].dropna().unique().tolist())
+        if not stores_in_data:
             raise SystemExit("no store_id available for per-store training")
 
-        for store_id in stores:
+        # Active-store allow-list (b): only ever (re)train stores Oriental/Aisekiya
+        # still actively serves. A stray row for a closed store must not resurrect it.
+        allowed_stores, rejected_stores = _filter_allowed_stores(stores_in_data, set(ALL_STORE_IDS))
+        for sid in rejected_stores:
+            print(f"[train-ml][skip] store_id={sid} not in ALL_STORE_IDS allow-list")
+            _carry_forward(sid, "not_in_allowlist")
+
+        # Stale-store guard (b): a store can be in the allow-list yet have stopped
+        # reporting (e.g. temporarily/permanently closed) — skip retraining it on
+        # data that no longer reflects reality.
+        now_ts = pd.Timestamp.now(tz=cfg.timezone)
+        trainable_stores: list[str] = []
+        for sid in allowed_stores:
+            sdf_ts = df.loc[df["store_id"] == sid, "ts"]
+            if sdf_ts.empty:
+                continue
+            last_ts = sdf_ts.max()
+            if _is_stale_store(last_ts, now_ts, cfg.stale_store_days):
+                print(f"[train-ml][skip] stale-store skip: {sid} last={last_ts.date()}")
+                _carry_forward(sid, f"stale_store last={last_ts.date()}")
+            else:
+                trainable_stores.append(sid)
+
+        for store_id in trainable_stores:
             sdf = df[df["store_id"] == store_id].copy().reset_index(drop=True)
             if len(sdf) < 200:
                 print(f"[train-ml][skip] store_id={store_id} rows={len(sdf)} (<200)")
+                _carry_forward(store_id, "insufficient_rows")
                 continue
 
             # 評価方法のリーク対策（#4）: train/val/test に3分割し、
             # HPO（Optuna）と early-stopping は train+val のみで完結させる。
             # test は _log_metrics_by_store に渡すまで一切参照しない「未見データ」。
             train_part, val_part, test_part = _time_series_split_3(sdf)
-            hpo_params = _optimize_params(train_part, val_part, cfg, store_id)
+
+            # HPO param source (d): weekly Optuna runs re-tune fresh; daily fixed-
+            # param runs reuse the weekly-tuned params from deployed metadata (if
+            # any) instead of always falling back to the fixed defaults.
+            if cfg.optuna_enabled:
+                hpo_params = _optimize_params(train_part, val_part, cfg, store_id)
+                hpo_source = "optuna" if hpo_params else "defaults"
+            else:
+                hpo_params = _reused_hpo_params(existing_metrics, store_id)
+                hpo_source = "reused_weekly_optuna" if hpo_params else "defaults"
+            print(
+                f"[train-ml][hpo] store={store_id} source={hpo_source} "
+                f"params={json.dumps(hpo_params, ensure_ascii=True)}"
+            )
 
             model_men_path, model_women_path, model_men, model_women, test_df, fi_men, fi_women = _train_models(
                 sdf, train_part, val_part, test_part, work_dir, cfg, store_id, date_tag, hpo_params=hpo_params,
             )
             store_metrics = _log_metrics_by_store(test_df, model_men, model_women)
+            new_entry = store_metrics.get(store_id)
+            if new_entry is None:
+                print(f"[train-ml][skip] store_id={store_id} produced no test metrics; keeping existing model")
+                _carry_forward(store_id, "no_test_metrics")
+                continue
             if hpo_params:
-                for k in store_metrics:
-                    store_metrics[k]["hpo_params"] = hpo_params
-            for k in store_metrics:
-                store_metrics[k]["feature_importance_men"] = fi_men
-                store_metrics[k]["feature_importance_women"] = fi_women
-            all_metrics.update(store_metrics)
+                new_entry["hpo_params"] = hpo_params
+            new_entry["hpo_params_source"] = hpo_source
+            new_entry["feature_importance_men"] = fi_men
+            new_entry["feature_importance_women"] = fi_women
+
+            # Champion/challenger gate (a): compare the new (challenger) model's
+            # held-out test total_mae against the currently-deployed (champion)
+            # model's. Only upload if it doesn't regress by more than the threshold.
+            new_mae = (new_entry.get("overall") or {}).get("total_mae")
+            old_entry = existing_metrics.get(store_id)
+            old_entry = old_entry if isinstance(old_entry, dict) else None
+            old_mae = (old_entry.get("overall") or {}).get("total_mae") if old_entry else None
+            decision, reason = _gate_decision(new_mae, old_mae, cfg.gate_max_regression_pct)
+            gate_decisions.append({
+                "store_id": store_id, "decision": decision, "reason": reason,
+                "new_mae": new_mae, "old_mae": old_mae,
+            })
+            print(f"[train-ml][gate] store={store_id} decision={decision} reason={reason}")
+
+            if decision == "skipped":
+                # Challenger regressed too much — keep serving the deployed champion
+                # by carrying forward its old metadata entry (old model files are
+                # left untouched in storage, so the carried-forward paths stay valid).
+                if old_entry is not None:
+                    carried = dict(old_entry)
+                    carried["gate_skipped"] = True
+                    carried["gate_reason"] = reason
+                    carried["challenger_mae"] = new_mae
+                    all_metrics[store_id] = carried
+                if store_id in existing_store_models:
+                    store_models[store_id] = dict(existing_store_models[store_id])
+                continue
+
+            new_entry["gate_skipped"] = False
+            all_metrics[store_id] = new_entry
+            replaced_stores.append(store_id)
 
             # Latest alias for simpler rollback/fallback
             alias_men_path = work_dir / f"model_{store_id}_men.txt"
@@ -745,35 +1043,31 @@ def main() -> int:
                 "trained_at": trained_at,
             }
 
-        if not store_models:
-            raise SystemExit("no per-store models were trained (all stores skipped)")
+        # Completeness (task 1/6): carry forward any store this run never touched
+        # at all (e.g. zero rows in the fetch window) so metadata.json stays valid
+        # for every store still being served, not just the ones processed above.
+        for sid, old_sm in existing_store_models.items():
+            if sid in store_models:
+                continue
+            store_models[sid] = dict(old_sm)
+            gate_decisions.append({"store_id": sid, "decision": "carried_forward", "reason": "no_data_this_run"})
+            old_entry = existing_metrics.get(sid)
+            if isinstance(old_entry, dict) and sid not in all_metrics:
+                carried = dict(old_entry)
+                carried.setdefault("gate_skipped", True)
+                carried.setdefault("gate_reason", "no_data_this_run")
+                all_metrics[sid] = carried
 
-        # Subset training (a single/specific store_id) must NOT clobber the other stores
-        # in the shared metadata.json — otherwise the registry drops them and their
-        # forecasts break. Merge the freshly-trained store(s) into the existing metadata
-        # (same schema only) so all stores keep being served.
-        if cfg.store_id:
-            existing = _download_existing_metadata(cfg, session)
-            if existing and str(existing.get("schema_version")) == cfg.schema_version:
-                prev_models = existing.get("store_models")
-                if isinstance(prev_models, dict):
-                    merged = dict(prev_models)
-                    merged.update(store_models)
-                    print(
-                        f"[train-ml][merge] merged {len(store_models)} trained store(s) into "
-                        f"{len(prev_models)} existing -> {len(merged)} total"
-                    )
-                    store_models = merged
-                prev_metrics = existing.get("metrics")
-                if isinstance(prev_metrics, dict):
-                    merged_metrics = dict(prev_metrics)
-                    merged_metrics.update(all_metrics)
-                    all_metrics = merged_metrics
-            elif existing:
-                print(
-                    f"[train-ml][merge] existing metadata schema "
-                    f"({existing.get('schema_version')}) != {cfg.schema_version}; replacing instead of merging"
-                )
+        if not store_models:
+            raise SystemExit("no per-store models were trained or carried forward (all stores skipped)")
+
+        gate_summary = {
+            "replaced": sum(1 for d in gate_decisions if d["decision"] == "replaced"),
+            "skipped": sum(1 for d in gate_decisions if d["decision"] == "skipped"),
+            "carried_forward": sum(1 for d in gate_decisions if d["decision"] == "carried_forward"),
+        }
+        print("[train-ml][gate][summary]", json.dumps(gate_summary, ensure_ascii=True))
+        print("[train-ml][gate][decisions]", json.dumps(gate_decisions, ensure_ascii=True))
 
         metadata = _build_metadata(
             cfg,
@@ -782,32 +1076,49 @@ def main() -> int:
             date_tag=date_tag,
             store_models=store_models,
             metrics=all_metrics if all_metrics else None,
+            coverage=coverage,
+            gate_decisions=gate_decisions,
         )
         metadata_path = work_dir / "metadata.json"
         metadata_path.write_text(json.dumps(metadata, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
-        # backward compatibility global aliases (default store or first available store)
-        default_store = cfg.store_id if cfg.store_id in store_models else sorted(store_models.keys())[0]
-        default_men = work_dir / store_models[default_store]["model_men"]
-        default_women = work_dir / store_models[default_store]["model_women"]
-        global_men = work_dir / "model_men.txt"
-        global_women = work_dir / "model_women.txt"
-        global_men.write_bytes(default_men.read_bytes())
-        global_women.write_bytes(default_women.read_bytes())
-        _upload_file(
-            cfg=cfg,
-            session=session,
-            local_path=global_men,
-            remote_name=global_men.name,
-            content_type="text/plain",
-        )
-        _upload_file(
-            cfg=cfg,
-            session=session,
-            local_path=global_women,
-            remote_name=global_women.name,
-            content_type="text/plain",
-        )
+        # backward compatibility global aliases: only pick a default store from
+        # among the stores actually (re)trained+uploaded THIS run — carried-forward
+        # stores have no local files in work_dir (their models already live in
+        # storage from a prior run, untouched).
+        if cfg.store_id and cfg.store_id in replaced_stores:
+            default_store = cfg.store_id
+        elif replaced_stores:
+            default_store = sorted(replaced_stores)[0]
+        else:
+            default_store = None
+
+        if default_store is not None:
+            default_men = work_dir / store_models[default_store]["model_men"]
+            default_women = work_dir / store_models[default_store]["model_women"]
+            global_men = work_dir / "model_men.txt"
+            global_women = work_dir / "model_women.txt"
+            global_men.write_bytes(default_men.read_bytes())
+            global_women.write_bytes(default_women.read_bytes())
+            _upload_file(
+                cfg=cfg,
+                session=session,
+                local_path=global_men,
+                remote_name=global_men.name,
+                content_type="text/plain",
+            )
+            _upload_file(
+                cfg=cfg,
+                session=session,
+                local_path=global_women,
+                remote_name=global_women.name,
+                content_type="text/plain",
+            )
+        else:
+            print(
+                "[train-ml] no store was (re)trained this run (all gated/stale/allow-list skipped); "
+                "leaving existing global model_men.txt/model_women.txt untouched"
+            )
         _upload_file(
             cfg=cfg,
             session=session,
@@ -815,6 +1126,8 @@ def main() -> int:
             remote_name="metadata.json",
             content_type="application/json",
         )
+
+    _write_github_step_summary(coverage, gate_decisions)
 
     print(
         "[train-ml] uploaded models successfully",
@@ -824,7 +1137,9 @@ def main() -> int:
                 "prefix": cfg.prefix,
                 "schema_version": cfg.schema_version,
                 "row_count": len(df),
-                "stores_trained": sorted(store_models.keys()),
+                "stores_served": sorted(store_models.keys()),
+                "stores_replaced": sorted(replaced_stores),
+                "gate_summary": gate_summary,
             },
             ensure_ascii=True,
         ),
