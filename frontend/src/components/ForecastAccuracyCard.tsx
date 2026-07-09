@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { isPercentCrowdBrand, type BrandId } from "@/app/config/stores";
+import { resolveNightsWindow, resolveStoreComparison } from "@/lib/forecastAccuracy";
 
 type StoreMetrics = {
   overall: { total_mae: number; men_mae: number; women_mae: number };
@@ -107,11 +108,20 @@ export function ForecastAccuracyCard({
     ? new Date(trainedAt).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo", month: "short", day: "numeric" })
     : null;
 
-  // ベースライン比（直近7日平均）。live 側にのみ存在する。
-  const baselinePct =
-    hasLive && live?.mae_7d != null && live?.baseline_7d != null && live.baseline_7d > 0
-      ? Math.round(((live.baseline_7d - live.mae_7d) / live.baseline_7d) * 1000) / 10
-      : null;
+  // 実測ウィンドウ（何夜分のデータか）。mae_30d は30夜貯まるまでnullなので
+  // 7日値へ安全にフォールバックしつつ、実際の集計夜数(nights_count)だけを表示する（30夜と偽らない）。
+  const nightsWindow = resolveNightsWindow(live);
+
+  // ベースライン比較は「サイト全体の平均」ではなく、この店舗自身の実測値同士で行う。
+  // 全体平均だと個々の店舗の大負け／大勝ちが薄まって見えなくなるため。
+  const storeComparison = resolveStoreComparison(liveStore?.live_mae, liveStore?.live_baseline_mae);
+  const storeComparisonDisplay = storeComparison
+    ? {
+        mae: toDisplay(storeComparison.mae),
+        baseline: toDisplay(storeComparison.baseline),
+        worse: storeComparison.worse,
+      }
+    : null;
 
   return (
     <div className={`rounded-2xl border p-4 ${grade.bg}`}>
@@ -125,20 +135,25 @@ export function ForecastAccuracyCard({
       </div>
       <p className="mt-1 text-[11px] text-white/40">
         {hasLive
-          ? "実測精度 — 前夜の予測と実測の平均的なズレ（本番）"
+          ? `実測ベース（本番・${nightsWindow?.label ?? "集計中"}）— 前夜の予測と実測の平均的なズレ`
           : "学習時の参考値（実測精度を集計中）— 予測と実測の平均的なズレ"}
       </p>
       {hasLive ? (
         <>
-          {baselinePct != null && (
-            <div className="mt-2 flex items-baseline gap-1">
-              <span className="text-sm font-bold text-white/70">{baselinePct > 0 ? "+" : ""}{baselinePct.toFixed(1)}%</span>
-              <span className="text-[11px] text-white/40">ベースライン比（直近7日）</span>
+          {storeComparisonDisplay && (
+            <div className="mt-2 flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+              <span className="text-sm font-bold text-white/70">
+                ML {storeComparisonDisplay.mae.toFixed(1)} / 基準 {storeComparisonDisplay.baseline.toFixed(1)}
+              </span>
+              <span className="text-[11px] text-white/40">{maeUnit.replace(" MAE", "")}・実測比較</span>
+              {storeComparisonDisplay.worse && (
+                <span className="text-[10px] text-white/30">（現状は基準の方が近い・調整中）</span>
+              )}
             </div>
           )}
           <div className="mt-3 flex items-center gap-2 text-[10px] text-white/30">
             {live?.stores_scored_latest != null && <span>直近夜: {live.stores_scored_latest}店舗</span>}
-            {live?.nights_count != null && <span>集計: {live.nights_count}夜分</span>}
+            {nightsWindow && !nightsWindow.matured && <span>30夜到達まで集計中</span>}
           </div>
         </>
       ) : (
