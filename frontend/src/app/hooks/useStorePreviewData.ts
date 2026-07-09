@@ -17,12 +17,15 @@ import {
   formatNowHmJst,
   formatYMD,
   hasSeriesData,
+  isNightCompleted,
   isWithinNight,
+  nightDateYYYYMMDD,
   parseForecastPoints,
   parseRangePoints,
   pickCurrentActual,
   pickLatestActualPoint,
   pickPeak,
+  type ForecastPoint,
   type ForecastStatus,
   type PreviewRangeMode,
   type StoreSnapshot,
@@ -134,6 +137,11 @@ export function useStorePreviewData(
         const now = new Date();
         const baseDate = computeSelectedNightBaseDate(rangeMode, customDate, now);
         const nightWindow = computeNightWindowFromBaseDate(baseDate);
+        // 表示対象の夜が既に終わっている（窓の終わり=翌05:00 JSTを過ぎた）かどうか。
+        // - 「今日」モードでも、05:00-19:00 の間（次の夜がまだ始まっていない）は
+        //   ここで true になり、直近に終わった夜の答え合わせ表示に切り替わる。
+        // - 「昨日」「先週」は実質的に常に true。カスタムで未来日を選んだ場合のみ false。
+        const completedNight = isNightCompleted(baseDate, now);
 
         const rangeLimit = RANGE_LIMIT_BY_MODE[rangeMode] ?? 400;
         const fromYmd = formatYMD(baseDate);
@@ -144,10 +152,22 @@ export function useStorePreviewData(
           `&to=${encodeURIComponent(toYmd)}` +
           `&limit=${rangeLimit}`;
 
-        const forecastUrl = `/api/forecast_today?store=${encodeURIComponent(meta.slug)}`;
+        // 予測の取得先を決める:
+        // - 完了済みの夜（モード問わず）: その夜に実際配信されていた予測のスナップショット
+        //   （/api/forecast_snapshot）。実測(実線)の上に予測(点線)を夜全体で重ねて
+        //   答え合わせできるようにする（buildSeries の overlayAllForecast=true）。
+        // - 進行中の「今日」: 従来通り /api/forecast_today（未来区間のみ点線＝isFutureOnly）。
+        // - それ以外（非 today モードで対象の夜がまだ完了していない＝未来日カスタム等）:
+        //   予測は取得しない（従来通り）。
+        const forecastUrl = completedNight
+          ? `/api/forecast_snapshot?store=${encodeURIComponent(meta.slug)}` +
+            `&date=${encodeURIComponent(nightDateYYYYMMDD(baseDate))}`
+          : rangeMode === "today"
+            ? `/api/forecast_today?store=${encodeURIComponent(meta.slug)}`
+            : null;
         // 高速化: range と forecast を同時発火、range が先に解決したら即描画
         const rangePromise = fetch(rangeUrl, { signal }).then((r) => r.json().catch(() => ({})));
-        const forecastPromise = rangeMode === "today"
+        const forecastPromise = forecastUrl
           ? fetch(forecastUrl, { signal }).then((r) => r.json().catch(() => ({})))
           : Promise.resolve(null);
 
@@ -204,21 +224,57 @@ export function useStorePreviewData(
           setState({ loading: false, error: null, snapshot: baseSnapshotResolved });
         }
 
-        // 非 today モード（昨日/先週/カスタム）は予測を取得しない代わりに実測 range が
+        // range と予測(forecastPoints)をマージして描画する共通処理。completedNight の
+        // スナップショット合流・today 進行中の forecast_today 合流の両方から使う。
+        const applyMergedForecast = (
+          forecastPoints: ForecastPoint[],
+          overlayAllForecast: boolean,
+        ) => {
+          const mergedSeries = buildSeries(rangePoints, forecastPoints, overlayAllForecast);
+          const effectiveMergedSeries =
+            mergedSeries.length > 0 ? mergedSeries : baseSnapshotResolved.series;
+          const mergedCurrent = pickCurrentActual(effectiveMergedSeries);
+          const mergedNowMen = latestActual?.nowMen ?? mergedCurrent.nowMen;
+          const mergedNowWomen = latestActual?.nowWomen ?? mergedCurrent.nowWomen;
+          const mergedPeak = pickPeak(effectiveMergedSeries);
+          const mergedSnapshot: StoreSnapshot = {
+            ...baseSnapshotResolved,
+            nowMen: Math.round(mergedNowMen),
+            nowWomen: Math.round(mergedNowWomen),
+            nowTotal: Math.round(mergedNowMen + mergedNowWomen),
+            peakTotal: Math.round(mergedPeak.peakTotal),
+            peakTimeLabel: mergedPeak.peakTimeLabel,
+            peakMen: mergedPeak.peakMen,
+            peakWomen: mergedPeak.peakWomen,
+            forecastUpdatedLabel: formatNowHmJst(new Date()),
+            series: effectiveMergedSeries,
+            hasData: hasSeriesData(mergedSeries) || baseSnapshotResolved.hasData,
+            forecastStatus: "ok",
+          };
+          if (!cancelled) {
+            setState({ loading: false, error: null, snapshot: mergedSnapshot });
+          }
+        };
+
+        // 非 today モード（昨日/先週/カスタム）は、予測の有無に関わらず実測 range が
         // 生命線。コールド店舗＋営業ピークの輻輳で range が一過性に空応答になると、以前は
         // グラフが空のまま自己回復せず「昨日のグラフが出ない」と誤認されていた。実測が
         // 1 件も取れなかった場合だけ、今日モードの予測再試行と同じバックオフで range を
         // 再取得する（データが元々存在しない過去日では空が正なので、上限到達後は静かに終了）。
-        if (rangeMode !== "today") {
-          if (!hasData && forecastRetryAttempt < FORECAST_MAX_RETRIES) {
-            if (cancelled) return;
-            const delay = FORECAST_RETRY_DELAYS_MS[forecastRetryAttempt] ?? 12_000;
-            retryTimer = setTimeout(() => {
-              if (!cancelled) {
-                run(forecastRetryAttempt + 1);
-              }
-            }, delay);
-          }
+        // これは forecastUrl の有無（completedNight かどうか）とは独立に行う。
+        if (rangeMode !== "today" && !hasData && forecastRetryAttempt < FORECAST_MAX_RETRIES) {
+          if (cancelled) return;
+          const delay = FORECAST_RETRY_DELAYS_MS[forecastRetryAttempt] ?? 12_000;
+          retryTimer = setTimeout(() => {
+            if (!cancelled) {
+              run(forecastRetryAttempt + 1);
+            }
+          }, delay);
+        }
+
+        // 予測を取得しないケース（非 today モードで対象の夜がまだ完了していない＝
+        // 未来日カスタム等）は、実測のみのスナップショットで終了。
+        if (!forecastUrl) {
           return;
         }
 
@@ -228,6 +284,24 @@ export function useStorePreviewData(
           return;
         }
 
+        if (completedNight) {
+          // 完了済みの夜: その夜に配信されていた予測のスナップショットをそのまま
+          // 夜全体に重ねる（答え合わせ）。無い/空（まだ記録されていない新しい夜・
+          // この機能導入前の古い夜）場合はエラー扱いにせず、再試行もせず実測のみで
+          // 静かに終了する（forecastStatus は idle のまま = UI に警告を出さない）。
+          const snapshotOk = Boolean((forecastJson as { ok?: boolean })?.ok);
+          const allSnapshotPoints = snapshotOk ? parseForecastPoints(forecastJson) : [];
+          const snapshotPoints = allSnapshotPoints.filter((p) =>
+            isWithinNight(p.ts, nightWindow),
+          );
+          if (snapshotPoints.length === 0) {
+            return;
+          }
+          applyMergedForecast(snapshotPoints, true);
+          return;
+        }
+
+        // ここから先は「進行中の今日」のみ（completedNight===false && rangeMode==="today"）。
         // バックエンドが履歴データ不足を明示している場合（店舗の実測データがまだ無く、
         // そもそも予測できない）。この場合は men_pred/women_pred/total_pred が全て null の
         // ダミー行が返ってくるだけなので、再試行しても状況は変わらない。再試行ループには
@@ -277,32 +351,7 @@ export function useStorePreviewData(
         const forecastPoints = allForecastPoints.filter((p) =>
           isWithinNight(p.ts, nightWindow),
         );
-        const mergedSeries = buildSeries(rangePoints, forecastPoints);
-        const effectiveMergedSeries =
-          mergedSeries.length > 0 ? mergedSeries : baseSnapshotResolved.series;
-        const mergedCurrent = pickCurrentActual(effectiveMergedSeries);
-        const mergedNowMen = latestActual?.nowMen ?? mergedCurrent.nowMen;
-        const mergedNowWomen = latestActual?.nowWomen ?? mergedCurrent.nowWomen;
-        const mergedPeak = pickPeak(effectiveMergedSeries);
-        const mergedSnapshot: StoreSnapshot = {
-          ...baseSnapshotResolved,
-          nowMen: Math.round(mergedNowMen),
-          nowWomen: Math.round(mergedNowWomen),
-          nowTotal: Math.round(mergedNowMen + mergedNowWomen),
-          peakTotal: Math.round(mergedPeak.peakTotal),
-          peakTimeLabel: mergedPeak.peakTimeLabel,
-          peakMen: mergedPeak.peakMen,
-          peakWomen: mergedPeak.peakWomen,
-          forecastUpdatedLabel: formatNowHmJst(new Date()),
-          series: effectiveMergedSeries,
-          hasData:
-            hasSeriesData(mergedSeries) ||
-            baseSnapshotResolved.hasData,
-          forecastStatus: "ok",
-        };
-        if (!cancelled) {
-          setState({ loading: false, error: null, snapshot: mergedSnapshot });
-        }
+        applyMergedForecast(forecastPoints, false);
       } catch (err) {
         if (signal.aborted) return;
         const detail = err instanceof Error ? err.message : String(err);

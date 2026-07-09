@@ -4,7 +4,9 @@ import {
   computeNightBaseDate,
   computeSelectedNightBaseDate,
   computeNightWindowFromBaseDate,
+  isNightCompleted,
   isWithinNight,
+  nightDateYYYYMMDD,
   parseRangePoints,
   hasSeriesData,
   formatYMD,
@@ -96,5 +98,103 @@ describe("storePreviewSnapshot — yesterday-mode series", () => {
     // 過去（実測と重なる）区間には予測点線を引かない。
     const overlapPt = series.find((p) => p.ts === t(30));
     expect(overlapPt?.menForecast).toBeNull();
+  });
+});
+
+/**
+ * 完了済みの夜の答え合わせオーバーレイ機能の回帰テスト。
+ *
+ * 経緯: 完了済みの夜（昨日/先週/カスタム過去日、または「今日」モードで夜が既に終わった
+ * 05:00-19:00 の間）は、その夜に実際配信されていた予測のスナップショットを
+ * /api/forecast_snapshot から取得し、実測(実線)の上に予測(点線)を夜全体で重ねて
+ * 表示する。この重ね描画には buildSeries の overlayAllForecast:true を使う
+ * （デフォルトの false は「実測より未来の区間だけ点線を残す」today 進行中の挙動）。
+ */
+describe("storePreviewSnapshot — night completion helpers", () => {
+  it("nightDateYYYYMMDD formats the night's JST base date as YYYYMMDD (snapshot storage key)", () => {
+    const baseDate = new Date(2026, 6, 8); // 2026-07-08 (JS month is 0-indexed)
+    expect(nightDateYYYYMMDD(baseDate)).toBe("20260708");
+  });
+
+  it("nightDateYYYYMMDD pads single-digit month/day", () => {
+    const baseDate = new Date(2026, 0, 5); // 2026-01-05
+    expect(nightDateYYYYMMDD(baseDate)).toBe("20260105");
+  });
+
+  it("isNightCompleted is false while now is still within the night window", () => {
+    const baseDate = computeSelectedNightBaseDate("yesterday", "", new Date());
+    const window = computeNightWindowFromBaseDate(baseDate);
+    // window の終わり(翌05:00)の1分前 = まだ完了していない
+    const justBeforeEnd = new Date(window.end.getTime() - 60_000);
+    expect(isNightCompleted(baseDate, justBeforeEnd)).toBe(false);
+  });
+
+  it("isNightCompleted is true once now is at/after the night window end (05:00 JST)", () => {
+    const baseDate = computeSelectedNightBaseDate("yesterday", "", new Date());
+    const window = computeNightWindowFromBaseDate(baseDate);
+    expect(isNightCompleted(baseDate, window.end)).toBe(true);
+    const justAfterEnd = new Date(window.end.getTime() + 60_000);
+    expect(isNightCompleted(baseDate, justAfterEnd)).toBe(true);
+  });
+
+  it("a 'yesterday' night is always completed relative to any current time (regression: overlay must fire for 昨日)", () => {
+    const now = new Date();
+    const baseDate = computeSelectedNightBaseDate("yesterday", "", now);
+    expect(isNightCompleted(baseDate, now)).toBe(true);
+  });
+});
+
+describe("storePreviewSnapshot — buildSeries overlayAllForecast (completed-night overlay)", () => {
+  const t = (min: number) =>
+    new Date(Date.UTC(2026, 6, 7, 10, 0, 0) + min * 60_000).toISOString();
+
+  function makeActualsAndForecasts() {
+    // 実測は夜の前半だけ（後半はまだ実測データが来ていない想定でも良い）。
+    const actuals: RangePoint[] = [
+      { ts: t(0), men: 5, women: 8 },
+      { ts: t(15), men: 7, women: 10 },
+      { ts: t(30), men: 9, women: 12 },
+    ];
+    // 予測はその夜全体（実測と重なる過去区間 + 実測より未来の区間）を含む。
+    const forecasts: ForecastPoint[] = [
+      { ts: t(0), men_pred: 4, women_pred: 7 },
+      { ts: t(15), men_pred: 6, women_pred: 9 },
+      { ts: t(30), men_pred: 8, women_pred: 11 },
+      { ts: t(45), men_pred: 11, women_pred: 14 },
+      { ts: t(60), men_pred: 13, women_pred: 16 },
+    ];
+    return { actuals, forecasts };
+  }
+
+  it("overlayAllForecast:true keeps every forecast point (even past/overlapping ones) — nothing nulled", () => {
+    const { actuals, forecasts } = makeActualsAndForecasts();
+    const series = buildSeries(actuals, forecasts, true);
+
+    // すべての予測点で menForecast/womenForecast が null にならず値を保持している。
+    for (const f of forecasts) {
+      const pt = series.find((p) => p.ts === f.ts);
+      expect(pt).toBeDefined();
+      expect(pt?.menForecast).toBe(f.men_pred);
+      expect(pt?.womenForecast).toBe(f.women_pred);
+    }
+    // 実測(実線)も同時に残っている＝実測+予測オーバーレイが両立。
+    expect(series.find((p) => p.ts === t(0))?.menActual).toBe(5);
+    expect(series.find((p) => p.ts === t(30))?.menActual).toBe(9);
+  });
+
+  it("overlayAllForecast:false (default) preserves the existing isFutureOnly behavior (past overlap nulled)", () => {
+    const { actuals, forecasts } = makeActualsAndForecasts();
+    const seriesDefault = buildSeries(actuals, forecasts);
+    const seriesExplicitFalse = buildSeries(actuals, forecasts, false);
+
+    for (const series of [seriesDefault, seriesExplicitFalse]) {
+      // 実測と重なる過去区間（t(0), t(15), t(30)）は予測が null化される。
+      expect(series.find((p) => p.ts === t(0))?.menForecast).toBeNull();
+      expect(series.find((p) => p.ts === t(15))?.menForecast).toBeNull();
+      expect(series.find((p) => p.ts === t(30))?.menForecast).toBeNull();
+      // 実測より未来の区間（t(45), t(60)）は予測が残る。
+      expect(series.find((p) => p.ts === t(45))?.menForecast).toBe(11);
+      expect(series.find((p) => p.ts === t(60))?.menForecast).toBe(13);
+    }
   });
 });

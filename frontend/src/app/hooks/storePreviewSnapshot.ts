@@ -289,6 +289,32 @@ export function isWithinNight(ts: string | undefined, window: NightWindow): bool
   return time >= window.start.getTime() && time <= window.end.getTime();
 }
 
+/**
+ * 夜の baseDate（19:00 側の JST 日付）を、スナップショットのストレージキーと同じ
+ * YYYYMMDD 形式にする（scripts/snapshot_forecasts.py の `night_date` と一致させる）。
+ * baseDate は getFullYear/getMonth/getDate だけで JST の Y/M/D を運ぶ値なので、
+ * ここでもそれ以外（getTime 等）は参照しない。
+ */
+export function nightDateYYYYMMDD(baseDate: Date): string {
+  const y = baseDate.getFullYear();
+  const m = pad2(baseDate.getMonth() + 1);
+  const d = pad2(baseDate.getDate());
+  return `${y}${m}${d}`;
+}
+
+/**
+ * 対象の夜（baseDate 19:00 始まり）が、`now` 時点で既に終わっている（窓の終わり
+ * ＝ 翌日 05:00 JST を過ぎている）かどうか。
+ * - 「今日」モードでも、05:00-19:00 の間（次の夜がまだ始まっていない）はここで
+ *   true になる＝直近に終わった夜の予測スナップショットを見せる対象になる。
+ * - 「昨日」「先週」は baseDate が常に過去なので、実質的に常に true。
+ * - 「カスタム」で未来日を選んだ場合は false（まだ配信すらされていない）。
+ */
+export function isNightCompleted(baseDate: Date, now: Date): boolean {
+  const window = computeNightWindowFromBaseDate(baseDate);
+  return now.getTime() >= window.end.getTime();
+}
+
 function formatLabel(ts: string): string {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return ts;
@@ -307,6 +333,11 @@ export function formatNowHmJst(date: Date): string {
 export function buildSeries(
   actuals: RangePoint[],
   forecasts: ForecastPoint[],
+  // 完了済みの夜の答え合わせ表示専用: true の場合、実測と重なる過去区間でも予測
+  // （点線）を null にせず、夜全体に渡って実測(実線)の上に予測(点線)を重ねて描く。
+  // デフォルト false は従来どおり（today モード進行中は「実測より未来」の区間だけ
+  // 点線を残し、過去区間の二重描画を防ぐ）。
+  overlayAllForecast = false,
 ): TimeSeriesPoint[] {
   const toRoundedOrNull = (v: unknown): number | null =>
     typeof v === "number" && Number.isFinite(v) ? Math.round(v) : null;
@@ -345,7 +376,8 @@ export function buildSeries(
   for (const p of sortedForecasts) {
     if (!p.ts) continue;
     const t = new Date(p.ts).getTime();
-    const isFutureOnly = lastActualTime > 0 && t > lastActualTime;
+    const keepForecast =
+      overlayAllForecast || (lastActualTime > 0 && t > lastActualTime);
 
     const existing = map.get(p.ts);
     const menForecast = toRoundedOrNull(p.men_pred) ?? existing?.menForecast ?? null;
@@ -355,8 +387,8 @@ export function buildSeries(
       map.set(p.ts, {
         ...existing,
         ts: p.ts,
-        menForecast: isFutureOnly ? menForecast : null,
-        womenForecast: isFutureOnly ? womenForecast : null,
+        menForecast: keepForecast ? menForecast : null,
+        womenForecast: keepForecast ? womenForecast : null,
       });
     } else {
       map.set(p.ts, {
