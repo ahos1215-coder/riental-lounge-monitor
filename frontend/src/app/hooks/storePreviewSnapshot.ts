@@ -10,6 +10,8 @@
 // そのためロジックを重複させず、フレームワーク非依存の純粋関数だけをこの独立ファイルに切り出した。
 import {
   buildStoreFullName,
+  isPercentCrowdBrand,
+  seatFullnessPercent,
   type StoreMeta,
   type BrandId,
 } from "../config/stores";
@@ -66,6 +68,20 @@ export type StoreSnapshot = {
    * 実測データが1件も無い場合は null（表示側は「データなし」扱い）。
    */
   latestActualTs: string | null;
+  /**
+   * ピーク（最も混雑した系列点）の ts（ISO文字列・絶対時刻）。null は不明。
+   * 「ピークまで あと約…」チップが、ピークを既に過ぎた後も"これから盛り上がる"方向へ
+   * 誤誘導しないよう、描画時に `new Date()` と比較して「ピークは過ぎたか」を判定するために使う。
+   */
+  peakTs: string | null;
+  /**
+   * 表示対象の夜が既に終わっている（回顧的表示）かどうか。
+   * - 「昨日」「先週」「過去日カスタム」は常に true。
+   * - 「今日」モードでも、夜が既に終わった（05:00-19:00 の間など）場合は true。
+   * 完了済みの夜では「ピークまで あと約…」や「ピークは過ぎました（進行中の含意）」を
+   * 出さない（答え合わせ表示なので現在進行の文言は誤解を招く）。
+   */
+  completedNight: boolean;
 };
 
 export type RangePoint = {
@@ -177,6 +193,8 @@ export function buildBaseSnapshot(meta: StoreMeta): StoreSnapshot {
     hasData: false,
     forecastStatus: "idle",
     latestActualTs: null,
+    peakTs: null,
+    completedNight: false,
   };
 }
 
@@ -455,6 +473,7 @@ export function pickCurrentActual(series: TimeSeriesPoint[]) {
 
 export function pickPeak(series: TimeSeriesPoint[]) {
   let bestLabel = "";
+  let bestTs: string | null = null;
   let bestTotal = 0;
   let bestMen: number | null = null;
   let bestWomen: number | null = null;
@@ -466,11 +485,19 @@ export function pickPeak(series: TimeSeriesPoint[]) {
     if (total > bestTotal) {
       bestTotal = total;
       bestLabel = p.label;
+      // ピーク時刻の絶対値（ISO）。表示側の「ピークは過ぎたか」判定に使う。
+      bestTs = p.ts ?? null;
       bestMen = men > 0 ? Math.round(men) : null;
       bestWomen = women > 0 ? Math.round(women) : null;
     }
   });
-  return { peakTotal: bestTotal, peakTimeLabel: bestLabel || "--:--", peakMen: bestMen, peakWomen: bestWomen };
+  return {
+    peakTotal: bestTotal,
+    peakTimeLabel: bestLabel || "--:--",
+    peakTs: bestTs,
+    peakMen: bestMen,
+    peakWomen: bestWomen,
+  };
 }
 
 export function hasSeriesData(series: TimeSeriesPoint[]) {
@@ -499,4 +526,111 @@ export function pickLatestActualPoint(points: RangePoint[]) {
     // 「◯分前更新」用に ts も保持する（以前は破棄していた）。
     ts: typeof latest.ts === "string" ? latest.ts : null,
   };
+}
+
+/**
+ * ピーク（最も混雑した系列点）を既に過ぎたか＝ピーク時刻 < 現在時刻 かどうか。
+ * peakTs は絶対時刻（ISO）なので、閲覧者のタイムゾーンに関係なく getTime() 比較で正しい。
+ * null/不正な場合は「過ぎたか不明」として false を返す（進行中の夜では従来どおり
+ * 「ピークまで あと約…」を出せるよう安全側に倒す）。
+ */
+export function isPeakPassed(
+  peakTs: string | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (!peakTs) return false;
+  const t = new Date(peakTs);
+  if (Number.isNaN(t.getTime())) return false;
+  return t.getTime() < now.getTime();
+}
+
+/**
+ * 「予測ハイライト」のピーク進捗チップ（1つ、または該当なしで null）を決める純粋関数。
+ *
+ * バグ修正: 以前は `max(0, peak - now)` だけを見て、ピークを過ぎて客足が引いた後でも
+ * 「ピークまで あと約◯人」を出し続け、閉店に向かって数字が増える誤誘導になっていた。
+ * さらに完了済みの夜（昨日/過去日）でも同じチップが「あと約◯人」と回顧的に表示していた。
+ *
+ * 新ルール:
+ * - 完了済みの夜（completedNight）: 回顧的表示なので「あと約…」も「ピークは過ぎました」も
+ *   出さない（現在進行の含意を避ける）。おすすめ度があればそれにフォールバック。
+ * - 進行中でピークを既に過ぎた: 「ピークは過ぎました（落ち着き傾向）」に置き換える。
+ * - 進行中でこれからピーク: 従来どおり「ピークまで あと約◯人 / %」。
+ */
+export function peakProgressChip(
+  snapshot: Pick<
+    StoreSnapshot,
+    "brand" | "capacity" | "peakTotal" | "nowTotal" | "peakTs" | "completedNight" | "recommendation"
+  >,
+  now: Date = new Date(),
+): string | null {
+  const percentMode = isPercentCrowdBrand(snapshot.brand) && !!snapshot.capacity;
+  const cap = snapshot.capacity ?? 0;
+  const peak = Math.max(0, Math.round(Number(snapshot.peakTotal ?? 0)));
+  const total = Math.max(0, Math.round(Number(snapshot.nowTotal ?? 0)));
+  const rec = snapshot.recommendation?.trim() || "";
+  const recChip =
+    rec && rec !== "データなし" && rec !== "データ取得済み" ? `おすすめ度 ${rec}` : null;
+
+  // 完了済みの夜は回顧的表示。現在進行の文言は出さず、おすすめ度があればそれを出す。
+  if (snapshot.completedNight) {
+    return recChip;
+  }
+
+  // 進行中でピークを既に過ぎている → 「あと約…」は誤誘導。落ち着き傾向を明示する。
+  if (isPeakPassed(snapshot.peakTs, now)) {
+    return "ピークは過ぎました（落ち着き傾向）";
+  }
+
+  // 進行中でこれからピーク → 従来どおり残り目安を出す。
+  if (percentMode) {
+    const peakPct = seatFullnessPercent(peak, cap * 2) ?? 0;
+    const nowPct = seatFullnessPercent(total, cap * 2) ?? 0;
+    const deltaPct = Math.max(0, peakPct - nowPct);
+    if (deltaPct > 0) return `ピークまで あと約${deltaPct}%`;
+    return recChip;
+  }
+  const delta = peak > 0 ? Math.max(0, peak - total) : 0;
+  if (delta > 0) return `ピークまで あと約${delta}人`;
+  return recChip;
+}
+
+/**
+ * リアルタイム人数の「鮮度」表示のしきい値（分）。
+ * 最新実測がこの分数以上前なら「今の数値」とは見なさず、閉店中/計測停止として
+ * 「最終 HH:MM 時点」の注記に切り替える。
+ */
+export const REALTIME_STALE_THRESHOLD_MIN = 20;
+
+/**
+ * リアルタイム人数の鮮度情報。
+ * - `none`: latestActualTs が null/不正 → 鮮度表示は出さない（誤った「0分前」を避ける）。
+ * - `fresh`: しきい値未満 → 「◯分前更新」（0分は「たった今更新」）。
+ * - `stale`: しきい値以上 → 「最終 HH:MM 時点」（閉店中/計測停止の注記）。
+ */
+export type FreshnessInfo =
+  | { state: "none" }
+  | { state: "fresh"; minutesAgo: number; label: string }
+  | { state: "stale"; minutesAgo: number; asOfLabel: string; label: string };
+
+/**
+ * 最新実測の ts と現在時刻から、リアルタイム人数の鮮度表示を決める純粋関数。
+ * ts は絶対時刻（ISO）なので getTime() 差分で分数を出す（TZ非依存）。
+ */
+export function computeFreshness(
+  latestActualTs: string | null | undefined,
+  now: Date = new Date(),
+  staleThresholdMin: number = REALTIME_STALE_THRESHOLD_MIN,
+): FreshnessInfo {
+  if (!latestActualTs) return { state: "none" };
+  const t = new Date(latestActualTs);
+  if (Number.isNaN(t.getTime())) return { state: "none" };
+  // 未来の ts（端末時計のズレ）は 0 分前として扱う（負数を出さない）。
+  const minutesAgo = Math.max(0, Math.floor((now.getTime() - t.getTime()) / 60_000));
+  if (minutesAgo >= staleThresholdMin) {
+    const asOfLabel = formatNowHmJst(t);
+    return { state: "stale", minutesAgo, asOfLabel, label: `最終 ${asOfLabel} 時点` };
+  }
+  const label = minutesAgo === 0 ? "たった今更新" : `${minutesAgo}分前更新`;
+  return { state: "fresh", minutesAgo, label };
 }

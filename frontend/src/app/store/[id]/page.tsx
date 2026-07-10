@@ -180,7 +180,7 @@ async function fetchInitialSnapshotOnce(meta: StoreMeta): Promise<StoreSnapshot 
       const current = pickCurrentActual(effectiveSeries);
       const nowMen = latestActual?.nowMen ?? current.nowMen;
       const nowWomen = latestActual?.nowWomen ?? current.nowWomen;
-      const { peakTotal, peakTimeLabel, peakMen, peakWomen } = pickPeak(effectiveSeries);
+      const { peakTotal, peakTimeLabel, peakTs, peakMen, peakWomen } = pickPeak(effectiveSeries);
       const latestActualTs =
         latestActual?.ts ??
         [...effectiveSeries].reverse().find((p) => p.menActual !== null || p.womenActual !== null)?.ts ??
@@ -195,6 +195,7 @@ async function fetchInitialSnapshotOnce(meta: StoreMeta): Promise<StoreSnapshot 
         nowTotal: Math.round(nowMen + nowWomen),
         peakTotal: Math.round(peakTotal),
         peakTimeLabel,
+        peakTs,
         peakMen,
         peakWomen,
         // snapshot が無い/空（記録前の古い夜等）なら "--:--" のまま
@@ -204,6 +205,8 @@ async function fetchInitialSnapshotOnce(meta: StoreMeta): Promise<StoreSnapshot 
         hasData,
         forecastStatus: snapshotPoints.length > 0 ? "ok" : "idle",
         latestActualTs,
+        // この分岐は完了済みの夜（05:00-19:00 の間 or 過去日）のみ到達する。
+        completedNight: true,
       };
       return snapshot;
     }
@@ -228,7 +231,7 @@ async function fetchInitialSnapshotOnce(meta: StoreMeta): Promise<StoreSnapshot 
     const current = pickCurrentActual(effectiveSeries);
     const nowMen = latestActual?.nowMen ?? current.nowMen;
     const nowWomen = latestActual?.nowWomen ?? current.nowWomen;
-    const { peakTotal, peakTimeLabel, peakMen, peakWomen } = pickPeak(effectiveSeries);
+    const { peakTotal, peakTimeLabel, peakTs, peakMen, peakWomen } = pickPeak(effectiveSeries);
     const latestActualTs =
       latestActual?.ts ??
       [...effectiveSeries].reverse().find((p) => p.menActual !== null || p.womenActual !== null)?.ts ??
@@ -249,6 +252,7 @@ async function fetchInitialSnapshotOnce(meta: StoreMeta): Promise<StoreSnapshot 
       nowTotal: Math.round(nowMen + nowWomen),
       peakTotal: Math.round(peakTotal),
       peakTimeLabel,
+      peakTs,
       peakMen,
       peakWomen,
       forecastUpdatedLabel: allForecastPoints.length > 0 ? "更新済み" : "--:--",
@@ -256,6 +260,8 @@ async function fetchInitialSnapshotOnce(meta: StoreMeta): Promise<StoreSnapshot 
       hasData,
       forecastStatus,
       latestActualTs,
+      // ここは completedNight===false（進行中/これからの夜）のみ到達する。
+      completedNight: false,
     };
     return snapshot;
   } catch {

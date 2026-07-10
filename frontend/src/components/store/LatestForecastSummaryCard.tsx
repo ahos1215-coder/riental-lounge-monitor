@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import type { StoreSnapshot } from "@/app/hooks/useStorePreviewData";
+import { peakProgressChip } from "@/app/hooks/storePreviewSnapshot";
 import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
 
 type Payload =
@@ -17,10 +18,8 @@ function mlHighlightChips(snapshot: StoreSnapshot): string[] {
   const percentMode = isPercentCrowdBrand(snapshot.brand) && !!snapshot.capacity;
   const cap = snapshot.capacity ?? 0;
   const peak = Math.max(0, Math.round(Number(snapshot.peakTotal ?? 0)));
-  const total = Math.max(0, Math.round(Number(snapshot.nowTotal ?? 0)));
   const peakTime = snapshot.peakTimeLabel?.trim() || "";
   const updated = snapshot.forecastUpdatedLabel?.trim() || "";
-  const rec = snapshot.recommendation?.trim() || "";
 
   const chips: string[] = [];
   if (peak > 0 && peakTime && peakTime !== "—") {
@@ -45,22 +44,11 @@ function mlHighlightChips(snapshot: StoreSnapshot): string[] {
   if (updated && updated !== "—") {
     chips.push(`予測更新 ${updated}`);
   }
-  if (percentMode) {
-    const peakPct = seatFullnessPercent(peak, cap * 2) ?? 0;
-    const nowPct = seatFullnessPercent(total, cap * 2) ?? 0;
-    const deltaPct = Math.max(0, peakPct - nowPct);
-    if (deltaPct > 0) {
-      chips.push(`ピークまで あと約${deltaPct}%`);
-    } else if (rec && rec !== "データなし" && rec !== "データ取得済み") {
-      chips.push(`おすすめ度 ${rec}`);
-    }
-  } else {
-    const delta = peak > 0 ? Math.max(0, peak - total) : 0;
-    if (delta > 0) {
-      chips.push(`ピークまで あと約${delta}人`);
-    } else if (rec && rec !== "データなし" && rec !== "データ取得済み") {
-      chips.push(`おすすめ度 ${rec}`);
-    }
+  // ピーク進捗チップ（ピーク前=「あと約…」/ 通過後=「ピークは過ぎました」/ 完了済みの夜=非表示）は
+  // 純粋関数に集約。ピークを過ぎた後も「あと約◯人」が閉店へ向かって増える誤誘導を防ぐ。
+  const progressChip = peakProgressChip(snapshot);
+  if (progressChip) {
+    chips.push(progressChip);
   }
   return chips.slice(0, 3);
 }

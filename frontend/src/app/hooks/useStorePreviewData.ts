@@ -188,7 +188,7 @@ export function useStorePreviewData(
         const current = pickCurrentActual(effectiveActualSeries);
         const nowMen = latestActual?.nowMen ?? current.nowMen;
         const nowWomen = latestActual?.nowWomen ?? current.nowWomen;
-        const { peakTotal, peakTimeLabel, peakMen: peakMenVal, peakWomen: peakWomenVal } = pickPeak(effectiveActualSeries);
+        const { peakTotal, peakTimeLabel, peakTs: peakTsVal, peakMen: peakMenVal, peakWomen: peakWomenVal } = pickPeak(effectiveActualSeries);
         // latestActual（夜窓フィルタ前の全データ）の ts を優先し、無ければ夜窓内系列の最新実測点で代替する。
         const latestActualTs =
           latestActual?.ts ??
@@ -212,6 +212,7 @@ export function useStorePreviewData(
           nowTotal: Math.round(nowMen + nowWomen),
           peakTotal: Math.round(peakTotal),
           peakTimeLabel,
+          peakTs: peakTsVal,
           peakMen: peakMenVal,
           peakWomen: peakWomenVal,
           forecastUpdatedLabel: "--:--",
@@ -219,6 +220,7 @@ export function useStorePreviewData(
           hasData,
           forecastStatus: initialForecastStatus,
           latestActualTs,
+          completedNight,
         };
 
         if (!cancelled) {
@@ -245,6 +247,7 @@ export function useStorePreviewData(
             nowTotal: Math.round(mergedNowMen + mergedNowWomen),
             peakTotal: Math.round(mergedPeak.peakTotal),
             peakTimeLabel: mergedPeak.peakTimeLabel,
+            peakTs: mergedPeak.peakTs,
             peakMen: mergedPeak.peakMen,
             peakWomen: mergedPeak.peakWomen,
             forecastUpdatedLabel: formatNowHmJst(new Date()),

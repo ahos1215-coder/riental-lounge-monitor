@@ -2,6 +2,7 @@
 
 import { GenderRatioBar } from "@/components/home/GenderRatioBar";
 import type { StoreSnapshot } from "@/app/hooks/useStorePreviewData";
+import { computeFreshness } from "@/app/hooks/storePreviewSnapshot";
 import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
 
 function crowdHintFromTotals(nowTotal: number, peakTotal: number): string {
@@ -39,6 +40,12 @@ export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
     percentMode && snapshot.capacity
       ? seatFullnessPercent(total, snapshot.capacity * 2)
       : null;
+
+  // リアルタイム人数の鮮度。最新実測 ts と現在時刻から「◯分前更新」を出し、しきい値以上
+  // 古ければ「閉店中・最終 HH:MM 時点」に切り替える（古い数値を"今"に見せない）。
+  // PreviewMainSection は ssr:false のクライアント専用なので、描画時の new Date() で
+  // ハイドレーション不整合は起きない。
+  const freshness = computeFreshness(snapshot.latestActualTs);
 
   if (loading) {
     return (
@@ -80,6 +87,23 @@ export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
                 </p>
               )}
         </div>
+
+        {/* 鮮度表示: fresh なら「◯分前更新」、stale なら閉店中/計測停止の注記。
+            null（実測なし）は誤った「0分前」を避けるため何も出さない。 */}
+        {freshness.state === "fresh" && (
+          <p className="mt-0.5 text-[10px] text-slate-500" data-testid="realtime-freshness">
+            <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-400/80 align-middle" aria-hidden />
+            {freshness.label}
+          </p>
+        )}
+        {freshness.state === "stale" && (
+          <p
+            className="mt-0.5 rounded-full border border-amber-500/25 bg-amber-500/10 px-2 py-0.5 text-[10px] text-amber-200/90"
+            data-testid="realtime-freshness"
+          >
+            閉店中・{freshness.label}
+          </p>
+        )}
       </div>
 
       {percentMode ? (
