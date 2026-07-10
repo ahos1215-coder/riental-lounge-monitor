@@ -434,7 +434,7 @@ export type AisekiyaCostResult = {
   charges: ChargeLine[];
 };
 
-export type ComputeAisekiyaCostOptions = {
+type ComputeAisekiyaCostOptions = {
   /** アプリパスポート等でチャージが無料になっている場合 true */
   appCheckin: boolean;
 };
@@ -504,7 +504,7 @@ export function computeAisekiyaStayCost(
   };
 }
 
-export type AisekiyaStayPlanOption = {
+type AisekiyaStayPlanOption = {
   label: string;
   exitLabel: string;
   exitMinutes: number;

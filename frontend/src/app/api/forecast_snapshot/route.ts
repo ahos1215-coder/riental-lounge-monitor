@@ -9,7 +9,8 @@ const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:5000";
  * と違い、対象の夜が終わればもう内容は変わらない（scripts/snapshot_forecasts.py が
  * その夜の開始前に一度だけ書き込む）ので、長め＆不変寄りの CDN キャッシュにする。
  */
-const CACHE_HEADER = "public, s-maxage=86400, stale-while-revalidate=604800";
+const TTL_SECONDS = 86400;
+const CACHE_HEADER = `public, s-maxage=${TTL_SECONDS}, stale-while-revalidate=604800`;
 
 type ErrorBody = {
   ok: false;
@@ -35,7 +36,7 @@ export async function GET(req: NextRequest) {
     `&date=${encodeURIComponent(date)}`;
 
   try {
-    const backendRes = await fetch(apiUrl, { next: { revalidate: 86400 } });
+    const backendRes = await fetch(apiUrl, { next: { revalidate: TTL_SECONDS } });
     const buf = await backendRes.arrayBuffer();
 
     const headers = new Headers();

@@ -34,8 +34,14 @@ type Props = {
   params: Promise<{ id: string }>;
 };
 
-/** 毎日18:00/21:30更新のレポートとは別に、実測+予測は数分単位で動くため短め */
+/**
+ * 毎日18:00/21:30更新のレポートとは別に、実測+予測は数分単位で動くため短め。
+ * Next.js の revalidate route segment config は静的解析専用のため、ここは定数参照ではなく
+ * リテラルのままにする必要がある（下の REVALIDATE_SECONDS と値は同じ 120 で揃える）。
+ */
 export const revalidate = 120;
+/** 上の revalidate と同じ値（120秒）。リテラル export にできない他の箇所で使う共有定数。 */
+const REVALIDATE_SECONDS = 120;
 
 /**
  * dynamicParams=false に変更（旧: デフォルト true のまま「新店舗追加時にビルドし直さなくても
@@ -84,7 +90,7 @@ function delay(ms: number): Promise<void> {
 async function fetchJsonWithTimeout(
   url: string,
   timeoutMs: number,
-  revalidateSeconds = 120,
+  revalidateSeconds = REVALIDATE_SECONDS,
 ): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -149,7 +155,7 @@ async function fetchInitialSnapshotOnce(meta: StoreMeta): Promise<StoreSnapshot 
       ? `${base}/api/forecast_snapshot?store=${encodeURIComponent(meta.slug)}` +
         `&date=${encodeURIComponent(nightDateYYYYMMDD(baseDate))}`
       : `${base}/api/forecast_today?store=${encodeURIComponent(meta.slug)}`;
-    const forecastRevalidateSeconds = completedNight ? 86_400 : 120;
+    const forecastRevalidateSeconds = completedNight ? 86_400 : REVALIDATE_SECONDS;
 
     const [rangeJson, forecastJson] = await Promise.all([
       fetchJsonWithTimeout(rangeUrl, SERVER_SNAPSHOT_TIMEOUT_MS),

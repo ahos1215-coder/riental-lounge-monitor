@@ -135,7 +135,7 @@ export function detectDayTypeJst(now: Date): DayTypeDetection {
   return { dayType: "weekday", anchorYmd, dowLabel, reason: "平日" };
 }
 
-export type AisekiyaDayTypeDetection = {
+type AisekiyaDayTypeDetection = {
   dayType: DayType;
   /** 判定に使った基準日（JST・夜営業の基準日）"YYYY-MM-DD" */
   anchorYmd: string;
