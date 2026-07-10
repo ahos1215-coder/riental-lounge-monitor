@@ -12,7 +12,7 @@ function insightTrace(...args: unknown[]): void {
   }
 }
 
-export type NightWindow = { from: string; to: string; label: string };
+export type NightWindowIso = { from: string; to: string; label: string };
 
 export type Insight = {
   peak_time: string;
@@ -59,7 +59,7 @@ export type DraftContext = {
 
 export type InsightBuildResult = {
   insight: Insight;
-  range: NightWindow;
+  range: NightWindowIso;
   quality_flags: { notes: string[] };
   /** Which API produced points before insight */
   source: "api/range" | "api/forecast_today";
@@ -100,7 +100,7 @@ function ymdPlusDays(ymd: string, days: number): string {
   return fmtYmdTokyo(d);
 }
 
-export function nightWindowIso(ymd: string): NightWindow {
+export function nightWindowIso(ymd: string): NightWindowIso {
   const from = `${ymd}T19:00:00+09:00`;
   const toYmd = ymdPlusDays(ymd, 1);
   const to = `${toYmd}T05:00:00+09:00`;
@@ -108,7 +108,7 @@ export function nightWindowIso(ymd: string): NightWindow {
 }
 
 /** 同一カレンダー日（JST）0:00〜23:59:59.999。今夜の窓にまだサンプルが無い日中などに使う */
-export function dayWindowIso(ymd: string): NightWindow {
+export function dayWindowIso(ymd: string): NightWindowIso {
   return {
     from: `${ymd}T00:00:00+09:00`,
     to: `${ymd}T23:59:59.999+09:00`,
@@ -171,7 +171,7 @@ type CollectOptions = {
   shiftDays?: number;
 };
 
-export function collectPoints(
+function collectPoints(
   rows: unknown[],
   fromIso: string,
   toIso: string,
@@ -554,7 +554,7 @@ export async function buildInsightFromBackend(
   limit = 1000,
   options?: { edition?: BlogEdition }
 ): Promise<InsightBuildResult> {
-  let range: NightWindow = nightWindowIso(dateYmd);
+  let range: NightWindowIso = nightWindowIso(dateYmd);
   const notes: string[] = [];
   let source: InsightBuildResult["source"] = "api/range";
   let shift: InsightBuildResult["shift"] = "none";

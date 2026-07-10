@@ -42,7 +42,7 @@ export type {
   StoreSnapshot,
   RangePoint,
   ForecastPoint,
-  NightWindow,
+  NightWindowRange,
 } from "./storePreviewSnapshot";
 
 export type StorePreviewState = {
