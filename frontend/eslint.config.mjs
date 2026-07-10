@@ -12,9 +12,6 @@ export default [
       "node_modules/**",
       "out/**",
       "build/**",
-      "_trash/**",
-      // 迷子の旧ディレクトリが残っても lint しない
-      "frontend/**",
     ],
   },
   {
