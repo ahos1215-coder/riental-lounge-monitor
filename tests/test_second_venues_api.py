@@ -31,7 +31,7 @@ def client(monkeypatch):
     monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "key")
     monkeypatch.setenv("DATA_BACKEND", "supabase")
-    from oriental.routes import data as data_module
+    from oriental.routes import data_meta as data_module
 
     monkeypatch.setattr(data_module, "SecondVenuesRepository", _FakeRepo)
 

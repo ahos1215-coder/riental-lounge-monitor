@@ -71,7 +71,7 @@ def app_and_provider(monkeypatch):
     monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test-key")
     monkeypatch.setenv("DISABLE_MODEL_PRELOAD", "1")
 
-    from oriental.routes import data as data_module
+    from oriental.routes import data_range as data_module
 
     provider = _FakeProvider(rows_by_store={
         "ol_gangnam": [
@@ -91,7 +91,7 @@ RANGE_MULTI_URL = "/api/range_multi?stores=gangnam&from=2026-07-01&to=2026-07-02
 
 
 def test_range_cache_key_normalization():
-    from oriental.routes.data import _range_cache_key
+    from oriental.routes.data_range import _range_cache_key
 
     k1 = _range_cache_key("ol_gangnam", dt.date(2026, 7, 1), dt.date(2026, 7, 2), 500)
     k1_again = _range_cache_key("ol_gangnam", dt.date(2026, 7, 1), dt.date(2026, 7, 2), 500)

@@ -18,7 +18,7 @@ import json
 import pytest
 
 from oriental import create_app
-from oriental.routes import forecast as fc
+from oriental.routes import forecast_accuracy as fc
 
 
 # --------------------------------------------------------------------------- #
