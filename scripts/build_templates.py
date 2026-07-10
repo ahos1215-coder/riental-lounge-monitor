@@ -41,8 +41,30 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from oriental.ml.night_type import classify_night, night_date_of, special_block
-from oriental.utils.stores import ALL_STORE_IDS
+def _load_module_from_file(name: str, relpath: str):
+    """パッケージ経由importが使えない最小依存環境(GHA)用のファイル直読みローダ。
+    oriental/__init__.py が flask、oriental/ml/__init__.py が pandas/lightgbm を
+    引き込むため、stdlib+jpholidayしか無いジョブでは対象ファイルだけを直接読む。"""
+    import importlib.util
+
+    p = REPO_ROOT / relpath
+    spec = importlib.util.spec_from_file_location(name, p)
+    m = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(m)
+    return m
+
+
+try:
+    from oriental.ml.night_type import classify_night, night_date_of, special_block
+    from oriental.utils.stores import ALL_STORE_IDS
+except ModuleNotFoundError:
+    _nt = _load_module_from_file("_night_type_standalone", "oriental/ml/night_type.py")
+    classify_night, night_date_of, special_block = (
+        _nt.classify_night, _nt.night_date_of, _nt.special_block,
+    )
+    _st = _load_module_from_file("_stores_standalone", "oriental/utils/stores.py")
+    ALL_STORE_IDS = _st.ALL_STORE_IDS
 
 JST = timezone(timedelta(hours=9))
 

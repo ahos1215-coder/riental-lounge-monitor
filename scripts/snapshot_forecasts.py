@@ -29,7 +29,19 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from oriental.ml.night_type import classify_night, special_block  # noqa: E402
+try:
+    from oriental.ml.night_type import classify_night, special_block  # noqa: E402
+except ModuleNotFoundError:
+    # 最小依存環境(GHA=stdlib+jpholidayのみ)ではパッケージ経由importが
+    # oriental/__init__.py の flask 等を引き込んで失敗するため、ファイル直読みで代替。
+    import importlib.util as _ilu  # noqa: E402
+
+    _p = REPO_ROOT / "oriental" / "ml" / "night_type.py"
+    _spec = _ilu.spec_from_file_location("_night_type_standalone", _p)
+    _m = _ilu.module_from_spec(_spec)
+    assert _spec and _spec.loader
+    _spec.loader.exec_module(_m)
+    classify_night, special_block = _m.classify_night, _m.special_block
 
 JST = timezone(timedelta(hours=9))
 DEFAULT_BACKEND = "https://riental-lounge-monitor.onrender.com"

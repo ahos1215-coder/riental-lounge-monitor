@@ -25,7 +25,21 @@ from datetime import date, datetime, timedelta, timezone
 
 import jpholiday
 
-from oriental.ml.holiday_calendar import is_off_day
+try:
+    from oriental.ml.holiday_calendar import is_off_day
+except ModuleNotFoundError:
+    # 最小依存環境(GHAのbuild-templates/snapshotジョブ=stdlib+jpholidayのみ)では、
+    # パッケージ経由importが oriental/__init__.py の flask 等を引き込んで失敗する。
+    # holiday_calendar.py 自体は stdlib+jpholiday のみなのでファイル直読みで代替する。
+    import importlib.util as _ilu
+    from pathlib import Path as _Path
+
+    _p = _Path(__file__).with_name("holiday_calendar.py")
+    _spec = _ilu.spec_from_file_location("_holiday_calendar_standalone", _p)
+    _m = _ilu.module_from_spec(_spec)
+    assert _spec and _spec.loader
+    _spec.loader.exec_module(_m)
+    is_off_day = _m.is_off_day
 
 __all__ = ["classify_night", "special_block", "night_date_of", "day_off"]
 
