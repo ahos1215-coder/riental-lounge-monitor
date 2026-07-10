@@ -18,7 +18,9 @@ import {
   formatYMD,
   addDays,
   hasSeriesData,
+  isNightCompleted,
   isWithinNight,
+  nightDateYYYYMMDD,
   parseForecastPoints,
   parseRangePoints,
   pickCurrentActual,
@@ -79,13 +81,17 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unknown> {
+async function fetchJsonWithTimeout(
+  url: string,
+  timeoutMs: number,
+  revalidateSeconds = 120,
+): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
       signal: controller.signal,
-      next: { revalidate: 120 },
+      next: { revalidate: revalidateSeconds },
     });
     if (!res.ok) return null;
     return await res.json().catch(() => null);
@@ -108,6 +114,14 @@ async function fetchJsonWithTimeout(url: string, timeoutMs: number): Promise<unk
  * 同じ `next.revalidate` 付き fetch をしているだけなので、直接叩いても Next Data Cache への
  * 参加や挙動は変わらない。
  *
+ * 完了済みの夜（05:00-19:00 の間、または対象の夜が既に終わっている場合）は
+ * useStorePreviewData の completedNight 分岐と全く同じ判定・URL 形式・マージ方法
+ * （実測 + /api/forecast_snapshot を overlayAllForecast:true でマージ）を使う。
+ * これにより、昼間の ISR 再生成が重い ML 計算（forecast_today）を一切呼ばずに済み、
+ * かつクライアントが実際に表示する「完了済みの夜の答え合わせ」と同じ実データを
+ * そのまま HTML に焼き込める（従来は forecast_today の結果をクライアントが使わないまま
+ * 二重に計算していた上、データが無ければ initialSnapshot が null になり空箱 HTML になっていた）。
+ *
  * 失敗・タイムアウト時は null を返す（呼び出し側は今日通りの CSR 挙動にフォールバックする）。
  */
 async function fetchInitialSnapshotOnce(meta: StoreMeta): Promise<StoreSnapshot | null> {
@@ -119,17 +133,27 @@ async function fetchInitialSnapshotOnce(meta: StoreMeta): Promise<StoreSnapshot 
     const rangeLimit = RANGE_LIMIT_BY_MODE.today;
     const fromYmd = formatYMD(baseDate);
     const toYmd = formatYMD(addDays(baseDate, 1));
+    // 「今日」の夜が既に終わっている（05:00-19:00 の間）かどうか。true の場合、
+    // useStorePreviewData と同じく forecast_today (重い ML 計算) を呼ばず、
+    // その夜に配信済みだった forecast_snapshot を使う。
+    const completedNight = isNightCompleted(baseDate, now);
 
     const rangeUrl =
       `${base}/api/range?store=${encodeURIComponent(meta.slug)}` +
       `&from=${encodeURIComponent(fromYmd)}` +
       `&to=${encodeURIComponent(toYmd)}` +
       `&limit=${rangeLimit}`;
-    const forecastUrl = `${base}/api/forecast_today?store=${encodeURIComponent(meta.slug)}`;
+    // forecast_snapshot は完了済みの夜の不変データ（/api/forecast_snapshot の route.ts と
+    // 同じ 86400s キャッシュ方針）。forecast_today は今まで通り 120s。
+    const forecastUrl = completedNight
+      ? `${base}/api/forecast_snapshot?store=${encodeURIComponent(meta.slug)}` +
+        `&date=${encodeURIComponent(nightDateYYYYMMDD(baseDate))}`
+      : `${base}/api/forecast_today?store=${encodeURIComponent(meta.slug)}`;
+    const forecastRevalidateSeconds = completedNight ? 86_400 : 120;
 
     const [rangeJson, forecastJson] = await Promise.all([
       fetchJsonWithTimeout(rangeUrl, SERVER_SNAPSHOT_TIMEOUT_MS),
-      fetchJsonWithTimeout(forecastUrl, SERVER_SNAPSHOT_TIMEOUT_MS),
+      fetchJsonWithTimeout(forecastUrl, SERVER_SNAPSHOT_TIMEOUT_MS, forecastRevalidateSeconds),
     ]);
 
     const baseSnapshot = buildBaseSnapshot(meta);
@@ -138,6 +162,53 @@ async function fetchInitialSnapshotOnce(meta: StoreMeta): Promise<StoreSnapshot 
     const rangePoints = allRangePoints.filter((p) => isWithinNight(p.ts, nightWindow));
     const latestActual = pickLatestActualPoint(allRangePoints);
 
+    if (completedNight) {
+      // 完了済みの夜: useStorePreviewData の completedNight 分岐と同じ組み立て
+      // （実測 + forecast_snapshot を overlayAllForecast:true でマージ）。
+      const snapshotOk = Boolean((forecastJson as { ok?: boolean } | null)?.ok);
+      const allSnapshotPoints = snapshotOk ? parseForecastPoints(forecastJson) : [];
+      const snapshotPoints = allSnapshotPoints.filter((p) => isWithinNight(p.ts, nightWindow));
+
+      const series = buildSeries(rangePoints, snapshotPoints, true);
+      const effectiveSeries = series.length > 0 ? series : baseSnapshot.series;
+      const hasData = hasSeriesData(series) || latestActual !== null;
+
+      // データが何も無ければ「取得はできたが空」であり、CSR 側の baseSnapshot と実質同じ。
+      // その場合はわざわざ initialSnapshot を渡さず、null にして通常の CSR フローに任せる。
+      if (!hasData) return null;
+
+      const current = pickCurrentActual(effectiveSeries);
+      const nowMen = latestActual?.nowMen ?? current.nowMen;
+      const nowWomen = latestActual?.nowWomen ?? current.nowWomen;
+      const { peakTotal, peakTimeLabel, peakMen, peakWomen } = pickPeak(effectiveSeries);
+      const latestActualTs =
+        latestActual?.ts ??
+        [...effectiveSeries].reverse().find((p) => p.menActual !== null || p.womenActual !== null)?.ts ??
+        null;
+
+      const snapshot: StoreSnapshot = {
+        ...baseSnapshot,
+        level: "データ取得済み",
+        recommendation: "データ取得済み",
+        nowMen: Math.round(nowMen),
+        nowWomen: Math.round(nowWomen),
+        nowTotal: Math.round(nowMen + nowWomen),
+        peakTotal: Math.round(peakTotal),
+        peakTimeLabel,
+        peakMen,
+        peakWomen,
+        // snapshot が無い/空（記録前の古い夜等）なら "--:--" のまま
+        // （useStorePreviewData と同様、警告状態にはせず forecastStatus は idle のまま）。
+        forecastUpdatedLabel: snapshotPoints.length > 0 ? "更新済み" : "--:--",
+        series: effectiveSeries,
+        hasData,
+        forecastStatus: snapshotPoints.length > 0 ? "ok" : "idle",
+        latestActualTs,
+      };
+      return snapshot;
+    }
+
+    // 進行中/これからの夜: 従来通り forecast_today（未来区間のみ点線）
     // insufficient_history の場合、forecast はダミー行のみなので予測系列には使わない
     // （useStorePreviewData と同じ扱い: 実測のみ表示、予測は "insufficient_history" 状態）。
     const isInsufficientHistory = Boolean(

@@ -98,6 +98,35 @@ export const FORECAST_MAX_RETRIES = FORECAST_RETRY_DELAYS_MS.length;
 
 export const FORECAST_REFRESH_MS = 15 * 60 * 1000;
 
+// initialSnapshot（サーバー seed）を消費した直後の最初のバックグラウンド再取得を
+// どれだけ遅らせるかの範囲（ms）。page.tsx の initialSnapshot は revalidate=120 で
+// 最大でも約2分しか経っていない実データなので、マウント直後に同じ内容をほぼ確実に
+// 再取得するだけの二重フェッチ（サーバー側 SSR フェッチとクライアント側フェッチの
+// back-to-back 発火）を避ける。15分ごとの定期更新ループ自体はこの遅延と無関係に
+// マウント時点から起算し続ける。
+export const INITIAL_REFRESH_DELAY_MIN_MS = 60_000;
+export const INITIAL_REFRESH_DELAY_MAX_MS = 90_000;
+
+/**
+ * 初回バックグラウンド再取得までの遅延（ms）を決める純粋関数。
+ * - `shouldPreserveInitialSeed` が false（initialSnapshot 無しのコールド CSR、または
+ *   店舗/モード変更後の再実行）の場合は 0 を返す＝従来通り即時実行（挙動を変えない）。
+ * - true の場合は [INITIAL_REFRESH_DELAY_MIN_MS, INITIAL_REFRESH_DELAY_MAX_MS) の範囲で
+ *   ジッターさせた遅延を返す（同時にマウントされた多数のカード/タブが一斉に同じ
+ *   タイミングでバックエンドを叩くのを避ける）。
+ * `random` は 0 以上 1 未満の乱数を返す関数（テスト用に差し替え可能。既定は Math.random）。
+ */
+export function computeInitialRefreshDelayMs(
+  shouldPreserveInitialSeed: boolean,
+  random: () => number = Math.random,
+): number {
+  if (!shouldPreserveInitialSeed) return 0;
+  const span = INITIAL_REFRESH_DELAY_MAX_MS - INITIAL_REFRESH_DELAY_MIN_MS;
+  const r = random();
+  const clamped = Number.isFinite(r) ? Math.min(Math.max(r, 0), 1) : 0;
+  return INITIAL_REFRESH_DELAY_MIN_MS + Math.floor(clamped * span);
+}
+
 // page.tsx（サーバー側の initialSnapshot 取得）も today モードと同じ limit を使う必要があるため export する。
 export const RANGE_LIMIT_BY_MODE: Record<PreviewRangeMode, number> = {
   // today は初速重視で軽めにして表示開始を早める

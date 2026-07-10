@@ -1,9 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   buildSeries,
+  computeInitialRefreshDelayMs,
   computeNightBaseDate,
   computeSelectedNightBaseDate,
   computeNightWindowFromBaseDate,
+  INITIAL_REFRESH_DELAY_MAX_MS,
+  INITIAL_REFRESH_DELAY_MIN_MS,
   isNightCompleted,
   isWithinNight,
   nightDateYYYYMMDD,
@@ -196,5 +199,47 @@ describe("storePreviewSnapshot — buildSeries overlayAllForecast (completed-nig
       expect(series.find((p) => p.ts === t(45))?.menForecast).toBe(11);
       expect(series.find((p) => p.ts === t(60))?.menForecast).toBe(13);
     }
+  });
+});
+
+/**
+ * useStorePreviewData の「initialSnapshot 消費直後は最初のバックグラウンド再取得を
+ * 60-90s 遅らせる」ロジックの純粋部分（遅延ms計算）の回帰テスト。
+ *
+ * 経緯: page.tsx の SSR initialSnapshot はサーバー・クライアント双方が同じ店舗の
+ * forecast_today/forecast_snapshot を back-to-back に二重フェッチしていた
+ * （バックエンド側の一時的な輻輳・無駄な ML 再計算の原因）。initialSnapshot をその
+ * ままマウント直後にもう一度取り直すのを避けるため、最初の1回だけ遅延させる。
+ * コールド CSR（initialSnapshot 無し）の挙動は絶対に変えてはならない（0ms=即時実行）。
+ */
+describe("storePreviewSnapshot — computeInitialRefreshDelayMs (seeded-delay logic)", () => {
+  it("returns 0 (no delay) when there is no usable initial seed — cold CSR path must not slow down", () => {
+    expect(computeInitialRefreshDelayMs(false)).toBe(0);
+    expect(computeInitialRefreshDelayMs(false, () => 0)).toBe(0);
+    expect(computeInitialRefreshDelayMs(false, () => 0.999)).toBe(0);
+  });
+
+  it("returns the minimum delay when random() is 0", () => {
+    expect(computeInitialRefreshDelayMs(true, () => 0)).toBe(INITIAL_REFRESH_DELAY_MIN_MS);
+  });
+
+  it("returns a value strictly below the maximum delay when random() approaches 1", () => {
+    const delay = computeInitialRefreshDelayMs(true, () => 0.999999);
+    expect(delay).toBeGreaterThanOrEqual(INITIAL_REFRESH_DELAY_MIN_MS);
+    expect(delay).toBeLessThan(INITIAL_REFRESH_DELAY_MAX_MS);
+  });
+
+  it("stays within the documented [60s, 90s) range for arbitrary random values", () => {
+    for (const r of [0, 0.1, 0.25, 0.5, 0.75, 0.9, 0.999]) {
+      const delay = computeInitialRefreshDelayMs(true, () => r);
+      expect(delay).toBeGreaterThanOrEqual(INITIAL_REFRESH_DELAY_MIN_MS);
+      expect(delay).toBeLessThan(INITIAL_REFRESH_DELAY_MAX_MS);
+    }
+  });
+
+  it("clamps out-of-range random() implementations defensively (NaN/negative/>1)", () => {
+    expect(computeInitialRefreshDelayMs(true, () => Number.NaN)).toBe(INITIAL_REFRESH_DELAY_MIN_MS);
+    expect(computeInitialRefreshDelayMs(true, () => -1)).toBe(INITIAL_REFRESH_DELAY_MIN_MS);
+    expect(computeInitialRefreshDelayMs(true, () => 5)).toBeLessThan(INITIAL_REFRESH_DELAY_MAX_MS + 1);
   });
 });

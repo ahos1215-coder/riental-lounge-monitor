@@ -220,39 +220,85 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
     }
 
     void (async () => {
-      const rangeBySlug = new Map<string, ReturnType<typeof parseRangeResponse>>();
-      let batchOk = false;
       const slugsCsv = targets.map((t) => t.slug).join(",");
       type ForecastBatchBody = { ok?: boolean; by_slug?: Record<string, { data?: ForecastPoint[] }> };
+      type RangeBatchResult = {
+        ok: boolean;
+        bySlug: Map<string, ReturnType<typeof parseRangeResponse>>;
+      };
 
-      // ① range_multi を最優先で発火 → 部分カードを最速表示
-      // (forecast_today_multi は range 完了後に発火 — gunicorn single worker 対策)
-      try {
-        const r = await fetch(
-          `/api/range_multi?stores=${encodeURIComponent(slugsCsv)}&limit=${STORE_CARD_RANGE_LIMIT}`,
-          { signal },
-        );
-        if (signal.aborted) return;
-        if (r.ok) {
+      // ① range_multi・forecast_today_multi・megribi_score を完全並列で発火する。
+      // 旧実装は range_multi の完了を await してから forecast/megribi を発火しており、
+      // コールド時（range 3-6s + forecast 8-9s）の待ち時間が直列に積み上がって
+      // 最悪 10 秒超になっていた。3つとも独立 state 更新なので、range が届き次第
+      // カードを部分表示し、forecast/megribi は届き次第チップを埋める
+      // （体感の待ち時間は合計ではなく max(...) で頭打ちになる）。
+      const rangeMultiPromise: Promise<RangeBatchResult> = fetch(
+        `/api/range_multi?stores=${encodeURIComponent(slugsCsv)}&limit=${STORE_CARD_RANGE_LIMIT}`,
+        { signal },
+      )
+        .then(async (r) => {
+          if (!r.ok) return { ok: false, bySlug: new Map() };
           const j = (await r.json()) as {
             ok?: boolean;
             by_slug?: Record<string, { rows?: unknown[] }>;
           };
-          if (j?.ok && j?.by_slug && typeof j.by_slug === "object") {
-            batchOk = true;
-            for (const s of targets) {
-              const rows = j.by_slug[s.slug]?.rows ?? [];
-              rangeBySlug.set(s.slug, parseRangeResponse({ rows }));
+          if (!j?.ok || !j?.by_slug || typeof j.by_slug !== "object") {
+            return { ok: false, bySlug: new Map() };
+          }
+          const bySlug = new Map<string, ReturnType<typeof parseRangeResponse>>();
+          for (const s of targets) {
+            const rows = j.by_slug[s.slug]?.rows ?? [];
+            bySlug.set(s.slug, parseRangeResponse({ rows }));
+          }
+          return { ok: true, bySlug };
+        })
+        // フォールバックで個別 /api/range に任せる（batchOk=false 相当）
+        .catch(() => ({ ok: false, bySlug: new Map() }));
+
+      const megribiPromise = (async () => {
+        try {
+          const mRes = await fetch(
+            `/api/megribi_score?stores=${encodeURIComponent(slugsCsv)}`,
+            { signal },
+          );
+          if (!signal.aborted && mRes.ok) {
+            // megribi_score は {ok, data:[{slug,score}]} 形式。slug->score の Map にする。
+            const mJson = (await mRes.json()) as { ok?: boolean; data?: { slug: string; score?: number }[] };
+            const scoreMap = new Map<string, number>();
+            if (Array.isArray(mJson.data)) {
+              for (const it of mJson.data) {
+                if (it && typeof it.slug === "string" && typeof it.score === "number") {
+                  scoreMap.set(it.slug, it.score);
+                }
+              }
+            }
+            if (!signal.aborted) {
+              setStoreRealtime((prev) => {
+                const next = { ...prev };
+                for (const t of targets) {
+                  const score = scoreMap.has(t.slug) ? (scoreMap.get(t.slug) as number) : null;
+                  if (next[t.slug]) {
+                    next[t.slug] = { ...next[t.slug], megribiScore: score };
+                  }
+                }
+                return next;
+              });
             }
           }
+        } catch {
+          // スコア取得失敗は非致命的
         }
-      } catch (err) {
-        if (!signal.aborted && !isAbortError(err)) {
-          /* フォールバックで個別 /api/range */
-        }
-      }
+      })();
 
-      async function fetchStoreCard(store: StoreMeta, fBatch?: Promise<ForecastBatchBody | null>): Promise<void> {
+      const forecastBatchPromise: Promise<ForecastBatchBody | null> = fetch(
+        `/api/forecast_today_multi?stores=${encodeURIComponent(slugsCsv)}`,
+        { signal },
+      )
+        .then((r) => (r.ok ? (r.json() as Promise<ForecastBatchBody>) : null))
+        .catch(() => null);
+
+      async function fetchStoreCard(store: StoreMeta): Promise<void> {
         let menNow = 0;
         let womenNow = 0;
         let nowTotal = 0;
@@ -261,10 +307,13 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
         let sparklineWomen: number[] = [];
 
         try {
+          const rangeMulti = await rangeMultiPromise;
+          if (signal.aborted) return;
           let rangeRows: ReturnType<typeof parseRangeResponse>;
-          if (batchOk && rangeBySlug.has(store.slug)) {
-            rangeRows = rangeBySlug.get(store.slug)!;
+          if (rangeMulti.ok && rangeMulti.bySlug.has(store.slug)) {
+            rangeRows = rangeMulti.bySlug.get(store.slug)!;
           } else {
+            // バッチ失敗時のみ個別 /api/range にフォールバック
             const rangeRes = await fetch(
               `/api/range?store=${encodeURIComponent(store.slug)}&limit=${STORE_CARD_RANGE_LIMIT}`,
               { signal },
@@ -314,59 +363,24 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
         }
 
         try {
-          // バッチ forecast があればそれを使い、なければ個別フォールバック
+          // バッチ forecast（並列発火済み）を待って使う。バッチ失敗時のみ個別フォールバック。
           let forecastRows: ForecastPoint[] = [];
-          if (fBatch) {
-            const batchBody = await fBatch;
-            if (signal.aborted) return;
-            const batchData = batchBody?.by_slug?.[store.slug]?.data;
-            if (Array.isArray(batchData)) {
-              forecastRows = batchData;
-            } else {
-              // batch 失敗 → 個別フォールバック
-              const fallbackRes = await fetch(
-                `/api/forecast_today?store=${encodeURIComponent(store.slug)}`,
-                { signal },
-              ).catch(() => null);
-              if (signal.aborted) return;
-              if (fallbackRes?.ok) {
-                const fb = (await fallbackRes.json().catch(() => ({}))) as { data?: ForecastPoint[] };
-                forecastRows = Array.isArray(fb?.data) ? fb.data : [];
-              }
-            }
+          const batchBody = await forecastBatchPromise;
+          if (signal.aborted) return;
+          const batchData = batchBody?.by_slug?.[store.slug]?.data;
+          if (Array.isArray(batchData)) {
+            forecastRows = batchData;
           } else {
-            const forecastRes = await fetch(
+            // batch 失敗 → 個別フォールバック
+            const fallbackRes = await fetch(
               `/api/forecast_today?store=${encodeURIComponent(store.slug)}`,
               { signal },
-            );
+            ).catch(() => null);
             if (signal.aborted) return;
-            if (!forecastRes.ok) {
-              const unavailable = forecastRes.status === 503;
-              setStoreRealtime((prev) => {
-                const cur = prev[store.slug];
-                if (!cur) return prev;
-                return {
-                  ...prev,
-                  [store.slug]: {
-                    ...cur,
-                    stats: {
-                      ...cur.stats,
-                      peakPredTotal: 0,
-                      crowdLevel: unavailable ? "予測なし" : "予測準備中",
-                      recommendLabel: unavailable ? "モデル準備中" : "予測準備中",
-                    },
-                    sparkline: cur.sparkline,
-                    sparklineMen: cur.sparklineMen,
-                    sparklineWomen: cur.sparklineWomen,
-                    forecastPending: false,
-                  },
-                };
-              });
-              return;
+            if (fallbackRes?.ok) {
+              const fb = (await fallbackRes.json().catch(() => ({}))) as { data?: ForecastPoint[] };
+              forecastRows = Array.isArray(fb?.data) ? fb.data : [];
             }
-            const forecastBody = (await forecastRes.json()) as { data?: ForecastPoint[] };
-            if (signal.aborted) return;
-            forecastRows = Array.isArray(forecastBody?.data) ? forecastBody.data : [];
           }
 
           if (signal.aborted) return;
@@ -428,53 +442,9 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
       }
 
       if (!signal.aborted) {
-        // ② megribi_score を先に発火（軽量 0.5s — gunicorn で先に処理される）
-        const megribiPromise = (async () => {
-          try {
-            const mRes = await fetch(
-              `/api/megribi_score?stores=${encodeURIComponent(slugsCsv)}`,
-              { signal },
-            );
-            if (!signal.aborted && mRes.ok) {
-              // megribi_score は {ok, data:[{slug,score}]} 形式。slug->score の Map にする。
-              const mJson = (await mRes.json()) as { ok?: boolean; data?: { slug: string; score?: number }[] };
-              const scoreMap = new Map<string, number>();
-              if (Array.isArray(mJson.data)) {
-                for (const it of mJson.data) {
-                  if (it && typeof it.slug === "string" && typeof it.score === "number") {
-                    scoreMap.set(it.slug, it.score);
-                  }
-                }
-              }
-              if (!signal.aborted) {
-                setStoreRealtime((prev) => {
-                  const next = { ...prev };
-                  for (const t of targets) {
-                    const score = scoreMap.has(t.slug) ? (scoreMap.get(t.slug) as number) : null;
-                    if (next[t.slug]) {
-                      next[t.slug] = { ...next[t.slug], megribiScore: score };
-                    }
-                  }
-                  return next;
-                });
-              }
-            }
-          } catch {
-            // スコア取得失敗は非致命的
-          }
-        })();
-
-        // ③ forecast_today_multi を megribi の直後に発火
-        // (megribi が先にワーカーに届き 0.5s で処理、forecast は後続で ~7s)
-        const forecastBatchPromise: Promise<ForecastBatchBody | null> = fetch(
-          `/api/forecast_today_multi?stores=${encodeURIComponent(slugsCsv)}`,
-          { signal },
-        )
-          .then((r) => (r.ok ? (r.json() as Promise<ForecastBatchBody>) : null))
-          .catch(() => null);
-
-        // ④ 部分カード描画 + forecast バッチ待ち
-        const forecastPromises = targets.map((store) => fetchStoreCard(store, forecastBatchPromise));
+        // 部分カード描画（range 到着次第）+ forecast/megribi 到着待ちを全店舗ぶん並行実行。
+        // range_multi・forecast_today_multi・megribi_score 自体は既に上で並列発火済み。
+        const forecastPromises = targets.map((store) => fetchStoreCard(store));
 
         await Promise.all([...forecastPromises, megribiPromise]);
       }

@@ -11,6 +11,7 @@ import {
   addDays,
   buildBaseSnapshot,
   buildSeries,
+  computeInitialRefreshDelayMs,
   computeNightBaseDate,
   computeNightWindowFromBaseDate,
   computeSelectedNightBaseDate,
@@ -371,10 +372,23 @@ export function useStorePreviewData(
       }
     }
 
-    run();
+    // サーバーの initialSnapshot をこの初回実行で seed 消費する場合、最初のバックグラウンド
+    // 再取得だけ 60-90s 遅らせる（page.tsx 側は revalidate=120 で焼いた実データなので、
+    // マウント直後に同じ内容をほぼ確実に再取得するだけの二重フェッチを避ける）。
+    // initialSnapshot が無いコールド CSR パスは従来通り即時実行（挙動を変えない）。
+    const initialRunDelayMs = computeInitialRefreshDelayMs(shouldPreserveInitialSeed);
+    let initialRunTimer: ReturnType<typeof setTimeout> | null = null;
+    if (initialRunDelayMs > 0) {
+      initialRunTimer = setTimeout(() => {
+        if (!cancelled) run();
+      }, initialRunDelayMs);
+    } else {
+      run();
+    }
 
     let timer: ReturnType<typeof setInterval> | null = null;
     // 今日モードは実測/予測が動くので15分ごとに再取得して予測線を更新する。
+    // (遅延させた初回実行とは独立に、マウント時点から15分の定期ループを開始する)
     if (rangeMode === "today") {
       timer = setInterval(() => {
         run();
@@ -386,6 +400,7 @@ export function useStorePreviewData(
       controller.abort();
       if (timer) clearInterval(timer);
       if (retryTimer) clearTimeout(retryTimer);
+      if (initialRunTimer) clearTimeout(initialRunTimer);
     };
   }, [meta, baseSnapshot, rangeMode, customDate, usableInitialSnapshot]);
 
