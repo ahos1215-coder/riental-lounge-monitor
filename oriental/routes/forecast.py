@@ -434,6 +434,68 @@ def _storage_get(cfg: AppConfig, path: str) -> bytes | None:
         raise
 
 
+def _is_num(v: object) -> bool:
+    """bool を除いた実数か（JSON 由来の int/float を想定）。"""
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _night_avg_by_store(snapshot: dict | None) -> dict[str, float]:
+    """予測スナップショット (accuracy/snapshots/<date>.json の by_slug) から、
+    店舗ごとの「その夜の予測総数の平均」を返す。これを店舗規模（＝想定夜間来客数）の
+    近似値として使い、相対誤差 relative_mae = live_mae / night_avg の分母にする。
+
+    キーは snapshot 側と同じ slug（オリエンタルは "ol_" なしの短縮 slug、相席屋は "ay_*"）。
+    予測点が無い/壊れている店は結果に含めない（呼び出し側で相対誤差を付けない）。
+    純関数（ネットワーク I/O 無し）なのでユニットテストしやすい。
+    """
+    if not isinstance(snapshot, dict):
+        return {}
+    by_slug = snapshot.get("by_slug")
+    if not isinstance(by_slug, dict):
+        return {}
+    out: dict[str, float] = {}
+    for slug, points in by_slug.items():
+        if not isinstance(points, list):
+            continue
+        vals = [
+            float(p.get("total_pred"))
+            for p in points
+            if isinstance(p, dict) and _is_num(p.get("total_pred"))
+        ]
+        if vals:
+            out[slug] = sum(vals) / len(vals)
+    return out
+
+
+def _augment_relative_fields(per_store: dict, night_avg: dict[str, float]) -> None:
+    """per_store の各エントリに「店舗規模で正規化した相対性能」シグナルを追加する
+    （additive・in-place、既存キーは触らない）。
+
+    - beats_baseline: live_mae < live_baseline_mae（ナイーブ基準＝先週同時刻に勝っているか）。
+      規模に依存しない頑健なシグナルで、両値が揃うときのみ付与する。
+    - night_avg: 想定夜間来客数（スケール正規化の分母）。スナップショットがある店のみ。
+    - relative_mae: live_mae / night_avg（店舗規模で正規化した相対誤差）。night_avg があるときのみ。
+
+    これにより精度バッジを「絶対人数」ではなく「相対性能」で判定できる（小規模店が
+    小さい MAE だけで "高精度" になり、大規模店が同等以上の相対精度でも "参考値" に
+    なる逆転を解消する）。
+    """
+    if not isinstance(per_store, dict):
+        return
+    for slug, entry in per_store.items():
+        if not isinstance(entry, dict):
+            continue
+        lm = entry.get("live_mae")
+        bm = entry.get("live_baseline_mae")
+        if _is_num(lm) and _is_num(bm):
+            entry["beats_baseline"] = bool(lm < bm)
+        avg = night_avg.get(slug)
+        if _is_num(avg) and avg > 0:
+            entry["night_avg"] = round(float(avg), 2)
+            if _is_num(lm):
+                entry["relative_mae"] = round(float(lm) / float(avg), 3)
+
+
 def _fetch_live_accuracy(cfg: AppConfig) -> dict | None:
     """Supabase Storage の答え合わせ結果 (scripts/score_forecasts.py が毎晩書き込む)
     から実測精度を組み立てる。summary.json が無い/壊れている、または nights が
@@ -480,6 +542,21 @@ def _fetch_live_accuracy(cfg: AppConfig) -> dict | None:
                 per_store = daily.get("per_store")
                 if isinstance(per_store, dict):
                     live["per_store"] = per_store
+
+        # 追加(後方互換): 店舗規模で正規化した相対性能シグナル（beats_baseline /
+        # night_avg / relative_mae）を per_store に付与する。分母の「想定夜間来客数」は
+        # その夜の予測スナップショットの総数平均で近似する（1 リクエスト＝Storage 1 read
+        # 追加のみ）。スナップショットが無い/壊れていても beats_baseline は日次スコアだけで
+        # 付き、relative_mae のみスキップされる（カードは相対誤差なしでも基準比較で判定可能）。
+        if live["per_store"] and latest_date:
+            night_avg: dict[str, float] = {}
+            try:
+                snap_raw = _storage_get(cfg, f"accuracy/snapshots/{latest_date}.json")
+                if snap_raw is not None:
+                    night_avg = _night_avg_by_store(json.loads(snap_raw.decode()))
+            except Exception:  # noqa: BLE001 — スナップショット取得/解析失敗は相対誤差なしで続行
+                night_avg = {}
+            _augment_relative_fields(live["per_store"], night_avg)
 
         return live
     except Exception:  # noqa: BLE001

@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { isPercentCrowdBrand, type BrandId } from "@/app/config/stores";
-import { resolveNightsWindow, resolveStoreComparison } from "@/lib/forecastAccuracy";
+import {
+  resolveAccuracyGrade,
+  resolveNightsWindow,
+  resolveStoreComparison,
+  type AccuracyGrade,
+} from "@/lib/forecastAccuracy";
 
 type StoreMetrics = {
   overall: { total_mae: number; men_mae: number; women_mae: number };
@@ -15,6 +20,19 @@ type LiveStoreScore = {
   matched_slots: number;
   live_baseline_mae?: number;
   ml_vs_baseline_live_pct?: number;
+  /** 想定夜間来客数（相対誤差の分母）。バックエンドが予測スナップショットから算出。 */
+  night_avg?: number;
+  /** 店舗規模で正規化した相対誤差 = live_mae / night_avg。 */
+  relative_mae?: number;
+  /** ナイーブ基準(先週同時刻)に勝っているか。 */
+  beats_baseline?: boolean;
+};
+
+/** バッジのランク → 表示ラベル/配色。ランク判定は resolveAccuracyGrade（純関数）。 */
+const GRADE_STYLES: Record<AccuracyGrade, { label: string; color: string; bg: string }> = {
+  high: { label: "高精度", color: "text-emerald-300", bg: "bg-emerald-500/15 border-emerald-500/30" },
+  standard: { label: "標準", color: "text-sky-300", bg: "bg-sky-500/15 border-sky-500/30" },
+  reference: { label: "参考値", color: "text-amber-300", bg: "bg-amber-500/15 border-amber-500/30" },
 };
 
 type LiveAccuracy = {
@@ -70,15 +88,19 @@ export function ForecastAccuracyCard({
 
   useEffect(() => {
     let active = true;
-    // 相席屋は slug==store_id ("ay_*")。オリエンタルは短縮 slug なので "ol_" を付与。
+    // metrics（学習時 holdout）は store_id キー: 相席屋は slug==store_id ("ay_*")、
+    // オリエンタルは短縮 slug に "ol_" を付与。
     const storeId = storeSlug.startsWith("ay_") ? storeSlug : `ol_${storeSlug}`;
+    // live.per_store は slug キー（score_forecasts.py が by_slug 由来の slug で書き込む）。
+    // オリエンタルは "ol_" を付けない短縮 slug なので、store_id で引くと必ず外れる
+    // （＝オリエンタル店の実測バッジが出ないバグ）。ここは storeSlug で引く。
     fetchAccuracy().then((data) => {
       if (!active) return;
       const m = data.metrics?.[storeId] ?? null;
       setMetrics(m);
       setTrainedAt(data.trained_at ?? null);
       setLive(data.live ?? null);
-      setLiveStore(data.live?.per_store?.[storeId] ?? null);
+      setLiveStore(data.live?.per_store?.[storeSlug] ?? null);
     });
     return () => { active = false; };
   }, [storeSlug]);
@@ -99,10 +121,15 @@ export function ForecastAccuracyCard({
   const mae = toDisplay(rawMae);
   const weekendMae = rawWeekendMae != null ? toDisplay(rawWeekendMae) : undefined;
 
-  const grade =
-    mae <= 5 ? { label: "高精度", color: "text-emerald-300", bg: "bg-emerald-500/15 border-emerald-500/30" }
-    : mae <= 10 ? { label: "標準", color: "text-sky-300", bg: "bg-sky-500/15 border-sky-500/30" }
-    : { label: "参考値", color: "text-amber-300", bg: "bg-amber-500/15 border-amber-500/30" };
+  // バッジは「絶対人数の MAE」ではなく「店舗規模に対する相対性能」で判定する
+  // （相対誤差 relative_mae + ナイーブ基準比較 beats_baseline）。これにより小規模店が
+  // 小さい MAE だけで "高精度" になり、大規模店が相対的に同等以上でも "参考値" になる
+  // 逆転を解消する。実測が無い店は holdout フォールバック＝参考値。
+  const grade = GRADE_STYLES[resolveAccuracyGrade({
+    hasLive,
+    relativeMae: liveStore?.relative_mae ?? null,
+    beatsBaseline: liveStore?.beats_baseline ?? null,
+  })];
 
   const trainedLabel = trainedAt
     ? new Date(trainedAt).toLocaleDateString("ja-JP", { timeZone: "Asia/Tokyo", month: "short", day: "numeric" })

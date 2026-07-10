@@ -48,6 +48,52 @@ export type StoreLiveComparison = {
   worse: boolean;
 };
 
+/** 精度バッジのランク。表示ラベル/色はカード側でこのキーから引く。 */
+export type AccuracyGrade = "high" | "standard" | "reference";
+
+/**
+ * 相対誤差（= live_mae / 想定夜間来客数）のしきい値。
+ * 「絶対人数」ではなく「店舗規模に対する相対的な当たり具合」でランク付けするための境界。
+ * 実測データ (2026-07-09, 42店) で調整: 30%未満=規模比で明確に良い / 50%未満=標準 /
+ * それ以上=小規模で相対誤差が大きい店。
+ */
+export const GRADE_HIGH_MAX_RELATIVE = 0.30;
+export const GRADE_STANDARD_MAX_RELATIVE = 0.50;
+
+export type AccuracyGradeInput = {
+  /** 実測(本番)スコアがあるか。無ければ holdout フォールバック＝参考値。 */
+  hasLive: boolean;
+  /** 店舗規模で正規化した相対誤差 = live_mae / 想定夜間来客数。無ければ null。 */
+  relativeMae?: number | null;
+  /** ナイーブ基準(先週同時刻)に勝っているか。false は規模に関わらず参考値どまり。 */
+  beatsBaseline?: boolean | null;
+};
+
+/**
+ * 予測精度バッジの判定を「絶対人数」ではなく「相対性能」で行う純関数。
+ *
+ * 判定順:
+ * 1. 実測が無い（学習時 holdout フォールバック）→ 参考値。
+ * 2. 実測はあるがナイーブ基準に負けている（beatsBaseline===false）→ 相対誤差や
+ *    絶対 MAE に関わらず参考値どまり（小さい MAE でも "高精度/標準" を出さない）。
+ *    これが「基準より悪い店が 標準/高精度 になる」逆転を直接止める。
+ * 3. それ以外は店舗規模で正規化した相対誤差 relativeMae でランク付け。
+ * 4. 相対誤差が取れない（スナップショット未取得）が基準には勝っている場合は、
+ *    精緻なランク付けはできないので中位の「標準」に留める。
+ */
+export function resolveAccuracyGrade(input: AccuracyGradeInput): AccuracyGrade {
+  if (!input.hasLive) return "reference";
+  if (input.beatsBaseline === false) return "reference";
+  const rel = input.relativeMae;
+  if (rel != null && Number.isFinite(rel)) {
+    if (rel < GRADE_HIGH_MAX_RELATIVE) return "high";
+    if (rel < GRADE_STANDARD_MAX_RELATIVE) return "standard";
+    return "reference";
+  }
+  if (input.beatsBaseline === true) return "standard";
+  return "reference";
+}
+
 /**
  * この店舗自身の実測MAEと、同店舗の単純ベースライン（先週同時刻など）を比較する。
  * サイト全体の集計値ではなく、店舗ごとの実数値を使うことで

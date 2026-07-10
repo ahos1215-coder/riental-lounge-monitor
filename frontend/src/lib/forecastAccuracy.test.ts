@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveNightsWindow, resolveStoreComparison } from "./forecastAccuracy";
+import {
+  GRADE_HIGH_MAX_RELATIVE,
+  GRADE_STANDARD_MAX_RELATIVE,
+  resolveAccuracyGrade,
+  resolveNightsWindow,
+  resolveStoreComparison,
+} from "./forecastAccuracy";
 
 describe("resolveNightsWindow", () => {
   it("falls back to mae_7d/nights_count while mae_30d is null (n<30)", () => {
@@ -55,5 +61,58 @@ describe("resolveStoreComparison", () => {
   it("returns null on non-finite input", () => {
     expect(resolveStoreComparison(NaN, 1.43)).toBeNull();
     expect(resolveStoreComparison(14.74, Infinity)).toBeNull();
+  });
+});
+
+describe("resolveAccuracyGrade", () => {
+  // 実データ (2026-07-09) の相対誤差 = live_mae / 想定夜間来客数(予測総数平均):
+  //   shibuya 11.78/44.8=0.26, ebisu 14.74/57.9=0.25, utsunomiya 2.39/3.5=0.69,
+  //   kashiwa 6.99/11.8=0.59（かつ live 6.99 > baseline 4.02 -> beatsBaseline=false）。
+
+  it("小規模店の高絶対MAE・悪い相対 -> 高精度にしない（逆転バグの本丸）", () => {
+    // utsunomiya: 絶対 MAE は小さい(2.39)が、規模比では 69% と悪い -> 高精度にしない。
+    const g = resolveAccuracyGrade({ hasLive: true, relativeMae: 0.69, beatsBaseline: true });
+    expect(g).not.toBe("high");
+    expect(g).toBe("reference"); // 0.69 >= 0.50
+  });
+
+  it("大規模店の低相対誤差 -> 高精度（絶対 MAE が大きくても）", () => {
+    // shibuya: 絶対 MAE 11.78 は大きいが規模比 26% -> 高精度。
+    expect(resolveAccuracyGrade({ hasLive: true, relativeMae: 0.26, beatsBaseline: true })).toBe("high");
+    // ebisu: 規模比 25% -> 高精度。
+    expect(resolveAccuracyGrade({ hasLive: true, relativeMae: 0.25, beatsBaseline: true })).toBe("high");
+  });
+
+  it("ナイーブ基準に負けている店は相対誤差に関わらず参考値に丸める（kashiwa）", () => {
+    // kashiwa: relative 0.59 でも beatsBaseline=false -> 参考値（絶対 MAE でも「標準」にしない）。
+    expect(resolveAccuracyGrade({ hasLive: true, relativeMae: 0.59, beatsBaseline: false })).toBe("reference");
+    // たとえ相対誤差が極小でも、基準に負けていれば高精度/標準にはならない。
+    expect(resolveAccuracyGrade({ hasLive: true, relativeMae: 0.05, beatsBaseline: false })).toBe("reference");
+  });
+
+  it("相対誤差のしきい値（境界は排他）", () => {
+    // < 0.30 -> high, < 0.50 -> standard, それ以上 -> reference
+    expect(resolveAccuracyGrade({ hasLive: true, relativeMae: 0.29, beatsBaseline: true })).toBe("high");
+    expect(resolveAccuracyGrade({ hasLive: true, relativeMae: GRADE_HIGH_MAX_RELATIVE, beatsBaseline: true })).toBe("standard");
+    expect(resolveAccuracyGrade({ hasLive: true, relativeMae: 0.49, beatsBaseline: true })).toBe("standard");
+    expect(resolveAccuracyGrade({ hasLive: true, relativeMae: GRADE_STANDARD_MAX_RELATIVE, beatsBaseline: true })).toBe("reference");
+  });
+
+  it("実測が無い（holdout フォールバック）-> 参考値", () => {
+    expect(resolveAccuracyGrade({ hasLive: false, relativeMae: 0.1, beatsBaseline: true })).toBe("reference");
+    expect(resolveAccuracyGrade({ hasLive: false })).toBe("reference");
+  });
+
+  it("相対誤差が無いが基準に勝っている -> 中位の標準に留める", () => {
+    expect(resolveAccuracyGrade({ hasLive: true, relativeMae: null, beatsBaseline: true })).toBe("standard");
+  });
+
+  it("相対誤差も基準情報も無い（実測はある）-> 参考値", () => {
+    expect(resolveAccuracyGrade({ hasLive: true, relativeMae: null, beatsBaseline: null })).toBe("reference");
+  });
+
+  it("非有限の相対誤差は無視して基準比較にフォールバック", () => {
+    expect(resolveAccuracyGrade({ hasLive: true, relativeMae: NaN, beatsBaseline: true })).toBe("standard");
+    expect(resolveAccuracyGrade({ hasLive: true, relativeMae: Infinity, beatsBaseline: false })).toBe("reference");
   });
 });
