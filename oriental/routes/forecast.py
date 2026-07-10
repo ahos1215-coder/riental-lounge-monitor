@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import re
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Blueprint, current_app, jsonify, request
 
@@ -12,10 +11,16 @@ from flask import Blueprint, current_app, jsonify, request
 # → 180秒に緩和（2026-07）。キャッシュキー/失効ロジックは変更なし。
 _FORECAST_CACHE_TTL = int(os.getenv("FORECAST_RESULT_CACHE_TTL", "180"))  # 3 分
 
+# 同じキーへの同時アクセスが cold なとき、合流待ちを諦めるまでの秒数。
+# gunicorn のスレッド数(4)を大きく超えて待たせないための保険（fail-open）。
+_FORECAST_CACHE_WAIT_TIMEOUT = float(os.getenv("FORECAST_CACHE_WAIT_TIMEOUT", "25"))
+_FORECAST_CACHE_MAX_ENTRIES = int(os.getenv("FORECAST_CACHE_MAX_ENTRIES", "500"))
+
 from ..config import AppConfig
 from ..ml.forecast_service import ForecastService
 from ..ml.megribi_score import megribi_score as calc_megribi_score
 from ..utils.stores import SLUG_TO_ID
+from ._cache import SingleFlightTTLCache
 from .common import get_config as _config, get_supabase_provider, resolve_store_id
 
 bp = Blueprint("forecast", __name__, url_prefix="/api")
@@ -50,44 +55,46 @@ def _error_status(raw: dict) -> int:
     return 200
 
 
-# ---------- 軽量な in-process キャッシュ ----------
+# ---------- in-process TTL キャッシュ + single-flight 合流 ----------
+#
+# キャッシュに入れる値は常に (body, http_status) のタプル。body はそのまま
+# jsonify() できる dict、http_status は成功時 200 / エラー時 5xx。エンベロープ
+# を統一しているのは、/api/forecast_today（単体）と /api/forecast_today_multi
+# （店舗別の内部 fetch）が同じキャッシュキー("today:<store_id>")を共有し、
+# どちらが先に計算してもキャッシュの形が一致するようにするため
+# （forecast_today_multi._fetch_one 側を参照）。
 
-def _forecast_cache() -> dict:
+def _forecast_cache() -> SingleFlightTTLCache:
     if "FORECAST_RESULT_CACHE" not in current_app.config:
-        current_app.config["FORECAST_RESULT_CACHE"] = {}
+        current_app.config["FORECAST_RESULT_CACHE"] = SingleFlightTTLCache(
+            ttl=_FORECAST_CACHE_TTL,
+            max_entries=_FORECAST_CACHE_MAX_ENTRIES,
+            wait_timeout=_FORECAST_CACHE_WAIT_TIMEOUT,
+        )
     return current_app.config["FORECAST_RESULT_CACHE"]
-
-
-def _get_cached(key: str) -> dict | None:
-    cache = _forecast_cache()
-    entry = cache.get(key)
-    if not entry:
-        return None
-    if time.time() - entry["at"] > _FORECAST_CACHE_TTL:
-        cache.pop(key, None)
-        return None
-    return entry["data"]
-
-
-def _set_cached(key: str, data: dict) -> None:
-    _forecast_cache()[key] = {"at": time.time(), "data": data}
 
 
 _supabase_provider = get_supabase_provider
 _resolve_store_id = resolve_store_id
 
 
-def _normalize_points(result: dict) -> list[dict]:
+def _normalize_points(result: dict, logger=None) -> list[dict]:
     """
     どんな結果が来ても、
     - data は「配列 list」
     - 各要素は ts を持つ dict
     という形にそろえる。
+
+    `logger` を明示的に受け取れるようにしているのは、ThreadPoolExecutor の
+    ワーカースレッド（forecast_today_multi._fetch_one など、Flask のリクエスト
+    コンテキストを持たない）から呼ばれても current_app プロキシに触れずに
+    安全にログを出せるようにするため。省略時は current_app.logger を使う
+    （単体エンドポイントは自スレッド=リクエストスレッドなので安全）。
     """
+    log = logger if logger is not None else current_app.logger
+
     if not isinstance(result, dict):
-        current_app.logger.warning(
-            "api_forecast.result_not_dict -> normalize_to_empty_list"
-        )
+        log.warning("api_forecast.result_not_dict -> normalize_to_empty_list")
         return []
 
     data = result.get("data")
@@ -95,7 +102,7 @@ def _normalize_points(result: dict) -> list[dict]:
     if isinstance(data, list):
         filtered = [d for d in data if isinstance(d, dict) and "ts" in d]
         if len(filtered) != len(data):
-            current_app.logger.warning(
+            log.warning(
                 "api_forecast.data_list_had_invalid_entries -> filtered=%d -> %d",
                 len(data),
                 len(filtered),
@@ -103,7 +110,7 @@ def _normalize_points(result: dict) -> list[dict]:
         return filtered
 
     # data が {} や None, 数値など → 空配列にする
-    current_app.logger.warning(
+    log.warning(
         "api_forecast.data_not_list -> normalize_to_empty_list type=%s",
         type(data),
     )
@@ -119,36 +126,39 @@ def forecast_next_hour():
     cfg = _config()
     store = _resolve_store_id(cfg)
     freq = max(1, int(os.getenv("FORECAST_FREQ_MIN", "15")))
+    logger = current_app.logger
 
     cache_key = f"next_hour:{store}"
-    cached = _get_cached(cache_key)
-    if cached:
-        current_app.logger.info("api_forecast.cache_hit store=%s horizon=next_hour", store)
-        return jsonify(cached)
 
-    current_app.logger.info("api_forecast.start store=%s horizon=next_hour", store)
-    raw = _service().forecast_next_hour(store_id=store, freq_min=freq)
-    if not raw.get("ok", True):
-        current_app.logger.warning("api_forecast.error store=%s detail=%s", store, raw.get("detail"))
-        return jsonify(raw), _error_status(raw)
-    points = _normalize_points(raw)
-    current_app.logger.info(
-        "api_forecast.success store=%s points=%d", store, len(points)
+    def _compute() -> tuple[tuple[dict, int], bool]:
+        logger.info("api_forecast.start store=%s horizon=next_hour", store)
+        raw = _service().forecast_next_hour(store_id=store, freq_min=freq)
+        if not raw.get("ok", True):
+            logger.warning("api_forecast.error store=%s detail=%s", store, raw.get("detail"))
+            return (raw, _error_status(raw)), False
+        points = _normalize_points(raw, logger)
+        logger.info("api_forecast.success store=%s points=%d", store, len(points))
+
+        result = {
+            "ok": True,
+            "data": points,
+            "reasoning": raw.get("reasoning", {}),
+            "insufficient_history": bool(raw.get("insufficient_history", False)),
+            # closed-loop 後処理（ベースライン・ブレンド/深夜帯クランプ）が実際に効いたかを
+            # 観測できるよう、service の raw 結果からそのまま透過する（後方互換の追加のみ）。
+            "blend_w_ml": raw.get("blend_w_ml"),
+            "blended_slots": raw.get("blended_slots"),
+            "clamped_slots": raw.get("clamped_slots"),
+        }
+        return (result, 200), True
+
+    (body, http_status), cache_status = _forecast_cache().get_or_compute(cache_key, _compute)
+    logger.info(
+        "api_forecast.request store=%s horizon=next_hour cache=%s", store, cache_status
     )
-
-    result = {
-        "ok": True,
-        "data": points,
-        "reasoning": raw.get("reasoning", {}),
-        "insufficient_history": bool(raw.get("insufficient_history", False)),
-        # closed-loop 後処理（ベースライン・ブレンド/深夜帯クランプ）が実際に効いたかを
-        # 観測できるよう、service の raw 結果からそのまま透過する（後方互換の追加のみ）。
-        "blend_w_ml": raw.get("blend_w_ml"),
-        "blended_slots": raw.get("blended_slots"),
-        "clamped_slots": raw.get("clamped_slots"),
-    }
-    _set_cached(cache_key, result)
-    return jsonify(result)
+    if http_status != 200:
+        return jsonify(body), http_status
+    return jsonify(body)
 
 
 @bp.get("/forecast_today")
@@ -160,41 +170,46 @@ def forecast_today():
     cfg = _config()
     store = _resolve_store_id(cfg)
     freq = max(1, int(os.getenv("FORECAST_FREQ_MIN", "15")))
+    logger = current_app.logger
 
     start_h = int(os.getenv("NIGHT_START_H", "19"))
     end_h = int(os.getenv("NIGHT_END_H", "5"))
 
     cache_key = f"today:{store}"
-    cached = _get_cached(cache_key)
-    if cached:
-        current_app.logger.info("api_forecast.cache_hit store=%s horizon=today", store)
-        return jsonify(cached)
 
-    current_app.logger.info("api_forecast.start store=%s horizon=today", store)
-    raw = _service().forecast_today(
-        store_id=store, freq_min=freq, start_h=start_h, end_h=end_h
-    )
-    if not raw.get("ok", True):
-        current_app.logger.warning("api_forecast.error store=%s detail=%s", store, raw.get("detail"))
-        return jsonify(raw), _error_status(raw)
-    points = _normalize_points(raw)
-    current_app.logger.info(
-        "api_forecast.success store=%s points=%d", store, len(points)
-    )
+    def _compute() -> tuple[tuple[dict, int], bool]:
+        logger.info("api_forecast.start store=%s horizon=today", store)
+        raw = _service().forecast_today(
+            store_id=store, freq_min=freq, start_h=start_h, end_h=end_h
+        )
+        if not raw.get("ok", True):
+            logger.warning("api_forecast.error store=%s detail=%s", store, raw.get("detail"))
+            return (raw, _error_status(raw)), False
+        points = _normalize_points(raw, logger)
+        logger.info("api_forecast.success store=%s points=%d", store, len(points))
 
-    result = {
-        "ok": True,
-        "data": points,
-        "reasoning": raw.get("reasoning", {}),
-        "insufficient_history": bool(raw.get("insufficient_history", False)),
-        # closed-loop 後処理（ベースライン・ブレンド/深夜帯クランプ）が実際に効いたかを
-        # 観測できるよう、service の raw 結果からそのまま透過する（後方互換の追加のみ）。
-        "blend_w_ml": raw.get("blend_w_ml"),
-        "blended_slots": raw.get("blended_slots"),
-        "clamped_slots": raw.get("clamped_slots"),
-    }
-    _set_cached(cache_key, result)
-    return jsonify(result)
+        result = {
+            "ok": True,
+            "data": points,
+            "reasoning": raw.get("reasoning", {}),
+            "insufficient_history": bool(raw.get("insufficient_history", False)),
+            # closed-loop 後処理（ベースライン・ブレンド/深夜帯クランプ）が実際に効いたかを
+            # 観測できるよう、service の raw 結果からそのまま透過する（後方互換の追加のみ）。
+            "blend_w_ml": raw.get("blend_w_ml"),
+            "blended_slots": raw.get("blended_slots"),
+            "clamped_slots": raw.get("clamped_slots"),
+        }
+        return (result, 200), True
+
+    # このキャッシュキーは forecast_today_multi._fetch_one とも共有される
+    # （同じ店舗の today 予測をどちらが先に計算しても合流できるようにするため）。
+    (body, http_status), cache_status = _forecast_cache().get_or_compute(cache_key, _compute)
+    logger.info(
+        "api_forecast.request store=%s horizon=today cache=%s", store, cache_status
+    )
+    if http_status != 200:
+        return jsonify(body), http_status
+    return jsonify(body)
 
 
 @bp.get("/forecast_today_multi")
@@ -222,45 +237,54 @@ def forecast_today_multi():
     end_h = int(os.getenv("NIGHT_END_H", "5"))
 
     # Flask コンテキスト外のスレッドで使えるよう、参照を先に取得
+    # （current_app プロキシはワーカースレッドの中では使えないため、
+    # service/cache/logger は必ずここで実体を取り出しておく）。
     service = _service()
     cache = _forecast_cache()
 
     def _fetch_one(slug: str, store_id: str):
+        # forecast_today（単体エンドポイント）と全く同じキー・エンベロープ
+        # ("today:<store_id>" -> (body_dict, http_status)) を使うことで、
+        # 店舗ページのサーバー側/クライアント側リクエストとこの multi 経路の
+        # どちらが先に来ても single-flight で合流し、ML 推論を1回にできる。
         cache_key = f"today:{store_id}"
-        entry = cache.get(cache_key)
-        if entry and time.time() - entry["at"] <= _FORECAST_CACHE_TTL:
-            return slug, entry["data"]
 
-        raw = service.forecast_today(
-            store_id=store_id, freq_min=freq, start_h=start_h, end_h=end_h
-        )
-        if not raw.get("ok", True):
-            return slug, {"ok": False, "data": [], "error": raw.get("error") or "forecast_failed"}
+        def _compute() -> tuple[tuple[dict, int], bool]:
+            raw = service.forecast_today(
+                store_id=store_id, freq_min=freq, start_h=start_h, end_h=end_h
+            )
+            if not raw.get("ok", True):
+                body = {"ok": False, "data": [], "error": raw.get("error") or "forecast_failed"}
+                return (body, _error_status(raw)), False
 
-        data = raw.get("data")
-        points = [d for d in data if isinstance(d, dict) and "ts" in d] if isinstance(data, list) else []
-        result = {
-            "ok": True,
-            "data": points,
-            # forecast_today と同様、後処理の効き具合を店舗別に観測できるよう透過する。
-            "blend_w_ml": raw.get("blend_w_ml"),
-            "blended_slots": raw.get("blended_slots"),
-            "clamped_slots": raw.get("clamped_slots"),
-        }
-        cache[cache_key] = {"at": time.time(), "data": result}
-        return slug, result
+            points = _normalize_points(raw, logger)
+            result = {
+                "ok": True,
+                "data": points,
+                # forecast_today と同様、後処理の効き具合を店舗別に観測できるよう透過する。
+                "blend_w_ml": raw.get("blend_w_ml"),
+                "blended_slots": raw.get("blended_slots"),
+                "clamped_slots": raw.get("clamped_slots"),
+            }
+            return (result, 200), True
+
+        (body, _http_status), cache_status = cache.get_or_compute(cache_key, _compute)
+        return slug, body, cache_status
 
     by_slug: dict = {}
     errors_by_slug: dict = {}
+    cache_counts: dict[str, int] = {}
     with ThreadPoolExecutor(max_workers=min(12, len(valid))) as pool:
         futures = {pool.submit(_fetch_one, s, sid): s for s, sid in valid}
         for fut in as_completed(futures):
             try:
-                slug_key, data = fut.result()
+                slug_key, data, cache_status = fut.result()
                 by_slug[slug_key] = data
+                cache_counts[cache_status] = cache_counts.get(cache_status, 0) + 1
             except Exception as exc:
                 slug_key = futures[fut]
                 by_slug[slug_key] = {"ok": False, "data": [], "error": str(exc)}
+                cache_counts["error"] = cache_counts.get("error", 0) + 1
 
     # 個別店舗の失敗を可視化する（全体は ok:true / 200 のまま、追加フィールドのみ）
     for slug_key, entry in by_slug.items():
@@ -268,9 +292,10 @@ def forecast_today_multi():
             errors_by_slug[slug_key] = entry.get("error") or "unknown_error"
 
     logger.info(
-        "api_forecast_today_multi.success count=%d partial_failure_count=%d",
+        "api_forecast_today_multi.success count=%d partial_failure_count=%d cache=%s",
         len(by_slug),
         len(errors_by_slug),
+        cache_counts,
     )
     return jsonify({
         "ok": True,

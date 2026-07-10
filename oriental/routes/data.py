@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
@@ -13,12 +14,21 @@ from ..data.second_venues_repository import SecondVenuesRepository
 from ..utils import storage, timeutil
 from ..utils.log import format_payload
 from ..utils.stores import SLUG_TO_ID
+from ._cache import SingleFlightTTLCache
 
 bp = Blueprint("data", __name__)
 
 # マルチストア系エンドポイントの上限。既知の全店舗数（44店舗）を下回らないようにする。
 # DoS 対策は SLUG_TO_ID による既知 slug のみのフィルタリングとレート制限で担保する。
 MAX_MULTI_STORES = len(SLUG_TO_ID)
+
+# /api/range, /api/range_multi の in-process キャッシュ TTL（秒）。
+# 実測データは5分おきにしか更新されないため、120秒は鮮度と負荷軽減のバランスが良い
+# （forecast.py の FORECAST_RESULT_CACHE_TTL=180 と同じ考え方、2026-07 の perf 監査）。
+_RANGE_CACHE_TTL = int(os.getenv("RANGE_CACHE_TTL", "120"))
+# 同じキーへの同時アクセスが cold なとき、合流待ちを諦めるまでの秒数（fail-open）。
+_RANGE_CACHE_WAIT_TIMEOUT = float(os.getenv("RANGE_CACHE_WAIT_TIMEOUT", "25"))
+_RANGE_CACHE_MAX_ENTRIES = int(os.getenv("RANGE_CACHE_MAX_ENTRIES", "500"))
 
 
 @dataclass(slots=True)
@@ -35,6 +45,32 @@ class RangeQueryError(ValueError):
 from .common import get_config as _config, get_supabase_provider, resolve_store_id
 
 
+# ---------- in-process TTL キャッシュ + single-flight 合流 ----------
+#
+# forecast.py の FORECAST_RESULT_CACHE と同じ仕組み（詳細は ._cache 参照）。
+# キーは店舗単位（store_id + from/to + limit）で正規化する。/api/range（単体）
+# と /api/range_multi（店舗別の内部 fetch）が同じキー形式を使うことで、店舗
+# ページのサーバー側/クライアント側リクエストがどちらから来ても single-flight
+# で合流し、Supabase への同時重複クエリを1回にできる。
+#
+# キャッシュに入れる値は常に (body, http_status) のタプル（forecast.py と同じ
+# エンベロープ）。成功時のみ cacheable=True にし、上流エラーは TTL に乗せず
+# 次のリクエストで再試行できるようにする。
+
+def _range_cache() -> SingleFlightTTLCache:
+    if "RANGE_RESULT_CACHE" not in current_app.config:
+        current_app.config["RANGE_RESULT_CACHE"] = SingleFlightTTLCache(
+            ttl=_RANGE_CACHE_TTL,
+            max_entries=_RANGE_CACHE_MAX_ENTRIES,
+            wait_timeout=_RANGE_CACHE_WAIT_TIMEOUT,
+        )
+    return current_app.config["RANGE_RESULT_CACHE"]
+
+
+def _range_cache_key(store_id: str, start: date | None, end: date | None, limit: int) -> str:
+    return f"{store_id}|{start.isoformat() if start else ''}|{end.isoformat() if end else ''}|{limit}"
+
+
 @bp.get("/")
 def index() -> str | Response:
     try:
@@ -48,6 +84,112 @@ def index() -> str | Response:
 def api_current():
     cfg = _config()
     return jsonify(storage.load_latest(cfg))
+
+
+def _compute_range_for_store(
+    *,
+    cfg: AppConfig,
+    logger,
+    backend: str,
+    store_id: str,
+    query: "RangeQuery",
+    provider: SupabaseLogsProvider | None,
+    gas_client,
+) -> tuple[tuple[dict, int], bool]:
+    """1店舗ぶんの /api/range 本体を計算する。
+
+    single-flight の leader（cold なキーを最初に引いたリクエスト）、または
+    合流待ちがタイムアウトしたフォロワーが呼ぶ（`_cache.SingleFlightTTLCache`
+    参照）。current_app には一切触れない（呼び出し側が cfg/logger/provider/gas_client を
+    先に取り出して渡す）ため、ThreadPoolExecutor のワーカースレッド
+    （api_range_multi._fetch_slug）からも安全に呼べる。
+
+    戻り値は (body, http_status), cacheable。body はそのまま jsonify() できる
+    dict、cacheable は成功時のみ True（上流エラーは TTL に乗せず、次のリクエスト
+    で再試行できるようにする）。
+    """
+    if backend == "supabase" and provider is not None:
+        if query.start and query.end:
+            start_utc, end_utc = _range_bounds_to_utc(query.start, query.end, cfg.timezone)
+        else:
+            start_utc, end_utc = None, None
+        try:
+            supabase_rows = provider.fetch_range(
+                store_id=store_id,
+                start_ts=start_utc,
+                end_ts=end_utc,
+                limit=query.limit,
+            )
+        except SupabaseError as exc:
+            logger.error(
+                "api_range.supabase_error detail=%s store_id=%s window=%s..%s",
+                exc,
+                store_id,
+                query.start,
+                query.end,
+            )
+            body = {"ok": False, "error": "upstream-supabase", "detail": str(exc)}
+            return (body, 502), False
+
+        deduped = _deduplicate_by_ts(supabase_rows)
+        limited = deduped[-query.limit:]
+        logger.info(
+            "api_range.success backend=supabase store_id=%s window=%s..%s returned=%d limit=%d",
+            store_id,
+            query.start,
+            query.end,
+            len(limited),
+            query.limit,
+        )
+        body = {"ok": True, "rows": _trim_range_rows(limited)}
+        return (body, 200), True
+
+    if backend == "supabase" and provider is None:
+        logger.warning(
+            "api_range.supabase_missing_config fallback=legacy store_id=%s window=%s..%s",
+            store_id,
+            query.start,
+            query.end,
+        )
+
+    # legacy フォールバック（backend != supabase、または supabase 未設定）
+    if query.start and query.end:
+        rows = list(storage.rows_in_range(cfg, start=query.start, end=query.end))
+    else:
+        rows = list(storage.iter_log_rows(cfg))
+    local_count = len(rows)
+
+    remote_count = 0
+    if query.start and query.end:
+        try:
+            remote_rows = gas_client.fetch_range(start=query.start, end=query.end)
+            remote_count = len(remote_rows)
+            rows.extend(remote_rows)
+        except GasClientError as exc:
+            logger.error(
+                "api_range.upstream_error type=%s detail=%s window=%s..%s",
+                exc.__class__.__name__,
+                exc,
+                query.start,
+                query.end,
+            )
+            body = {"ok": False, "error": "upstream-google-sheets", "detail": str(exc)}
+            return (body, 502), False
+
+    deduped = _deduplicate_by_ts(rows)
+    limited = deduped[-query.limit:]
+
+    logger.info(
+        "api_range.success backend=legacy window=%s..%s local=%d remote=%d returned=%d limit=%d",
+        query.start,
+        query.end,
+        local_count,
+        remote_count,
+        len(limited),
+        query.limit,
+    )
+    body = {"ok": True, "rows": _trim_range_rows(limited)}
+    return (body, 200), True
 
 
 @bp.get("/api/range")
@@ -69,86 +211,30 @@ def api_range():
 
     backend = (cfg.data_backend or "legacy").lower()
     store_id = _resolve_store_id(cfg)
-
-    if backend == "supabase":
-        provider = _supabase_provider(cfg)
-        if provider is None:
-            logger.warning(
-                "api_range.supabase_missing_config fallback=legacy store_id=%s window=%s..%s",
-                store_id,
-                query.start,
-                query.end,
-            )
-        else:
-            if query.start and query.end:
-                start_utc, end_utc = _range_bounds_to_utc(query.start, query.end, cfg.timezone)
-            else:
-                start_utc, end_utc = None, None
-            try:
-                supabase_rows = provider.fetch_range(
-                    store_id=store_id,
-                    start_ts=start_utc,
-                    end_ts=end_utc,
-                    limit=query.limit,
-                )
-            except SupabaseError as exc:
-                logger.error(
-                    "api_range.supabase_error detail=%s store_id=%s window=%s..%s",
-                    exc,
-                    store_id,
-                    query.start,
-                    query.end,
-                )
-                return jsonify({"ok": False, "error": "upstream-supabase", "detail": str(exc)}), 502
-
-            deduped = _deduplicate_by_ts(supabase_rows)
-            limited = deduped[-query.limit:]
-            logger.info(
-                "api_range.success backend=supabase store_id=%s window=%s..%s returned=%d limit=%d",
-                store_id,
-                query.start,
-                query.end,
-                len(limited),
-                query.limit,
-            )
-            return jsonify({"ok": True, "rows": _trim_range_rows(limited)})
-
-    if query.start and query.end:
-        rows = list(storage.rows_in_range(cfg, start=query.start, end=query.end))
-    else:
-        rows = list(storage.iter_log_rows(cfg))
-    local_count = len(rows)
-
+    provider = _supabase_provider(cfg) if backend == "supabase" else None
     gas_client = current_app.config["GAS_CLIENT"]
-    remote_count = 0
-    if query.start and query.end:
-        try:
-            remote_rows = gas_client.fetch_range(start=query.start, end=query.end)
-            remote_count = len(remote_rows)
-            rows.extend(remote_rows)
-        except GasClientError as exc:
-            logger.error(
-                "api_range.upstream_error type=%s detail=%s window=%s..%s",
-                exc.__class__.__name__,
-                exc,
-                query.start,
-                query.end,
-            )
-            return jsonify({"ok": False, "error": "upstream-google-sheets", "detail": str(exc)}), 502
 
-    deduped = _deduplicate_by_ts(rows)
-    limited = deduped[-query.limit:]
+    # このキャッシュキーは api_range_multi._fetch_slug とも共有される
+    # （同じ店舗の range をどちらが先に計算しても single-flight で合流できる
+    # ようにするため）。
+    cache_key = _range_cache_key(store_id, query.start, query.end, query.limit)
 
-    logger.info(
-        "api_range.success backend=legacy window=%s..%s local=%d remote=%d returned=%d limit=%d",
-        query.start,
-        query.end,
-        local_count,
-        remote_count,
-        len(limited),
-        query.limit,
-    )
-    return jsonify({"ok": True, "rows": _trim_range_rows(limited)})
+    def _compute() -> tuple[tuple[dict, int], bool]:
+        return _compute_range_for_store(
+            cfg=cfg,
+            logger=logger,
+            backend=backend,
+            store_id=store_id,
+            query=query,
+            provider=provider,
+            gas_client=gas_client,
+        )
+
+    (body, http_status), cache_status = _range_cache().get_or_compute(cache_key, _compute)
+    logger.info("api_range.request store_id=%s cache=%s", store_id, cache_status)
+    if http_status != 200:
+        return jsonify(body), http_status
+    return jsonify(body)
 
 
 def _parse_multi_store_slugs(raw: str, *, max_stores: int) -> list[str]:
@@ -217,45 +303,61 @@ def api_range_multi():
             422,
         )
 
-    if query.start and query.end:
-        start_utc, end_utc = _range_bounds_to_utc(query.start, query.end, cfg.timezone)
-    else:
-        start_utc, end_utc = None, None
+    # Flask コンテキスト外のワーカースレッドで使えるよう、参照を先に取得
+    # （current_app プロキシはワーカースレッドの中では使えないため、cache は
+    # 必ずここで実体を取り出しておく。forecast.py の forecast_today_multi と
+    # 同じ理由・同じパターン）。
+    cache = _range_cache()
 
     def _fetch_slug(slug: str):
         store_id = SLUG_TO_ID[slug]
-        try:
-            supabase_rows = provider.fetch_range(
+        # api_range（単体）と全く同じキー・エンベロープを使うことで、店舗ページの
+        # 単体 /api/range とこの range_multi 経路のどちらが先に来ても single-flight
+        # で合流し、Supabase への重複クエリを1回にできる（forecast.py の
+        # today/today_multi と同じパターン）。
+        cache_key = _range_cache_key(store_id, query.start, query.end, query.limit)
+
+        def _compute() -> tuple[tuple[dict, int], bool]:
+            # ここに来る時点で backend=="supabase" かつ provider は必ず利用可能
+            # （関数冒頭で確認済み）なので、legacy フォールバックには入らない
+            # -> gas_client は使われないため None で構わない。
+            return _compute_range_for_store(
+                cfg=cfg,
+                logger=logger,
+                backend=backend,
                 store_id=store_id,
-                start_ts=start_utc,
-                end_ts=end_utc,
-                limit=query.limit,
+                query=query,
+                provider=provider,
+                gas_client=None,
             )
-        except SupabaseError as exc:
-            logger.warning("api_range_multi.supabase_error slug=%s detail=%s", slug, exc)
-            # rows は空のままにしつつ ok:false と error を残し、
-            # 「データなし」と「取得失敗」をフロント/監視側で区別できるようにする
-            return slug, {"ok": False, "error": str(exc), "rows": []}
-        deduped = _deduplicate_by_ts(supabase_rows)
-        limited = deduped[-query.limit :]
-        return slug, {"rows": _trim_range_rows(limited)}
+
+        (body, _http_status), cache_status = cache.get_or_compute(cache_key, _compute)
+        if not body.get("ok", True):
+            # range_multi は昔から rows キーのみのエラーボディ（error + 空 rows）を
+            # 返してきたため、by_slug の形は維持しつつ detail は落とす。
+            logger.warning("api_range_multi.supabase_error slug=%s detail=%s", slug, body.get("detail"))
+            return slug, {"ok": False, "error": body.get("error", "upstream-supabase"), "rows": []}, cache_status
+        return slug, {"rows": body["rows"]}, cache_status
 
     by_slug: dict[str, dict] = {}
+    cache_counts: dict[str, int] = {}
     with ThreadPoolExecutor(max_workers=min(12, len(slugs))) as pool:
         futures = [pool.submit(_fetch_slug, s) for s in slugs]
         for fut in as_completed(futures):
-            slug_key, data = fut.result()
+            slug_key, data, cache_status = fut.result()
             by_slug[slug_key] = data
+            cache_counts[cache_status] = cache_counts.get(cache_status, 0) + 1
 
     partial_failure_count = sum(
         1 for data in by_slug.values() if isinstance(data, dict) and not data.get("ok", True)
     )
 
     logger.info(
-        "api_range_multi.success slug_count=%d limit=%d partial_failure_count=%d",
+        "api_range_multi.success slug_count=%d limit=%d partial_failure_count=%d cache=%s",
         len(slugs),
         query.limit,
         partial_failure_count,
+        cache_counts,
     )
     return jsonify({
         "ok": True,
