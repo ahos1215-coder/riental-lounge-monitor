@@ -9,6 +9,7 @@ import {
   seatFullnessPercent,
   type BrandId,
 } from "@/app/config/stores";
+import { segmentIndicesByTimeGaps } from "@/lib/storeCardRangeSparkline";
 import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
 
 type StoreCardProps = {
@@ -32,9 +33,13 @@ type StoreCardProps = {
     recommendLabel?: string;
   };
   sparklinePoints?: number[];
+  /** sparklinePoints と同順・同数の各点タイムスタンプ(epoch ms)。閉店ギャップで折れ線を分割する。 */
+  sparklineTimes?: number[];
   /** 実測レンジ由来の男女推移（あれば合計1本よりこちらを優先表示） */
   sparklineMen?: number[];
   sparklineWomen?: number[];
+  /** sparklineMen/Women と同順・同数の各点タイムスタンプ(epoch ms)。閉店ギャップ分割用。 */
+  sparklineGenderTimes?: number[];
   /** 一覧などで /api/range だけ先に反映し、予測を後追いするとき */
   forecastPending?: boolean;
   isLoading?: boolean;
@@ -42,19 +47,20 @@ type StoreCardProps = {
   megribiScore?: number | null;
 };
 
-function SimpleLineChart({ points }: { points?: number[] }) {
-  const normalized = points && points.length >= 2 ? points : [50, 44, 52, 40, 46, 36, 44, 34, 40, 32];
+function SimpleLineChart({ points, times }: { points?: number[]; times?: number[] }) {
+  const usingReal = Boolean(points && points.length >= 2);
+  const normalized = usingReal ? points! : [50, 44, 52, 40, 46, 36, 44, 34, 40, 32];
   const max = Math.max(...normalized);
   const min = Math.min(...normalized);
   const span = Math.max(1, max - min);
   const step = 180 / Math.max(1, normalized.length - 1);
-  const path = normalized
-    .map((v, i) => {
-      const x = Math.round(i * step);
-      const y = Math.round(60 - ((v - min) / span) * 30);
-      return `${x},${y}`;
-    })
-    .join(" ");
+  const toX = (i: number) => Math.round(i * step);
+  const toY = (v: number) => Math.round(60 - ((v - min) / span) * 30);
+  // 実データで times が揃っているときだけ、閉店ギャップで折れ線を分割する。
+  const segments =
+    usingReal && times && times.length === normalized.length
+      ? segmentIndicesByTimeGaps(times)
+      : [normalized.map((_, i) => i)];
 
   return (
     <svg
@@ -62,20 +68,42 @@ function SimpleLineChart({ points }: { points?: number[] }) {
       className="h-20 w-full text-indigo-400/80"
       aria-hidden="true"
     >
-      <polyline
-        points={path}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth={2}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+      {segments.map((seg, si) =>
+        seg.length >= 2 ? (
+          <polyline
+            key={si}
+            points={seg.map((i) => `${toX(i)},${toY(normalized[i])}`).join(" ")}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        ) : (
+          // ギャップ直後に1点だけ残るセグメント（例: 開店直後の最初の実測）は点で示す
+          <circle
+            key={si}
+            cx={toX(seg[0])}
+            cy={toY(normalized[seg[0]])}
+            r={1.6}
+            fill="currentColor"
+          />
+        ),
+      )}
     </svg>
   );
 }
 
 /** 男女を同じYスケールで重ねる（カード内ミニチャート・/api/range 実測のみ） */
-function GenderTrendMiniChart({ men, women }: { men: number[]; women: number[] }) {
+function GenderTrendMiniChart({
+  men,
+  women,
+  times,
+}: {
+  men: number[];
+  women: number[];
+  times?: number[];
+}) {
   const all = [...men, ...women];
   const max = Math.max(...all, 1);
   const min = Math.min(...all);
@@ -83,13 +111,41 @@ function GenderTrendMiniChart({ men, women }: { men: number[]; women: number[] }
   const width = 180;
   const n = men.length;
   const step = width / Math.max(1, n - 1);
+  const toX = (i: number) => Math.round(i * step);
   const toY = (v: number) => Math.round(44 - ((v - min) / span) * 28);
-  const pathMen = men
-    .map((v, i) => `${Math.round(i * step)},${toY(v)}`)
-    .join(" ");
-  const pathWomen = women
-    .map((v, i) => `${Math.round(i * step)},${toY(v)}`)
-    .join(" ");
+  // 閉店をまたぐ大きな時間ギャップがあれば、そこで折れ線を分割する（偽の急上昇を防ぐ）。
+  const segments =
+    times && times.length === n
+      ? segmentIndicesByTimeGaps(times)
+      : [men.map((_, i) => i)];
+
+  const renderSeries = (
+    values: number[],
+    strokeClass: string,
+    fillClass: string,
+    keyPrefix: string,
+  ) =>
+    segments.map((seg, si) =>
+      seg.length >= 2 ? (
+        <polyline
+          key={`${keyPrefix}-${si}`}
+          points={seg.map((i) => `${toX(i)},${toY(values[i])}`).join(" ")}
+          fill="none"
+          className={strokeClass}
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ) : (
+        <circle
+          key={`${keyPrefix}-${si}`}
+          cx={toX(seg[0])}
+          cy={toY(values[seg[0]])}
+          r={1.6}
+          className={fillClass}
+        />
+      ),
+    );
 
   return (
     <div className="flex w-full flex-col gap-0.5">
@@ -107,22 +163,8 @@ function GenderTrendMiniChart({ men, women }: { men: number[]; women: number[] }
           className="stroke-white/[0.08]"
           strokeWidth={1}
         />
-        <polyline
-          points={pathMen}
-          fill="none"
-          className="stroke-cyan-300/90"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <polyline
-          points={pathWomen}
-          fill="none"
-          className="stroke-pink-300/90"
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
+        {renderSeries(men, "stroke-cyan-300/90", "fill-cyan-300/90", "m")}
+        {renderSeries(women, "stroke-pink-300/90", "fill-pink-300/90", "w")}
       </svg>
       <div className="flex justify-center gap-3 text-[9px] leading-none text-white/40">
         <span className="flex items-center gap-1">
@@ -179,8 +221,10 @@ function StoreCardImpl({
   isHighlight = false,
   stats,
   sparklinePoints,
+  sparklineTimes,
   sparklineMen,
   sparklineWomen,
+  sparklineGenderTimes,
   forecastPending = false,
   isLoading = false,
   megribiScore,
@@ -363,9 +407,13 @@ function StoreCardImpl({
             </p>
           )
         ) : hasGenderTrend ? (
-          <GenderTrendMiniChart men={sparklineMen!} women={sparklineWomen!} />
+          <GenderTrendMiniChart
+            men={sparklineMen!}
+            women={sparklineWomen!}
+            times={sparklineGenderTimes}
+          />
         ) : (
-          <SimpleLineChart points={sparklinePoints} />
+          <SimpleLineChart points={sparklinePoints} times={sparklineTimes} />
         )}
       </div>
 
@@ -429,8 +477,10 @@ export const StoreCard = memo(StoreCardImpl, (prev, next) => {
     prev.megribiScore === next.megribiScore &&
     statsEqual(prev.stats, next.stats) &&
     numArrayEqual(prev.sparklinePoints, next.sparklinePoints) &&
+    numArrayEqual(prev.sparklineTimes, next.sparklineTimes) &&
     numArrayEqual(prev.sparklineMen, next.sparklineMen) &&
-    numArrayEqual(prev.sparklineWomen, next.sparklineWomen)
+    numArrayEqual(prev.sparklineWomen, next.sparklineWomen) &&
+    numArrayEqual(prev.sparklineGenderTimes, next.sparklineGenderTimes)
   );
 });
 

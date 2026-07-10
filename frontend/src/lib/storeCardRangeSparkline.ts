@@ -14,6 +14,13 @@ export type StoreCardRangeRow = {
 export const STORE_CARD_RANGE_LIMIT = 48;
 export const STORE_CARD_SPARKLINE_POINTS = 12;
 
+/**
+ * ミニ推移グラフで「営業終了をまたぐ大きな時間ギャップ」を検出して折れ線を分割する閾値。
+ * 5分間隔の通常サンプルは分割せず、閉店→翌開店の十数時間ギャップだけをセグメント境界にする。
+ */
+export const SPARKLINE_GAP_BREAK_MIN_MINUTES = 60;
+export const SPARKLINE_GAP_BREAK_MEDIAN_MULT = 3;
+
 function finiteNonNeg(v: unknown): number | null {
   if (typeof v === "number" && Number.isFinite(v)) {
     return Math.max(0, Math.round(v));
@@ -77,18 +84,65 @@ function rowMenWomenForSparkline(r: StoreCardRangeRow): { m: number; w: number }
   return null;
 }
 
+function rowTs(r: StoreCardRangeRow): number {
+  return typeof r.ts === "string" ? new Date(r.ts).getTime() : NaN;
+}
+
+/**
+ * 時刻順・実測合計の直近 N 点（値＋各点の epoch ms タイムスタンプ）。
+ * ミニチャートの「時間ギャップで折れ線を分割する」処理に times を使う。
+ */
+export function buildActualSparklineSeriesFromRange(
+  rows: StoreCardRangeRow[],
+  maxPoints: number,
+): { values: number[]; times: number[] } {
+  const ordered = orderedRangeRows(rows);
+  const values: number[] = [];
+  const times: number[] = [];
+  for (const r of ordered) {
+    const v = rangeRowTotal(r);
+    if (v === null) continue;
+    values.push(v);
+    times.push(rowTs(r));
+  }
+  if (!values.length) return { values: [], times: [] };
+  const start = Math.max(0, values.length - maxPoints);
+  return { values: values.slice(start), times: times.slice(start) };
+}
+
 /** 時刻順・実測合計の直近 N 点（予測は含めない） */
 export function buildActualSparklineFromRange(
   rows: StoreCardRangeRow[],
   maxPoints: number,
 ): number[] {
+  return buildActualSparklineSeriesFromRange(rows, maxPoints).values;
+}
+
+/**
+ * 実測の男女それぞれの直近 N 点＋各点のタイムスタンプ（合計系列と同じ行集合・同じ並び）。
+ */
+export function buildGenderSparklineSeriesFromRange(
+  rows: StoreCardRangeRow[],
+  maxPoints: number,
+): { men: number[]; women: number[]; times: number[] } {
   const ordered = orderedRangeRows(rows);
-  const totals: number[] = [];
+  const men: number[] = [];
+  const women: number[] = [];
+  const times: number[] = [];
   for (const r of ordered) {
-    const v = rangeRowTotal(r);
-    if (v !== null) totals.push(v);
+    const pair = rowMenWomenForSparkline(r);
+    if (pair === null) continue;
+    men.push(pair.m);
+    women.push(pair.w);
+    times.push(rowTs(r));
   }
-  return totals.length ? totals.slice(-maxPoints) : [];
+  if (!men.length) return { men: [], women: [], times: [] };
+  const start = Math.max(0, men.length - maxPoints);
+  return {
+    men: men.slice(start),
+    women: women.slice(start),
+    times: times.slice(start),
+  };
 }
 
 /** 実測の男女それぞれの直近 N 点（合計系列と同じ行集合・同じ並び） */
@@ -96,20 +150,60 @@ export function buildGenderSparklineFromRange(
   rows: StoreCardRangeRow[],
   maxPoints: number,
 ): { men: number[]; women: number[] } {
-  const ordered = orderedRangeRows(rows);
-  const men: number[] = [];
-  const women: number[] = [];
-  for (const r of ordered) {
-    const pair = rowMenWomenForSparkline(r);
-    if (pair === null) continue;
-    men.push(pair.m);
-    women.push(pair.w);
+  const s = buildGenderSparklineSeriesFromRange(rows, maxPoints);
+  return { men: s.men, women: s.women };
+}
+
+function median(xs: number[]): number {
+  if (!xs.length) return 0;
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0
+    ? sorted[mid]
+    : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/**
+ * 実測点のタイムスタンプ列 `times`（epoch ms・点と同順）を見て、営業終了をまたぐ大きな
+ * 時間ギャップの手前で折れ線を分割するためのセグメント（点インデックスの配列）を返す。
+ *
+ * 分割条件: 直前点との差が「minGapMinutes 分」と「median ステップ × medianMult」の
+ * 大きい方(= 閾値)を超えるとき。5分間隔の通常サンプルは分割されず、営業終了→翌開店の
+ * 十数時間ギャップだけがセグメント境界になる。差が非有限(ts 欠損)の箇所では分割しない。
+ *
+ * 返り値は常に全インデックスを被覆する（times が空なら []、1点なら [[0]]）。
+ */
+export function segmentIndicesByTimeGaps(
+  times: number[],
+  opts?: { minGapMinutes?: number; medianMult?: number },
+): number[][] {
+  const n = times.length;
+  if (n <= 1) return n === 1 ? [[0]] : [];
+
+  const minGapMs =
+    (opts?.minGapMinutes ?? SPARKLINE_GAP_BREAK_MIN_MINUTES) * 60_000;
+  const medianMult = opts?.medianMult ?? SPARKLINE_GAP_BREAK_MEDIAN_MULT;
+
+  const deltas: number[] = [];
+  for (let i = 1; i < n; i++) {
+    const d = times[i] - times[i - 1];
+    if (Number.isFinite(d) && d > 0) deltas.push(d);
   }
-  if (!men.length) return { men: [], women: [] };
-  return {
-    men: men.slice(-maxPoints),
-    women: women.slice(-maxPoints),
-  };
+  const threshold = Math.max(minGapMs, median(deltas) * medianMult);
+
+  const segments: number[][] = [];
+  let current: number[] = [0];
+  for (let i = 1; i < n; i++) {
+    const d = times[i] - times[i - 1];
+    if (Number.isFinite(d) && d > threshold) {
+      segments.push(current);
+      current = [i];
+    } else {
+      current.push(i);
+    }
+  }
+  segments.push(current);
+  return segments;
 }
 
 export function pickLatestRangeRow(rows: StoreCardRangeRow[]): StoreCardRangeRow | null {

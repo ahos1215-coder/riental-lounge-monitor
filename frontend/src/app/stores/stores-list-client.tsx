@@ -14,8 +14,8 @@ import {
 import {
   STORE_CARD_RANGE_LIMIT,
   STORE_CARD_SPARKLINE_POINTS,
-  buildActualSparklineFromRange,
-  buildGenderSparklineFromRange,
+  buildActualSparklineSeriesFromRange,
+  buildGenderSparklineSeriesFromRange,
   parseRangeResponse,
   pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
@@ -35,8 +35,12 @@ export type StoreRealtimeCard = {
     recommendLabel: string;
   };
   sparkline: number[];
+  /** sparkline と同順・同数の各点タイムスタンプ(epoch ms)。閉店ギャップで折れ線分割に使う。 */
+  sparklineTimes?: number[];
   sparklineMen: number[];
   sparklineWomen: number[];
+  /** sparklineMen/Women と同順・同数の各点タイムスタンプ(epoch ms)。 */
+  sparklineGenderTimes?: number[];
   forecastPending?: boolean;
   megribiScore?: number | null;
 };
@@ -303,8 +307,10 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
         let womenNow = 0;
         let nowTotal = 0;
         let actualSparkline: number[] = [];
+        let sparklineTimes: number[] = [];
         let sparklineMen: number[] = [];
         let sparklineWomen: number[] = [];
+        let sparklineGenderTimes: number[] = [];
 
         try {
           const rangeMulti = await rangeMultiPromise;
@@ -325,16 +331,19 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
             rangeRows = parseRangeResponse(rangeBody);
           }
 
-          actualSparkline = buildActualSparklineFromRange(
+          const actualSeries = buildActualSparklineSeriesFromRange(
             rangeRows,
             STORE_CARD_SPARKLINE_POINTS,
           );
-          const genderSparks = buildGenderSparklineFromRange(
+          actualSparkline = actualSeries.values;
+          sparklineTimes = actualSeries.times;
+          const genderSparks = buildGenderSparklineSeriesFromRange(
             rangeRows,
             STORE_CARD_SPARKLINE_POINTS,
           );
           sparklineMen = genderSparks.men;
           sparklineWomen = genderSparks.women;
+          sparklineGenderTimes = genderSparks.times;
           const current = pickLatestRangeRow(rangeRows) ?? {};
           menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
           womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
@@ -352,8 +361,10 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
               recommendLabel: "取得中",
             },
             sparkline: actualSparkline,
+            sparklineTimes,
             sparklineMen,
             sparklineWomen,
+            sparklineGenderTimes,
             forecastPending: true,
           };
           setStoreRealtime((prev) => ({ ...prev, [store.slug]: partialCard }));
@@ -410,8 +421,10 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
               recommendLabel: calm?.ts ? `${calmLabel}ごろ` : "確認中",
             },
             sparkline: actualSparkline,
+            sparklineTimes,
             sparklineMen,
             sparklineWomen,
+            sparklineGenderTimes,
             forecastPending: false,
           };
           if (signal.aborted) return;
@@ -603,8 +616,10 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
                       isHighlight={idx === 0}
                       stats={storeRealtime[store.slug]?.stats}
                       sparklinePoints={storeRealtime[store.slug]?.sparkline}
+                      sparklineTimes={storeRealtime[store.slug]?.sparklineTimes}
                       sparklineMen={storeRealtime[store.slug]?.sparklineMen}
                       sparklineWomen={storeRealtime[store.slug]?.sparklineWomen}
+                      sparklineGenderTimes={storeRealtime[store.slug]?.sparklineGenderTimes}
                       forecastPending={storeRealtime[store.slug]?.forecastPending}
                       isLoading={realtimeLoading && !storeRealtime[store.slug]}
                       megribiScore={storeRealtime[store.slug]?.megribiScore}
