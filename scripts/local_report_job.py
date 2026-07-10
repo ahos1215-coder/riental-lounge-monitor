@@ -49,6 +49,11 @@ EXPERIMENTS_DIR = REPO_ROOT / "scripts" / "experiments"
 sys.path.insert(0, str(EXPERIMENTS_DIR))
 import local_llm_spike as spk  # noqa: E402  (経路追加後に import する必要がある)
 
+# scripts/_supabase_common.py（.env 読み込み・SUPABASE 設定解決の共有実装）を
+# シブリングとしてベアインポートする。generate_weekly_insights.py と同じ規約。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _supabase_common import _load_env, _supabase_conf  # noqa: E402
+
 # 共有GPUロック（音楽PJと衝突しないための排他）。local_llm_spike と同じ取り込み方。
 try:
     sys.path.insert(0, r"C:\Users\Public\共有データ系")
@@ -90,36 +95,6 @@ def _pr(*parts: Any) -> None:
     内容は失われず、ログから復元可能（json.loads 等で戻せる）。"""
     text = " ".join(str(p) for p in parts)
     print(text.encode("ascii", "backslashreplace").decode("ascii"))
-
-
-# ---------------------------------------------------------------------------
-# .env / .env.local 読み込み（scripts/backup_logs.py と同じ手動パーサ。
-# 実環境変数（GitHub Actions secrets 等）が最優先）
-# ---------------------------------------------------------------------------
-
-def _load_env() -> None:
-    for name in (".env", ".env.local"):
-        p = REPO_ROOT / name
-        if not p.is_file():
-            continue
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-
-
-def _supabase_conf() -> tuple[str, str] | None:
-    """generate_weekly_insights.py の _supabase_conf と同じ探索順。キー自体は絶対に表示しない。"""
-    base = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
-    key = (
-        os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-        or os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
-    )
-    if not base or not key:
-        return None
-    return base, key
 
 
 # ---------------------------------------------------------------------------

@@ -49,6 +49,13 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+# scripts/_night_slots.py（40スロットグリッド定数の共有実装、stdlib のみ）を
+# シブリングとしてベアインポートする。scripts/generate_weekly_insights.py が
+# commentary_quality_gate.py を import するのと同じ規約。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _night_slots import SLOTS, NIGHT_START_HOUR  # noqa: E402
+
+
 def _load_module_from_file(name: str, relpath: str):
     """パッケージ経由importが使えない最小依存環境(GHA)用のファイル直読みローダ。
     oriental/__init__.py が flask、oriental/ml/__init__.py が pandas/lightgbm を
@@ -93,8 +100,7 @@ JST = timezone(timedelta(hours=9))
 SCHEMA = "v2t1"
 TEMPLATES_PATH = "forecast/templates_v2.json"
 
-SLOTS = 40  # 19:00〜05:00 を 15 分刻みで 40 スロット (index 0=19:00 .. 39=04:45)
-NIGHT_START_HOUR = 19
+# SLOTS / NIGHT_START_HOUR は scripts/_night_slots.py で定義（snapshot_forecasts.py と共有）。
 
 FETCH_DAYS = 91  # ~13 週（M の 12 週窓 + 余白）
 WINDOW_DAYS = {"L": 56, "H": 56, "M": 84}  # タイプ別ルックバック（L/H=8週, M=12週）

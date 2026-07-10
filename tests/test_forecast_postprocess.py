@@ -6,11 +6,13 @@ All synthetic / no network.
 """
 
 import logging
+import pathlib
 
 import numpy as np
 import pandas as pd
 import pytest
 
+from oriental.ml import night_type
 from oriental.ml.postprocess import (
     _night_bucket,
     actual_slot_map,
@@ -19,6 +21,7 @@ from oriental.ml.postprocess import (
     same_slot_stats,
     same_slot_stats_by_bucket,
 )
+from oriental.ml import postprocess as postprocess_module
 
 TZ = "Asia/Tokyo"
 
@@ -504,3 +507,34 @@ def test_history_window_covers_blend_baseline_requirement():
     assert int(m.group(1)) >= 8 * 120, (
         f"history_limit 上限 {m.group(1)} が 8日分(960行) 未満: ブレンドの7日前参照が壊れる"
     )
+
+
+# --------------------------- NIGHT_SESSION_SHIFT_HOURS: shared with night_type ---------------------------
+
+
+class TestNightSessionShiftHoursConsolidation:
+    """postprocess.py の NIGHT_SESSION_SHIFT_HOURS は oriental/ml/night_type.py の
+    定義に一本化されている（旧: 2 箇所に独立した `= 6` リテラルがあった）。
+    値が 6 のままであること、かつ postprocess が night_type の値を import している
+    (コピーではなく同一オブジェクトを参照している) ことをロックする。
+    """
+
+    def test_value_is_still_6(self) -> None:
+        assert postprocess_module.NIGHT_SESSION_SHIFT_HOURS == 6
+        assert night_type.NIGHT_SESSION_SHIFT_HOURS == 6
+
+    def test_postprocess_imports_the_canonical_constant(self) -> None:
+        assert postprocess_module.NIGHT_SESSION_SHIFT_HOURS is night_type.NIGHT_SESSION_SHIFT_HOURS
+
+    def test_postprocess_source_has_no_duplicate_literal_definition(self) -> None:
+        """int の小さい値は CPython でキャッシュされるため `is` 一致だけでは
+        「import かコピペか」を区別できない。ソースを直接見て、postprocess.py に
+        `NIGHT_SESSION_SHIFT_HOURS = <数値>` という再代入が残っていないことを確認する。"""
+        import re
+
+        src = pathlib.Path(postprocess_module.__file__).read_text(encoding="utf-8")
+        assert not re.search(r"^NIGHT_SESSION_SHIFT_HOURS\s*=\s*\d", src, re.MULTILINE), (
+            "postprocess.py に NIGHT_SESSION_SHIFT_HOURS の独自リテラル定義が残っている"
+            "(night_type.py からの import に一本化されているはず)"
+        )
+        assert "from oriental.ml.night_type import NIGHT_SESSION_SHIFT_HOURS" in src

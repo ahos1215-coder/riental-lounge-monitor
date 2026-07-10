@@ -44,6 +44,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from oriental.ml.night_type import NIGHT_SESSION_SHIFT_HOURS
+
 logger = logging.getLogger(__name__)
 
 # 深夜帯クランプを適用する開始時刻(JST)。夜セッションは 19:00-05:00 に跨るため、
@@ -58,7 +60,7 @@ CLAMP_MIN_NIGHTS = 3
 CLAMP_MIN_NIGHTS_WEEKDAY = 3
 CLAMP_MIN_NIGHTS_WEEKEND = 2
 # 深夜0-5時台のスロットを「前夜のセッションの続き」とみなすための逆シフト時間。
-NIGHT_SESSION_SHIFT_HOURS = 6
+# NIGHT_SESSION_SHIFT_HOURS は oriental/ml/night_type.py で定義（正準値=6）。
 # pandas の Timestamp.weekday(): 月=0, 火=1, 水=2, 木=3, 金=4, 土=5, 日=6。
 WEEKEND_SESSION_WEEKDAYS = {4, 5}  # 金・土発の夜 -> "weekend" バケット
 

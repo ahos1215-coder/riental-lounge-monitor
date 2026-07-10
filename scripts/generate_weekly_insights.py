@@ -27,6 +27,7 @@ from urllib.request import Request, urlopen
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from commentary_quality_gate import check_weekly_commentary  # noqa: E402
+from _supabase_common import _supabase_conf  # noqa: E402
 
 MEGRIBI_SCORE_PATH = REPO_ROOT / "oriental" / "ml" / "megribi_score.py"
 
@@ -395,17 +396,6 @@ def _env_bool(name: str, default: bool = False) -> bool:
     if raw is None:
         return default
     return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _supabase_conf() -> tuple[str, str] | None:
-    base = os.environ.get("SUPABASE_URL", "").strip().rstrip("/")
-    key = (
-        os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-        or os.environ.get("SUPABASE_SERVICE_KEY", "").strip()
-    )
-    if not base or not key:
-        return None
-    return base, key
 
 
 def _fetch_existing_weekly_commentary(store: str) -> dict[str, Any]:

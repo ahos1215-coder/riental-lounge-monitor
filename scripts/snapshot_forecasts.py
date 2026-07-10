@@ -29,6 +29,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+# scripts/_night_slots.py（40スロットグリッド定数の共有実装、stdlib のみ）を
+# シブリングとしてベアインポートする。build_templates.py と同一の値であることを
+# tests/test_night_slots.py で担保する。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _night_slots import SLOTS as V2_SLOTS  # noqa: E402
+
 try:
     from oriental.ml.night_type import classify_night, special_block  # noqa: E402
 except ModuleNotFoundError:
@@ -49,7 +55,7 @@ DEFAULT_BACKEND = "https://riental-lounge-monitor.onrender.com"
 # v2 SHADOW: scripts/build_templates.py がここへ書く店×夜タイプのテンプレを読み、
 # A スナップショットと並べて v2 予測を同じ JSON に記録する（本番配信は不変）。
 TEMPLATES_PATH = "forecast/templates_v2.json"
-V2_SLOTS = 40  # 19:00〜04:45 を 15 分刻みで 40 スロット（build_templates と同一）
+# V2_SLOTS は scripts/_night_slots.py で定義（build_templates.py の SLOTS と共有）。
 V2_STALE_HOURS = 48  # テンプレがこれより古い/無い → v2=null（A は無傷）
 
 
