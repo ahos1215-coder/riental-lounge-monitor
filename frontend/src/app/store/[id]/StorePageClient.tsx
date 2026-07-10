@@ -1,9 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { StoreCard } from "@/components/StoreCard";
 import MeguribiDashboardPreview from "../../../components/MeguribiDashboardPreview";
 import {
   isFavoriteStore,
@@ -20,75 +18,17 @@ import {
   pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
 import { ForecastAccuracyCard } from "@/components/ForecastAccuracyCard";
-import { BRAND_DISPLAY_LABEL, DEFAULT_STORE, STORES, STORE_REGION_FILTER_ORDER, distanceKm, getStoreMetaBySlug, getStoreMetaBySlugStrict } from "../../config/stores";
+import { DEFAULT_STORE, STORES, STORE_REGION_FILTER_ORDER, distanceKm, getStoreMetaBySlug, getStoreMetaBySlugStrict } from "../../config/stores";
 import type { StoreSnapshot } from "../../hooks/useStorePreviewData";
-
-type ReportSummaryItem = {
-  bullets: string[];
-  heading: string | null;
-  updatedAt: string;
-  targetDate: string;
-} | null;
-
-type ReportSummaryData = {
-  // Daily カードは v2 で削除済 (LatestForecastSummaryCard の「今日の傾向まとめ」に統合)。
-  // ここでは weekly のみ保持する。
-  weekly: ReportSummaryItem;
-};
-
-type RealtimeCardStats = {
-  menCount: number;
-  womenCount: number;
-  nowTotal: number;
-  peakPredTotal: number;
-  genderRatio: string;
-  crowdLevel?: string;
-  recommendLabel?: string;
-};
-
-/**
- * コールド店舗（CDN MISS + バックエンド輻輳）での初回表示を守るためのフェッチ延期ゲート。
- * グラフの生命線である range/forecast_today（useStorePreviewData）は絶対に遅延させず、
- * それ以外の非クリティカルな並列フェッチ（関連店舗・レポート要約など）だけを
- * 「メインデータの初回解決（loading=false）」または「フォールバックタイマー」のどちらか
- * 早い方まで遅らせる。initialSnapshot が既にある（ISRスナップショット命中）場合は
- * mainReady が最初のレンダーから true になるため、ほぼ即座に発火する。
- */
-function useDeferredFetchGate(mainReady: boolean, fallbackMs = 2_500): boolean {
-  const [timerElapsed, setTimerElapsed] = useState(mainReady);
-
-  useEffect(() => {
-    if (mainReady || timerElapsed) return;
-    const t = setTimeout(() => setTimerElapsed(true), fallbackMs);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mainReady, fallbackMs]);
-
-  return mainReady || timerElapsed;
-}
-
-function StorePageFallback() {
-  return (
-    <div className="mx-auto w-full max-w-6xl space-y-8 px-4 py-8">
-      <div className="space-y-3">
-        <div className="h-5 w-48 animate-pulse rounded bg-slate-700/80" />
-        <div className="h-40 w-full animate-pulse rounded-2xl bg-slate-800/80" />
-        <div className="h-72 w-full animate-pulse rounded-2xl bg-slate-800/80" />
-      </div>
-      <div className="space-y-3">
-        <div className="h-4 w-40 animate-pulse rounded bg-slate-700/80" />
-        <div className="grid gap-3 md:grid-cols-4">
-          {[0, 1, 2, 3].map((i) => (
-            <div
-              key={i}
-              className="h-44 animate-pulse rounded-2xl border border-slate-800/80 bg-slate-900/60"
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
+import { useDeferredFetchGate } from "./useDeferredFetchGate";
+import { StorePageFallback } from "./StorePageFallback";
+import { StoreReportSummarySection } from "./StoreReportSummarySection";
+import { RelatedStoresSection } from "./RelatedStoresSection";
+import type {
+  RelatedRealtimeMap,
+  ReportSummaryData,
+  ReportSummaryItem,
+} from "./storePageTypes";
 
 function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | null }) {
   const router = useRouter();
@@ -186,17 +126,7 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
   }, [slug, canFireDeferred]);
 
   const [favorite, setFavorite] = useState(false);
-  const [relatedRealtime, setRelatedRealtime] = useState<
-    Record<
-      string,
-      {
-        stats: RealtimeCardStats;
-        sparkline: number[];
-        sparklineMen: number[];
-        sparklineWomen: number[];
-      }
-    >
-  >({});
+  const [relatedRealtime, setRelatedRealtime] = useState<RelatedRealtimeMap>({});
   const [relatedLoading, setRelatedLoading] = useState(false);
 
   useEffect(() => {
@@ -222,15 +152,7 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
           : null;
         const bySlug = batchBody?.ok && batchBody.by_slug ? batchBody.by_slug : null;
 
-        const mapped: Record<
-          string,
-          {
-            stats: RealtimeCardStats;
-            sparkline: number[];
-            sparklineMen: number[];
-            sparklineWomen: number[];
-          }
-        > = {};
+        const mapped: RelatedRealtimeMap = {};
         for (const store of digestStores) {
           try {
             const rows = bySlug?.[store.slug]?.rows ?? [];
@@ -298,51 +220,7 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
 
       {/* AI レポート要約セクション（Weekly Report のみ） */}
       {hasWeeklyReport && (
-        <section className="mx-auto w-full max-w-6xl px-4">
-          <h2 className="mb-3 text-sm font-semibold text-slate-100">AI 予測レポート</h2>
-          <div className="grid gap-3">
-            {/* Weekly Report */}
-            {reportSummary.weekly && (
-              <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-4">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="inline-flex items-center rounded-md bg-amber-500/20 px-2 py-0.5 text-[11px] font-bold text-amber-200">
-                    Weekly Report
-                  </span>
-                  <span className="text-[11px] text-white/40">{reportSummary.weekly.updatedAt} 更新</span>
-                </div>
-                {reportSummary.weekly.heading && (
-                  <p className="mt-2 text-sm font-bold leading-snug text-white line-clamp-2">
-                    {reportSummary.weekly.heading}
-                  </p>
-                )}
-                {reportSummary.weekly.bullets.length > 0 && (
-                  <ul className="mt-2 space-y-1">
-                    {reportSummary.weekly.bullets.map((b, i) => (
-                      <li key={i} className="flex items-start gap-1.5 text-xs text-white/75">
-                        <span className="mt-0.5 shrink-0 text-amber-300">▸</span>
-                        <span className="line-clamp-2">{b}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <Link
-                  href={`/reports/weekly/${encodeURIComponent(slug)}`}
-                  className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-amber-300 hover:text-amber-200"
-                >
-                  詳しく見る <span aria-hidden>→</span>
-                </Link>
-              </div>
-            )}
-          </div>
-          <div className="mt-3">
-            <Link
-              href="/reports"
-              className="text-xs text-indigo-300 hover:text-indigo-200"
-            >
-              AI予測レポート一覧 →
-            </Link>
-          </div>
-        </section>
+        <StoreReportSummarySection weekly={reportSummary.weekly} slug={slug} />
       )}
 
       {/* 非クリティカル: モジュールレベルで長期キャッシュ済みだが、コールド店舗での
@@ -355,29 +233,11 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
         </section>
       )}
 
-      <section className="mx-auto w-full max-w-6xl space-y-3 px-4">
-        <h2 className="text-sm font-semibold text-slate-100">ほかの店舗を見る</h2>
-        <p className="text-[11px] text-slate-500">別店舗の人数・混雑の目安を、カードからすぐに比較できます。</p>
-        <div className="grid gap-3 md:grid-cols-4">
-          {digestStores.map((store, idx) => (
-            <StoreCard
-              key={store.slug}
-              slug={store.slug}
-              label={store.label}
-              brandLabel={BRAND_DISPLAY_LABEL[store.brand]}
-              brand={store.brand}
-              capacity={store.capacity}
-              areaLabel={store.areaLabel}
-              isHighlight={idx === 0}
-              stats={relatedRealtime[store.slug]?.stats}
-              sparklinePoints={relatedRealtime[store.slug]?.sparkline}
-              sparklineMen={relatedRealtime[store.slug]?.sparklineMen}
-              sparklineWomen={relatedRealtime[store.slug]?.sparklineWomen}
-              isLoading={relatedLoading && !relatedRealtime[store.slug]}
-            />
-          ))}
-        </div>
-      </section>
+      <RelatedStoresSection
+        digestStores={digestStores}
+        relatedRealtime={relatedRealtime}
+        relatedLoading={relatedLoading}
+      />
     </div>
   );
 }
