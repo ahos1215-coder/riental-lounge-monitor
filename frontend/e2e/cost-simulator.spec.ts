@@ -79,6 +79,13 @@ test.describe("Cost simulator card - aisekiya stores", () => {
     // 相席屋専用の週末キャプション（日曜も高料金対象と明記）
     await expect(page.getByText(/高料金の対象: 金・土・日曜日・祝日・祝前日/)).toBeVisible();
 
+    // 値上がり注意行の金額は当日の曜日区分で変わる（平日 ¥715=¥650×1.1 / 週末 ¥825=¥750×1.1）。
+    // カード上部の曜日トグルは detectAisekiyaDayTypeJst(new Date()) の自動判定が既定値になるため、
+    // 実行日が金・土・日・祝日・祝前日だと既定が週末=¥825になり、¥715固定の検証はカレンダー依存で
+    // 不安定になる（実装は正しく当日の値を出しているだけ）。自由計算テストと同様に平日を明示選択して
+    // 曜日区分を固定し、¥715を決定的に検証する。
+    await page.getByRole("button", { name: "平日" }).first().click();
+
     // 22:00以降の10%加算をオリエンタルと同じ「値上がり注意行」で表示する
     // （¥715=¥650×1.1。オリエンタルの「XX時以降は相席」とは別文言「22:00以降は相席」）。
     await expect(page.getByText(/22:00以降は相席 10分 ¥715/)).toBeVisible();
@@ -132,6 +139,8 @@ test.describe("Cost simulator card - aisekiya stores", () => {
     await page.goto("/store/ay_chiba");
     await expect(page.getByText("料金の目安")).toBeVisible();
     await expect(page.getByText(/高料金の対象: 金・土・日曜日・祝日・祝前日/)).toBeVisible();
+    // ¥715は平日区分の値（週末は¥825）。実行日の曜日に依存しないよう平日を明示選択して固定する。
+    await page.getByRole("button", { name: "平日" }).first().click();
     await expect(page.getByText(/22:00以降は相席 10分 ¥715/)).toBeVisible();
   });
 });
