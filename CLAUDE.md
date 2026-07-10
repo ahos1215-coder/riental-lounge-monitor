@@ -113,10 +113,15 @@ CLAUDE.md — MEGRIBI（Oriental Lounge Monitor）3分マップ
 1. **`oriental/ml/model_xgb.py` の中身は LightGBM。** 2026-04-12 に移行済みで、ファイル名は import
    互換のためだけに残っている。「XGBoost」という名前・変数名に引きずられて古い前提でコードを
    書かないこと。**改名しないこと**（多数のimport箇所が壊れる）。
-2. **夜セッションの日付境界が2箇所でずれている（未解消・既知）**: `oriental/ml/postprocess.py` /
-   `night_type.py` の `NIGHT_SESSION_SHIFT_HOURS=6`（00:00-05:59は前夜扱い、「-6hシフト」規約）に対し、
-   `scripts/generate_weekly_insights.py` は `hour < 5` で丸めている。1時間分の閾値差があるが、
-   意図的に放置されている（影響が小さいと判断済み）。「バグだ」と勝手に統一修正しないこと。
+2. **夜セッションの日付境界のズレは2026-07-11に解消済み（もう罠ではない）**: 旧
+   `scripts/generate_weekly_insights.py` は独自に `hour < 5` で丸めており、`oriental/ml/postprocess.py` /
+   `night_type.py` の `NIGHT_SESSION_SHIFT_HOURS=6`（00:00-05:59は前夜扱い、「-6hシフト」規約）と
+   1時間ずれていた。3店舗（shibuya/ay_chiba/takasaki）の本番 `/api/range` 実データで検証したところ
+   直近7日間 JST 5時台（収集は ~04:55 JST で停止）の行は0件で、hour<5→hour<6 の統一による
+   nightly件数・daily_summary・heatmap集計への実影響はゼロだったため、`night_type.py` の
+   `NIGHT_SESSION_SHIFT_HOURS` を単一ソースとする `hour < 6` に統一した
+   （`_night_date` は now `from oriental.ml.night_type import NIGHT_SESSION_SHIFT_HOURS` を参照）。
+   履歴として記録: 統一前は「意図的に放置」と判断されていたが、実データ検証により解消した。
 3. **相席屋は%表示のみ。人数はバックエンド内部の逆算推定値**（`(座席数+VIP)×2 × %`）で、
    UIには表示しない（「※推計値」を免責ページに明記する方針）。
 4. **`frontend/src/data/stores.json` が店舗マスタの唯一の正本。** 店舗の追加・削除はこのファイルと

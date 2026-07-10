@@ -19,6 +19,7 @@ from scripts.generate_weekly_insights import (
     DEFAULT_WEEKLY_MIN_NIGHT_SAMPLES,
     HEATMAP_HOURS,
     JST_OFFSET,
+    NIGHT_SESSION_SHIFT_HOURS,
     _build_busy_windows,
     _build_daily_summary,
     _build_day_hour_heatmap,
@@ -61,6 +62,40 @@ def _full_week_points(occ_overrides: dict[tuple[int, int], float] | None = None)
                 occ = (occ_overrides or {}).get((day_offset, hour), 0.30)
                 points.append(_point(ts, occ))
     return points
+
+
+# ---------------------------------------------------------------------------
+# _night_date: -6h シフト規約 (oriental/ml/night_type.py と単一ソース) への統一 (C1)
+# ---------------------------------------------------------------------------
+
+
+class TestNightDateSharedConvention:
+    """_night_date は oriental/ml/night_type.py の NIGHT_SESSION_SHIFT_HOURS (=6) を
+    単一ソースとする -6h シフト規約に従う。2026-07-11 に旧 `hour < 5` から統一した
+    (実データに JST 5時台の行が存在しないため出力への影響はゼロ。CLAUDE.md 罠#2 参照)。
+    """
+
+    def test_shift_hours_is_six(self) -> None:
+        assert NIGHT_SESSION_SHIFT_HOURS == 6
+
+    def test_0530_belongs_to_previous_night(self) -> None:
+        # 05:30 は旧実装 (hour<5) では「当日」扱いだったが、-6h規約では前夜に属する。
+        ts = datetime(2026, 5, 3, 5, 30, tzinfo=JST_OFFSET)
+        assert _night_date(ts) == (ts - timedelta(days=1)).date() == datetime(2026, 5, 2).date()
+
+    def test_0630_belongs_to_same_day(self) -> None:
+        ts = datetime(2026, 5, 3, 6, 30, tzinfo=JST_OFFSET)
+        assert _night_date(ts) == ts.date() == datetime(2026, 5, 3).date()
+
+    def test_boundary_at_exactly_0559_and_0600(self) -> None:
+        just_before = datetime(2026, 5, 3, 5, 59, tzinfo=JST_OFFSET)
+        just_after = datetime(2026, 5, 3, 6, 0, tzinfo=JST_OFFSET)
+        assert _night_date(just_before) == datetime(2026, 5, 2).date()
+        assert _night_date(just_after) == datetime(2026, 5, 3).date()
+
+    def test_1900_start_of_session_is_same_day(self) -> None:
+        ts = datetime(2026, 5, 2, 19, 0, tzinfo=JST_OFFSET)
+        assert _night_date(ts) == datetime(2026, 5, 2).date()
 
 
 # ---------------------------------------------------------------------------

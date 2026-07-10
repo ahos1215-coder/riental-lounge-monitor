@@ -29,6 +29,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from commentary_quality_gate import check_weekly_commentary  # noqa: E402
 from _supabase_common import _supabase_conf  # noqa: E402
 
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+try:
+    from oriental.ml.night_type import NIGHT_SESSION_SHIFT_HOURS  # noqa: E402
+except ModuleNotFoundError:
+    # 最小依存環境(oriental/__init__.py 経由のimportがflask等を引き込めない場合)では
+    # ファイル直読みで代替する。scripts/snapshot_forecasts.py / build_templates.py と同一パターン。
+    _night_type_spec = importlib.util.spec_from_file_location(
+        "_night_type_standalone", REPO_ROOT / "oriental" / "ml" / "night_type.py"
+    )
+    _night_type_mod = importlib.util.module_from_spec(_night_type_spec)
+    assert _night_type_spec and _night_type_spec.loader
+    _night_type_spec.loader.exec_module(_night_type_mod)
+    NIGHT_SESSION_SHIFT_HOURS = _night_type_mod.NIGHT_SESSION_SHIFT_HOURS
+
 MEGRIBI_SCORE_PATH = REPO_ROOT / "oriental" / "ml" / "megribi_score.py"
 
 if not MEGRIBI_SCORE_PATH.exists():
@@ -588,11 +603,22 @@ DEFAULT_WEEKLY_MIN_NIGHT_SAMPLES = 24
 def _night_date(ts_jst: datetime) -> Any:
     """JST タイムスタンプが属する「夜」の日付 (date) を返す。
 
-    夜のセッションは 19:00 開始〜翌 04:59 終了。0-4 時のデータは前日の夜として扱う
-    (例: 日曜 00:00 は土曜の夜)。HEATMAP_HOURS 外 (日中 5-18 時) の点をどう扱うかは
+    夜のセッションは 19:00 開始〜翌 04:59 終了。0-5 時台 (00:00-05:59) のデータは前夜の
+    セッションとして扱う (-6h シフト規約。oriental/ml/night_type.py の
+    NIGHT_SESSION_SHIFT_HOURS / postprocess.py と同一の単一ソース)。
+    例: 日曜 00:00 は土曜の夜。HEATMAP_HOURS 外 (日中 6-18 時) の点をどう扱うかは
     呼び出し側の責務 (通常は事前に HEATMAP_HOURS でフィルタしてから渡す)。
+
+    2026-07-11: 旧実装は独自に `hour < 5` (-5h相当) を使っており night_type.py の
+    -6h規約と1時間ずれていた。実データでは収集が ~04:55 JST で止まり JST 5時台の行が
+    存在しない (直近7日で0件を確認) ため、この統一によるレポート出力への実影響はゼロ
+    (詳細は CLAUDE.md「よくある罠」#2)。
     """
-    return (ts_jst - timedelta(days=1)).date() if ts_jst.hour < 5 else ts_jst.date()
+    return (
+        (ts_jst - timedelta(days=1)).date()
+        if ts_jst.hour < NIGHT_SESSION_SHIFT_HOURS
+        else ts_jst.date()
+    )
 
 
 def _build_day_hour_heatmap(points: list[dict[str, Any]]) -> dict[str, Any]:
