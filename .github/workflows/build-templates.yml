@@ -1,0 +1,67 @@
+name: Build forecast v2 templates
+
+# v2 SHADOW パイプラインの「唯一の」テンプレ再生成コマンド (scripts/build_templates.py)。
+# 店×夜タイプ(L/M/H)の夜シェイプ×スケールを直近13週の実測から作り、Storage の
+# forecast/templates_v2.json に1本アップロードする。snapshot_forecasts.py が毎晩これを
+# 読んで A スナップショットと並べて v2 予測を記録し、score_forecasts.py が両者を採点する。
+# 本番配信 (oriental/ml/forecast_service.py) は一切触らない。
+# スコアリング(06:10 JST)の後に走らせるため 07:30 JST に固定。詳細は plan/FORECAST_V2.md。
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "true ならアップロードせずカバレッジのみ表示"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+  schedule:
+    - cron: "30 22 * * *"   # 07:30 JST 毎日（スコアリング 06:10 JST の後）
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # build_templates.py は stdlib のみだが、夜タイプ判定(oriental/ml/night_type)が
+      # 祝日判定に jpholiday を使うため、これだけ入れる（重い ML 依存は入れない）。
+      - name: Install jpholiday
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "jpholiday==1.0.3"
+
+      # build_templates.py が GITHUB_STEP_SUMMARY にカバレッジ表(店×L/M/H の n_nights と
+      # フォールバック)を自分で書くので、ここでの追加配線は不要。
+      - name: Build and upload v2 templates
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FORECAST_MODEL_BUCKET: ${{ vars.FORECAST_MODEL_BUCKET }}
+          TIMEZONE: Asia/Tokyo
+          INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          if [ "${INPUT_DRY_RUN:-false}" = "true" ]; then
+            python scripts/build_templates.py --dry-run
+          else
+            python scripts/build_templates.py
+          fi
+
+  notify-on-failure:
+    needs: [build]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "Build forecast v2 templates"

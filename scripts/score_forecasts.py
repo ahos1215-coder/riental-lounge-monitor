@@ -169,6 +169,155 @@ def _store_id_for(slug: str) -> str:
     return slug if slug.startswith("ay_") else f"ol_{slug}"
 
 
+# --------------------------------------------------------------------------- #
+# プロダクト・スコアカード（純関数・ネットワーク無し）
+#   A / v2 / baseline を同一スロットマッチングで、MAE 以外の実用指標でも採点する。
+# --------------------------------------------------------------------------- #
+PEAK_HIT_TOLERANCE_MIN = 30  # ピーク時刻の許容ズレ（<=30 分で hit）
+PEAK_MIN_SLOTS = 20          # ピーク判定を有効化する最低マッチスロット数
+PEAK_MIN_PEOPLE = 5.0        # 実測ピークがこれ未満の夜はピーク判定対象外
+GHOST_LATE_START_HOUR = 23   # ゴースト判定の深夜帯開始（23:00〜翌05:00）
+GHOST_LATE_END_HOUR = 5
+
+
+def _peak_index(values: list[float | None]) -> int | None:
+    best: float | None = None
+    bi: int | None = None
+    for i, v in enumerate(values):
+        if v is None:
+            continue
+        if best is None or v > best:
+            best = v
+            bi = i
+    return bi
+
+
+def peak_time_hit30(
+    times_min: list[int],
+    actuals: list[float | None],
+    preds: list[float | None],
+    *,
+    min_slots: int = PEAK_MIN_SLOTS,
+    min_peak: float = PEAK_MIN_PEOPLE,
+    tol_min: int = PEAK_HIT_TOLERANCE_MIN,
+) -> bool | None:
+    """予測ピークスロットが実測ピークスロットと <=tol_min 分か（店-夜ごとの bool）。
+
+    有効条件: マッチスロットが min_slots 以上 かつ 実測ピークが min_peak 人以上。
+    条件を満たさない夜は None（対象外）。times_min は各スロットの絶対分（同順配列）。
+    """
+    if len(actuals) < min_slots:
+        return None
+    a_i = _peak_index(actuals)
+    if a_i is None or (actuals[a_i] or 0.0) < min_peak:
+        return None
+    p_i = _peak_index(preds)
+    if p_i is None:
+        return None
+    return abs(times_min[p_i] - times_min[a_i]) <= tol_min
+
+
+def ghost_index(
+    actuals: list[float | None],
+    preds: list[float | None],
+    late_flags: list[bool],
+) -> float | None:
+    """深夜帯(23:00以降)で実測が実質ゼロのスロットでの平均予測総数（過剰予測=ゴースト）。
+
+    「実質ゼロ」= 実測 <= max(1.0, その夜の実測ピークの5%)。対象スロットが無ければ None。
+    """
+    peak = max((a for a in actuals if a is not None), default=0.0)
+    thr = max(1.0, 0.05 * peak)
+    vals = [
+        preds[i]
+        for i in range(len(actuals))
+        if late_flags[i]
+        and actuals[i] is not None
+        and actuals[i] <= thr
+        and preds[i] is not None
+    ]
+    if not vals:
+        return None
+    return sum(vals) / len(vals)
+
+
+def band_coverage(
+    actuals: list[float | None],
+    p10s: list[float | None],
+    p90s: list[float | None],
+) -> float | None:
+    """p10 <= 実測 <= p90 を満たすマッチスロットの割合（v2 の帯の当たり率）。無ければ None。"""
+    total = 0
+    covered = 0
+    for a, lo, hi in zip(actuals, p10s, p90s):
+        if a is None or lo is None or hi is None:
+            continue
+        total += 1
+        if lo <= a <= hi:
+            covered += 1
+    return (covered / total) if total else None
+
+
+def _slot_min(dt: datetime) -> int:
+    """スロット時刻を JST 15 分に丸め、ピーク距離計算用の絶対分（epoch 分）にする。"""
+    j = dt.astimezone(JST)
+    j = j.replace(minute=(j.minute // SLOT_MIN) * SLOT_MIN, second=0, microsecond=0)
+    return int(j.timestamp() // 60)
+
+
+def _is_late_slot(dt: datetime) -> bool:
+    h = dt.astimezone(JST).hour
+    return h >= GHOST_LATE_START_HOUR or h < GHOST_LATE_END_HOUR
+
+
+def _mean_opt(values: list) -> float | None:
+    nums = [v for v in values if isinstance(v, (int, float)) and not isinstance(v, bool)]
+    return round(sum(nums) / len(nums), 3) if nums else None
+
+
+def _rate_opt(values: list) -> float | None:
+    bools = [1.0 if v else 0.0 for v in values if v is not None]
+    return round(sum(bools) / len(bools), 3) if bools else None
+
+
+def _num_or_none(v: object) -> float | None:
+    try:
+        f = float(v)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return None if (f != f or f in (float("inf"), float("-inf"))) else f
+
+
+def _round_opt(v: float | None) -> float | None:
+    return round(v, 3) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def _fleet_scorecard(scorecard_per_store: dict[str, dict]) -> dict:
+    """店別スコアカードを艦隊レベルに集計する（A/v2/baseline）。
+
+    peak_hit30 は対象店の hit 率、ghost / band_coverage は対象店の平均。None（対象外）は除外。
+    """
+    def collect(pipeline: str, metric: str) -> list:
+        return [
+            sc[pipeline].get(metric)
+            for sc in scorecard_per_store.values()
+            if isinstance(sc.get(pipeline), dict)
+        ]
+
+    return {
+        "a": {"peak_hit30": _rate_opt(collect("a", "peak_hit30")), "ghost": _mean_opt(collect("a", "ghost"))},
+        "baseline": {
+            "peak_hit30": _rate_opt(collect("baseline", "peak_hit30")),
+            "ghost": _mean_opt(collect("baseline", "ghost")),
+        },
+        "v2": {
+            "peak_hit30": _rate_opt(collect("v2", "peak_hit30")),
+            "ghost": _mean_opt(collect("v2", "ghost")),
+            "band_coverage": _mean_opt(collect("v2", "band_coverage")),
+        },
+    }
+
+
 def blend_weight(ml_mae: float, baseline_mae: float, nights: int) -> float:
     """逆誤差ブレンド重み w_ml。
 
@@ -278,6 +427,102 @@ def _write_step_summary(
         print(f"[score] step summary write failed: {str(exc)[:120]}")
 
 
+def _read_recent_scorecards(
+    bucket: str, url: str, key: str, night_dates: list[str]
+) -> dict[str, dict[str, list]]:
+    """直近夜の scores/<date>.json から艦隊スコアカードを集めてローリング集計用に返す。"""
+    acc: dict[str, dict[str, list]] = {
+        "a": {"peak": [], "ghost": []},
+        "v2": {"peak": [], "ghost": [], "cov": []},
+        "baseline": {"peak": [], "ghost": []},
+    }
+    for d in night_dates[:7]:
+        raw = _storage_get(bucket, f"accuracy/scores/{d}.json", url, key)
+        if raw is None:
+            continue
+        try:
+            doc = json.loads(raw.decode())
+        except Exception:  # noqa: BLE001
+            continue
+        sc = doc.get("scorecard") if isinstance(doc, dict) else None
+        if not isinstance(sc, dict):
+            continue
+        for pl in ("a", "v2", "baseline"):
+            blk = sc.get(pl)
+            if not isinstance(blk, dict):
+                continue
+            if isinstance(blk.get("peak_hit30"), (int, float)):
+                acc[pl]["peak"].append(blk["peak_hit30"])
+            if isinstance(blk.get("ghost"), (int, float)):
+                acc[pl]["ghost"].append(blk["ghost"])
+            if pl == "v2" and isinstance(blk.get("band_coverage"), (int, float)):
+                acc["v2"]["cov"].append(blk["band_coverage"])
+    return acc
+
+
+def _write_scorecard_summary(
+    night_date: str,
+    overall: float | None,
+    overall_v2: float | None,
+    overall_baseline: float | None,
+    fleet: dict,
+    bucket: str,
+    url: str,
+    key: str,
+    nights: list[dict],
+) -> None:
+    """GITHUB_STEP_SUMMARY に A vs v2 vs baseline の夜次スコアカード + 直近7夜ローリングを書く。
+
+    未設定(ローカル実行)や失敗時は何もしない。v2 は shadow なので exit code には一切影響しない。
+    """
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+
+    def fmt(x: object) -> str:
+        return "—" if x is None else str(x)
+
+    a, v2, bl = fleet.get("a", {}), fleet.get("v2", {}), fleet.get("baseline", {})
+    lines: list[str] = []
+    lines.append(f"\n## Forecast v2 shadow scorecard — night {night_date}\n\n")
+    lines.append("| metric | A (prod) | v2 (shadow) | baseline |\n|---|---|---|---|\n")
+    lines.append(f"| MAE (lower=better) | {fmt(overall)} | {fmt(overall_v2)} | {fmt(overall_baseline)} |\n")
+    lines.append(
+        f"| peak_hit30 (higher=better) | {fmt(a.get('peak_hit30'))} | "
+        f"{fmt(v2.get('peak_hit30'))} | {fmt(bl.get('peak_hit30'))} |\n"
+    )
+    lines.append(
+        f"| ghost_index (lower=better) | {fmt(a.get('ghost'))} | "
+        f"{fmt(v2.get('ghost'))} | {fmt(bl.get('ghost'))} |\n"
+    )
+    lines.append(f"| band_coverage (v2) | — | {fmt(v2.get('band_coverage'))} | — |\n")
+    try:
+        ra = _mean_opt([n.get("overall_live_mae") for n in nights[:7]])
+        rv2 = _mean_opt([n.get("overall_v2_mae") for n in nights[:7]])
+        rbl = _mean_opt([n.get("overall_baseline_mae") for n in nights[:7]])
+        dates = [n.get("night_date") for n in nights if n.get("night_date")][:7]
+        rsc = _read_recent_scorecards(bucket, url, key, dates)
+        lines.append(f"\n### Rolling last-{len(dates)} nights\n\n")
+        lines.append("| metric | A | v2 | baseline |\n|---|---|---|---|\n")
+        lines.append(f"| MAE | {fmt(ra)} | {fmt(rv2)} | {fmt(rbl)} |\n")
+        lines.append(
+            f"| peak_hit30 | {fmt(_mean_opt(rsc['a']['peak']))} | "
+            f"{fmt(_mean_opt(rsc['v2']['peak']))} | {fmt(_mean_opt(rsc['baseline']['peak']))} |\n"
+        )
+        lines.append(
+            f"| ghost_index | {fmt(_mean_opt(rsc['a']['ghost']))} | "
+            f"{fmt(_mean_opt(rsc['v2']['ghost']))} | {fmt(_mean_opt(rsc['baseline']['ghost']))} |\n"
+        )
+        lines.append(f"| band_coverage | — | {fmt(_mean_opt(rsc['v2']['cov']))} | — |\n")
+    except Exception as exc:  # noqa: BLE001
+        lines.append(f"\n(rolling aggregation failed: {str(exc)[:100]})\n")
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write("".join(lines))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[score] scorecard summary write failed: {str(exc)[:120]}")
+
+
 def main() -> int:
     _load_env()
     supabase_url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
@@ -310,7 +555,12 @@ def main() -> int:
     start_prev_iso = (start - timedelta(days=7)).astimezone(timezone.utc).isoformat()
     end_prev_iso = (end - timedelta(days=7)).astimezone(timezone.utc).isoformat()
 
+    # v2 SHADOW: snapshot_forecasts.py が同じ夜の JSON に併記した v2 予測（無ければ空）。
+    v2_all = snapshot.get("v2") or {}
+
     per_store: dict[str, dict] = {}
+    v2_per_store: dict[str, dict] = {}
+    scorecard_per_store: dict[str, dict] = {}
     for slug, preds in by_slug.items():
         if not isinstance(preds, list) or not preds:
             continue
@@ -319,8 +569,16 @@ def main() -> int:
         slot_now = _slot_means(_fetch_actuals(supabase_url, key, store_id, start_iso, end_iso))
         slot_prev = _slot_means(_fetch_actuals(supabase_url, key, store_id, start_prev_iso, end_prev_iso))
 
+        # --- A (本番、既存ロジックは不変) の MAE + A/baseline スコアカード用配列を収集 ---
         ml_err: list[float] = []
         base_err: list[float] = []
+        a_times: list[int] = []
+        a_actual: list[float | None] = []
+        a_pred: list[float | None] = []
+        a_late: list[bool] = []
+        b_actual: list[float | None] = []
+        b_pred: list[float | None] = []
+        b_late: list[bool] = []
         for p in preds:
             dt = _parse_iso(p.get("ts", ""))
             if dt is None:
@@ -336,6 +594,14 @@ def main() -> int:
             naive = slot_prev.get(_slot_key(dt - timedelta(days=7)))  # same clock slot, last week
             if naive is not None:
                 base_err.append(abs(naive - actual))
+            # スコアカード用（A と baseline は同一グリッド。baseline は naive のある slot のみ）。
+            a_times.append(_slot_min(dt))
+            a_actual.append(actual)
+            a_pred.append(pred_total)
+            a_late.append(_is_late_slot(dt))
+            b_actual.append(actual if naive is not None else None)
+            b_pred.append(naive)
+            b_late.append(_is_late_slot(dt))
         if ml_err:
             entry = {"live_mae": round(sum(ml_err) / len(ml_err), 2), "matched_slots": len(ml_err)}
             if base_err:
@@ -346,10 +612,76 @@ def main() -> int:
                     entry["ml_vs_baseline_live_pct"] = round((b - entry["live_mae"]) / b * 100.0, 1)
             per_store[slug] = entry
 
+        # --- v2 (shadow) の MAE + 帯カバレッジ + スコアカード用配列 ---
+        v2_entry = v2_all.get(slug)
+        v2_times: list[int] = []
+        v2_actual: list[float | None] = []
+        v2_pred: list[float | None] = []
+        v2_late: list[bool] = []
+        v2_p10: list[float | None] = []
+        v2_p90: list[float | None] = []
+        v2_err: list[float] = []
+        if isinstance(v2_entry, dict) and isinstance(v2_entry.get("data"), list):
+            for p in v2_entry["data"]:
+                if not isinstance(p, dict):
+                    continue
+                dt = _parse_iso(p.get("ts", ""))
+                if dt is None:
+                    continue
+                actual = slot_now.get(_slot_key(dt))
+                if actual is None:
+                    continue
+                try:
+                    pt = float(p.get("total_pred") or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                v2_err.append(abs(pt - actual))
+                v2_times.append(_slot_min(dt))
+                v2_actual.append(actual)
+                v2_pred.append(pt)
+                v2_late.append(_is_late_slot(dt))
+                v2_p10.append(_num_or_none(p.get("p10")))
+                v2_p90.append(_num_or_none(p.get("p90")))
+            if v2_err:
+                v2e: dict = {
+                    "v2_mae": round(sum(v2_err) / len(v2_err), 2),
+                    "matched_slots": len(v2_err),
+                    "night_type": v2_entry.get("night_type"),
+                    "special_block": v2_entry.get("special_block"),
+                    "fallback": v2_entry.get("template_fallback"),
+                }
+                cov = band_coverage(v2_actual, v2_p10, v2_p90)
+                if cov is not None:
+                    v2e["band_coverage"] = round(cov, 3)
+                v2_per_store[slug] = v2e
+
+        # --- 店別スコアカード（A / v2 / baseline を同一マッチングで） ---
+        if ml_err:
+            sc: dict = {
+                "a": {
+                    "peak_hit30": peak_time_hit30(a_times, a_actual, a_pred),
+                    "ghost": _round_opt(ghost_index(a_actual, a_pred, a_late)),
+                },
+                "baseline": {
+                    "peak_hit30": peak_time_hit30(a_times, a_actual, b_pred),
+                    "ghost": _round_opt(ghost_index(b_actual, b_pred, b_late)),
+                },
+            }
+            if v2_times:
+                sc["v2"] = {
+                    "peak_hit30": peak_time_hit30(v2_times, v2_actual, v2_pred),
+                    "ghost": _round_opt(ghost_index(v2_actual, v2_pred, v2_late)),
+                    "band_coverage": _round_opt(band_coverage(v2_actual, v2_p10, v2_p90)),
+                }
+            scorecard_per_store[slug] = sc
+
     maes = [v["live_mae"] for v in per_store.values()]
     overall = round(sum(maes) / len(maes), 2) if maes else None
     base_maes = [v["live_baseline_mae"] for v in per_store.values() if "live_baseline_mae" in v]
     overall_baseline = round(sum(base_maes) / len(base_maes), 2) if base_maes else None
+    v2_maes = [v["v2_mae"] for v in v2_per_store.values() if "v2_mae" in v]
+    overall_v2 = round(sum(v2_maes) / len(v2_maes), 2) if v2_maes else None
+    fleet_scorecard = _fleet_scorecard(scorecard_per_store)
     result = {
         "night_date": night_date,
         "scored_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -357,6 +689,14 @@ def main() -> int:
         "overall_baseline_mae": overall_baseline,
         "stores_scored": len(per_store),
         "per_store": per_store,
+        # --- 追加(後方互換): v2 と scorecard を別キーで併記。既存 consumer は無視できる。 ---
+        "v2": {
+            "overall_v2_mae": overall_v2,
+            "overall_baseline_mae": overall_baseline,
+            "stores_scored": len(v2_per_store),
+            "per_store": v2_per_store,
+        },
+        "scorecard": {**fleet_scorecard, "per_store": scorecard_per_store},
     }
     _storage_put(bucket, f"accuracy/scores/{night_date}.json", json.dumps(result, ensure_ascii=False).encode("utf-8"), supabase_url, key)
 
@@ -372,7 +712,9 @@ def main() -> int:
             pass
     summary["nights"] = (
         [{"night_date": night_date, "overall_live_mae": overall,
-          "overall_baseline_mae": overall_baseline, "stores_scored": len(per_store)}]
+          "overall_baseline_mae": overall_baseline, "stores_scored": len(per_store),
+          # 追加(後方互換): v2 の夜次 MAE。_fetch_live_accuracy は無視する（既存キーは不変）。
+          "overall_v2_mae": overall_v2}]
         + [n for n in summary["nights"] if n.get("night_date") != night_date]
     )[:SUMMARY_KEEP]
     summary["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
@@ -436,8 +778,16 @@ def main() -> int:
     if not per_store:
         print("[score] no stores could be scored (no overlapping actual slots).")
 
+    print(f"[score] v2(shadow) overall_v2_mae={overall_v2} stores_v2={len(v2_per_store)} "
+          f"scorecard={json.dumps(fleet_scorecard, ensure_ascii=True)}")
+
     # GitHub Actions のジョブ画面に艦隊サマリを表示（PDCAの可視化）。
     _write_step_summary(night_date, overall, overall_baseline, per_store, weights, len(summary["nights"][:7]))
+    # 追加: A vs v2 vs baseline の夜次スコアカード + 直近7夜のローリング集計。
+    _write_scorecard_summary(
+        night_date, overall, overall_v2, overall_baseline, fleet_scorecard,
+        bucket, supabase_url, key, summary["nights"],
+    )
 
     # 艦隊 ML がナイーブ・ベースラインに負けた夜はジョブを RED にして notify-on-failure を
     # 発火させる（Act 断線の修理）。ACCURACY_FAIL_ON_BASELINE_LOSS=0 で無効化可。

@@ -33,6 +33,13 @@ jobs:
         with:
           python-version: "3.12"
 
+      # snapshot モードは v2 併記で oriental/ml/night_type を import し、祝日判定に
+      # jpholiday を使う。両モード共通で入れておく（軽量・score モードでは未使用）。
+      - name: Install jpholiday
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "jpholiday==1.0.3"
+
       - name: Decide mode
         id: decide
         env:
