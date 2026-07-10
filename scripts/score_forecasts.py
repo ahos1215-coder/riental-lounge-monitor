@@ -32,6 +32,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 JST = timezone(timedelta(hours=9))
 SLOT_MIN = 15
 SUMMARY_KEEP = 60
+FETCH_PAGE_SIZE = 1000     # PostgREST 1リクエスト最大行数と揃える（build_templates.pyと同一）
+FETCH_ABSURD_ROWS = 50_000  # 1店・1夜でこれを超えたら暴走クエリを疑い、大声で警告する
 
 
 def _load_env() -> None:
@@ -94,26 +96,58 @@ def _storage_put(bucket: str, path: str, payload: bytes, url: str, key: str) -> 
 
 
 def _fetch_actuals(url: str, key: str, store_id: str, start_iso: str, end_iso: str) -> list[dict]:
+    """1店・1ウィンドウ分の実測行を ts.asc キーセットページネーションで全件取得する。
+
+    以前は limit=5000 の単発フェッチだったため、1 夜の行数がそれを超えると
+    サイレントに切り捨てられ、答え合わせ(A vs v2 scoring)が静かに壊れる恐れがあった。
+    scripts/build_templates.py の _fetch_store_rows と同じ規約
+    (ts=gt.<cursor> で 1000 行/ページ、短いページで終了)を採用する。
+    select/フィルタ(store_id・gte/lte の時間窓)/order は完全不変、完全性だけを直す。
+    """
     endpoint = f"{url}/rest/v1/logs"
-    params = [
-        ("select", "ts,total,men,women"),
-        ("store_id", f"eq.{store_id}"),
-        ("ts", f"gte.{start_iso}"),
-        ("ts", f"lte.{end_iso}"),
-        ("order", "ts.asc"),
-        ("limit", "5000"),
-    ]
-    full = endpoint + "?" + urllib.parse.urlencode(params)
-    req = urllib.request.Request(full, headers={"apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json"})
-    for attempt in range(1, 4):
-        try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                payload = json.loads(resp.read().decode())
-                return [r for r in payload if isinstance(r, dict)] if isinstance(payload, list) else []
-        except Exception:  # noqa: BLE001
-            if attempt < 3:
-                time.sleep(2 * attempt)
-    return []
+    headers = {"apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json"}
+    rows: list[dict] = []
+    cursor: str | None = None
+    pages = 0
+    while True:
+        params = [
+            ("select", "ts,total,men,women"),
+            ("store_id", f"eq.{store_id}"),
+            ("ts", f"gte.{start_iso}" if cursor is None else f"gt.{cursor}"),
+            ("ts", f"lte.{end_iso}"),
+            ("order", "ts.asc"),
+            ("limit", str(FETCH_PAGE_SIZE)),
+        ]
+        full = endpoint + "?" + urllib.parse.urlencode(params)
+        req = urllib.request.Request(full, headers=headers)
+
+        payload = None
+        for attempt in range(1, 4):
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    payload = json.loads(resp.read().decode())
+                break
+            except Exception:  # noqa: BLE001
+                if attempt < 3:
+                    time.sleep(2 * attempt)
+        pages += 1
+        if not isinstance(payload, list):
+            print(f"[score][fetch] {store_id}: page {pages} gave up after retries — stopping pagination.")
+            break
+        rows.extend(r for r in payload if isinstance(r, dict))
+        if len(payload) < FETCH_PAGE_SIZE:
+            break
+        cursor = payload[-1].get("ts")
+        if not cursor:
+            break
+
+    print(f"[score][fetch] {store_id}: rows={len(rows)} pages={pages}")
+    if len(rows) > FETCH_ABSURD_ROWS:
+        print(
+            f"[score][fetch][WARN] {store_id}: {len(rows)} rows for a single window "
+            f"(> {FETCH_ABSURD_ROWS}) — possible runaway query / bad date filter, investigate."
+        )
+    return rows
 
 
 def _actual_total(row: dict) -> float | None:
