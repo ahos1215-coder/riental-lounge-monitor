@@ -128,17 +128,18 @@ def _store_id_for(slug: str) -> str:
     return slug if slug.startswith("ay_") else f"ol_{slug}"
 
 
-def _v2_points(t: dict, ts_list: list[datetime]) -> list[dict]:
+def _v2_points(t: dict, ts_list: list[datetime], scale_override: float | None = None) -> list[dict]:
     """テンプレ 1 タイプ分から 40 スロットの v2 予測点を組む。
 
-    total=shape[i]×scale_ref, men=total×men_ratio[i], women=total−men,
-    帯 p10[i]×scale_ref / p90[i]×scale_ref。
+    total=shape[i]×scale, men=total×men_ratio[i], women=total−men,
+    帯 p10[i]×scale / p90[i]×scale。scale は既定で scale_ref、v2.1 の tonight ブロックが
+    有効なら scale_override(=scale_blend50) を使う（帯も同じ scale で伸縮する）。
     """
     shape = t.get("shape") or []
     p10 = t.get("p10") or []
     p90 = t.get("p90") or []
     mr = t.get("men_ratio") or []
-    scale = float(t.get("scale_ref") or 0.0)
+    scale = float(scale_override) if scale_override is not None else float(t.get("scale_ref") or 0.0)
     out: list[dict] = []
     for i, ts in enumerate(ts_list):
         sh = float(shape[i]) if i < len(shape) else 0.0
@@ -193,6 +194,7 @@ def _compute_v2(
 
     stores = doc["stores"]
     tonight = now_jst.date()
+    tonight_iso = tonight.isoformat()
     ntype = classify_night(tonight)
     sblock = special_block(tonight)
     base = now_jst.replace(hour=19, minute=0, second=0, microsecond=0)
@@ -206,12 +208,27 @@ def _compute_v2(
             print(f"[snapshot][warn] v2: no {ntype} template for {sid} (slug={slug})")
             continue
         t = st[ntype]
+        # v2.1 blend50: tonight ブロックが「今夜の日付・夜タイプ」に一致し scale_blend50 を
+        # 持つときだけ採用（stale-tonight ガード）。不一致・欠如は scale_ref にフォールバック。
+        scale_override = None
+        scale_source = "scale_ref"
+        tn = st.get("tonight")
+        if (
+            isinstance(tn, dict)
+            and tn.get("date") == tonight_iso
+            and tn.get("night_type") == ntype
+            and isinstance(tn.get("scale_blend50"), (int, float))
+            and not isinstance(tn.get("scale_blend50"), bool)
+        ):
+            scale_override = float(tn["scale_blend50"])
+            scale_source = "blend50"
         out[slug] = {
             "night_type": ntype,
             "special_block": sblock,
             "template_generated_at": generated_at,
             "template_fallback": t.get("fallback"),
-            "data": _v2_points(t, ts_list),
+            "scale_source": scale_source,
+            "data": _v2_points(t, ts_list, scale_override=scale_override),
         }
     return out
 

@@ -87,3 +87,72 @@ def test_compute_v2_missing_returns_all_null(monkeypatch) -> None:
     monkeypatch.setattr(snap, "_storage_get", lambda *a, **k: None)
     out = snap._compute_v2(["shibuya", "ay_ueno"], "http://x", "k", "b", datetime.now(JST))
     assert out == {"shibuya": None, "ay_ueno": None}
+
+
+# --------------------------------------------------------------------------- #
+# v2.1 blend50: tonight スケールの stale-tonight ガード
+# --------------------------------------------------------------------------- #
+def _doc_with_tonight(tonight: dict | None) -> dict:
+    st: dict = {"H": _tmpl(100.0)}  # scale_ref=100 → shape 1/40 → slot0 total=2.5
+    if tonight is not None:
+        st["tonight"] = tonight
+    return {
+        "schema": "v2t1",
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "stores": {"ol_shibuya": st},
+    }
+
+
+def _run_compute(monkeypatch, doc: dict, now_jst: datetime):
+    import json
+
+    monkeypatch.setattr(snap, "classify_night", lambda d: "H")
+    monkeypatch.setattr(snap, "special_block", lambda d: None)
+    monkeypatch.setattr(snap, "_storage_get", lambda *a, **k: json.dumps(doc).encode())
+    return snap._compute_v2(["shibuya"], "http://x", "k", "b", now_jst)
+
+
+def test_tonight_guard_match_uses_blend50(monkeypatch) -> None:
+    now_jst = datetime(2026, 5, 1, 18, 10, tzinfo=JST)
+    doc = _doc_with_tonight(
+        {"date": "2026-05-01", "night_type": "H", "scale_median": 100.0,
+         "scale_lgbm": 500.0, "scale_blend50": 300.0}
+    )
+    out = _run_compute(monkeypatch, doc, now_jst)
+    assert out["shibuya"]["scale_source"] == "blend50"
+    # slot0 = shape[0](=1/40) × blend50(300) = 7.5（scale_ref の 2.5 ではない）
+    assert out["shibuya"]["data"][0]["total_pred"] == pytest.approx(7.5)
+
+
+def test_tonight_guard_date_mismatch_falls_back(monkeypatch) -> None:
+    now_jst = datetime(2026, 5, 1, 18, 10, tzinfo=JST)
+    doc = _doc_with_tonight(
+        {"date": "2026-04-30", "night_type": "H", "scale_blend50": 300.0}  # 昨日の tonight
+    )
+    out = _run_compute(monkeypatch, doc, now_jst)
+    assert out["shibuya"]["scale_source"] == "scale_ref"
+    assert out["shibuya"]["data"][0]["total_pred"] == pytest.approx(2.5)  # scale_ref=100
+
+
+def test_tonight_guard_type_mismatch_falls_back(monkeypatch) -> None:
+    now_jst = datetime(2026, 5, 1, 18, 10, tzinfo=JST)
+    doc = _doc_with_tonight(
+        {"date": "2026-05-01", "night_type": "L", "scale_blend50": 300.0}  # 型が今夜(H)と不一致
+    )
+    out = _run_compute(monkeypatch, doc, now_jst)
+    assert out["shibuya"]["scale_source"] == "scale_ref"
+    assert out["shibuya"]["data"][0]["total_pred"] == pytest.approx(2.5)
+
+
+def test_tonight_guard_missing_blend_falls_back(monkeypatch) -> None:
+    now_jst = datetime(2026, 5, 1, 18, 10, tzinfo=JST)
+    doc = _doc_with_tonight({"date": "2026-05-01", "night_type": "H"})  # scale_blend50 欠如
+    out = _run_compute(monkeypatch, doc, now_jst)
+    assert out["shibuya"]["scale_source"] == "scale_ref"
+
+
+def test_tonight_absent_defaults_to_scale_ref(monkeypatch) -> None:
+    now_jst = datetime(2026, 5, 1, 18, 10, tzinfo=JST)
+    out = _run_compute(monkeypatch, _doc_with_tonight(None), now_jst)
+    assert out["shibuya"]["scale_source"] == "scale_ref"
+    assert out["shibuya"]["data"][0]["total_pred"] == pytest.approx(2.5)

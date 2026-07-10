@@ -649,6 +649,8 @@ def main() -> int:
                     "night_type": v2_entry.get("night_type"),
                     "special_block": v2_entry.get("special_block"),
                     "fallback": v2_entry.get("template_fallback"),
+                    # v2.1 観測性: この夜の v2 スケールが blend50 か scale_ref か（snapshot 由来）。
+                    "scale_source": v2_entry.get("scale_source"),
                 }
                 cov = band_coverage(v2_actual, v2_p10, v2_p90)
                 if cov is not None:

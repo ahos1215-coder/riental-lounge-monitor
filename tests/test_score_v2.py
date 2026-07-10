@@ -35,6 +35,7 @@ def test_main_writes_v2_and_scorecard_additively(monkeypatch) -> None:
                 "special_block": None,
                 "template_generated_at": "2026-05-01T09:00:00+00:00",
                 "template_fallback": None,
+                "scale_source": "blend50",
                 "data": v2_points,
             }
         },
@@ -83,6 +84,7 @@ def test_main_writes_v2_and_scorecard_additively(monkeypatch) -> None:
     assert v2ps["v2_mae"] is not None
     assert v2ps["night_type"] == "H"
     assert v2ps["band_coverage"] == 1.0  # 実測 5..17 は [2,30] に全て収まる
+    assert v2ps["scale_source"] == "blend50"  # v2.1: snapshot の scale_source をパススルー
     assert scores["v2"]["overall_v2_mae"] is not None
 
     # 追加された scorecard ブロック（艦隊 + 店別）

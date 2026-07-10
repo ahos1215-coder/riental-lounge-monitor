@@ -34,12 +34,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      # build_templates.py は stdlib のみだが、夜タイプ判定(oriental/ml/night_type)が
-      # 祝日判定に jpholiday を使うため、これだけ入れる（重い ML 依存は入れない）。
-      - name: Install jpholiday
+      # 夜タイプ判定(oriental/ml/night_type)の祝日判定に jpholiday が要る。
+      # v2.1 の blend50 スケール(グローバルLGBM・当朝に拡大窓で学習)には pandas/numpy/lightgbm
+      # が要る（requirements.txt と整合するバージョンをピン。無ければ tonight は自動省略される）。
+      - name: Install deps (jpholiday + blend50 LGBM)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install "jpholiday==1.0.3"
+          python -m pip install "jpholiday==1.0.3" "numpy==1.26.4" "pandas==2.2.3" "lightgbm==4.5.0"
 
       # build_templates.py が GITHUB_STEP_SUMMARY にカバレッジ表(店×L/M/H の n_nights と
       # フォールバック)を自分で書くので、ここでの追加配線は不要。

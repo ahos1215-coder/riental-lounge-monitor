@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -213,3 +213,158 @@ class TestBuildStoreTemplates:
 
     def test_empty_returns_none(self) -> None:
         assert bt.build_store_templates([], self.TODAY) is None
+
+
+# --------------------------------------------------------------------------- #
+# v2.1 レバー2: 帯 k 拡幅の算術（純関数）
+# --------------------------------------------------------------------------- #
+class TestWidenBand:
+    def test_k_one_is_noop(self) -> None:
+        shape = [0.10, 0.20, 0.05]
+        p10 = [0.05, 0.15, 0.01]
+        p90 = [0.20, 0.30, 0.09]
+        p10w, p90w = bt.widen_band(shape, p10, p90, 1.0)
+        assert p10w == pytest.approx(p10)
+        assert p90w == pytest.approx(p90)
+
+    def test_p50_unchanged_and_symmetric_widen(self) -> None:
+        # shape(=p50) は関数の出力に含めず、拡幅は p50 を軸に対称スケール。
+        shape = [0.10]
+        p10 = [0.05]
+        p90 = [0.20]
+        p10w, p90w = bt.widen_band(shape, p10, p90, 1.7)
+        assert p10w[0] == pytest.approx(0.10 - 1.7 * (0.10 - 0.05))  # 0.015
+        assert p90w[0] == pytest.approx(0.10 + 1.7 * (0.20 - 0.10))  # 0.27
+
+    def test_floor_at_zero(self) -> None:
+        # k が大きく p10' が負になるケースは 0 でクリップ。p90' は青天井のまま。
+        shape = [0.10]
+        p10 = [0.09]
+        p90 = [0.11]
+        p10w, p90w = bt.widen_band(shape, p10, p90, 20.0)
+        assert p10w[0] == 0.0
+        assert p90w[0] == pytest.approx(0.10 + 20.0 * 0.01)
+
+    def test_apply_band_calibration_in_place(self) -> None:
+        totals = [10.0] * bt.SLOTS
+        nights = [(date(2026, 4, 20 - k), make_night(totals)) for k in range(6)]
+        tmpl = bt.build_store_templates(nights, date(2026, 4, 30))
+        assert tmpl is not None
+        before_shape = list(tmpl["L"]["shape"])
+        bt.apply_band_calibration(tmpl, 1.0)  # k=1 → p10/p90 据え置き・shape 不変
+        assert tmpl["L"]["shape"] == before_shape
+
+
+# --------------------------------------------------------------------------- #
+# v2.1 レバー2: 帯 k の自動再校正ルール（純関数）
+# --------------------------------------------------------------------------- #
+class TestRecalibrateK:
+    def test_default_when_no_prev_no_data(self) -> None:
+        assert bt.recalibrate_k(None, []) == bt.DEFAULT_BAND_K
+
+    def test_keeps_prev_when_no_data(self) -> None:
+        assert bt.recalibrate_k(1.5, []) == 1.5
+
+    def test_low_coverage_widens(self) -> None:
+        # 平均 0.71 < 0.78 → +0.1
+        assert bt.recalibrate_k(1.7, [0.70, 0.72]) == pytest.approx(1.8)
+
+    def test_high_coverage_narrows(self) -> None:
+        # 平均 0.91 > 0.86 → -0.1
+        assert bt.recalibrate_k(1.7, [0.90, 0.92]) == pytest.approx(1.6)
+
+    def test_deadband_no_change(self) -> None:
+        # 0.78 <= mean <= 0.86 は据え置き
+        assert bt.recalibrate_k(1.7, [0.80, 0.82]) == pytest.approx(1.7)
+
+    def test_boundary_low_is_deadband(self) -> None:
+        # ちょうど 0.78 は「< 0.78」に該当しない → 据え置き
+        assert bt.recalibrate_k(1.7, [0.78]) == pytest.approx(1.7)
+
+    def test_boundary_high_is_deadband(self) -> None:
+        # ちょうど 0.86 は「> 0.86」に該当しない → 据え置き
+        assert bt.recalibrate_k(1.7, [0.86]) == pytest.approx(1.7)
+
+    def test_clamp_max(self) -> None:
+        # 2.2 から更に広げようとしても上限 2.2
+        assert bt.recalibrate_k(2.2, [0.10]) == pytest.approx(bt.BAND_K_MAX)
+
+    def test_clamp_min(self) -> None:
+        # 1.0 から更に狭めようとしても下限 1.0
+        assert bt.recalibrate_k(1.0, [0.99]) == pytest.approx(bt.BAND_K_MIN)
+
+
+# --------------------------------------------------------------------------- #
+# v2.1 レバー1: blend50 の特徴量構築（同タイプ直近・≥3 ガード）
+# --------------------------------------------------------------------------- #
+class TestScaleFeatures:
+    def test_recents_use_last_six_same_type(self) -> None:
+        prior = [100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0]  # 古い順
+        feat = bt._scale_features("ol_shibuya", "H", prior)
+        # 直近6 = [200..700] → median 450, mean 450, last1 700
+        assert feat["store"] == "ol_shibuya"
+        assert feat["night_type"] == "H"
+        assert feat["recent_median6"] == pytest.approx(450.0)
+        assert feat["recent_mean6"] == pytest.approx(450.0)
+        assert feat["recent_last1"] == pytest.approx(700.0)
+
+    def test_empty_prior_is_nan(self) -> None:
+        import math
+
+        feat = bt._scale_features("x", "L", [])
+        assert math.isnan(feat["recent_median6"])
+        assert math.isnan(feat["recent_mean6"])
+        assert math.isnan(feat["recent_last1"])
+
+
+class TestBuildScaleTrainingRows:
+    def _samples(self, types: list[str], base: float = 100.0) -> list[dict]:
+        # 古い順に types を並べ、夜合計は index に比例させて可変にする。
+        return [
+            {"date": date(2026, 4, 1) + timedelta(days=i), "night_type": t, "total": base + i}
+            for i, t in enumerate(types)
+        ]
+
+    def test_min_three_prior_same_type_guard(self) -> None:
+        # H が 5 夜連続。行が立つのは 4 夜目以降（=同タイプ過去夜 >=3）→ 2 行。
+        samples = self._samples(["H", "H", "H", "H", "H"])
+        rows = bt.build_scale_training_rows({"s": samples})
+        assert len(rows) == 2
+        assert all(r["night_type"] == "H" for r in rows)
+
+    def test_recents_are_same_type_only(self) -> None:
+        # L,L,L,H,H,H,H → H 行は H の過去夜だけを recents に使う（L は混ぜない）。
+        samples = self._samples(["L", "L", "L", "H", "H", "H", "H"])
+        rows = bt.build_scale_training_rows({"s": samples})
+        # H の過去夜が 3 に達するのは 7 番目(index6)の H だけ → H 行は 1 行。
+        h_rows = [r for r in rows if r["night_type"] == "H"]
+        assert len(h_rows) == 1
+        # index 3,4,5 の H(total=103,104,105)が recents → median 104, last1 105
+        assert h_rows[0]["recent_median6"] == pytest.approx(104.0)
+        assert h_rows[0]["recent_last1"] == pytest.approx(105.0)
+        assert h_rows[0]["target"] == pytest.approx(106.0)  # index6 の total
+
+    def test_no_leak_uses_only_prior_nights(self) -> None:
+        # 各行の recents は「その夜より前」だけ。最後の L 夜(target)は recents に入らない。
+        samples = self._samples(["L", "L", "L", "L"])
+        rows = bt.build_scale_training_rows({"s": samples})
+        assert len(rows) == 1
+        r = rows[0]
+        assert r["recent_last1"] == pytest.approx(102.0)  # index2、target=index3(103) は除外
+        assert r["target"] == pytest.approx(103.0)
+
+
+class TestNightScaleSamples:
+    def test_valid_nights_only_and_chronological(self) -> None:
+        good = make_night([10.0] * bt.SLOTS)                     # 40 slots, sum>0
+        partial = {i: {"total": 10.0} for i in range(5)}         # 5 slots < MIN_SLOTS_PER_NIGHT
+        zero = {i: {"total": 0.0} for i in range(bt.SLOTS)}      # sum 0
+        ref = [
+            (date(2026, 4, 20), good),
+            (date(2026, 4, 19), partial),
+            (date(2026, 4, 18), zero),
+        ]
+        samples = bt._night_scale_samples(ref)
+        assert [s["date"] for s in samples] == [date(2026, 4, 20)]
+        assert samples[0]["total"] == pytest.approx(400.0)  # 40 * 10
+        assert samples[0]["night_type"] in ("L", "M", "H")
