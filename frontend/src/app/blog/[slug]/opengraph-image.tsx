@@ -1,9 +1,32 @@
 import { ImageResponse } from "next/og";
+import { getPostBySlug } from "@/lib/blog/content";
 
-export const runtime = "edge";
+// フロントマター（content/blog/*.mdx）を fs で読むため nodejs ランタイム必須（edge では fs 不可）。
+export const runtime = "nodejs";
 
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
+
+/** タイトル未取得時に slug 由来の英字を出さないためのブランド既定値。 */
+const BLOG_OG_TITLE_FALLBACK = "めぐりび｜相席ラウンジ攻略ブログ";
+
+/**
+ * OG 画像に描画するブログタイトルを決める純関数。
+ * - フロントマターの実タイトル（例:「渋谷店：今夜の狙い目」）を最優先で使う。
+ * - 未設定/取得失敗、または getPostBySlug が title 欠落時に slug をそのまま返してきた場合は、
+ *   機械整形した英字（旧バグ: "Shibuya Tonight 20251220"）ではなくブランド既定値へフォールバック。
+ * - 長い日本語タイトルは maxLen で丸め、末尾に「…」を付けて画像内で破綻させない。
+ */
+export function resolveBlogOgTitle(
+  rawTitle: string | null | undefined,
+  slug: string,
+  maxLen = 44,
+): string {
+  const trimmed = typeof rawTitle === "string" ? rawTitle.trim() : "";
+  const isMissing = trimmed.length === 0 || trimmed === slug.trim();
+  const base = isMissing ? BLOG_OG_TITLE_FALLBACK : trimmed;
+  return base.length > maxLen ? `${base.slice(0, maxLen - 1)}…` : base;
+}
 
 type Props = {
   params: Promise<{ slug: string }>;
@@ -11,10 +34,14 @@ type Props = {
 
 export default async function BlogOGImage({ params }: Props) {
   const { slug } = await params;
-  const title = slug
-    .replace(/-/g, " ")
-    .replace(/\b\w/g, (c) => c.toUpperCase())
-    .slice(0, 60);
+  let frontmatterTitle: string | null = null;
+  try {
+    frontmatterTitle = getPostBySlug(slug)?.title ?? null;
+  } catch {
+    // フロントマター読み取り失敗時も画像生成は落とさず、既定タイトルで描画する。
+    frontmatterTitle = null;
+  }
+  const title = resolveBlogOgTitle(frontmatterTitle, slug);
 
   return new ImageResponse(
     (
@@ -94,14 +121,16 @@ export default async function BlogOGImage({ params }: Props) {
 
           <div
             style={{
+              display: "-webkit-box",
               color: "white",
               fontSize: "52px",
               fontWeight: 700,
-              lineHeight: 1.2,
+              lineHeight: 1.25,
               letterSpacing: "-0.02em",
               maxWidth: "900px",
+              WebkitBoxOrient: "vertical",
+              WebkitLineClamp: 3,
               overflow: "hidden",
-              textOverflow: "ellipsis",
             }}
           >
             {title}

@@ -19,7 +19,7 @@ type MegribiScoreResponse = {
 export const metadata: Metadata = {
   title: "めぐりび | 相席ラウンジの混雑予測・リアルタイム人数",
   description:
-    "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測し、ベストな来店タイミングの参考をお届けします。全国43店舗対応。",
+    "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測し、ベストな来店タイミングの参考をお届けします。国内42・海外1の計43店舗対応。",
   alternates: { canonical: new URL("/", base).href },
   openGraph: {
     title: "めぐりび | 相席ラウンジの混雑予測・リアルタイム人数",
@@ -32,7 +32,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "めぐりび | 相席ラウンジの混雑予測",
     description:
-      "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測。全国43店舗対応。",
+      "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測。国内42・海外1の計43店舗対応。",
   },
 };
 
