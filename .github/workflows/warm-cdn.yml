@@ -1,47 +1,86 @@
 # Vercel CDN warming for store APIs.
 #
-# 目的: Vercel の Edge/CDN キャッシュ（/api/range・/api/forecast_today に付いている
+# 【2026-07-10 更新】プライマリはローカル実行に移行済み。このワークフローは
+# バックアップ（保険）としてのみ残す。
+#
+# 実測（2026-07-08〜10, 2晩）で GitHub Actions の `schedule:` は「10分毎・19:00〜23:50」
+# の想定60回に対して実際の発火は5回（8.3%）、間隔が1.5〜3時間空くこともあり、事実上
+# 温めが機能していなかった（GitHub Actions のスケジューラ側の遅延/間引きが原因。既知の
+# 制約 — 下記コメント参照）。そのためプライマリの実行主体を、既に MEGRIBI-daily-* /
+# MEGRIBI-weekly（毎日18:00・21:30・毎週水6:30の本番ジョブ）を安定運用しているオーナーの
+# 24時間稼働 Windows PC の Task Scheduler（タスク名 `MEGRIBI-warm-cdn`）に切り替えた。
+# 実体は scripts/warm_cdn_local.py（stdlib のみ・pip 不要）。詳細は
+# plan/CDN_WARMING_LOCAL.md、Task Scheduler 登録コマンドはそのスクリプトの docstring
+# 冒頭を参照。
+#
+# このワークフローは「GitHub Actions のスケジューラがたまたま時刻通りに発火した回」に
+# 限り追加で温めるだけの日和見バックアップとして、スケジュールはそのまま残す
+# （ローカル実行が主、これは保険）。
+#
+# 目的: Vercel の Edge/CDN キャッシュ（/api/range・/api/range_multi・/api/forecast_today・
+# /api/forecast_today_multi・/api/megribi_score・/api/forecast_snapshot に付いている
 # s-maxage/stale-while-revalidate）を定期的に温め続け、実訪問者がコールドキャッシュ
-# （〜1.8秒）ではなく温キャッシュ（〜50ms）を引くようにする。グラフ描画のクリティカル
-# パスに乗る2エンドポイントのみを対象にし、それ以外（重い/低価値なもの）は温めない。
+# （〜1.8秒〜9秒）ではなく温キャッシュ（〜10-30ms）を引くようにする。
+#
+# 対象URL（frontend/src/app/hooks/storePreviewSnapshot.ts・
+# frontend/src/app/stores/stores-list-client.tsx・frontend/src/app/home-client.tsx の
+# 実装から抽出。CDNキャッシュはURLの完全一致がキーなので、クライアントが実際に発行する
+# URLと同じ形式・同じパラメータ順で温めること）:
+#   店舗詳細ページ（今日/昨日タブ）× 全店舗:
+#     今日:       /api/range?store=X&from=<JST今日>&to=<JST明日>&limit=240
+#     昨日:       /api/range?store=X&from=<JST昨日>&to=<JST今日>&limit=1200
+#     予測(今日):  /api/forecast_today?store=X
+#     予測(昨日):  /api/forecast_snapshot?store=X&date=<JST昨日 YYYYMMDD>
+#   一覧ページ（フィルタ無し・12件/ページ）× 1〜4ページ目:
+#     /api/range_multi?stores=<csv>&limit=48
+#     /api/forecast_today_multi?stores=<csv>
+#     /api/megribi_score?stores=<csv>
+#   トップページ:
+#     /api/megribi_score（パラメータ無し・全店舗）
+#     /api/range?store=<先頭店舗>&limit=48（未訪問者のフォールバック "last visited"）
+#
+# 【意図的に含めないもの】店舗詳細ページの「ほかの店舗を見る」欄
+# （StorePageClient.tsx digestStores）は店舗ごとに haversine 距離で選んだ最寄り4店舗の
+# 組み合わせ（43店舗×固有CSV = 43通り）。bash/jq で緯度経度の最短距離計算を再実装するのは
+# 壊れやすく割に合わないため、このバックアップ workflow では対象外とする
+# （プライマリの scripts/warm_cdn_local.py は Python で完全に再現し、対象に含む）。
 #
 # コスト試算（無料枠を前提に保守的に設計）:
-#   - 店舗数: 44（frontend/src/data/stores.json から動的取得。ハードコードしない）
-#   - 対象: /api/range?limit=240, /api/forecast_today （店舗あたり2本）
-#   - 実行間隔: 10分毎 → 24時間で 144回/日
-#   - リクエスト数: 44店舗 × 2本 × 144回/日 ≒ 12,672 リクエスト/日（≒ 38万/月）
-#     Vercel Hobby の Function Invocations 無料枠に対して十分小さい想定。
-#     ただし将来 Hobby の実際の枠に照らして超過が心配な場合は、下記チューニング欄を参照。
+#   - 店舗数: 43（frontend/src/data/stores.json から動的取得。ハードコードしない）
+#   - リクエスト数/回: 43店舗×4本 + 4ページ×3本 + トップ2本 = 186
+#   - 実行間隔: 10分毎、19:00〜23:50 JST の窓のみ → 30回/日
+#   - リクエスト数: 186 × 30 ≒ 5,580 リクエスト/日（≒ 17万/月）
+#     ただし GitHub Actions の cron 精度の都合で実際に発火するのはこの一部
+#     （このワークフローはあくまでバックアップ。主たる負荷はローカル実行側）。
 #
 # バックエンド保護:
-#   - Render は gunicorn シングルワーカー1台のみ。44店舗を同時に叩くと自分自身で
-#     詰まらせてしまう（self-inflicted contention）ため、店舗ループに 0.3秒 の
-#     sleep を挟んで平準化する（サンダリングハードを避ける）。
-#   - 10分毎より高頻度にはしないこと（5分毎にすると Render 1台に対して
-#     44×2 リクエストのバーストが2倍の頻度で発生し、収集/予測など他のリクエストと
-#     衝突するリスクが上がる）。
+#   - Render は gunicorn シングルワーカー1台のみ。43店舗を同時に叩くと自分自身で
+#     詰まらせてしまう（self-inflicted contention）ため、店舗ループ・ページループの
+#     区切りに 0.3秒 の sleep を挟んで平準化する（サンダリングハードを避ける）。
+#   - 10分毎より高頻度にはしないこと。
 #
 # GitHub Actions の cron に関する注意:
 #   - `schedule` は「最短5分間隔」が目安とされ、GitHub 側の負荷状況によっては
 #     指定した時刻より遅延して実行される・場合によってはスキップされることがある
-#     （GitHub Actions の既知の制約）。本ワークフローは「定期的に温め続ければよい」
-#     性質のものなので、多少の遅延・欠番があっても実害は小さい設計にしている。
+#     （GitHub Actions の既知の制約。2026-07-08〜10の実測で60回中5回しか発火せず、
+#     これが「プライマリをローカルへ移す」判断の直接的な根拠になった）。
 #
 # チューニング方法:
 #   - 間隔を変える: 下の `cron: "*/10 * * * *"` を変更（10分未満にはしないこと）。
 #   - 対象を減らす: matrix ではなく単一ジョブの for ループなので、下の
-#     STORES 取得・ENDPOINTS 配列を編集するだけで調整できる。
+#     STORES 取得・warm_one 呼び出しを編集するだけで調整できる。
 #   - 無効化する: このファイルを削除するか、`schedule:` セクションをコメントアウトし
-#     `workflow_dispatch` のみ残す（手動実行はいつでも可能なまま）。
+#     `workflow_dispatch` のみ残す（手動実行はいつでも可能なまま）。プライマリは
+#     ローカル実行なので、これを無効化してもCDN温めは止まらない。
 #
 # 必要な Secrets: なし（本番URLは公開URLのため secrets 化していない）。
 
 name: Warm CDN (store APIs)
 
 on:
-  # 【2026-07-08 オーナー承認で有効化】営業ピーク帯 19:00〜24:00 JST のみ10分毎に巡回。
-  # 24時間巡回だと月38万リクエストだが、この時間窓なら 43店×2API×30回/日 ≒ 2,580回/日
-  # （月約7.7万リクエスト）に収まる。窓の外（開店直後17-19時・深夜0時以降）は
+  # 【2026-07-08 オーナー承認で有効化・2026-07-10 バックアップ化】営業ピーク帯
+  # 19:00〜24:00 JST のみ10分毎に巡回。プライマリはローカル Task Scheduler
+  # （MEGRIBI-warm-cdn）に移行済み。窓の外（開店直後17-19時・深夜0時以降）は
   # ISR焼き込み+CDNキャッシュ(PR#53)が下支えする設計。
   # 5分未満にはしないこと（Render ワーカーへの負荷配慮。上記コメント参照）。
   schedule:
@@ -72,7 +111,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Warm range + forecast_today for each store
+      - name: Warm range/range_multi/forecast_today/forecast_today_multi/megribi_score/forecast_snapshot
         env:
           BASE_URL: ${{ github.event.inputs.base_url || 'https://www.meguribi.jp' }}
         run: |
@@ -86,6 +125,7 @@ jobs:
           fi
 
           # 店舗スラッグは stores.json から動的に読む（ハードコードしない → 追加/削除に自動追従）。
+          # 順序は frontend/src/app/config/stores.ts の STORES と同じ（= stores.json のファイル順）。
           mapfile -t SLUGS < <(jq -r '.[].slug' "$STORES_JSON")
           TOTAL_STORES="${#SLUGS[@]}"
           echo "対象店舗数: ${TOTAL_STORES}"
@@ -97,7 +137,7 @@ jobs:
 
           OK_COUNT=0
           FAIL_COUNT=0
-          FAILED_SLUGS=()
+          FAILED_LABELS=()
 
           warm_one() {
             local url="$1"
@@ -115,44 +155,71 @@ jobs:
               OK_COUNT=$((OK_COUNT + 1))
             else
               FAIL_COUNT=$((FAIL_COUNT + 1))
-              FAILED_SLUGS+=("${label}(${status})")
+              FAILED_LABELS+=("${label}(${status})")
             fi
           }
 
-          # 【重要】CDNキャッシュはURLの完全一致がキー。クライアント(useStorePreviewData.ts)が
-          # 実際に発行するURLと同じ形式・同じパラメータ順で温めること。
+          # 【重要】CDNキャッシュはURLの完全一致がキー。クライアント(storePreviewSnapshot.ts /
+          # useStorePreviewData.ts)が実際に発行するURLと同じ形式・同じパラメータ順で温めること。
           #   今日:   /api/range?store=X&from=<JST今日>&to=<JST明日>&limit=240
           #   昨日:   /api/range?store=X&from=<JST昨日>&to=<JST今日>&limit=1200
-          # (旧実装は from/to 無しの limit=240 だけを温めており、クライアントの実URLと
-          #  キャッシュキーが一致せず range の温めが空振りしていた。2026-07-08修正)
+          # from/to の基準日は「このワークフローは JST 19:00 以降にしか走らない」ため、
+          # computeNightBaseDate(now) の "hour<19 ならベース日を1日戻す" 分岐は常に不成立
+          # ＝ベース日=当日（JST）で単純化して問題ない、と確認済み
+          # （frontend/src/app/hooks/storePreviewSnapshot.ts 参照。19:00より前に手動
+          # workflow_dispatch した場合はこの単純化が外れる点に注意）。
+          # 同様に「昨日」タブの夜は本ワークフローの実行時刻（19:00以降）では常に完了済み
+          # のため、予測は必ず forecast_snapshot（日付は YYYYMMDD、ダッシュ無し）を使う。
           JST_TODAY="$(date -u -d '+9 hours' +%F)"
           JST_TOMORROW="$(date -u -d '+9 hours +1 day' +%F)"
           JST_YESTERDAY="$(date -u -d '+9 hours -1 day' +%F)"
+          JST_YESTERDAY_COMPACT="$(date -u -d '+9 hours -1 day' +%Y%m%d)"
 
           for SLUG in "${SLUGS[@]}"; do
-            # クリティカルパスの3本のみ（重い/低価値なエンドポイントは温めない）。
             warm_one "${BASE}/api/range?store=${SLUG}&from=${JST_TODAY}&to=${JST_TOMORROW}&limit=240" "${SLUG}:range_today"
             warm_one "${BASE}/api/range?store=${SLUG}&from=${JST_YESTERDAY}&to=${JST_TODAY}&limit=1200" "${SLUG}:range_yesterday"
             warm_one "${BASE}/api/forecast_today?store=${SLUG}" "${SLUG}:forecast_today"
+            warm_one "${BASE}/api/forecast_snapshot?store=${SLUG}&date=${JST_YESTERDAY_COMPACT}" "${SLUG}:forecast_yesterday_snapshot"
             # Render ワーカーへのサンダリングハードを避けるための平準化。
             sleep 0.3
           done
 
-          echo "OK=${OK_COUNT} FAIL=${FAIL_COUNT} (対象 ${TOTAL_STORES}店舗 × 3本 = $((TOTAL_STORES * 3)) リクエスト)"
+          # 一覧ページ（/stores、フィルタ無し・12件/ページ）。順序は SLUGS と同じ
+          # （stores-list-client.tsx のデフォルト表示＝フィルタ無しはこの順のまま12件区切り）。
+          PAGE_SIZE=12
+          TOTAL_PAGES=$(( (TOTAL_STORES + PAGE_SIZE - 1) / PAGE_SIZE ))
+          for ((p = 0; p < TOTAL_PAGES; p++)); do
+            start=$((p * PAGE_SIZE))
+            PAGE_SLUGS=("${SLUGS[@]:$start:$PAGE_SIZE}")
+            CSV="$(IFS=,; echo "${PAGE_SLUGS[*]}")"
+            PAGE_LABEL="list_page$((p + 1))"
+            warm_one "${BASE}/api/range_multi?stores=${CSV}&limit=48" "${PAGE_LABEL}:range_multi"
+            warm_one "${BASE}/api/forecast_today_multi?stores=${CSV}" "${PAGE_LABEL}:forecast_today_multi"
+            warm_one "${BASE}/api/megribi_score?stores=${CSV}" "${PAGE_LABEL}:megribi_score"
+            sleep 0.3
+          done
+
+          # トップページ（home-client.tsx）: パラメータ無しの megribi_score（全店舗）＋
+          # localStorage 未設定の初回訪問者が引くフォールバック店舗（先頭店舗）の range。
+          warm_one "${BASE}/api/megribi_score" "top:megribi_score"
+          warm_one "${BASE}/api/range?store=${SLUGS[0]}&limit=48" "top:range_default_store"
+
+          TOTAL_REQUESTS=$((OK_COUNT + FAIL_COUNT))
+          echo "OK=${OK_COUNT} FAIL=${FAIL_COUNT} (合計 ${TOTAL_REQUESTS} リクエスト)"
           {
-            echo "## CDN warming 結果"
+            echo "## CDN warming 結果（バックアップ workflow）"
             echo "- 対象店舗数: ${TOTAL_STORES}"
-            echo "- 成功: ${OK_COUNT} / 失敗: ${FAIL_COUNT}"
-            if [ "${#FAILED_SLUGS[@]}" -gt 0 ]; then
-              echo "- 失敗内訳: ${FAILED_SLUGS[*]}"
+            echo "- 成功: ${OK_COUNT} / 失敗: ${FAIL_COUNT} / 合計: ${TOTAL_REQUESTS}"
+            if [ "${#FAILED_LABELS[@]}" -gt 0 ]; then
+              echo "- 失敗内訳（先頭50件）: ${FAILED_LABELS[*]:0:50}"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
           # 個別の失敗（一時的なコールドスタート等）はよくあるため許容するが、
           # 大半（半数超）が失敗した場合はバックエンド自体の障害を疑い、ジョブを失敗させて通知する。
-          THRESHOLD=$((TOTAL_STORES))  # 2本/店舗 × 店舗数 の半数 = TOTAL_STORES
+          THRESHOLD=$((TOTAL_REQUESTS / 2))
           if [ "$FAIL_COUNT" -gt "$THRESHOLD" ]; then
-            echo "::error::失敗が過半数（${FAIL_COUNT}/$((TOTAL_STORES * 2))）。バックエンド障害の可能性があります。"
+            echo "::error::失敗が過半数（${FAIL_COUNT}/${TOTAL_REQUESTS}）。バックエンド障害の可能性があります。"
             exit 1
           fi
 
