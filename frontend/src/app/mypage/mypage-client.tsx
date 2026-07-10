@@ -10,6 +10,7 @@ import {
   removeFavoriteStore,
 } from "@/lib/browser/meguribiStorage";
 import { getStoreMetaBySlug, isPercentCrowdBrand, seatFullnessPercent, type StoreMeta } from "@/app/config/stores";
+import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
 import {
   STORE_CARD_RANGE_LIMIT,
   STORE_CARD_SPARKLINE_POINTS,
@@ -286,7 +287,8 @@ export default function MyPageClient() {
                       </Link>
                       <p className="text-[11px] text-white/40">{card.meta.areaLabel}</p>
                     </div>
-                    <ScoreBadge score={card.megribiScore} />
+                    {/* 判定バッジは featureFlags.ts の理由により一旦非表示 */}
+                    {SHOW_MEGRIBI_JUDGMENTS && <ScoreBadge score={card.megribiScore} />}
                   </div>
 
                   {/* Realtime numbers（相席屋は人数非公開 → 席の埋まり具合% のみ） */}

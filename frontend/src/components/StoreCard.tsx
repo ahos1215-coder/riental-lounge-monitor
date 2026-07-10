@@ -9,6 +9,7 @@ import {
   seatFullnessPercent,
   type BrandId,
 } from "@/app/config/stores";
+import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
 
 type StoreCardProps = {
   slug: string;
@@ -273,7 +274,8 @@ function StoreCardImpl({
         <div>
           <div className="flex items-center gap-2">
             <p className="text-[11px] font-medium text-white/60">{brandLabel}</p>
-            <MegribiScoreBadge score={megribiScore} />
+            {/* 判定バッジは featureFlags.ts の理由により一旦非表示 */}
+            {SHOW_MEGRIBI_JUDGMENTS && <MegribiScoreBadge score={megribiScore} />}
           </div>
           <h2 className="mt-0.5 text-base font-semibold leading-tight">
             {label}
@@ -317,7 +319,8 @@ function StoreCardImpl({
               <span className="font-semibold text-white">{gender}</span>
             </div>
           )}
-          {(forecastPending || hasCrowd) && (
+          {/* 混雑・狙い目の判定チップは featureFlags.ts の理由により一旦非表示 */}
+          {SHOW_MEGRIBI_JUDGMENTS && (forecastPending || hasCrowd) && (
             <div className="flex items-center gap-1">
               <span className="text-white/50">混雑</span>
               {forecastPending ? (
@@ -331,7 +334,7 @@ function StoreCardImpl({
               )}
             </div>
           )}
-          {hasStats && (forecastPending || hasRecommend) && (
+          {SHOW_MEGRIBI_JUDGMENTS && hasStats && (forecastPending || hasRecommend) && (
             <div className="flex items-center gap-1 text-right">
               <span className="text-white/50">狙い目</span>
               {forecastPending ? (

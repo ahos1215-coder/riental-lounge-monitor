@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
+import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
 import {
   STORES,
   STORE_REGION_FILTER_ORDER,
@@ -410,7 +411,10 @@ export default function CompareClient() {
                           <p className="text-lg font-bold">{data.label}</p>
                           <p className="text-[11px] text-white/40">{data.areaLabel}</p>
                         </div>
-                        <span className={`text-sm font-bold ${sc.className}`}>{sc.text}</span>
+                        {/* 判定ラベルは featureFlags.ts の理由により一旦非表示 */}
+                        {SHOW_MEGRIBI_JUDGMENTS && (
+                          <span className={`text-sm font-bold ${sc.className}`}>{sc.text}</span>
+                        )}
                       </div>
                       {isPercentCrowdBrand(data.brand) && data.capacity ? (
                         // 相席屋は在店人数非公開 → 席の埋まり具合(%) のみ（人数は出さない）

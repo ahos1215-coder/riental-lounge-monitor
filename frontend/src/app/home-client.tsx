@@ -13,6 +13,7 @@ import {
   type StoreMeta,
 } from "./config/stores";
 import { LAST_STORE_KEY } from "@/lib/browser/meguribiStorage";
+import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
 import {
   STORE_CARD_RANGE_LIMIT,
   STORE_CARD_SPARKLINE_POINTS,
@@ -463,7 +464,9 @@ export default function HomePage({
             </div>
           </FadeIn>
 
-          {/* 今夜のおすすめ TOP 5 */}
+          {/* 今夜のおすすめ TOP 5 — めぐりびスコア順位が実態と不一致のため一旦非表示
+              （featureFlags.ts SHOW_MEGRIBI_JUDGMENTS の doc 参照） */}
+          {SHOW_MEGRIBI_JUDGMENTS && (
           <FadeIn delay={0.2} className="scroll-mt-24 space-y-3">
             <div className="flex items-end justify-between gap-3">
               <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
@@ -521,6 +524,7 @@ export default function HomePage({
               </div>
             )}
           </FadeIn>
+          )}
 
           <FadeIn delay={0.15} id="store-directory" className="scroll-mt-24 space-y-3">
             <h2 className="flex items-center gap-2 text-sm font-semibold text-slate-100">
