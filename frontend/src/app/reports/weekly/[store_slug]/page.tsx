@@ -126,6 +126,10 @@ export default async function WeeklyReportStorePage({ params }: Props) {
   const rawDaily = Array.isArray(ij.daily_summary) ? ij.daily_summary : [];
   const dailySummary: DailySummaryEntry[] = rawDaily
     .filter((d): d is Record<string, unknown> => Boolean(d && typeof d === "object"))
+    // fix #12: 観測数が少ない夜 (low_sample) は WeeklySummary の「一番賑わった夜」断定から
+    // 外すため除外する。生成側 (generate_weekly_insights.py) が WEEKLY_MIN_NIGHT_SAMPLES 未満の
+    // 夜に low_sample=true を付与する。フラグの無い旧データは従来どおり表示する。
+    .filter((d) => d.low_sample !== true)
     .map((d) => ({
       date: typeof d.date === "string" ? d.date : "",
       day_label_ja: typeof d.day_label_ja === "string" ? d.day_label_ja : "",

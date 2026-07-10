@@ -315,6 +315,61 @@ def _store_id_for_slug(slug: str) -> str:
     return fallback
 
 
+def _load_store_active_map() -> dict[str, bool]:
+    """stores.json の任意フィールド `active` を slug -> bool で読み込む (fix #5)。
+
+    明示的に `active=false` の店舗は週報生成を止めるための「手動オーバーライド」。
+    フィールドが無い店舗は既定で有効 (map に載らない = None 扱い)。fix #5 の第一義は
+    データ駆動の鮮度チェック (収集が再開すれば自動回復する) で、この active フラグは
+    それを上書きする明示スイッチという位置づけ。stores.json が壊れていても週報全体を
+    止めないよう、失敗時は空 dict を返す (= 全店 active 扱い)。
+    """
+    mapping: dict[str, bool] = {}
+    if not STORES_JSON_PATH.exists():
+        return mapping
+    try:
+        data = json.loads(STORES_JSON_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:  # noqa: BLE001
+        print(f"[weekly-insights] failed to load stores.json for active map: {exc}", file=sys.stderr)
+        return mapping
+    for row in data:
+        slug = row.get("slug")
+        active = row.get("active")
+        if slug and isinstance(active, bool):
+            mapping[slug] = active
+    return mapping
+
+
+def _weekly_skip_reason(
+    *,
+    store: str,
+    active_map: dict[str, bool],
+    period_end: datetime | None,
+    now: datetime,
+    stale_days: int,
+) -> str | None:
+    """この店舗の週報生成をスキップすべき理由を返す。生成してよければ None (fix #5)。
+
+    1) stores.json で `active=false` に設定されている (明示オーバーライド)
+    2) 最新データ (period_end) が取得できない
+    3) 最新データが `stale_days` 日より古い (収集停止店の陳腐化データ焼き直し防止)
+
+    (2)(3) はデータ駆動で自己回復する: 収集が再開して新しいデータが入れば、次回以降は
+    自動的に生成が再開される。
+    """
+    if active_map.get(store) is False:
+        return "stores.json で active=false に設定されています (手動オーバーライド)"
+    if period_end is None:
+        return "タイムスタンプ付きデータが取得できませんでした (/api/range が空)"
+    age_days = (now - period_end).total_seconds() / 86400.0
+    if age_days > stale_days:
+        return (
+            f"最新データが {age_days:.1f} 日前で古すぎます "
+            f"(> WEEKLY_STALE_DAYS={stale_days}); 最新={_iso(period_end)}"
+        )
+    return None
+
+
 def _env_float(name: str, default: float) -> float:
     raw = os.environ.get(name)
     if raw is None or raw.strip() == "":
@@ -525,6 +580,30 @@ DAY_LABELS_JA = ["月", "火", "水", "木", "金", "土", "日"]
 # 相席ラウンジの営業時間 (JST 19:00-04:59)。配列順は時系列。
 HEATMAP_HOURS = [19, 20, 21, 22, 23, 0, 1, 2, 3, 4]
 
+# 夜セッションを跨ぐ間隙 (04:59→翌19:00 の ~14h) を「賑わい窓」の途切れとして扱う閾値。
+# 直近7夜へ切り詰めた points は日中サンプルを含まないため、隣接する夜が地続きに
+# 見えてしまう。観測間隔 (概ね 5-15 分) を大きく超える間隙で窓を分割する (fix #2)。
+DEFAULT_BUSY_MAX_GAP_MINUTES = 30
+
+# 週報バッチが「収集停止済み店舗」の 2ヶ月前データを毎週「今日更新」で焼き直すのを防ぐ
+# 鮮度上限 (fix #5)。最新データがこの日数より古ければその店舗はスキップする。env override。
+DEFAULT_WEEKLY_STALE_DAYS = 10
+
+# 1 夜あたりの最小観測数 (fix #12)。これ未満の夜は low_sample フラグを立て、
+# フロントの「一番賑わった夜」の断定 (WeeklySummary の busiest) から除外できるようにする。
+# 健全な夜は概ね ~120 件 (10 時間 × 5 分間隔)。その ~20% (=24) を下限の目安とする。env override。
+DEFAULT_WEEKLY_MIN_NIGHT_SAMPLES = 24
+
+
+def _night_date(ts_jst: datetime) -> Any:
+    """JST タイムスタンプが属する「夜」の日付 (date) を返す。
+
+    夜のセッションは 19:00 開始〜翌 04:59 終了。0-4 時のデータは前日の夜として扱う
+    (例: 日曜 00:00 は土曜の夜)。HEATMAP_HOURS 外 (日中 5-18 時) の点をどう扱うかは
+    呼び出し側の責務 (通常は事前に HEATMAP_HOURS でフィルタしてから渡す)。
+    """
+    return (ts_jst - timedelta(days=1)).date() if ts_jst.hour < 5 else ts_jst.date()
+
 
 def _build_day_hour_heatmap(points: list[dict[str, Any]]) -> dict[str, Any]:
     """曜日 × 時間帯の平均混雑度ヒートマップを構築する。
@@ -544,10 +623,7 @@ def _build_day_hour_heatmap(points: list[dict[str, Any]]) -> dict[str, Any]:
         if hour not in HEATMAP_HOURS:
             continue
         # 0-4 時は前日の「夜」として曜日を 1 日戻す
-        if hour < 5:
-            day = (ts_jst - timedelta(days=1)).weekday()
-        else:
-            day = ts_jst.weekday()
+        day = _night_date(ts_jst).weekday()
         occ = float(p.get("occupancy_rate") or 0.0)
         fr = float(p.get("female_ratio") or 0.0)
         bucket.setdefault((day, hour), []).append((occ, fr))
@@ -588,7 +664,56 @@ def _build_day_hour_heatmap(points: list[dict[str, Any]]) -> dict[str, Any]:
 WEEKLY_DAILY_SUMMARY_MAX_NIGHTS = 7
 
 
-def _build_daily_summary(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _truncate_points_to_recent_nights(
+    points: list[dict[str, Any]],
+    max_nights: int = WEEKLY_DAILY_SUMMARY_MAX_NIGHTS,
+) -> list[dict[str, Any]]:
+    """全 consumer が同一の「直近 N 夜」を見るよう、points を上流で 1 度だけ切り詰める (fix #6)。
+
+    フェッチ元 API の `--limit` は 8〜10 夜分を返し得るが、レポートは「直近7夜」を謳う。
+    従来は daily_summary だけが内部で 7 夜に切り詰め、ヒートマップ / 狙い目TOP3 /
+    AIコメンタリー入力は切り詰め前の全夜を使っていたため、
+      - ヒートマップの sample_count が daily_summary より多い (同一曜日に 8 夜目が二重計上。
+        実例 ebisu 2026-07-07: 火曜セルが 24 件 = 2 夜分)
+      - 「集計期間=直近7夜」と実データがずれる
+      - AI の数値グラウンディングゲートは 7 夜を真値としているのにヒートマップは 8 夜を見る
+    という不整合が生じていた。ここで points 自体を直近 N 夜へ揃え、全 consumer を一致させる。
+
+    夜セッション (HEATMAP_HOURS, 19:00〜翌04:59) に属する点のみを対象とし、日中 (5-18 時)
+    の点は夜レポートの母集団ではないため落とす。結果として heatmap の総 sample_count と
+    daily_summary の総 sample_count は一致する。
+    """
+    nights: set[Any] = set()
+    for p in points:
+        ts = p.get("timestamp")
+        if not isinstance(ts, datetime):
+            continue
+        ts_jst = ts.astimezone(JST_OFFSET)
+        if ts_jst.hour not in HEATMAP_HOURS:
+            continue
+        nights.add(_night_date(ts_jst))
+    if not nights:
+        return []
+    kept = set(sorted(nights)[-max_nights:])
+
+    out: list[dict[str, Any]] = []
+    for p in points:
+        ts = p.get("timestamp")
+        if not isinstance(ts, datetime):
+            continue
+        ts_jst = ts.astimezone(JST_OFFSET)
+        if ts_jst.hour not in HEATMAP_HOURS:
+            continue
+        if _night_date(ts_jst) in kept:
+            out.append(p)
+    return out
+
+
+def _build_daily_summary(
+    points: list[dict[str, Any]],
+    *,
+    min_night_samples: int = DEFAULT_WEEKLY_MIN_NIGHT_SAMPLES,
+) -> list[dict[str, Any]]:
     """直近 7 夜の日別サマリ。各「夜」は 19:00 〜 翌 04:59 を 1 日として集計。
 
     フロントの「先週はこんな感じだった」セクション用。
@@ -597,6 +722,12 @@ def _build_daily_summary(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
     夜が含まれ得る (実例: fukuoka 2026-07-03 で 9 夜分が混入していた)。
     ここで直近 (日付が新しい方から) WEEKLY_DAILY_SUMMARY_MAX_NIGHTS 夜だけを
     残すことで、docstring/フロント表記の「先週7夜」を実態と一致させる。
+
+    fix #12: 観測数が `min_night_samples` 未満の夜は `low_sample=True` を立てる。
+    ヒートマップは sample_count>=2 のセルだけを狙い目/AI入力に使うのに、日別サマリには
+    足切りが無く、観測の薄い夜 (実例: kokura 07-01=6件, utsunomiya 07-06=17件) を
+    「一番賑わった夜」と同じ確信度で断定し得た。フラグを持たせ、フロント側で
+    busiest 判定から外せるようにする (夜自体は集計/カウント整合のため残す)。
     """
     by_night: dict[Any, list[dict[str, float]]] = {}
     for p in points:
@@ -604,11 +735,9 @@ def _build_daily_summary(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if not isinstance(ts, datetime):
             continue
         ts_jst = ts.astimezone(JST_OFFSET)
-        hour = ts_jst.hour
-        if hour not in HEATMAP_HOURS:
+        if ts_jst.hour not in HEATMAP_HOURS:
             continue
-        # 0-4 時は前日の夜
-        night_date = (ts_jst - timedelta(days=1)).date() if hour < 5 else ts_jst.date()
+        night_date = _night_date(ts_jst)
         occ = float(p.get("occupancy_rate") or 0.0)
         fr = float(p.get("female_ratio") or 0.0)
         by_night.setdefault(night_date, []).append({"occ": occ, "fr": fr})
@@ -632,9 +761,76 @@ def _build_daily_summary(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "peak_occupancy": round(peak_occ, 4),
                 "avg_female_ratio": round(avg_fr, 4),
                 "sample_count": len(rows),
+                # fix #12: 観測が薄い夜は「一番賑わった夜」の断定から除外させるためのフラグ
+                "low_sample": len(rows) < int(min_night_samples),
             }
         )
     return out
+
+
+def _build_busy_windows(
+    points: list[dict[str, Any]],
+    occupancy_threshold: float,
+    min_duration_minutes: int,
+    max_gap_minutes: float = DEFAULT_BUSY_MAX_GAP_MINUTES,
+) -> list[dict[str, Any]]:
+    """「賑わいやすい時間帯」を素の混雑度 (occupancy_rate) だけで検出する (fix #2)。
+
+    従来は megribi_score (女性比重み付き × ideal=0.7 で頭打ちの合成スコア) で窓を
+    選んでいたため、満席 (occ≈1.0) の時間帯は occ_score が 0 に落ちて脱落し、逆に
+    ideal 付近 (occ≈0.7) かつ女性比の高い「日中の空いた時間」が上位に来る自己矛盾が
+    起きていた (実例: ebisu 2026-07-07 は土 22:00-01:00 が満席なのに賑わい窓は 11:00 台の
+    日中窓だった)。同じページの狙い目TOP3 は素の occupancy を使っており正しかったため、
+    賑わい窓も素の occupancy に統一し、両セクションが矛盾しないようにする。
+
+    occupancy_rate が occupancy_threshold 以上の点が連続する区間を 1 窓とし、観測間隔を
+    大きく超える間隙 (max_gap_minutes) では窓を分割する (直近7夜へ切り詰めた points は
+    日中サンプルを含まず、夜を跨いで地続きに見えるのを防ぐ)。avg_score には平均 occupancy を
+    格納する (フロントの scoreLabel 閾値 0.6/0.45 とも意味的に整合する)。
+    """
+    scored: list[tuple[datetime, float]] = []
+    for p in points:
+        ts = p.get("timestamp")
+        if not isinstance(ts, datetime):
+            continue
+        occ = float(p.get("occupancy_rate") or 0.0)
+        scored.append((ts, occ))
+    scored.sort(key=lambda item: item[0])
+
+    windows: list[dict[str, Any]] = []
+    segment: list[tuple[datetime, float]] = []
+    threshold = float(occupancy_threshold)
+
+    def flush_segment() -> None:
+        if not segment:
+            return
+        start_dt = segment[0][0]
+        end_dt = segment[-1][0]
+        duration_minutes = (end_dt - start_dt).total_seconds() / 60.0
+        if duration_minutes >= float(min_duration_minutes):
+            avg_occ = sum(o for _, o in segment) / len(segment)
+            windows.append(
+                {
+                    "start": start_dt,
+                    "end": end_dt,
+                    "duration_minutes": duration_minutes,
+                    "avg_score": avg_occ,
+                }
+            )
+        segment.clear()
+
+    prev_dt: datetime | None = None
+    for dt, occ in scored:
+        if occ >= threshold:
+            if prev_dt is not None and (dt - prev_dt).total_seconds() / 60.0 > float(max_gap_minutes):
+                flush_segment()
+            segment.append((dt, occ))
+            prev_dt = dt
+        else:
+            flush_segment()
+            prev_dt = None
+    flush_segment()
+    return windows
 
 
 def _derive_next_week_recommendations(heatmap: dict[str, Any], top_n: int = 3) -> list[dict[str, Any]]:
@@ -1077,6 +1273,9 @@ def _extract_commentary_via_regex(raw: str) -> dict[str, str] | None:
 
 
 def _call_find_good_windows(points: list[dict[str, Any]], **kwargs: Any) -> list[dict[str, Any]]:
+    # fix #2 以降、週報の「賑わいやすい時間帯」はこの合成スコア窓ではなく素の occupancy を
+    # 使う _build_busy_windows に置き換わった。このヘルパー/ megribi_score import は将来の
+    # 参照・比較用に残しているが、現在レポート生成パイプラインからは呼ばれていない。
     sig = inspect.signature(find_good_windows)
     accepts_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
     if accepts_var_kw:
@@ -1124,6 +1323,12 @@ def main() -> int:
     timeout_seconds = max(1, _env_int("INSIGHTS_HTTP_TIMEOUT_SECONDS", DEFAULT_HTTP_TIMEOUT_SECONDS))
     retries = max(1, _env_int("INSIGHTS_HTTP_RETRIES", DEFAULT_HTTP_RETRIES))
     sync_to_supabase = _env_bool("INSIGHTS_SYNC_SUPABASE", False)
+    # fix #5: 収集停止店の陳腐化データ焼き直し防止。最新データがこの日数より古ければスキップ。
+    stale_days = max(1, _env_int("WEEKLY_STALE_DAYS", DEFAULT_WEEKLY_STALE_DAYS))
+    # fix #12: 1 夜あたり観測数の下限。これ未満の夜は daily_summary で low_sample フラグ付き。
+    min_night_samples = max(1, _env_int("WEEKLY_MIN_NIGHT_SAMPLES", DEFAULT_WEEKLY_MIN_NIGHT_SAMPLES))
+    # fix #5: 明示オーバーライド用の active フラグ (stores.json)。既定は全店 active。
+    active_map = _load_store_active_map()
 
     base_url = (
         os.environ.get("MEGRIBI_BASE_URL")
@@ -1151,6 +1356,15 @@ def main() -> int:
     generated_at = _iso(now)
 
     for store in stores:
+        # fix #5: 明示オーバーライド (active=false) は HTTP フェッチ前に弾く。
+        if active_map.get(store) is False:
+            print(
+                f"[weekly-insights] SKIP store={store}: stores.json で active=false "
+                f"(手動オーバーライド)",
+                file=sys.stderr,
+            )
+            continue
+
         rows = _load_rows(
             base_url,
             store,
@@ -1163,18 +1377,33 @@ def main() -> int:
         period_start = min(timestamps) if timestamps else None
         period_end = max(timestamps) if timestamps else None
 
+        # fix #5: 鮮度チェック。収集停止店 (最新データが stale_days 日より古い) は生成/公開
+        # しない。これが無いと sapporo_ag のような停止店が毎週「今日更新」で 2ヶ月前データを
+        # 焼き直し、AI が同じ古いデータに毎回新しいコメンタリーを書いてしまう
+        # (実例 2026-07-07: 最新 2026-05-11 のデータを generated_at=2026-07-07 で再生成)。
+        skip_reason = _weekly_skip_reason(
+            store=store,
+            active_map=active_map,
+            period_end=period_end,
+            now=now,
+            stale_days=stale_days,
+        )
+        if skip_reason is not None:
+            print(f"[weekly-insights] SKIP store={store}: {skip_reason}", file=sys.stderr)
+            continue
+
         totals = _collect_totals(rows)
         baseline = _percentile(totals, 95.0) if totals else 0.0
         baseline = baseline if baseline > 0 else 0.0
 
-        points = _build_points(rows, baseline)
-        windows = _call_find_good_windows(
-            points,
-            score_threshold=threshold,
-            min_duration_minutes=min_duration_minutes,
-            ideal=ideal,
-            gender_weight=gender_weight,
-        )
+        # fix #6: 全 consumer が同一の「直近7夜」を見るよう、points を上流で 1 度だけ切り詰める。
+        # これ以降の heatmap / daily_summary / 賑わい窓 / 狙い目TOP3 / AI入力 / points_used は
+        # すべてこの truncated points から作られ、集計期間・件数が完全に一致する。
+        points = _truncate_points_to_recent_nights(_build_points(rows, baseline))
+
+        # fix #2: 「賑わいやすい時間帯」は女性比重み付きの合成スコアではなく素の occupancy で
+        # ランク付けする (狙い目TOP3 と同じ指標)。満席時間帯が脱落する自己矛盾を解消。
+        windows = _build_busy_windows(points, threshold, min_duration_minutes)
         serialized_windows = _serialize_windows(windows)
         top_windows = sorted(
             serialized_windows,
@@ -1182,9 +1411,9 @@ def main() -> int:
             reverse=True,
         )[:3]
 
-        # v2: Phase A/B/D の追加データを構築
+        # v2: Phase A/B/D の追加データを構築 (すべて truncated points 基準)
         heatmap = _build_day_hour_heatmap(points)
-        daily_summary = _build_daily_summary(points)
+        daily_summary = _build_daily_summary(points, min_night_samples=min_night_samples)
         next_week_recs = _derive_next_week_recommendations(heatmap)
 
         # _build_daily_summary は直近 WEEKLY_DAILY_SUMMARY_MAX_NIGHTS 夜だけに切り詰める
