@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from typing import Tuple
 
+# --- フォールバック専用（private） ---------------------------------------
+# 単一ソースは frontend/src/data/stores.json。STORE_IDS / AISEKIYA_STORE_IDS は
+# 本来これらを直接書かずに stores.json から導出する（下の
+# _load_store_ids_from_stores_json を参照）。ここに残すハードコードは
+# stores.json が読めない/壊れている場合の安全網としてのみ使う
+# （Render は stores.json が万一欠けても起動できなければならない）。
+#
 # Known Supabase store_ids (38 stores). Kept minimal (id/slug) to avoid duplicating store metadata.
-STORE_IDS = [
+_FALLBACK_STORE_IDS = [
     "ol_nagasaki",
     "ol_fukuoka",
     "ol_kokura",
@@ -44,16 +51,45 @@ STORE_IDS = [
     "ol_hiroshima_ag",
 ]
 
-# 相席屋 (aisekiya) の Supabase store_id (6店)。ログは src_brand=aisekiya で保存され、
+# 相席屋 (aisekiya) の Supabase store_id (5店)。ログは src_brand=aisekiya で保存され、
 # フロントの slug は store_id とそのまま同じ ("ay_*")。オリエンタルと違い "ol_" 接頭辞を
 # 剥がした短縮 slug は使わない（ay_ueno と ol_ueno の衝突を避けるため）。
-AISEKIYA_STORE_IDS = [
+_FALLBACK_AISEKIYA_STORE_IDS = [
     "ay_shibuya",
     "ay_ikebukuro",
     "ay_ueno",
     "ay_chiba",
     "ay_yokohama",
 ]
+
+
+# stores.json から STORE_IDS / AISEKIYA_STORE_IDS を導出する。stores.json の並び順を
+# そのまま保持する（build_templates.py の ALL_STORE_IDS 走査や forecast.py の
+# `slugs[:MAX_MULTI_STORES]` 切り詰めなど、下流が反復順に依存しているため）。
+# 読み込み失敗・JSON 不正・どちらか一方でも空になった場合は上の _FALLBACK_* にフォールバック
+# する（新規追加漏れで static list が古いままでも、少なくとも起動時に落ちたり
+# 空リストで全店解決不能になったりしない）。
+def _load_store_ids_from_stores_json() -> Tuple[list[str], list[str]]:
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[2] / "frontend" / "src" / "data" / "stores.json"
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+        oriental_ids = [
+            s["store_id"] for s in rows if s.get("brand") == "oriental" and s.get("store_id")
+        ]
+        aisekiya_ids = [
+            s["store_id"] for s in rows if s.get("brand") == "aisekiya" and s.get("store_id")
+        ]
+        if not oriental_ids or not aisekiya_ids:
+            raise ValueError("stores.json produced an empty oriental/aisekiya store_id list")
+        return oriental_ids, aisekiya_ids
+    except Exception:
+        return list(_FALLBACK_STORE_IDS), list(_FALLBACK_AISEKIYA_STORE_IDS)
+
+
+STORE_IDS, AISEKIYA_STORE_IDS = _load_store_ids_from_stores_json()
 
 # ブランド横断の全 store_id。store 解決はこれを正とする。
 ALL_STORE_IDS = STORE_IDS + AISEKIYA_STORE_IDS
