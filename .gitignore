@@ -62,6 +62,10 @@ artifacts/
 data/ml_models/
 supabase/.temp/
 
+# Local runtime data (continuously written by the local collector; not fixtures)
+data/data.json
+data/log.jsonl
+
 # Open-Meteo weather cache (multi_collect.py)
 .cache/
 
