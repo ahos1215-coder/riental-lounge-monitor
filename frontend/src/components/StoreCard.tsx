@@ -9,8 +9,10 @@ import {
   seatFullnessPercent,
   type BrandId,
 } from "@/app/config/stores";
-import { segmentIndicesByTimeGaps } from "@/lib/storeCardRangeSparkline";
 import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
+import { SimpleLineChart } from "@/components/store-card/SimpleLineChart";
+import { GenderTrendMiniChart } from "@/components/store-card/GenderTrendMiniChart";
+import { MegribiScoreBadge } from "@/components/store-card/MegribiScoreBadge";
 
 type StoreCardProps = {
   slug: string;
@@ -46,161 +48,6 @@ type StoreCardProps = {
   /** めぐりびスコア 0.0〜1.0。≥0.65 → 緑 狙い目 / ≥0.40 → 黄 様子見 / <0.40 → 赤 他店へ */
   megribiScore?: number | null;
 };
-
-function SimpleLineChart({ points, times }: { points?: number[]; times?: number[] }) {
-  const usingReal = Boolean(points && points.length >= 2);
-  const normalized = usingReal ? points! : [50, 44, 52, 40, 46, 36, 44, 34, 40, 32];
-  const max = Math.max(...normalized);
-  const min = Math.min(...normalized);
-  const span = Math.max(1, max - min);
-  const step = 180 / Math.max(1, normalized.length - 1);
-  const toX = (i: number) => Math.round(i * step);
-  const toY = (v: number) => Math.round(60 - ((v - min) / span) * 30);
-  // 実データで times が揃っているときだけ、閉店ギャップで折れ線を分割する。
-  const segments =
-    usingReal && times && times.length === normalized.length
-      ? segmentIndicesByTimeGaps(times)
-      : [normalized.map((_, i) => i)];
-
-  return (
-    <svg
-      viewBox="0 0 180 72"
-      className="h-20 w-full text-indigo-400/80"
-      aria-hidden="true"
-    >
-      {segments.map((seg, si) =>
-        seg.length >= 2 ? (
-          <polyline
-            key={si}
-            points={seg.map((i) => `${toX(i)},${toY(normalized[i])}`).join(" ")}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        ) : (
-          // ギャップ直後に1点だけ残るセグメント（例: 開店直後の最初の実測）は点で示す
-          <circle
-            key={si}
-            cx={toX(seg[0])}
-            cy={toY(normalized[seg[0]])}
-            r={1.6}
-            fill="currentColor"
-          />
-        ),
-      )}
-    </svg>
-  );
-}
-
-/** 男女を同じYスケールで重ねる（カード内ミニチャート・/api/range 実測のみ） */
-function GenderTrendMiniChart({
-  men,
-  women,
-  times,
-}: {
-  men: number[];
-  women: number[];
-  times?: number[];
-}) {
-  const all = [...men, ...women];
-  const max = Math.max(...all, 1);
-  const min = Math.min(...all);
-  const span = Math.max(1, max - min);
-  const width = 180;
-  const n = men.length;
-  const step = width / Math.max(1, n - 1);
-  const toX = (i: number) => Math.round(i * step);
-  const toY = (v: number) => Math.round(44 - ((v - min) / span) * 28);
-  // 閉店をまたぐ大きな時間ギャップがあれば、そこで折れ線を分割する（偽の急上昇を防ぐ）。
-  const segments =
-    times && times.length === n
-      ? segmentIndicesByTimeGaps(times)
-      : [men.map((_, i) => i)];
-
-  const renderSeries = (
-    values: number[],
-    strokeClass: string,
-    fillClass: string,
-    keyPrefix: string,
-  ) =>
-    segments.map((seg, si) =>
-      seg.length >= 2 ? (
-        <polyline
-          key={`${keyPrefix}-${si}`}
-          points={seg.map((i) => `${toX(i)},${toY(values[i])}`).join(" ")}
-          fill="none"
-          className={strokeClass}
-          strokeWidth={2}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      ) : (
-        <circle
-          key={`${keyPrefix}-${si}`}
-          cx={toX(seg[0])}
-          cy={toY(values[seg[0]])}
-          r={1.6}
-          className={fillClass}
-        />
-      ),
-    );
-
-  return (
-    <div className="flex w-full flex-col gap-0.5">
-      <svg
-        viewBox="0 0 180 56"
-        className="h-10 w-full shrink-0"
-        role="img"
-        aria-label="直近の男性・女性人数の推移（実測）"
-      >
-        <line
-          x1="0"
-          y1="50"
-          x2="180"
-          y2="50"
-          className="stroke-white/[0.08]"
-          strokeWidth={1}
-        />
-        {renderSeries(men, "stroke-cyan-300/90", "fill-cyan-300/90", "m")}
-        {renderSeries(women, "stroke-pink-300/90", "fill-pink-300/90", "w")}
-      </svg>
-      <div className="flex justify-center gap-3 text-[9px] leading-none text-white/40">
-        <span className="flex items-center gap-1">
-          <span className="h-0.5 w-2.5 rounded-full bg-cyan-300/90" aria-hidden />
-          男性
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="h-0.5 w-2.5 rounded-full bg-pink-300/90" aria-hidden />
-          女性
-        </span>
-        <span className="text-white/30">実測・直近</span>
-      </div>
-    </div>
-  );
-}
-
-function MegribiScoreBadge({ score }: { score: number | null | undefined }) {
-  if (score == null) return null;
-  if (score >= 0.65)
-    return (
-      <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-bold text-emerald-300 ring-1 ring-emerald-500/40">
-        ● 狙い目
-      </span>
-    );
-  if (score >= 0.40)
-    return (
-      <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-bold text-amber-300 ring-1 ring-amber-500/40">
-        ● 様子見
-      </span>
-    );
-  return (
-    <span className="rounded-full bg-rose-500/20 px-2 py-0.5 text-[10px] font-bold text-rose-300 ring-1 ring-rose-500/40">
-      ● 他店へ
-    </span>
-  );
-}
 
 /**
  * コールド店舗では forecast_today_multi が 7〜22秒かかることがあり、その間チップは

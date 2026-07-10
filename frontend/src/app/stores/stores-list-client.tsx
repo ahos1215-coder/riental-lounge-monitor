@@ -6,7 +6,6 @@ import { StoreCard } from "@/components/StoreCard";
 import {
   BRAND_DISPLAY_LABEL,
   STORES,
-  STORE_REGION_BUTTON_LABEL,
   STORE_REGION_FILTER_ORDER,
   buildStoreFullName,
   type StoreMeta,
@@ -19,9 +18,17 @@ import {
   parseRangeResponse,
   pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
+import {
+  STORES_PER_PAGE,
+  crowdLabelFromPred,
+  toHmJst,
+  type BrandFilter,
+  type ForecastPoint,
+} from "./storesListHelpers";
+import { StoresFilterBar } from "./StoresFilterBar";
+import { StoresPagination } from "./StoresPagination";
+import { StoresStatsFooter } from "./StoresStatsFooter";
 
-type BrandFilter = "all" | "oriental" | "jis" | "aisekiya";
-type ForecastPoint = { ts: string; total_pred?: number };
 /** page.tsx（サーバー snapshot）とクライアント側 fetch の両方で使う共通シェイプ。 */
 export type StoreRealtimeCard = {
   slug: string;
@@ -44,15 +51,6 @@ export type StoreRealtimeCard = {
   forecastPending?: boolean;
   megribiScore?: number | null;
 };
-
-const BRAND_TABS: { id: BrandFilter; label: string }[] = [
-  { id: "all", label: "すべて" },
-  { id: "oriental", label: "ORIENTAL LOUNGE" },
-  { id: "jis", label: "JIS" },
-  { id: "aisekiya", label: "相席屋" },
-];
-
-const STORES_PER_PAGE = 12;
 
 export type StoresListClientProps = {
   /**
@@ -180,20 +178,6 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
     }
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, [currentPage]);
-
-  const toHmJst = (iso: string): string =>
-    new Intl.DateTimeFormat("ja-JP", {
-      timeZone: "Asia/Tokyo",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    }).format(new Date(iso));
-
-  const crowdLabelFromPred = (maxPred: number): string => {
-    if (maxPred >= 120) return "混雑";
-    if (maxPred >= 80) return "ほどよい";
-    return "空いている";
-  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -503,92 +487,15 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
             </p>
           </section>
 
-          <section>
-            <div className="rounded-xl border border-white/10 bg-black/50 p-4">
-              <div className="flex flex-wrap items-center gap-3">
-                <div className="flex min-w-[220px] flex-1 items-center rounded-full border border-slate-700 bg-slate-950 px-3 py-1.5 text-xs text-slate-200">
-                  <span className="mr-2 text-[13px] text-slate-400">🔍</span>
-                  <input
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    placeholder="店舗名・エリアで検索（例：渋谷、福岡）"
-                    className="flex-1 bg-transparent text-xs outline-none placeholder:text-slate-500"
-                  />
-                </div>
-
-                <div className="flex flex-wrap items-center gap-1">
-                  {BRAND_TABS.map((tab) => (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => {
-                        setBrandFilter(tab.id);
-                        replaceQueryParams((p) => {
-                          p.delete("page");
-                        });
-                      }}
-                      className={[
-                        "rounded-full px-3 py-1 text-[11px] font-medium transition",
-                        brandFilter === tab.id
-                          ? "bg-slate-100 text-slate-900"
-                          : "bg-slate-900/60 text-slate-300 hover:bg-slate-800",
-                      ].join(" ")}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-                <div className="mt-3 w-full border-t border-white/10 pt-3">
-                  <p className="mb-2 text-[11px] font-medium text-white/45">
-                    地域で絞り込み
-                  </p>
-                  <div
-                    className="flex flex-wrap gap-1.5"
-                    role="group"
-                    aria-label="地域で絞り込み"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        replaceQueryParams((p) => {
-                          p.delete("region");
-                          p.delete("page");
-                        });
-                      }}
-                      className={[
-                        "rounded-full px-3 py-1 text-[11px] font-medium transition",
-                        regionFilter === null
-                          ? "bg-indigo-500/90 text-white"
-                          : "bg-slate-900/60 text-slate-300 hover:bg-slate-800",
-                      ].join(" ")}
-                    >
-                      すべて
-                    </button>
-                    {regionTabIds.map((rid) => (
-                      <button
-                        key={rid}
-                        type="button"
-                        onClick={() => {
-                          replaceQueryParams((p) => {
-                            p.set("region", rid);
-                            p.delete("page");
-                          });
-                        }}
-                        className={[
-                          "rounded-full px-3 py-1 text-[11px] font-medium transition",
-                          regionFilter === rid
-                            ? "bg-indigo-500/90 text-white"
-                            : "bg-slate-900/60 text-slate-300 hover:bg-slate-800",
-                        ].join(" ")}
-                      >
-                        {STORE_REGION_BUTTON_LABEL[rid] ?? rid}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
+          <StoresFilterBar
+            query={query}
+            setQuery={setQuery}
+            brandFilter={brandFilter}
+            setBrandFilter={setBrandFilter}
+            replaceQueryParams={replaceQueryParams}
+            regionFilter={regionFilter}
+            regionTabIds={regionTabIds}
+          />
 
           <section className="space-y-3 py-4">
             {isComingSoonBrand ? (
@@ -627,74 +534,22 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
                   ))}
                 </div>
                 {pageCount > 1 ? (
-                  <nav
-                    className="mt-6 flex flex-wrap items-center justify-center gap-2 text-xs"
-                    aria-label="店舗一覧のページ送り"
-                  >
-                    <button
-                      type="button"
-                      disabled={currentPage <= 1}
-                      onClick={() => {
-                        const next = Math.max(1, currentPage - 1);
-                        replaceQueryParams((p) => {
-                          if (next <= 1) p.delete("page");
-                          else p.set("page", String(next));
-                        });
-                      }}
-                      className="rounded-full border border-slate-600 bg-slate-900/80 px-4 py-2 font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      前のページ
-                    </button>
-                    <span className="px-3 text-white/60">
-                      {currentPage} / {pageCount} ページ（全 {filteredStores.length} 店舗・1ページ {STORES_PER_PAGE} 店舗）
-                    </span>
-                    <button
-                      type="button"
-                      disabled={currentPage >= pageCount}
-                      onClick={() => {
-                        const next = Math.min(pageCount, currentPage + 1);
-                        replaceQueryParams((p) => {
-                          if (next <= 1) p.delete("page");
-                          else p.set("page", String(next));
-                        });
-                      }}
-                      className="rounded-full border border-slate-600 bg-slate-900/80 px-4 py-2 font-medium text-slate-200 transition hover:border-slate-500 hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      次のページ
-                    </button>
-                  </nav>
+                  <StoresPagination
+                    currentPage={currentPage}
+                    pageCount={pageCount}
+                    totalStores={filteredStores.length}
+                    replaceQueryParams={replaceQueryParams}
+                  />
                 ) : null}
               </>
             )}
           </section>
 
-          <section className="grid gap-3 pb-10 md:grid-cols-3">
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-3 text-xs">
-              <p className="text-[11px] text-slate-400">登録店舗数</p>
-              <p className="mt-1 text-2xl font-semibold text-slate-50">
-                {registeredCount}
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-3 text-xs">
-              <p className="text-[11px] text-slate-400">
-                カバーする大エリア数（region）
-              </p>
-              <p className="mt-1 text-2xl font-semibold text-slate-50">
-                {regionCount}
-              </p>
-              <p className="mt-1 text-[10px] text-slate-500">
-                営業中かどうかのリアルタイム表示は未連携です。
-              </p>
-            </div>
-            <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-3 text-xs">
-              <p className="text-[11px] text-slate-400">
-                掲載エリアの例（先頭3店）
-              </p>
-              <p className="mt-1 text-base font-semibold leading-snug text-slate-50">
-                {areaExamples}
-              </p>
-            </div>
-          </section>
+          <StoresStatsFooter
+            registeredCount={registeredCount}
+            regionCount={regionCount}
+            areaExamples={areaExamples}
+          />
         </div>
       </div>
     </div>
