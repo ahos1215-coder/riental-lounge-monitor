@@ -1,13 +1,18 @@
 # plan/ フォルダ案内（Cursor / AI 向け）
-Last updated: 2026-03-29
+Last updated: 2026-07-11（Batch B3: BLOG_CRON_GHA.md の位置づけ修正・CLAUDE.md 追加を反映）
 Target commit: (see git)
 
 **迷ったら最初にこのファイルを読む。** 各 `.md` の役割と読了順を固定する。
+
+> **リポジトリ全体の3分マップは `../CLAUDE.md`（リポジトリ直下）にある。** 本 `plan/` 配下は
+> その深掘り版（設計判断の経緯・契約の詳細・過去の Round 記録）。まず `CLAUDE.md` → 必要に応じて
+> 本ファイル経由で各 `plan/*.md` へ、という順で読むこと。
 
 ---
 
 ## AI / 人間向け・推奨読了順
 
+0. **`../CLAUDE.md`**（リポジトリ直下）— システム全体の3分マップ（最初に読む）
 1. **`README.md`**（本ファイル）— どのファイルを見るか
 2. **`CODEx_PROMPTS.md`** — 編集時のルール（API 契約・禁止事項）
 3. **`STATUS.md`** — **いま動いている機能**（事実の正）
@@ -43,7 +48,7 @@ Target commit: (see git)
 | `API_CURRENT.md` | `/api/current` の位置づけ・当面方針 |
 | `ARCHITECTURE.md` | アーキテクチャ |
 | `RUNBOOK.md` | 起動・運用・**GitHub Actions / 外部 cron**・トラブルシュート |
-| `BLOG_CRON_GHA.md` | 定時ブログの **GitHub Actions**（正本）・Secrets 一覧 |
+| `BLOG_CRON_GHA.md` | 定時ブログの **GitHub Actions 緊急時手順**（`workflow_dispatch`）・Secrets 一覧。**通常運用の正本ではない** — 通常運用（ローカル Ollama 主経路）の正本は `../docs/LOCAL_LLM_SETUP.md` |
 | `BLOG_CRON_ASYNC_FUTURE.md` | 定時ブログの **非同期化・キュー**（将来案メモ。未実装） |
 | （リポジトリ直下）`../STATUS.md` | 定時ブログの **監視・成功の定義・失敗店舗の再実行**（運用要約） |
 | `ENV.md` | 環境変数 |

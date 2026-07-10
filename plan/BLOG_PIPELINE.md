@@ -1,6 +1,10 @@
-# MEGRIBI Blog Pipeline（LINE / Next.js / GitHub Actions / Supabase / GitHub）
+# MEGRIBI Blog Pipeline（ローカル Ollama / LINE / Next.js / GitHub Actions / Supabase / GitHub）
 
-最終更新: 2026-03-26 (本文の構造設計は引き続き有効)
+最終更新: 2026-07-11（Batch B3: Daily/Weekly の生成元をローカル Ollama 主経路に更新。3分類・URL・LINE フローの構造自体は変わっていない）
+
+> **2026-07〜の変更**: Daily / Weekly の生成元は **GitHub Actions + Gemini から ローカル Ollama
+> （`gemma4:e4b`）へ主経路が移行済み**。GitHub Actions は `workflow_dispatch` の緊急用のみ残る。
+> 詳細手順は `docs/LOCAL_LLM_SETUP.md`、GHA 側の緊急手順は `plan/BLOG_CRON_GHA.md` を参照。
 
 > **2026-04 以降の内容更新**:
 > - Daily Report のプロンプト / 出力スタイルは `plan/BLOG_REDESIGN_2026_04.md` (Phase 1 完了 / Phase 2-4 未着手) を正本として参照
@@ -11,8 +15,8 @@
 
 | `content_type` | 用途 | URL | 生成元 | `is_published` |
 |----------------|------|-----|--------|----------------|
-| `daily` | AI 予測予報（毎日 2 回） | `/reports/daily/[store_slug]` | GitHub Actions 定時 | 生成完了時に `true`（自動）|
-| `weekly` | AI 週報（毎週水曜） | `/reports/weekly/[store_slug]` | GitHub Actions 週次 | 生成完了時に `true`（自動）|
+| `daily` | AI 予測予報（毎日 2 回） | `/reports/daily/[store_slug]` | **ローカル Ollama 定時（主）** / GHA `workflow_dispatch`（緊急時） | 生成完了時に `true`（自動）|
+| `weekly` | AI 週報（毎週水曜） | `/reports/weekly/[store_slug]` | **ローカル Ollama 定時（主）** / GHA `workflow_dispatch`（緊急時） | 生成完了時に `true`（自動）|
 | `editorial` | 分析ブログ記事（不定期）| `/blog/[slug]` | LINE 指示 + Gemini | 最初は `false`、LINE 承認で `true` |
 
 **SEO 方針**: daily / weekly は **固定 URL 上書き**（同じ store_slug に対し最新行を上書き）。カニバリゼーションを避け、Freshness を優先。
@@ -21,48 +25,55 @@
 
 ## 配管の全体像（結論）
 - **LINE 下書きの司令塔**: Next.js のみ（`POST /api/line`）。**n8n は廃止・非採用**。
-- **バッチ（Daily / Weekly）**: GitHub Actions（`trigger-blog-cron.yml` / `generate-weekly-insights.yml`）
+- **バッチ（Daily / Weekly）**: **ローカル Ollama（主。`scripts/local_report_job.py` / `run_weekly_local.ps1`、Task Scheduler）**。GitHub Actions（`trigger-blog-cron.yml` / `generate-weekly-insights.yml`）は `workflow_dispatch` の緊急用のみ
 - **承認**: 人（LINE でテキスト承認）
 
 ## 役割
 - あなた：分析依頼（LINE）→ 承認（LINE）→ 最終確認（公開 URL）
 - LINE：指示 UI（スマホ）→ Webhook は **Vercel の Next のみ**
 - Next.js：`POST /api/line` で受信 → 処理分岐 → Supabase `blog_drafts` 保存 → LINE 返信
-- GitHub Actions：Daily / Weekly の自動生成
+- ローカル Ollama（オーナーPC）：Daily / Weekly の自動生成（主経路）
+- GitHub Actions：Daily / Weekly の緊急時再生成（`workflow_dispatch`）、Editorial 以外の監視・CI 全般
 - Supabase：元データ（logs）、下書き（`blog_drafts`）
 - GitHub：Weekly JSON ファイル置き場（`frontend/content/insights/weekly`）
 
 ---
 
-## フロー 1: Daily Report（GitHub Actions → Supabase → `/reports/daily/`）
+## フロー 1: Daily Report（ローカル Ollama → Supabase → `/reports/daily/`）
 
-### 定時実行（`.github/workflows/trigger-blog-cron.yml`）
-1. UTC 09:00（JST 18:00）/ UTC 12:30（JST 21:30）に発火
-2. matrix で 38 店舗を並列実行（`max-parallel: 15`）
-3. `GET /api/cron/blog-draft?store=<slug>&edition=<edition>&source=github_actions_cron`
-4. `/api/cron/blog-draft/route.ts` 内で:
-   - `/api/range` + `/api/forecast_today`（BACKEND_URL 経由）
-   - `insightFromRange.ts` → Gemini MDX 生成
-   - Supabase `blog_drafts` に upsert（`content_type='daily'`, `is_published=true`, `edition=<edition>`）
+### 定時実行（主経路: Task Scheduler `MEGRIBI-daily-evening` / `MEGRIBI-daily-late`）
+1. 毎日 JST 18:00（evening_preview）/ 21:30（late_update）に発火
+2. `scripts/local_report_job.py --stores all --edition <edition> --mode publish` が全43店舗を単一プロセスで順次処理
+3. `/api/range` + `/api/forecast_today` 相当のデータ取得 → Ollama（`gemma4:e4b`）で本文生成
+4. Supabase `blog_drafts` に upsert（`content_type='daily'`, `is_published=true`, `edition=<edition>`）。失敗時は本文空・`is_published=false`・`error_message` あり
 5. `/reports/daily/[store_slug]` が最新行を自動表示
 
-**失敗時**: `retry-blog-draft-stores.yml` で該当店舗のみ再実行
+### 緊急時経路（`.github/workflows/trigger-blog-cron.yml`, `workflow_dispatch` のみ）
+1. `EDITION` を手動指定して起動
+2. matrix でオリエンタル 38 店舗を並列実行（`max-parallel: 5`。相席屋5店舗は対象外）
+3. `GET /api/cron/blog-draft?store=<slug>&edition=<edition>&source=github_actions_cron`
+4. `/api/cron/blog-draft/route.ts` 内で Gemini MDX 生成 → Supabase `blog_drafts` に upsert
+
+**失敗時**: `retry-blog-draft-stores.yml` で該当店舗のみ再実行（いずれの経路でも）
 
 ---
 
-## フロー 2: Weekly Report（GitHub Actions Fan-in → Supabase + Git → `/reports/weekly/`）
+## フロー 2: Weekly Report（ローカル Ollama → Supabase + Git → `/reports/weekly/`）
 
-### Fan-out（`generate-store` ジョブ）
-1. UTC 火曜 21:30（JST 水曜 06:30）に発火
-2. matrix で 38 店舗を独立実行（`max-parallel: 10`）
-3. `python scripts/generate_weekly_insights.py --stores <one_store> --skip-index`
-   - `/api/range` から過去データ取得
-   - Good Window 分析
-   - `frontend/content/insights/weekly/<store>/<date>.json` に書き込み
-   - Supabase upsert（`content_type='weekly'`, `is_published=true`, `edition='weekly'`, `facts_id='weekly_<store>'`, `public_slug='weekly-report-<store>'`）
-4. JSON を Artifact としてアップロード（retention: 1日）
+### 定時実行（主経路: Task Scheduler `MEGRIBI-weekly`）
+1. 毎週水曜 JST 06:30 に発火
+2. `run_weekly_local.ps1 -Stores all` → `generate_weekly_insights.py --stores all`（`INSIGHTS_LLM_BACKEND=ollama`）が全43店舗を単一プロセスで順次処理
+3. `/api/range` から過去データ取得 → Good Window 分析 → `frontend/content/insights/weekly/<store>/<date>.json` に書き込み + `index.json` を直接更新（Fan-in 不要）
+4. Supabase upsert（`content_type='weekly'`, `is_published=true`, `edition='weekly'`, `facts_id='weekly_<store>'`, `public_slug='weekly-report-<store>'`）
 
-### Fan-in（`collect-and-commit` ジョブ）
+### 緊急時経路（`generate-weekly-insights.yml`, `workflow_dispatch` のみ）— Fan-in Matrix
+
+#### Fan-out（`generate-store` ジョブ）
+1. 手動起動時、matrix でオリエンタル 38 店舗を独立実行（`max-parallel: 10`。相席屋5店舗は対象外）
+2. `python scripts/generate_weekly_insights.py --stores <one_store> --skip-index`（`INSIGHTS_LLM_BACKEND=gemini`）
+3. JSON を Artifact としてアップロード（retention: 1日）
+
+#### Fan-in（`collect-and-commit` ジョブ）
 1. 全 Artifact ダウンロード
 2. Python inline スクリプトで `index.json` を再構築（全店舗マージ）
 3. `pytest` 実行

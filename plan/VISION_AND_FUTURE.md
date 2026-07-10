@@ -1,5 +1,5 @@
 # VISION_AND_FUTURE
-Last updated: 2026-03-30 (Round 9 完了)
+Last updated: 2026-03-30 (Round 9 完了)。**2026-07-11 Batch B3 で店舗数・Daily/Weekly の生成経路・ML実装名の表記のみ訂正**（本文の展望・フェーズ構成自体は当時のまま）
 Target commit: (see git)
 
 > **このファイルの役割**  
@@ -15,9 +15,9 @@ Target commit: (see git)
 - **MEGRIBI（めぐりび）**: 相席ラウンジ等の **混雑の可視化** と **ML ベースの予測** を通じて、来店タイミングの判断材料を提供する Web サービス。
 - **データの正本**: Supabase `logs`。収集は **Render Starter**（$7/月、2025-12 移行済み）上の Flask／`multi_collect` 系。スリープなし
 - **フロント**: Next.js（Vercel）。コンテンツは 3 分類運用:
-  - **Daily/Weekly Report**: 完全自動（GitHub Actions + Gemini + cron-job.org）
+  - **Daily/Weekly Report**: 完全自動。**2026-07〜、生成元はローカル Ollama（`gemma4:e4b`、オーナーPC Task Scheduler）が主経路。GHA + Gemini は `workflow_dispatch` の緊急時のみ**
   - **Editorial Blog**: AI 下書き＋LINE 承認の半自動運用
-- **ML**: XGBoost ベースの店舗別最適化モデル（38 店舗分）。日次自動学習
+- **ML**: LightGBM ベースの店舗別最適化モデル（**43 店舗**分＝オリエンタル38+相席屋5。実装ファイル名は歴史的経緯で `model_xgb.py` のまま）。日次自動学習
 
 ### 個人のビジョン（参考・plan の必須要件ではない）
 
@@ -36,9 +36,9 @@ Target commit: (see git)
 | Flask API | `/api/range` `/api/megribi_score` `/api/forecast_*` `/api/forecast_today_multi` `/api/forecast_accuracy` 等 13 エンドポイント稼働 |
 | Next.js 画面 | 14 ページルート実装済み（`/` `/stores` `/store/[id]` `/compare` `/reports` `/reports/*/[store_slug]` `/blog` `/mypage` 等）。`/insights/weekly` は `/reports/weekly` に 301 リダイレクト |
 | Next.js API | 14 API route 稼働（proxy + cron + LINE + SNS） |
-| AI 予測レポート | Daily: 38 店舗 × 2 回/日、Weekly: 38 店舗 × 1 回/週。全自動 |
+| AI 予測レポート | Daily: 43 店舗 × 2 回/日、Weekly: 43 店舗 × 1 回/週。全自動（2026-07〜ローカル Ollama 主経路、GHA は緊急時のみ） |
 | Editorial Blog | LINE → Gemini → 承認 → 公開。半自動 |
-| ML 予測 | 店舗別 XGBoost モデル（ML 3.0）。Optuna HPO + Early Stopping + Holdout Test 評価。日次自動学習 |
+| ML 予測 | 店舗別 LightGBM モデル（ML 3.0。旧XGBoost、ファイル名 `model_xgb.py` は互換維持）。Optuna HPO（週次のみ）+ Early Stopping + Holdout Test 評価。日次自動学習（schema v7、24特徴量） |
 | megribi_score | Flask + Next.js proxy。トップ「今夜のおすすめ」+ マイページカード |
 | マイページ | ダッシュボード化完了（リッチカード・スパークライン・ML 予測・レポートリンク） |
 | X 自動投稿 | OAuth 1.0a 実装済み。Daily Report 後に自動トリガー。日本語店舗名テンプレート |
@@ -108,9 +108,9 @@ Target commit: (see git)
 
 ### フェーズ C — 予測・ML の「本番品質」 ✅ 大部分完了
 
-**現状の技術的事実**:
-- **ML 3.0 本番稼働**: 38 店舗別 XGBoost モデル。Optuna HPO + Early Stopping。日次自動学習
-- **特徴量**: 21 列（schema v4）。`same_dow_last_week_total` + `total_slope_30min`。時間減衰ウェイト + 日次精度トラッキング
+**現状の技術的事実**（店舗数・schema は 2026-07-11 Batch B3 で最新値に訂正）:
+- **ML 3.0 本番稼働**: 43 店舗別 LightGBM モデル（旧XGBoost、`model_xgb.py` は互換維持のためファイル名のみ据え置き）。Optuna HPO（週次のみ）+ Early Stopping。日次自動学習
+- **特徴量**: 24 列（schema v7）。`same_dow_last_week_total` / `total_slope_30min` / `holiday_block_length` / `holiday_block_position` 等。時間減衰ウェイト + 日次精度トラッキング
 - **評価基盤**: 時系列 Train/Test Split（80/20）。Holdout Test で真の汎化精度を測定
 - **Feature Importance**: metadata.json に店舗別で永続化
 - **`megribi_score`**: 女性比率・占有率・安定性から算出。トップ・マイページで表示
@@ -195,14 +195,15 @@ Target commit: (see git)
 
 ### 9.1 ブログと SEO（同一 URL の上書き）
 
-- **想定負荷**: 最大 38 店舗 × 1 日 2 本の Daily Report
+- **想定負荷**: 最大 43 店舗 × 1 日 2 本の Daily Report
 - **方針**: 店舗・日付ごとに同一 `facts_id` に対応する公開 URL を維持し、上書き更新
 - **狙い**: カニバリゼーション回避、情報の鮮度（Freshness）優先
 
 ### 9.2 Cron とスケール
 
-- **Daily**: GHA native schedule → matrix 38 店舗（`max-parallel: 15`）
-- **Weekly**: GHA schedule → Fan-in Matrix（`max-parallel: 10`）
+- **2026-07〜の実態**: Daily/Weekly ともローカル Ollama が主経路（単一プロセスで全43店舗を順次処理、matrix 概念なし）。GHA の matrix 構成は `workflow_dispatch` 緊急時のみ使う。
+- **Daily（GHA 緊急時経路）**: matrix オリエンタル38店舗（`max-parallel: 5`。2026-04 に 15 → 5 へ削減、相席屋5店舗は対象外）
+- **Weekly（GHA 緊急時経路）**: Fan-in Matrix、matrix オリエンタル38店舗（`max-parallel: 10`。相席屋5店舗は対象外）
 - **課題**: 店舗数増加時は `max-parallel` 調整。非同期キューは `BLOG_CRON_ASYNC_FUTURE.md`
 
 ### 9.3 X（Twitter）自動投稿

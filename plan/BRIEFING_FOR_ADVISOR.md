@@ -1,8 +1,8 @@
 # 相談役（Gemini 等）向けブリーフィング
-Last updated: 2026-03-26
+Last updated: 2026-03-26。**2026-07-11 Batch B3 で店舗数・ML実装名・Daily/Weekly生成経路の表記のみ実コードに合わせて訂正**（本文の骨子・時点情報は当時のまま）
 
 以下をそのまま（または要約して）外部の AI に貼り付け、**より良い案・優先順位・リスク**についてアドバイスを求める用途向けです。  
-リポジトリ内の正本は `plan/*.md` です。
+リポジトリ内の正本は `plan/*.md`（および `CLAUDE.md`）です。外部 AI に貼り付ける前に、店舗数・ML実装・生成経路など数値を伴う箇所は `CLAUDE.md` と食い違っていないか確認すること（本ファイルは相談用スナップショットであり、更新頻度は低い）。
 
 ---
 
@@ -23,9 +23,9 @@ Last updated: 2026-03-26
 | API | **Flask**（Render 上を想定） |
 | フロント | **Next.js**（App Router、**Vercel**） |
 | 収集 | Python（`multi_collect` 等）、`/tasks/multi_collect` が Supabase へ書き込み |
-| バッチ | **GitHub Actions**（Daily Report・Weekly Report → Supabase + ファイルにコミット） |
-| コンテンツ生成 | Vercel の **`POST /api/line`** または **GHA** → Flask `/api/range` → インサイト → **Gemini** → Supabase `blog_drafts` |
-| 予測 | Flask の `/api/forecast_*`（`ENABLE_FORECAST=1` のとき）。**XGBoost** 系は `oriental/ml/` |
+| バッチ | **ローカル Ollama（主, 2026-07〜）+ GitHub Actions（緊急時 `workflow_dispatch` のみ）**（Daily Report・Weekly Report → Supabase + ファイルにコミット） |
+| コンテンツ生成 | Vercel の **`POST /api/line`**（Editorial）／ **ローカル Ollama**（Daily/Weekly 主経路）／ **GHA緊急時 + Gemini** → Flask `/api/range` → インサイト → Supabase `blog_drafts` |
+| 予測 | Flask の `/api/forecast_*`（`ENABLE_FORECAST=1` のとき）。**LightGBM**（旧XGBoost、ファイル名 `model_xgb.py` は互換維持）系は `oriental/ml/` |
 
 ---
 
@@ -36,10 +36,10 @@ Last updated: 2026-03-26
 | パス | 内容 |
 |------|------|
 | `/` | トップ。StoreCard＋ブログ新着＋Daily Report 誘導 |
-| `/stores` | 全店舗一覧（38店舗、地域タブ・ページネーション） |
+| `/stores` | 全店舗一覧（**43店舗**＝オリエンタル38+相席屋5、地域タブ・ページネーション） |
 | `/store/[id]` | 店舗詳細（リアルタイム混雑・男女比・予測） |
-| **`/reports/daily/[store_slug]`** | **Daily Report**（毎日 18:00/21:30 に自動更新される最新AI予測。全38店舗）|
-| **`/reports/weekly/[store_slug]`** | **Weekly Report**（毎週水曜 06:30 JST 更新のAI週報。全38店舗）|
+| **`/reports/daily/[store_slug]`** | **Daily Report**（毎日 18:00/21:30 に自動更新される最新AI予測。全**43**店舗。2026-07〜ローカル Ollama 主経路）|
+| **`/reports/weekly/[store_slug]`** | **Weekly Report**（毎週水曜 06:30 JST 更新のAI週報。全**43**店舗。2026-07〜ローカル Ollama 主経路）|
 | `/insights/weekly/[store]` | Recharts 可視化（Good Window 時系列）|
 | `/blog` | Editorial ブログ一覧（AI予測レポートへの誘導バナー付き） |
 | **`/blog/[slug]`** | **Editorial Blog**（LINE 指示 → AI下書き → 人間承認後のみ表示） |
@@ -51,20 +51,24 @@ Last updated: 2026-03-26
 
 | 種類 | `content_type` | URL | 生成元 | `is_published` |
 |------|----------------|-----|--------|----------------|
-| AI 予測予報 | `daily` | `/reports/daily/[store_slug]` | GHA 毎日 18:00/21:30 | 自動 `true` |
-| AI 週報 | `weekly` | `/reports/weekly/[store_slug]` | GHA 毎週水曜 06:30 JST | 自動 `true` |
+| AI 予測予報 | `daily` | `/reports/daily/[store_slug]` | 毎日 18:00/21:30（**2026-07〜ローカル Ollama 主経路**、GHA は緊急時のみ） | 自動 `true` |
+| AI 週報 | `weekly` | `/reports/weekly/[store_slug]` | 毎週水曜 06:30 JST（**2026-07〜ローカル Ollama 主経路**、GHA は緊急時のみ） | 自動 `true` |
 | 編集ブログ | `editorial` | `/blog/[public_slug]` | LINE 指示 + Gemini | LINE 承認後 `true` |
 
-### 3c. GitHub Actions ワークフロー（実装済み）
+### 3c. 生成経路（2026-07 時点の実装）
+
+**通常運用（主経路）**: オーナーPCのローカル Ollama（`gemma4:e4b`）が Task Scheduler（`MEGRIBI-daily-evening`/`-late`/`-weekly`）で全43店舗を単一プロセスで順次生成。詳細は `docs/LOCAL_LLM_SETUP.md`。
+
+**緊急時のみ・GHA ワークフロー**（`workflow_dispatch`、Gemini 使用、オリエンタル38店舗のみ）:
 
 **Daily Report**（`trigger-blog-cron.yml`）:
-- 38 店舗 × 独立ジョブ（`max-parallel: 15`）
+- 38 店舗 × 独立ジョブ（`max-parallel: 5`。相席屋5店舗は matrix 対象外）
 - `GET /api/cron/blog-draft?store=<slug>&edition=<edition>`
 - Supabase に `content_type='daily'`, `is_published=true` で保存
 - 失敗店舗は `retry-blog-draft-stores.yml` で再実行可能
 
 **Weekly Report**（`generate-weekly-insights.yml`）— **Fan-in Matrix 構成**:
-- **Fan-out**: 38 店舗 × 独立ジョブ（`max-parallel: 10`）。各ジョブが `generate_weekly_insights.py --skip-index` 実行 → Supabase upsert → Artifact 保存
+- **Fan-out**: 38 店舗 × 独立ジョブ（`max-parallel: 10`。相席屋5店舗は matrix 対象外）。各ジョブが `generate_weekly_insights.py --skip-index` 実行 → Supabase upsert → Artifact 保存
 - **Fan-in**: 全 Artifact を回収 → `index.json` をマージ再構築 → Git commit 1回
 
 ### 3d. Supabase `blog_drafts` スキーマ（2026-03-26 拡張）
@@ -127,7 +131,7 @@ public_slug UNIQUE (where not null)
 
 - **Daily/Weekly**: 固定 URL（`/reports/daily/[store_slug]`・`/reports/weekly/[store_slug]`）で上書き運用。Freshness を優先。旧 `/blog/auto-*` URL は廃止済み。
 - **Editorial**: `/blog/[public_slug]` でユニーク URL。深い分析記事でロングテール狙い。
-- `sitemap.ts` に Daily（priority 0.85, daily）+ Weekly（priority 0.8, weekly）を全38店舗分登録済み。
+- `sitemap.ts` に Daily（priority 0.85, daily）+ Weekly（priority 0.8, weekly）を `STORES`（`config/stores.ts`、全43店舗）分登録済み。
 
 ---
 

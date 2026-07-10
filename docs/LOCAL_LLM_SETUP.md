@@ -1,5 +1,7 @@
 # ローカルLLM レポート生成 — セットアップ / 復旧手順書
 
+> 全体像は `../CLAUDE.md`（システム3分マップ）と `../plan/BLOG_CRON_GHA.md`（GHA緊急時手順）も参照。
+
 このノートPC（Windows・24時間常時起動）は、日次・週次レポートの文章を**ローカルの
 gemma4:12b（Ollama）で無料生成**して Supabase `blog_drafts` に upsert する。
 Gemini API へのコスト移行の代替として 2026-07 に構築。GPU (RTX 4060 8GB) は音楽

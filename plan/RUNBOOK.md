@@ -80,40 +80,62 @@ npm run dev
 
 ---
 
-## ML 3.0 Operational Notes（Round 8, 2026-03-29）
+## ML 3.0 Operational Notes（Round 8, 2026-03-29。2026-07 時点の schema/店舗数は Batch B3 で追記・訂正）
 
-- **モデル方針**: 本番学習（`scripts/train_ml_model.py`）は **店舗別 XGBoost**（38 店舗分の `men/women` 回帰モデル）を日次自動学習。
+- **モデル方針**: 本番学習（`scripts/train_ml_model.py`）は **店舗別 LightGBM**（`oriental/utils/stores.py` の `ALL_STORE_IDS` = 43店舗 allow-list、`men/women` 回帰モデル）を自動学習。「XGBoost」表記が残っているのは 2026-04-12 の LightGBM 移行前の名残 — 実装ファイル名 `model_xgb.py` は import 互換のため改名していないだけで、中身は LightGBM が優先ロードされる。
+- **学習頻度**: **日次（毎日05:30 JST）は固定パラメータで再学習のみ**（Optunaなし、GHA実行時間90%削減）。**週次（毎週月曜07:00 JST）のみ Optuna HPO** を実行。`workflow_dispatch`（手動）時は `vars.ML_OPTUNA_ENABLED` に従う。
 - **Optuna HPO**: 店舗ごとに最適なハイパーパラメータを探索（`max_depth`, `learning_rate`, `subsample` 等）。デフォルト 30 trials/店舗。`ML_OPTUNA_ENABLED=1` / `ML_OPTUNA_TRIALS=30` で制御。
 - **Early Stopping**: `n_estimators=300` 上限 + `early_stopping_rounds=15` で最適な木の数を自動決定。
-- **評価基盤**: 時系列 Train/Test Split（80/20）。Holdout Test で真の汎化精度（MAE/RMSE）を測定。`metadata.json` に永続化。
-- **特徴量**: 21 列（`FEATURE_COLUMNS`）。`same_dow_last_week_total` + `total_slope_30min`。推論時にも履歴から算出可能。
-- **schema_version**: v4（特徴量 21 列）。Flask / GHA ともに v4 がデフォルト。
-- **時間減衰ウェイト**: 学習時、直近データに高い重み（90日半減期の指数減衰）。
+- **評価基盤**: 時系列 Train/Test Split（80/20）。Holdout Test で真の汎化精度（MAE/RMSE）を測定。`metadata.json` に永続化。加えて 2026-07〜は本番配信の日次「答え合わせ」（v2 shadow, `forecast-accuracy-track.yml`）が別途 18:10 snapshot / 06:10 score で稼働（詳細 `plan/FORECAST_ACCURACY.md`）。
+- **特徴量**: 24 列（`oriental/ml/preprocess.py` の `FEATURE_COLUMNS`）。`same_dow_last_week_total` / `total_slope_30min` / `holiday_block_length` / `holiday_block_position` 等を含む。
+- **schema_version**: **v7**（2026-07〜、`oriental/config.py` の既定値・`.env.example`）。列数は v6 と同じ24列で、v7 は `total_slope_30min` のターゲットリーク修正（v6モデルと非互換・再学習必須）。Flask（Render 環境変数）/ GHA（Repository Variable）の `FORECAST_MODEL_SCHEMA_VERSION` を必ず同じ値に揃えること（`plan/DECISIONS.md` 44番、3箇所同期が必要）。
+- **時間減衰ウェイト**: 学習時、直近データに高い重み（既定90日半減期の指数減衰。GHA既定は `ML_RECENCY_HALFLIFE_DAYS=45` / `ML_RECENCY_FLOOR=0.25` で直近をより強く重視）。
 - **モデルプリロード**: Flask 起動時にバックグラウンドで全店舗モデルをメモリにロード。`DISABLE_MODEL_PRELOAD=1` で無効化可能。
 - **重み付け学習**: `sample_weight` で `ML_TRAIN_WEIGHT_PEAK` / `ML_TRAIN_WEIGHT_RAIN`（既定 1.8）を適用。
 - **Feature Importance**: `metadata.json` に店舗別で永続化。`/api/forecast_accuracy` で取得可能。
+- **Champion/Challenger gate**: `ML_GATE_MAX_REGRESSION_PCT` で退行モデルの本番反映を防ぐ安全ネット（稼働店舗 stale guard も同様）。
 - **実験スクリプト配置**: 検証用は `scripts/experiments/` に集約。`scripts/` 直下は本番運用用。
 
 ---
 
-## 定期処理・GitHub Actions（旧 CRON.md）
+## 定期処理・GitHub Actions / ローカル Task Scheduler（旧 CRON.md）
+
+> **2026-07〜、Daily/Weekly Report と CDN warming の「主経路」はオーナーPCのローカル実行に変わった。**
+> 下表の GHA 行は Daily/Weekly については **`workflow_dispatch`（緊急時専用）** であり、`schedule:` は
+> ワークフローファイル内でコメントアウト済み。ローカル側の正本は `docs/LOCAL_LLM_SETUP.md`。
+
+### ローカル Task Scheduler（オーナーPC・常時起動、主経路）
+| 内容 | スケジュール | タスク名 | 実体 |
+|------|------|------|------|
+| Daily Report（夕方版） | 毎日 18:00 JST | `MEGRIBI-daily-evening` | `scripts/local_report_job.py --edition evening_preview` |
+| Daily Report（深夜版） | 毎日 21:30 JST | `MEGRIBI-daily-late` | `scripts/local_report_job.py --edition late_update` |
+| Weekly Report | 毎週水曜 06:30 JST | `MEGRIBI-weekly` | `scripts/run_weekly_local.ps1 -Stores all` |
+| CDN warming | 19:00〜23:50 JST・10分毎 | `MEGRIBI-warm-cdn` | `scripts/warm_cdn_local.py` |
 
 ### GitHub Actions（リポジトリ管理）
 | 内容 | スケジュール | Workflow ファイル |
 |------|----------------|---------------------|
-| **Daily Report（定時・本番）** | `0 9` / `30 12` UTC = JST 18:00 / 21:30 | `trigger-blog-cron.yml` |
-| **Weekly Report** | 水曜 `30 21` UTC = JST 木曜 06:30 | `generate-weekly-insights.yml` |
-| **ML モデル学習** | `30 20` UTC = JST 05:30 | `train-ml-model.yml` |
-| **X 自動投稿** | Daily Report 完了後（`workflow_run`） | `x-auto-post.yml` |
+| Daily Report（**緊急時のみ**、`workflow_dispatch`） | schedule はコメントアウト済み（旧: `0 9`/`30 12` UTC = JST 18:00/21:30） | `trigger-blog-cron.yml` |
+| Weekly Report（**緊急時のみ**、`workflow_dispatch`） | schedule はコメントアウト済み（旧: 火 `30 21` UTC = JST 水 06:30） | `generate-weekly-insights.yml` |
+| **ML モデル学習・日次**（Optunaなし） | `30 20 * * *` UTC = JST 05:30 | `train-ml-model.yml` |
+| **ML モデル学習・週次**（Optuna HPOあり） | `0 22 * * 0` UTC（日曜22:00） = JST 月曜 07:00 | `train-ml-model.yml`（同一ファイル、cron条件分岐） |
+| Forecast v2 shadow: snapshot | `10 9 * * *` UTC = JST 18:10 | `forecast-accuracy-track.yml` |
+| Forecast v2 shadow: score | `10 21 * * *` UTC = JST 06:10 | `forecast-accuracy-track.yml` |
+| Forecast v2 templates 再生成 | `30 22 * * *` UTC = JST 07:30 | `build-templates.yml` |
+| CDN warming（**バックアップ**。主はローカル） | `*/10 10-14 * * *` UTC = JST 19:00-23:50・10分毎 | `warm-cdn.yml` |
+| **X 自動投稿** | Daily Report 完了後（`workflow_run`）。GHA 経路使用時のみ発火 | `x-auto-post.yml` |
 | Public Facts | `30 0` UTC = JST 09:30 | `generate-public-facts.yml` |
 | PAT 期限チェック | 月曜 `0 0` UTC = JST 09:00 | `check-pat-expiry.yml` |
-| Blog CI | push / PR（schedule なし） | `blog-ci.yml` |
+| Daily/Weekly 公開監視（ローカル生成の保険） | 各種 | `check-daily-published.yml` / `check-weekly-published.yml` |
+| 収集の生存監視 | 各種 | `check-collection-heartbeat.yml` |
+| logs バックアップ / 古いログ削除 | 週次 / 手動 | `backup-logs.yml` / `cleanup-old-logs.yml` |
+| Blog CI / Python CI | push / PR（schedule なし） | `blog-ci.yml` / `python-ci.yml` |
 | E2E テスト | PR + dispatch | `e2e.yml` |
 | Blog 再実行（手動） | `workflow_dispatch` のみ | `retry-blog-draft-stores.yml` |
 | Blog 手動依頼 | `workflow_dispatch` のみ | `blog-request.yml` |
 | 失敗通知（再利用） | `workflow_call` | `notify-on-failure.yml` |
 
-- Weekly: 手動 `workflow_dispatch` で `stores` / threshold 等を指定可能。成果物 `frontend/content/insights/weekly`
+- Weekly（GHA 緊急時経路）: 手動 `workflow_dispatch` で `stores` / threshold 等を指定可能。成果物 `frontend/content/insights/weekly`。matrix はオリエンタル38店舗のみ（相席屋5店舗は対象外）。ローカル主経路（`--stores all`）は全43店舗をカバーする。
 - Public Facts: 成果物 `frontend/content/facts/public`
 
 ### Actions 失敗通知（任意・2026-03 追加）
@@ -123,22 +145,23 @@ npm run dev
 - PR 用の `blog-ci.yml` には付けていない（失敗が多く通知が煩いため）。
 
 ### 外部 cron（運用側）
-- **`/tasks/multi_collect`** を一定間隔で叩く想定。定義は **Render / 外部 scheduler**（リポジトリ内に crontab はない）。
-- **ブログ下書き（1日2本・JST）**: **GitHub Actions**（`.github/workflows/trigger-blog-cron.yml`）が `GET /api/cron/blog-draft` を叩く。`?edition=evening_preview` / `late_update` と `source=github_actions_cron` を付与。**Secrets** は **`plan/BLOG_CRON_GHA.md`**。
+- **`/tasks/multi_collect`** を一定間隔で叩く想定。定義は **cron-job.org**（5分毎、`CRON_SECRET` 認証。リポジトリ内に crontab はない）。
+- **ブログ下書き（1日2本・JST）**: **通常運用はローカル Ollama**（`docs/LOCAL_LLM_SETUP.md`）。GitHub Actions（`.github/workflows/trigger-blog-cron.yml`）は緊急時の `workflow_dispatch` のみで `GET /api/cron/blog-draft` を叩く。`?edition=evening_preview` / `late_update` と `source=github_actions_cron` を付与。**Secrets** は **`plan/BLOG_CRON_GHA.md`**。
 - 追加の定期処理が必要なら `ROADMAP.md` に追記してから仕様化。
 
 ### LINE 下書きの `/api/range` limit
 - 本番では **`LINE_RANGE_LIMIT`**（未設定時 **500**）。小さすぎるとインサイトが偏る。定時は **`BLOG_CRON_RANGE_LIMIT`**（既定 500）。`plan/ENV.md` / `plan/DECISIONS.md` 12。
 
-### 定時ブログ（GitHub Actions）のトラブルシュート
+### 定時ブログのトラブルシュート
 
-1. **Secrets**: GitHub → Repository → **Settings → Secrets and variables → Actions** に **`CRON_SECRET`** と **`VERCEL_BLOG_CRON_BASE_URL`**（本番の `https://...vercel.app`、末尾スラッシュなし）があるか。
-2. **Supabase `blog_drafts`（最優先）**: 対象日・店舗で **`error_message`** の有無と本文を確認する。Actions が緑でも店舗単位で失敗していることがある。
-3. **Actions の実行ログ**: 補助情報。失敗時は `curl` の HTTP ステータス・Vercel 関数ログ（401 なら `CRON_SECRET` 不一致）。
-4. **一部店舗だけ失敗したとき**: **Actions → Retry blog draft (selected stores)** で `stores` に slug をカンマ区切り指定して再実行（`plan/BLOG_CRON_GHA.md`）。
-5. **Vercel の古い Cron**: 過去に Vercel Cron を有効にしていた場合、ダッシュボード **Settings → Cron Jobs** に古いジョブが残っていれば **削除**（コード側は `vercel.json` なし）。
+1. **まずローカルジョブを疑う**: 通常運用はローカル Ollama。オーナーPCが起動しているか、Task Scheduler `MEGRIBI-daily-evening`/`-late`/`-weekly` の履歴、`gpu_lock` の競合有無を確認（`docs/LOCAL_LLM_SETUP.md`）。
+2. **Supabase `blog_drafts`（最優先）**: 対象日・店舗で **`error_message`** の有無と本文を確認する。ローカルジョブ・Actions のどちらでも、成否の正本はここ。
+3. **緊急時に GHA `workflow_dispatch` を使う場合の Secrets**: GitHub → Repository → **Settings → Secrets and variables → Actions** に **`CRON_SECRET`** と **`VERCEL_BLOG_CRON_BASE_URL`**（本番の `https://...vercel.app`、末尾スラッシュなし）があるか。
+4. **Actions の実行ログ**: 補助情報。失敗時は `curl` の HTTP ステータス・Vercel 関数ログ（401 なら `CRON_SECRET` 不一致）。
+5. **一部店舗だけ失敗したとき（GHA 経路使用時）**: **Actions → Retry blog draft (selected stores)** で `stores` に slug をカンマ区切り指定して再実行（`plan/BLOG_CRON_GHA.md`）。
+6. **Vercel の古い Cron**: 過去に Vercel Cron を有効にしていた場合、ダッシュボード **Settings → Cron Jobs** に古いジョブが残っていれば **削除**（コード側は `vercel.json` なし）。
 
-**手順・Secrets の正本**は **`plan/BLOG_CRON_GHA.md`**。監視の要約・再実行の入口は **`STATUS.md`**（リポジトリ直下）。同期 HTTP の限界を超える場合の将来案は **`plan/BLOG_CRON_ASYNC_FUTURE.md`**。
+**通常運用の正本**は **`docs/LOCAL_LLM_SETUP.md`**。**緊急時 GHA 手順・Secrets**は **`plan/BLOG_CRON_GHA.md`**。監視の要約・再実行の入口は **`STATUS.md`**（リポジトリ直下）。同期 HTTP の限界を超える場合の将来案は **`plan/BLOG_CRON_ASYNC_FUTURE.md`**。
 
 ---
 

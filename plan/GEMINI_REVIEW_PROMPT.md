@@ -1,10 +1,13 @@
 # Gemini レビュー用プロンプト
 
-Last updated: 2026-03-28 (Round 4.5 完了後の包括レビュー)
+Last updated: 2026-03-28 (Round 4.5 完了後の包括レビュー)。**2026-07-11 Batch B3 で店舗数・ML実装名の表記のみ訂正**（他の数値・時点情報は2026-03時点のスナップショットのまま。詳細は下記注記）
 
 > このファイルは Gemini（または他の LLM）にプロジェクトの評価レビューと改善提案を求めるためのプロンプトです。
 > 以下の「プロンプト本文」セクションをそのままコピーして Gemini に貼り付けてください。
 > 可能であれば `plan/STATUS.md`、`plan/ARCHITECTURE.md`、`plan/ROADMAP.md` も添付すると精度が上がります。
+> **注意**: 本文は 2026-03 時点のスナップショットで、店舗数・ML実装名以外は更新していません
+> （gunicorn worker/thread数、dry_run状態、GHA本数、特徴量数など）。最新の正確な数字は
+> 貼り付け前に `CLAUDE.md` / `plan/ARCHITECTURE.md` で確認すること。
 
 ---
 
@@ -30,9 +33,9 @@ Last updated: 2026-03-28 (Round 4.5 完了後の包括レビュー)
 | データ収集 | Python (BeautifulSoup) + cron-job.org（5分毎） | Render Starter |
 | DB | Supabase (PostgreSQL) — logs / blog_drafts / secondary_venues | Supabase Free |
 | Backend API | Flask + Gunicorn (2 workers × 2 threads, timeout 300s) | Render Starter ($7/月, 2025-12〜) |
-| ML | XGBoost（38店舗別モデル、39特徴量、日次自動再学習） | GHA → Supabase Storage |
+| ML | LightGBM（旧XGBoost、ファイル名 `model_xgb.py` は互換維持。43店舗別モデル、日次自動再学習） | GHA → Supabase Storage |
 | Frontend | Next.js 16 + React 19 + Recharts + Tailwind (ダークテーマ) | Vercel Free |
-| コンテンツ生成 | Gemini 2.5 Flash（Daily 76本/日 + Weekly 38本/週） | GHA + Vercel Serverless |
+| コンテンツ生成 | ローカル Ollama（主, 2026-07〜）/ Gemini 2.5 Flash（GHA緊急時のみ）（Daily 最大86本/日 + Weekly 43本/週） | ローカル Task Scheduler + GHA緊急時 |
 | SNS | X (Twitter) OAuth 1.0a 自動投稿 | GHA workflow_run |
 | LINE | Webhook + Gemini → Editorial Blog 半自動公開 | Vercel Serverless |
 | CI/CD | 10 GHA ワークフロー（生成・学習・投稿・通知・CI・PAT監視） | GitHub Actions |
@@ -40,22 +43,22 @@ Last updated: 2026-03-28 (Round 4.5 完了後の包括レビュー)
 ### 規模の詳細
 
 **データ収集**:
-- 38店舗（日本全国 37 + ソウル 1）を 5分毎にスクレイピング → Supabase logs
+- 43店舗（オリエンタル38 + 相席屋5。日本全国 + ソウル1）を 5分毎にスクレイピング → Supabase logs
 - 天気データ統合（Open-Meteo API、都道府県単位でキャッシュ）
-- ThreadPoolExecutor(10) で並列スクレイプ（38店舗 ~3-5s）
+- オリエンタル+相席屋それぞれのトップページ SSR から2リクエストで全43店舗を収集（旧: 38個別リクエストから97%削減）
 
 **ML パイプライン**:
-- 39特徴量: 時間帯・曜日・祝日・給料日サイクル・天気・降水・ラグ(12h/24h)・移動平均(2/4step)・sin/cos 時刻エンコード
-- 店舗別 XGBoost モデル（men / women 2モデル × 38店舗 = 76モデル）
-- 日次自動学習（GHA train-ml-model.yml、180日分データ、週末・雨天に重み 1.8x）
-- Supabase Storage にアップロード → Flask ModelRegistry がダウンロード・キャッシュ（TTL 15分）
+- 24特徴量（`FEATURE_COLUMNS`、schema v7）: 時間帯・曜日・祝日・連休クラスタ・給料日サイクル・天気・降水・sin/cos 時刻エンコード 等
+- 店舗別 LightGBM モデル（旧XGBoost。men / women 2モデル × 43店舗 = 86モデル）
+- 日次自動学習（GHA train-ml-model.yml、日次は固定パラメータ、週次(月曜)のみ Optuna HPO）
+- Supabase Storage にアップロード → Flask ModelRegistry がダウンロード・キャッシュ
 - megribi_score: 女性比率 × 占有率（理想 70% のベルカーブ）× 安定性 → 0-1 スコア → GO/WAIT/SKIP
 
 **コンテンツ自動生成**:
-- Daily Report: 38店舗 × 2回/日（18:00 evening_preview / 21:30 late_update）= 76本/日
-- Weekly Report: 38店舗 × 1回/週（水曜 06:30 JST）、Fan-in Matrix 構成
+- Daily Report: 43店舗 × 2回/日（18:00 evening_preview / 21:30 late_update）= 最大86本/日。**2026-07〜ローカル Ollama（`gemma4:e4b`）が主経路**、GHA + Gemini は `workflow_dispatch` 緊急時のみ
+- Weekly Report: 43店舗 × 1回/週（水曜 06:30 JST）。**2026-07〜ローカル Ollama が主経路**（単一プロセス）、GHA Fan-in Matrix（オリエンタル38店舗のみ）は緊急時のみ
 - Editorial Blog: LINE で分析指示 → Gemini 下書き → LINE で「公開」承認 → /blog/[slug]
-- X 自動投稿: Daily Report 生成後 workflow_run でトリガー（現在 dry_run）
+- X 自動投稿: Daily Report 生成後 workflow_run でトリガー（GHA経路使用時のみ発火。現在 dry_run）
 
 **フロントエンド**:
 - 13 ページルート（トップ・店舗一覧・店舗詳細・レポート統合・Daily/Weekly 個別・ブログ・マイページ・Weekly Insights）
@@ -120,7 +123,7 @@ Last updated: 2026-03-28 (Round 4.5 完了後の包括レビュー)
 ### 2. 技術アーキテクチャの評価
 - Flask + Next.js + Supabase の構成に **技術的リスク** や **改善余地** はありますか？
 - 月額 $7 でこの規模のサービスを運用する構成として適切ですか？スケール時のボトルネックは？
-- ML パイプライン（XGBoost 38店舗 × 76モデル × 日次再学習 × 39特徴量）の設計は妥当ですか？もっと良い方法はありますか？
+- ML パイプライン（LightGBM 43店舗 × 86モデル × 日次再学習 × 24特徴量）の設計は妥当ですか？もっと良い方法はありますか？
 - ThreadPoolExecutor 並列化 + Request Ordering 戦略の評価。async (Uvicorn) への移行は必要ですか？
 - Gunicorn 2 workers × 2 threads は適切ですか？チューニングの余地は？
 
@@ -140,7 +143,7 @@ Last updated: 2026-03-28 (Round 4.5 完了後の包括レビュー)
 - 「megribi_score → GO/WAIT/SKIP」の表現は直感的ですか？改善案は？
 - マイページ（localStorage ベース、ログインなし）の設計は妥当ですか？
 - モバイルファーストの観点で改善すべき点は？
-- 「38店舗 × 12件/ページ」のページネーションは最適ですか？もっと良い見せ方は？
+- 「43店舗 × 12件/ページ」のページネーションは最適ですか？もっと良い見せ方は？
 
 ### 6. 収益化の現実性
 - $7/月の運用コストに対して、アフィリエイト収益でペイできる見込みはありますか？

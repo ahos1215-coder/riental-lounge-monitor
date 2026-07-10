@@ -1,6 +1,16 @@
-# 定時コンテンツ生成（GitHub Actions — 正本）
+# 定時コンテンツ生成（GitHub Actions — 緊急時のみ。通常運用の正本はローカル Ollama）
 
-Last updated: 2026-03-26 (cron スケジュール / matrix 構成は引き続き有効)
+Last updated: 2026-07-11（Batch B3: 2026-07 のローカル Ollama 移行を反映。cron スケジュール自体は
+コードとして残っているが `schedule:` はコメントアウト済みで `workflow_dispatch` 専用になっている点に注意）
+
+> **本ファイルは現在「非常時の手動実行手順書」です。** 通常運用の Daily/Weekly Report は
+> 2026-07〜 オーナーPCのローカル Ollama（`scripts/local_report_job.py` / `run_weekly_local.ps1`、
+> Windows Task Scheduler `MEGRIBI-daily-evening`/`-late`/`-weekly`）が生成している。手順・復旧は
+> **`docs/LOCAL_LLM_SETUP.md`** を正本として参照すること。本ファイルの内容（GHA matrix・Secrets）は
+> ローカルPCが落ちた場合や大量再生成が必要な場合の `workflow_dispatch` 手動実行にのみ使う。
+> ローカルと GHA を同時刻に定時実行すると同じ `facts_id`（Daily）/ `blog_drafts`（Weekly, `content_type=weekly`）
+> 行を奪い合う（二重生成で `is_published=false` 上書き事故）ため、手動実行時は必ずローカルジョブの
+> 実行時間帯を避けること。
 
 > **2026-04 以降の内容更新**:
 > - Daily Report のプロンプト改修は `plan/BLOG_REDESIGN_2026_04.md` を参照 (Phase 1 ✅ / Phase 3 cron 時間分散 ❌ 未着手)
@@ -10,8 +20,8 @@ Last updated: 2026-03-26 (cron スケジュール / matrix 構成は引き続き
 ## 方針
 
 - **Vercel Cron（`vercel.json`）は使わない**（二重実行防止のため削除済み）。
-- **Daily Report**: `.github/workflows/trigger-blog-cron.yml` が **毎日 JST 18:00 / 21:30** に全 38 店舗を matrix で並列実行。
-- **Weekly Report**: `.github/workflows/generate-weekly-insights.yml` が **毎週水曜 06:30 JST** に Fan-in Matrix 構成で全 38 店舗を並列生成。
+- **Daily Report**: 通常運用は **ローカル Ollama**（毎日 JST 18:00 / 21:30、全43店舗）。`.github/workflows/trigger-blog-cron.yml` の `schedule:` はコメントアウト済みで、**緊急時の `workflow_dispatch` のみ**有効（matrix はオリエンタル38店舗のみ、相席屋5店舗は対象外）。
+- **Weekly Report**: 通常運用は **ローカル Ollama**（毎週水曜 06:30 JST、全43店舗、単一プロセス）。`.github/workflows/generate-weekly-insights.yml` の `schedule:` はコメントアウト済みで、**緊急時の `workflow_dispatch` のみ**有効（Fan-in Matrix、オリエンタル38店舗のみ）。
 
 ---
 
@@ -98,7 +108,7 @@ collect-and-commit（Fan-in）
 
 ### store フィルタ（`workflow_dispatch` 時）
 
-- `inputs.stores` が空 or `"all"` → 全 38 店舗を実行
+- `inputs.stores` が空 or `"all"` → matrix に列挙された 38 店舗（オリエンタルのみ。相席屋5店舗は matrix 対象外）を実行
 - 特定店舗を指定（例: `"shibuya,fukuoka"`）→ 該当店舗のみ実行（他はスキップ）
 
 ### 必要な Secrets
