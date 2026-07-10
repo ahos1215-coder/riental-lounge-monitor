@@ -8,16 +8,13 @@ name: Check collection heartbeat
 #
 # 収集は cron-job.org が /tasks/multi_collect を 5分毎にトリガーする
 # (plan/ARCHITECTURE.md: "cron-job.org が 5 分毎にトリガー")。
-# multi_collect.py / /tasks/multi_collect には営業時間ウィンドウのゲートが無く、
-# 24時間365日収集する想定（`/tasks/tick` という別の legacy エンドポイントには
-# WINDOW_START/WINDOW_END による時間帯ゲートがあるが、現行の収集経路である
-# /tasks/multi_collect はそれを使っていない）。そのため本チェックは
-# 時間帯を絞らず常時（24/7）実行する。
 #
-# 5分毎の収集に対して閾値を30分に設定: 1〜数回分のリトライ猶予を持たせつつ、
-# 実質的な停止（PCダウン・Renderコールドスタート長期化・cron-job.org 側の障害等）
-# を数十分以内に検知する。2時間毎にチェックすることで、閾値超過を見逃さない
-# （最悪でも stale から 2時間+30分 以内に検知）。
+# 【2026-07-10 修正】実データ上、新規行が入るのは営業ウィンドウ(JST 19:00〜翌05:00)
+# のみで、昼間は新規行ゼロが正常（店舗別120行/夜=夜間のみ、直近3日の実測で確認）。
+# 旧実装は「24時間収集」前提の一律30分閾値だったため、毎日昼間に3〜4回の偽アラート
+# を出していた（2026-07-08〜10の failure 履歴すべてが昼間帯）。
+# 現在は時間帯対応: 夜間=30分閾値 / 昼間=「昨夜が営業終了(05:00 JST)の45分以内まで
+# 完走していたか」を判定する。チェック自体は従来どおり2時間毎(24/7)に実行する。
 #
 # 必要な Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
@@ -51,7 +48,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, sys, urllib.request, urllib.parse
-          from datetime import datetime, timezone
+          from datetime import datetime, timedelta, timezone
 
           url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
           key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or ""
@@ -101,11 +98,40 @@ jobs:
           now = datetime.now(timezone.utc)
           age_minutes = (now - newest).total_seconds() / 60.0
 
+          # 営業時間ウィンドウ(JST 19:00〜翌05:00)を理解した判定にする。
+          # 実データは営業終了(〜04:55 JST)から開店(19:00 JST)まで新規行が入らないのが
+          # 正常(店が閉まっていて人数が取れない)。旧実装は24時間一律で「30分無ければ
+          # 異常」としており、毎日昼間に3〜4回の偽アラートを出していた(2026-07-08〜10の
+          # 失敗履歴で確認)。
+          # - 夜間(19:00〜05:00 JST): 従来どおり 経過<=閾値(30分) を要求
+          # - 昼間(05:00〜19:00 JST): 「昨夜が閉店近くまで収集できていたか」を要求
+          #   (最新行が直近の営業終了時刻 05:00 JST の45分以上前で止まっていれば、
+          #    昨夜の収集が途中で死んでいた=本物の異常として検知できる)
+          JST = timezone(timedelta(hours=9))
+          now_jst = now.astimezone(JST)
+          in_window = (now_jst.hour >= 19) or (now_jst.hour < 5)
+
+          if in_window:
+              mode = f"夜間窓(閾値={threshold_minutes}分)"
+              ok = age_minutes <= threshold_minutes
+              fail_msg = f"収集が {age_minutes:.1f} 分間停止しています（閾値 {threshold_minutes} 分）。"
+          else:
+              # 直近の営業終了 = 今日の 05:00 JST (05:00〜19:00 の昼間帯なので必ず今日)
+              window_end = now_jst.replace(hour=5, minute=0, second=0, microsecond=0)
+              gap_minutes = (window_end - newest.astimezone(JST)).total_seconds() / 60.0
+              mode = "昼間(前夜の完走チェック)"
+              ok = gap_minutes <= 45
+              fail_msg = (
+                  f"昨夜の収集が営業終了の {gap_minutes:.0f} 分前で止まっています"
+                  f"(最新 {newest_raw})。夜間の収集が途中で死んでいた可能性。"
+              )
+
           lines = [
-              f"収集ハートビートチェック（閾値={threshold_minutes}分）",
+              f"収集ハートビートチェック [{mode}]",
               f"- 最新ログ ts: {newest_raw}",
-              f"- 現在時刻(UTC): {now.isoformat()}",
+              f"- 現在時刻(JST): {now_jst.isoformat()}",
               f"- 経過: {age_minutes:.1f} 分",
+              f"- 判定: {'OK' if ok else 'NG'}",
           ]
           detail = "\n".join(lines)
 
@@ -115,10 +141,10 @@ jobs:
               fh.write("detail<<EOF\n" + detail + "\nEOF\n")
           print(detail)
 
-          if age_minutes > threshold_minutes:
-              print(f"::error::収集が {age_minutes:.1f} 分間停止しています（閾値 {threshold_minutes} 分）。")
+          if not ok:
+              print(f"::error::{fail_msg}")
               sys.exit(1)
-          print("OK: 収集は正常に継続しています。")
+          print("OK: 収集は正常です。")
           PY
 
   notify:
