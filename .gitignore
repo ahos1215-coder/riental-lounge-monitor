@@ -75,3 +75,8 @@ data/log.jsonl
 # --- Local LLM job artifacts / state ---
 local_llm_spike_out/
 data/aisekiya_alert_sent.txt
+
+# --- Analytics service-account key (owner-only, NEVER commit) ---
+# 週次アナリティクス(scripts/analytics_weekly_report.py)のGoogleサービスアカウント鍵。
+# 閲覧専用ロボットの秘密鍵なので絶対にコミットしない。設定手順は docs/ANALYTICS_SETUP.md。
+/secrets/

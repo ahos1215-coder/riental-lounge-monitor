@@ -13,3 +13,6 @@ lightgbm>=4.0.0
 python-dotenv==1.1.0
 optuna>=4.0.0
 shap>=0.43.0
+# scripts/analytics_weekly_report.py: GA4/Search Console のサービスアカウント認証のみに使用
+# （純粋 Python 依存: rsa/pyasn1/cachetools。HTTP は既存の requests を流用）。
+google-auth==2.35.0
