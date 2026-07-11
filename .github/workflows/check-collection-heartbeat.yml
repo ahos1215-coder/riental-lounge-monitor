@@ -16,6 +16,13 @@ name: Check collection heartbeat
 # 現在は時間帯対応: 夜間=30分閾値 / 昼間=「昨夜が営業終了(05:00 JST)の45分以内まで
 # 完走していたか」を判定する。チェック自体は従来どおり2時間毎(24/7)に実行する。
 #
+# 【2026-07-11 追加】上記の全体チェックは「logs 全体の最新1行」しか見ないため、複数店の
+# うち1店だけが静かに死んでも他店の新しい行に隠れて検知できない(実例: ol_sapporo_ag が
+# 閉店で 2026-05-11 に凍結していたが全体チェックは緑のままだった)。そこで stores.json の
+# 各店ごとに最新 ts を個別照会し、PER_STORE_STALE_DAYS 日(既定3)より古い/1行も無い店舗を
+# 店名付きで検知する店舗別チェックを追加した(全体ロジックは不変、加算判定)。stores.json を
+# 読むため checkout ステップを追加している。
+#
 # 必要な Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
 on:
@@ -28,6 +35,10 @@ on:
         description: "許容する最終収集からの経過分数（既定30分）"
         required: false
         default: "30"
+      per_store_stale_days:
+        description: "店舗別: 最新行がこれより古い店舗を異常扱い（既定3日 / 単一店の死を検知）"
+        required: false
+        default: "3"
 
 permissions:
   contents: read
@@ -39,12 +50,15 @@ jobs:
     outputs:
       detail: ${{ steps.check.outputs.detail }}
     steps:
+      - name: Checkout（店舗マスタ stores.json を読むため）
+        uses: actions/checkout@v4
       - name: Query Supabase for newest log timestamp
         id: check
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           THRESHOLD_MINUTES: ${{ github.event.inputs.threshold_minutes || '30' }}
+          PER_STORE_STALE_DAYS: ${{ github.event.inputs.per_store_stale_days || '3' }}
         run: |
           python3 - <<'PY'
           import json, os, sys, urllib.request, urllib.parse
@@ -126,13 +140,90 @@ jobs:
                   f"(最新 {newest_raw})。夜間の収集が途中で死んでいた可能性。"
               )
 
+          # ---- 全体判定（既存ロジック; 判定基準は不変） --------------------------
           lines = [
               f"収集ハートビートチェック [{mode}]",
               f"- 最新ログ ts: {newest_raw}",
               f"- 現在時刻(JST): {now_jst.isoformat()}",
               f"- 経過: {age_minutes:.1f} 分",
-              f"- 判定: {'OK' if ok else 'NG'}",
+              f"- 判定(全体): {'OK' if ok else 'NG'}",
           ]
+
+          # ---- 追加: 店舗別 staleness チェック ----------------------------------
+          # 全体チェックは「最新の1行」しか見ないため、複数店のうち1店だけが静かに死んでも
+          # (例: ol_sapporo_ag が閉店で 2026-05-11 に凍結) 他店の新しい行に隠れて検知できない。
+          # ここでは stores.json の各店について「その店の最新 ts」を個別に照会し、
+          # PER_STORE_STALE_DAYS 日より古ければ(または1行も無ければ)店名付きで異常を報告する。
+          # 閾値は日単位(既定3日)で毎晩の閉店ウィンドウ(~14時間)を十分に上回るため、
+          # 時間帯を問わず誤検知しない。全体ロジック(上)はそのまま維持し、こちらは加算判定。
+          try:
+              per_store_stale_days = float(os.environ.get("PER_STORE_STALE_DAYS") or "3")
+          except ValueError:
+              per_store_stale_days = 3.0
+
+          def _newest_ts_for_store(store_id):
+              sq = urllib.parse.urlencode({
+                  "store_id": f"eq.{store_id}",
+                  "select": "ts",
+                  "order": "ts.desc",
+                  "limit": "1",
+              })
+              sreq = urllib.request.Request(
+                  f"{url}/rest/v1/logs?{sq}",
+                  headers={"apikey": key, "Authorization": f"Bearer {key}"},
+              )
+              err = None
+              for _ in range(2):
+                  try:
+                      with urllib.request.urlopen(sreq, timeout=15) as r:
+                          data = json.loads(r.read().decode())
+                          return (data[0]["ts"] if data else None), None
+                  except Exception as e:
+                      err = e
+              return None, err
+
+          stores_json_path = os.path.join(os.getcwd(), "frontend", "src", "data", "stores.json")
+          store_rows = []
+          try:
+              with open(stores_json_path, encoding="utf-8") as fh:
+                  store_rows = json.load(fh)
+          except Exception as e:
+              print(f"::warning::stores.json を読めませんでした({e}) — 店舗別チェックをスキップします。")
+
+          stale_stores = []
+          query_errors = []
+          checked = 0
+          for entry in store_rows:
+              sid = (entry.get("store_id") or "").strip()
+              if not sid:
+                  continue
+              label = entry.get("label") or entry.get("store") or entry.get("slug") or sid
+              ts_raw, err = _newest_ts_for_store(sid)
+              if err is not None:
+                  query_errors.append(f"{sid}({label})")
+                  continue
+              checked += 1
+              if ts_raw is None:
+                  stale_stores.append(f"{sid}({label}): 収集行なし")
+                  continue
+              try:
+                  ts_dt = datetime.fromisoformat(str(ts_raw).replace("Z", "+00:00"))
+              except ValueError:
+                  stale_stores.append(f"{sid}({label}): ts 解釈不能({ts_raw})")
+                  continue
+              store_age_days = (now - ts_dt).total_seconds() / 86400.0
+              if store_age_days > per_store_stale_days:
+                  stale_stores.append(
+                      f"{sid}({label}): 最新 {ts_raw} = {store_age_days:.1f}日前 (>{per_store_stale_days:g}日)"
+                  )
+
+          lines.append(
+              f"- 店舗別チェック(閾値={per_store_stale_days:g}日): "
+              f"{checked}店照会 / 陳腐化 {len(stale_stores)}店 / 照会失敗 {len(query_errors)}店"
+          )
+          for s in stale_stores:
+              lines.append(f"    停止疑い -> {s}")
+
           detail = "\n".join(lines)
 
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
@@ -141,10 +232,18 @@ jobs:
               fh.write("detail<<EOF\n" + detail + "\nEOF\n")
           print(detail)
 
+          # 全体NG または 店舗別で陳腐化があれば失敗。照会失敗(=一時的な通信エラー)のみでは
+          # 落とさない(全体チェックが疎通を保証済み。誤検知回避)。
+          problems = []
           if not ok:
               print(f"::error::{fail_msg}")
+              problems.append("全体")
+          if stale_stores:
+              print(f"::error::収集が止まっている店舗があります: {', '.join(stale_stores)}")
+              problems.append("店舗別")
+          if problems:
               sys.exit(1)
-          print("OK: 収集は正常です。")
+          print("OK: 収集は正常です（全体 + 全店とも新鮮）。")
           PY
 
   notify:

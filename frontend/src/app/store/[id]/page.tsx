@@ -61,7 +61,7 @@ const REVALIDATE_SECONDS = 120;
  */
 export const dynamicParams = false;
 
-/** ビルド時に全店舗ページを静的生成する（43店） */
+/** ビルド時に全店舗ページを静的生成する（42店。ol_sapporo_ag は 2026-07-11 閉店で除外） */
 export function generateStaticParams(): { id: string }[] {
   return STORES.map((s) => ({ id: s.slug }));
 }

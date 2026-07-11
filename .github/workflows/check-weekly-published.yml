@@ -12,12 +12,12 @@ name: Check weekly reports published
 on:
   schedule:
     # 毎週木曜 08:00 JST（= 水曜 23:00 UTC）。水曜 06:30 JST 開始の週次生成が
-    # 44 店舗分終わっているのに十分な時間的余裕を見た翌朝。
+    # 42 店舗分終わっているのに十分な時間的余裕を見た翌朝。
     - cron: "0 23 * * 3"
   workflow_dispatch:
     inputs:
       min_stores:
-        description: "公開済みとみなす最低店舗数（既定38 / 全44店 + 余裕）"
+        description: "公開済みとみなす最低店舗数（既定38 / 全42店の下限フロア + 余裕）"
         required: false
         default: "38"
       max_staleness_days:
@@ -58,7 +58,7 @@ jobs:
 
           def fetch_rows():
               # is_published=true かつ error_message が無い weekly レコードを
-              # store_slug, updated_at だけ取得する（全44店なので limit は余裕を持たせる）。
+              # store_slug, updated_at だけ取得する（全42店なので limit は余裕を持たせる）。
               q = urllib.parse.urlencode({
                   "content_type": "eq.weekly",
                   "is_published": "eq.true",

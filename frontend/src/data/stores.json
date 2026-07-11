@@ -126,20 +126,6 @@
     "lon": 127.025305
   },
   {
-    "slug": "sapporo_ag",
-    "store_id": "ol_sapporo_ag",
-    "store": "ag札幌",
-    "label": "札幌AG",
-    "area_label": "北海道・札幌",
-    "region_label": "北海道・東北",
-    "maps_query_base": "札幌",
-    "url": "https://oriental-lounge.com/stores/1",
-    "pref": "hokkaido",
-    "brand": "oriental",
-    "lat": 43.0554,
-    "lon": 141.3536
-  },
-  {
     "slug": "sendai_ag",
     "store_id": "ol_sendai_ag",
     "store": "ag仙台",

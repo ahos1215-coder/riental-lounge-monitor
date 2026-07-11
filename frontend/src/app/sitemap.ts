@@ -83,7 +83,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // Daily を indexable にする場合は、まず reports/daily の robots 指定を見直すのが先。
 
   // Weekly Report: 毎週水曜更新の固定URL。
-  // 2026-07-03 時点でローカル gemma 生成が相席屋(aisekiya)にも対応し、全44店舗で published 行が存在するため
+  // 2026-07-03 時点でローカル gemma 生成が相席屋(aisekiya)にも対応し、全42店舗で published 行が存在するため
   // ブランドによる絞り込みは不要（以前は oriental のみ対応で aisekiya は notFound() になっていた）。
   // lastModified は content/insights/weekly/{slug} 配下の最新日付ファイルがあればそれを使い、
   // 無ければ now にフォールバックする（Supabase 側の実データを毎回叩くのは高コストなため）。

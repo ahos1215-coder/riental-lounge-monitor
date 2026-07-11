@@ -9,7 +9,8 @@ from typing import Tuple
 # stores.json が読めない/壊れている場合の安全網としてのみ使う
 # （Render は stores.json が万一欠けても起動できなければならない）。
 #
-# Known Supabase store_ids (38 stores). Kept minimal (id/slug) to avoid duplicating store metadata.
+# Known Supabase store_ids (37 stores; ol_sapporo_ag 除外 2026-07-11 閉店)。
+# Kept minimal (id/slug) to avoid duplicating store metadata.
 _FALLBACK_STORE_IDS = [
     "ol_nagasaki",
     "ol_fukuoka",
@@ -20,7 +21,6 @@ _FALLBACK_STORE_IDS = [
     "ol_kagoshima",
     "ol_okinawa_ag",
     "ol_gangnam",
-    "ol_sapporo_ag",
     "ol_sendai_ag",
     "ol_shibuya",
     "ol_ebisu",
