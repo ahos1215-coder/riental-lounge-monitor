@@ -113,6 +113,251 @@ def test_build_list_page_urls_does_not_warm_megribi_score():
     assert all("megribi_score" not in u.url for u in urls)
 
 
+# --------------------------------------------------------------------------
+# Brand-tab / region-filter coverage (2026-07-11 filter-combo coverage --
+# see the module docstring in warm_cdn_local.py for the full rationale).
+# --------------------------------------------------------------------------
+
+
+def test_normalize_brand_matches_frontend_default_mapping():
+    # Mirrors config/stores.ts: only "aisekiya"/"jis" are preserved, anything
+    # else (including None/missing) normalizes to "oriental".
+    assert warm.normalize_brand("aisekiya") == "aisekiya"
+    assert warm.normalize_brand("jis") == "jis"
+    assert warm.normalize_brand("oriental") == "oriental"
+    assert warm.normalize_brand(None) == "oriental"
+    assert warm.normalize_brand("") == "oriental"
+    assert warm.normalize_brand("something-unexpected") == "oriental"
+
+
+def test_load_stores_includes_brand_and_region_label_from_real_stores_json():
+    # 42 stores as of the 2026-07-11 sapporo_ag closure (CLAUDE.md ss1):
+    # 37 oriental + 5 aisekiya, no "jis" entries yet.
+    stores = warm.load_stores()
+    assert len(stores) == 42
+    brands = [s["brand"] for s in stores]
+    assert brands.count("oriental") == 37
+    assert brands.count("aisekiya") == 5
+    assert brands.count("jis") == 0
+    assert all(s["region_label"] for s in stores)
+
+
+def test_brand_filter_groups_preserves_stores_json_order_and_skips_zero_count_brands():
+    stores = [
+        {"slug": "a", "brand": "oriental", "region_label": "kanto"},
+        {"slug": "b", "brand": "aisekiya", "region_label": "kanto"},
+        {"slug": "c", "brand": "oriental", "region_label": "kansai"},
+    ]
+    groups = warm.brand_filter_groups(stores)
+    # First-occurrence order: "oriental" (store a) before "aisekiya" (store b).
+    assert [b for b, _ in groups] == ["oriental", "aisekiya"]
+    by_brand = dict(groups)
+    assert [s["slug"] for s in by_brand["oriental"]] == ["a", "c"]  # order preserved
+    assert [s["slug"] for s in by_brand["aisekiya"]] == ["b"]
+    assert "jis" not in by_brand  # zero stores -> absent, not an empty list
+
+
+def test_region_filter_groups_preserves_stores_json_order():
+    stores = [
+        {"slug": "a", "brand": "oriental", "region_label": "kanto"},
+        {"slug": "b", "brand": "oriental", "region_label": "kansai"},
+        {"slug": "c", "brand": "aisekiya", "region_label": "kanto"},
+    ]
+    groups = warm.region_filter_groups(stores)
+    assert [r for r, _ in groups] == ["kanto", "kansai"]
+    by_region = dict(groups)
+    assert [s["slug"] for s in by_region["kanto"]] == ["a", "c"]
+    assert [s["slug"] for s in by_region["kansai"]] == ["b"]
+
+
+def test_build_paged_multi_urls_empty_group_yields_no_urls():
+    assert warm.build_paged_multi_urls("https://example.test", [], "brand_jis") == []
+
+
+def test_build_filter_page_urls_brand_examples_match_real_stores_json():
+    # Literal known-good example built from the current 42-store roster
+    # (independently re-filtered here, not via warm.brand_filter_groups).
+    stores = warm.load_stores()
+    oriental_slugs = [s["slug"] for s in stores if s["brand"] == "oriental"]
+    aisekiya_slugs = [s["slug"] for s in stores if s["brand"] == "aisekiya"]
+    assert len(oriental_slugs) == 37  # -> ceil(37/12) = 4 pages
+    assert len(aisekiya_slugs) == 5  # -> 1 page
+
+    urls = warm.build_filter_page_urls("https://example.test", stores)
+    by_label = {u.label: u for u in urls}
+
+    page1_csv = ",".join(oriental_slugs[0:12])
+    page4_csv = ",".join(oriental_slugs[36:37])  # last, partial page (1 store)
+    assert (
+        by_label["brand_oriental_page1:range_multi"].url
+        == f"https://example.test/api/range_multi?stores={page1_csv}&limit=48"
+    )
+    assert by_label["brand_oriental_page1:range_multi"].prefix == "range_multi"
+    assert (
+        by_label["brand_oriental_page1:forecast_today_multi"].url
+        == f"https://example.test/api/forecast_today_multi?stores={page1_csv}"
+    )
+    assert by_label["brand_oriental_page1:forecast_today_multi"].prefix == "forecast_multi"
+    assert (
+        by_label["brand_oriental_page4:range_multi"].url
+        == f"https://example.test/api/range_multi?stores={page4_csv}&limit=48"
+    )
+    assert "brand_oriental_page5:range_multi" not in by_label  # exactly 4 pages, no more
+
+    aisekiya_csv = ",".join(aisekiya_slugs)
+    assert (
+        by_label["brand_aisekiya_page1:range_multi"].url
+        == f"https://example.test/api/range_multi?stores={aisekiya_csv}&limit=48"
+    )
+    assert "brand_aisekiya_page2:range_multi" not in by_label  # 5 stores fit on 1 page
+
+
+def test_build_filter_page_urls_region_examples_match_real_stores_json():
+    # Literal known-good example for the region filter: 海外 (overseas) is a
+    # single-store region today (gangnam, Seoul) -- exactly 1 page, no page 2.
+    stores = warm.load_stores()
+    overseas_slugs = [s["slug"] for s in stores if s["region_label"] == "海外"]
+    assert overseas_slugs == ["gangnam"]
+
+    urls = warm.build_filter_page_urls("https://example.test", stores)
+    by_label = {u.label: u for u in urls}
+
+    assert (
+        by_label["region_海外_page1:range_multi"].url
+        == "https://example.test/api/range_multi?stores=gangnam&limit=48"
+    )
+    assert by_label["region_海外_page1:range_multi"].prefix == "range_multi"
+    assert (
+        by_label["region_海外_page1:forecast_today_multi"].url
+        == "https://example.test/api/forecast_today_multi?stores=gangnam"
+    )
+    assert "region_海外_page2:range_multi" not in by_label
+
+
+def test_build_filter_page_urls_excludes_default_view_and_zero_count_jis_tab():
+    stores = warm.load_stores()
+    urls = warm.build_filter_page_urls("https://example.test", stores)
+    labels = [u.label for u in urls]
+    # "すべて" (all) IS the default view, already covered by build_list_page_urls
+    # -- build_filter_page_urls must not duplicate it under any label.
+    assert not any(label.startswith("brand_all") for label in labels)
+    # "jis" has zero stores.json entries (not yet scraped) -> zero fetches
+    # client-side -> nothing to warm.
+    assert not any(label.startswith("brand_jis") for label in labels)
+
+
+def test_build_filter_page_urls_only_kanto_region_needs_a_second_page():
+    # Derived dynamically from stores.json, not a hardcoded region list:
+    # exactly the regions with > STORES_PER_PAGE stores should get a page 2.
+    stores = warm.load_stores()
+    region_counts = {r: len(g) for r, g in warm.region_filter_groups(stores)}
+    expected_two_page_regions = {r for r, n in region_counts.items() if n > warm.STORES_PER_PAGE}
+    assert expected_two_page_regions == {"関東"}  # 17 stores today
+
+    urls = warm.build_filter_page_urls("https://example.test", stores)
+    labels = {u.label for u in urls}
+    for region in region_counts:
+        assert f"region_{region}_page1:range_multi" in labels
+        has_page2 = f"region_{region}_page2:range_multi" in labels
+        assert has_page2 == (region in expected_two_page_regions)
+
+
+def test_build_filter_page_urls_does_not_warm_megribi_score():
+    stores = warm.load_stores()
+    urls = warm.build_filter_page_urls("https://example.test", stores)
+    assert all("megribi_score" not in u.label and "megribi_score" not in u.prefix for u in urls)
+
+
+def test_build_all_urls_interleaves_filter_units_across_the_store_loop():
+    # Small deterministic fixture: 4 stores, 2 brands x 2 regions -> exactly
+    # 4 filter-page-pairs (1 page each, all groups <= STORES_PER_PAGE), which
+    # evenly distributes to exactly 1 filter unit inserted right after each
+    # store's own block+related hit (4 units / 4 stores).
+    now = datetime(2026, 7, 10, 20, 0, tzinfo=JST)
+    stores = [
+        {"slug": "a", "lat": 0.0, "lon": 0.0, "brand": "oriental", "region_label": "kanto"},
+        {"slug": "b", "lat": 1.0, "lon": 0.0, "brand": "oriental", "region_label": "kansai"},
+        {"slug": "c", "lat": 2.0, "lon": 0.0, "brand": "aisekiya", "region_label": "kanto"},
+        {"slug": "d", "lat": 3.0, "lon": 0.0, "brand": "aisekiya", "region_label": "kansai"},
+    ]
+    urls = warm.build_all_urls("https://example.test", stores, now)
+    labels = [u.label for u in urls]
+
+    # top(1) + list_page(1 page * 2) + 4 stores * (4 own + 1 related + 2 filter-pair) = 31
+    assert len(labels) == 1 + 2 + 4 * 7
+
+    assert labels == [
+        "top:range_default_store",
+        "list_page1:range_multi",
+        "list_page1:forecast_today_multi",
+        "a:range_today",
+        "a:range_yesterday",
+        "a:forecast_today",
+        "a:forecast_yesterday_snapshot",
+        "a:related_range_multi",
+        "brand_oriental_page1:range_multi",
+        "brand_oriental_page1:forecast_today_multi",
+        "b:range_today",
+        "b:range_yesterday",
+        "b:forecast_today",
+        "b:forecast_yesterday_snapshot",
+        "b:related_range_multi",
+        "brand_aisekiya_page1:range_multi",
+        "brand_aisekiya_page1:forecast_today_multi",
+        "c:range_today",
+        "c:range_yesterday",
+        "c:forecast_today",
+        "c:forecast_yesterday_snapshot",
+        "c:related_range_multi",
+        "region_kanto_page1:range_multi",
+        "region_kanto_page1:forecast_today_multi",
+        "d:range_today",
+        "d:range_yesterday",
+        "d:forecast_today",
+        "d:forecast_yesterday_snapshot",
+        "d:related_range_multi",
+        "region_kansai_page1:range_multi",
+        "region_kansai_page1:forecast_today_multi",
+    ]
+    # A (range_multi, forecast_today_multi) pair always stays adjacent --
+    # never split across an interleaving boundary.
+    for i, label in enumerate(labels):
+        if label.endswith(":range_multi") and (
+            label.startswith("brand_") or label.startswith("region_") or label.startswith("list_")
+        ):
+            assert labels[i + 1] == label.replace(":range_multi", ":forecast_today_multi")
+
+
+def test_build_all_urls_total_count_matches_default_plus_filter_urls_on_real_stores_json():
+    now = datetime(2026, 7, 11, 20, 0, tzinfo=JST)
+    stores = warm.load_stores()
+    default_total = len(warm.build_all_urls("https://example.test", [dict(s, brand=None, region_label=None) for s in stores], now))
+    full_total = len(warm.build_all_urls("https://example.test", stores, now))
+    filter_only_total = len(warm.build_filter_page_urls("https://example.test", stores))
+    assert filter_only_total == 26  # 5 brand pages + 8 region pages, x2 URLs/page
+    assert full_total == default_total + filter_only_total
+    assert full_total == 245  # 219 (pre-existing baseline) + 26
+
+
+def test_build_all_urls_does_not_cluster_filter_units_densely(monkeypatch):
+    # Regression guard for the same class of 429 burst that motivated the
+    # related-stores interleaving: no long unbroken run of the same prefix.
+    now = datetime(2026, 7, 11, 20, 0, tzinfo=JST)
+    stores = warm.load_stores()
+    urls = warm.build_all_urls("https://example.test", stores, now)
+
+    max_run = 1
+    run = 1
+    for prev, cur in zip(urls, urls[1:]):
+        if cur.prefix == prev.prefix:
+            run += 1
+            max_run = max(max_run, run)
+        else:
+            run = 1
+    assert max_run <= 2  # e.g. a filter unit's range_multi landing right after
+    # a related-stores range_multi hit -- never a long contiguous block.
+
+
 def test_build_top_page_urls_uses_first_store_as_default_and_no_megribi_score():
     stores = [{"slug": "nagasaki", "lat": 0.0, "lon": 0.0}, {"slug": "fukuoka", "lat": 0.0, "lon": 0.0}]
     urls = warm.build_top_page_urls("https://example.test", stores)

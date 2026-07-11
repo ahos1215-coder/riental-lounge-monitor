@@ -26,13 +26,19 @@ guessed):
   - frontend/src/app/hooks/useStorePreviewData.ts     (range/forecast URL
     construction for the store detail page: today + yesterday tabs)
   - frontend/src/app/stores/stores-list-client.tsx    (list-page range_multi
-    / forecast_today_multi / megribi_score csv construction, 12/page)
+    / forecast_today_multi / megribi_score csv construction, 12/page;
+    `filteredStores` brand/region filter chain -- see 2026-07-11 filter-combo
+    coverage note below)
+  - frontend/src/app/stores/storesListHelpers.ts       (BrandFilter/BRAND_TABS
+    -- "jis" has zero stores.json entries today, so its tab fires zero
+    fetches; STORES_PER_PAGE)
   - frontend/src/app/store/[id]/StorePageClient.tsx   (per-store "related
     stores" range_multi — nearest-4-by-haversine digestStores)
   - frontend/src/app/home-client.tsx                  (top page: bare
     megribi_score + /api/range for the fallback "last visited" store)
   - frontend/src/app/config/stores.ts                 (distanceKm haversine
-    formula, STORES order == frontend/src/data/stores.json order)
+    formula, STORES order == frontend/src/data/stores.json order;
+    STORE_REGION_FILTER_ORDER for the region-filter buttons)
   - frontend/src/lib/storeCardRangeSparkline.ts        (STORE_CARD_RANGE_LIMIT)
 
 Rate-limit note (important, discovered while building this -- confirmed by an
@@ -86,6 +92,56 @@ SHOW_MEGRIBI_JUDGMENTS goes back to `true`. The frontend fetch itself
 (home-client.tsx's unconditional `/api/megribi_score` call, stores-list-
 client.tsx, etc.) is a separate concern tracked/owned by another batch --
 this script only stops *pre-warming* the URL.
+
+2026-07-11 filter-combo coverage (owner report: "/stores list still has
+slow pages"): `build_list_page_urls` only ever warmed the *default*
+(unfiltered, page 1..N) view. But stores-list-client.tsx's `filteredStores`
+also branches on the brand tabs (すべて/ORIENTAL LOUNGE/JIS/相席屋,
+storesListHelpers.ts BRAND_TABS) and the region buttons (地域で絞り込み,
+config/stores.ts STORE_REGION_FILTER_ORDER) -- selecting either produces a
+*different* stores CSV for range_multi/forecast_today_multi (same 12/page
+pagination, same STORE_CARD_RANGE_LIMIT, just a different, filtered
+`STORES` subset in stores.json order) that was never pre-warmed, so a
+visitor landing on any of those tabs/buttons always hit a cold ~3-8s
+backend round-trip. `build_filter_page_urls` (via the shared
+`build_paged_multi_urls` pager, also now used by `build_list_page_urls`
+for the default view) closes this gap:
+  - Brand tabs: one page set per brand actually present in stores.json
+    (today: "oriental" 37 stores -> 4 pages, "aisekiya" 5 stores -> 1 page;
+    "すべて" is the default view already covered above, and "jis" has 0
+    stores.json entries -- storesListHelpers.ts isComingSoonBrand -- so its
+    tab fires zero fetches client-side and there is nothing to warm).
+  - Region filters: one page set per `region_label` present in stores.json
+    (today: 7 regions), page 1 always plus page 2 only when a region has
+    more than STORES_PER_PAGE stores (today: only 関東/Kanto, 17 stores).
+    Free-text search (`query`) combos are intentionally NOT warmed -- the
+    input space is unbounded.
+  - Brand and region are warmed independently (not as a cross product);
+    combined brand+region filters are a much larger, low-traffic tail and
+    out of scope here.
+  - All group membership/counts are derived from stores.json at run time
+    (`brand_filter_groups` / `region_filter_groups`) -- no hardcoded store
+    counts, so this tracks store openings/closings automatically.
+Measured against the current 42-store roster: +26 URLs per pass (10 from 5
+brand pages, 16 from 8 region pages; each page = 1 range_multi +
+1 forecast_today_multi), taking a pass from 219 to 245 URLs. `build_all_urls`
+spreads these 13 new page-pairs evenly across the per-store loop (same
+anti-clustering rationale as the related-stores interleaving below) rather
+than appending them as one dense contiguous block, so the per-minute
+range_multi/forecast_multi request density doesn't spike at the tail of the
+pass. At 30 passes/night (19:00-23:50, every 10 min) this is roughly
++780 requests/night / +23,400/month over the pre-fix baseline. Measured live
+against production (first pass ever hitting these 26 URLs, so every one of
+them was a cold MISS -- see the "Rate-limit note" above for why real request
+latency, not the explicit sleep, dominates pass duration): 245/245 ok,
+0 fail, 0x429, 178.4s total (vs. the pre-fix 219-URL baseline's ~110s);
+steady-state passes (once the new combos are warm) should track close to
+that ~110s + the ~8s of extra pacing sleep the 26 added requests contribute,
+i.e. still well under the 10-minute Task Scheduler execution time limit.
+A same-URL second-hit spot check on 2 of the new combos
+(brand_aisekiya_page1:range_multi, region_海外_page1:range_multi) confirmed
+`x-vercel-cache: HIT` immediately after the warming pass, i.e. the CDN
+cache-key does match the real frontend fetch shape for these filter combos.
 
 Design constraints
 ------------------
@@ -205,9 +261,25 @@ DEFAULT_WINDOW_END = "24:05"
 # --------------------------------------------------------------------------
 
 
+def normalize_brand(raw_brand: object) -> str:
+    """Mirrors config/stores.ts STORES mapping: `rawBrand === "aisekiya" ?
+    "aisekiya" : rawBrand === "jis" ? "jis" : "oriental"` -- any value other
+    than "aisekiya"/"jis" (including missing/None) normalizes to
+    "oriental"."""
+    if raw_brand == "aisekiya":
+        return "aisekiya"
+    if raw_brand == "jis":
+        return "jis"
+    return "oriental"
+
+
 def load_stores(path: Path = STORES_JSON_PATH) -> list[dict]:
     """Load stores.json, preserving file order (== frontend STORES order,
-    frontend/src/app/config/stores.ts `STORES = rawStores.map(...)`)."""
+    frontend/src/app/config/stores.ts `STORES = rawStores.map(...)`).
+    Includes `brand` (normalized, see `normalize_brand`) and `region_label`
+    (raw pass-through, mirrors `StoreMeta.regionLabel`) so the brand-tab /
+    region-filter warm URLs (`build_filter_page_urls`) can be derived
+    without a second file read."""
     with path.open("r", encoding="utf-8") as f:
         raw = json.load(f)
     out = []
@@ -215,7 +287,15 @@ def load_stores(path: Path = STORES_JSON_PATH) -> list[dict]:
         slug = s.get("slug")
         if not slug:
             continue
-        out.append({"slug": slug, "lat": s.get("lat"), "lon": s.get("lon")})
+        out.append(
+            {
+                "slug": slug,
+                "lat": s.get("lat"),
+                "lon": s.get("lon"),
+                "brand": normalize_brand(s.get("brand")),
+                "region_label": s.get("region_label"),
+            }
+        )
     return out
 
 
@@ -235,9 +315,10 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 def nearest_related_slugs(stores: list[dict], slug: str, count: int = RELATED_STORE_COUNT) -> list[str]:
     """Mirrors StorePageClient.tsx `digestStores`: nearest `count` other
     stores by haversine distance, nearest first, ties broken by original
-    stores.json order. All 43 stores.json entries carry lat/lon (verified),
-    so the region-label fallback branch in distanceKm's caller never
-    triggers here and is intentionally not replicated.
+    stores.json order. All stores.json entries carry lat/lon (verified;
+    42 stores as of the 2026-07-11 sapporo_ag closure), so the
+    region-label fallback branch in distanceKm's caller never triggers
+    here and is intentionally not replicated.
     """
     me = next((s for s in stores if s["slug"] == slug), None)
     if me is None or me.get("lat") is None or me.get("lon") is None:
@@ -372,46 +453,107 @@ def build_store_urls(base: str, stores: list[dict], now_jst: datetime) -> list[W
     return out
 
 
-def build_list_page_urls(base: str, stores: list[dict]) -> list[WarmUrl]:
-    """List page (/stores), default view (no filter/search): pages of
-    STORES_PER_PAGE in stores.json order (stores-list-client.tsx).
+def build_paged_multi_urls(base: str, group_stores: list[dict], label_prefix: str) -> list[WarmUrl]:
+    """Shared pager for the /stores list page's range_multi +
+    forecast_today_multi pair: STORES_PER_PAGE stores per page, in the
+    group's given order (stores.json order, already filtered by the caller).
+    Mirrors stores-list-client.tsx's `filteredStores.slice((page-1)*12,
+    page*12)` -- pagination and CSV construction are identical regardless
+    of which filter (none / brand tab / region button) produced the
+    `group_stores` subset, so this one function backs both
+    `build_list_page_urls` (the default, unfiltered view) and
+    `build_filter_page_urls` (brand-tab / region-filter views).
 
-    2026-07-11 (bug audit rank7): no longer warms megribi_score here -- the
-    only UI that consumes it (score badges/judgment chips) is behind
+    2026-07-11 (bug audit rank7): does not warm megribi_score -- the only
+    UI that consumes it (score badges/judgment chips) is behind
     SHOW_MEGRIBI_JUDGMENTS (frontend/src/lib/featureFlags.ts), which is
     `false`. Warming it is wasted Render load for a hidden UI. Restore a
     `WarmUrl(f"{base}/api/megribi_score?stores={csv}",
-    f"list_page{page_no}:megribi_score", "megribi_score")` append here if the
-    flag goes back to `true`.
+    f"{label_prefix}_page{page_no}:megribi_score", "megribi_score")` append
+    here if the flag goes back to `true`.
     """
     out: list[WarmUrl] = []
-    page_count = math.ceil(len(stores) / STORES_PER_PAGE) if stores else 0
+    page_count = math.ceil(len(group_stores) / STORES_PER_PAGE) if group_stores else 0
     for page in range(page_count):
-        chunk = stores[page * STORES_PER_PAGE : (page + 1) * STORES_PER_PAGE]
+        chunk = group_stores[page * STORES_PER_PAGE : (page + 1) * STORES_PER_PAGE]
         csv = ",".join(s["slug"] for s in chunk)
         page_no = page + 1
         out.append(
             WarmUrl(
                 f"{base}/api/range_multi?stores={csv}&limit={STORE_CARD_RANGE_LIMIT}",
-                f"list_page{page_no}:range_multi",
+                f"{label_prefix}_page{page_no}:range_multi",
                 "range_multi",
             )
         )
         out.append(
             WarmUrl(
                 f"{base}/api/forecast_today_multi?stores={csv}",
-                f"list_page{page_no}:forecast_today_multi",
+                f"{label_prefix}_page{page_no}:forecast_today_multi",
                 "forecast_multi",
             )
         )
     return out
 
 
+def build_list_page_urls(base: str, stores: list[dict]) -> list[WarmUrl]:
+    """List page (/stores), default view (no filter/search): pages of
+    STORES_PER_PAGE in stores.json order (stores-list-client.tsx). See
+    `build_paged_multi_urls` for the shared pager and the megribi_score note.
+    """
+    return build_paged_multi_urls(base, stores, "list")
+
+
+def brand_filter_groups(stores: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Distinct `brand` values, in stores.json first-occurrence order, each
+    paired with its filtered store list (stores.json order preserved) --
+    mirrors stores-list-client.tsx's `list.filter((s) => s.brand ===
+    brandFilter)` for every brand tab except "すべて" (the default view,
+    already covered by `build_list_page_urls`). A brand with zero
+    stores.json entries (today: "jis", not yet scraped -- see
+    storesListHelpers.ts BRAND_TABS/isComingSoonBrand) is naturally absent
+    from the result, matching the frontend firing zero fetches for an empty
+    filtered list."""
+    seen: list[str] = []
+    for s in stores:
+        b = s.get("brand")
+        if b and b not in seen:
+            seen.append(b)
+    return [(b, [s for s in stores if s.get("brand") == b]) for b in seen]
+
+
+def region_filter_groups(stores: list[dict]) -> list[tuple[str, list[dict]]]:
+    """Distinct `region_label` values, in stores.json first-occurrence
+    order, each paired with its filtered store list (stores.json order
+    preserved) -- mirrors stores-list-client.tsx's `list.filter((s) =>
+    s.regionLabel === regionFilter)` for every region button
+    (config/stores.ts STORE_REGION_FILTER_ORDER)."""
+    seen: list[str] = []
+    for s in stores:
+        r = s.get("region_label")
+        if r and r not in seen:
+            seen.append(r)
+    return [(r, [s for s in stores if s.get("region_label") == r]) for r in seen]
+
+
+def build_filter_page_urls(base: str, stores: list[dict]) -> list[WarmUrl]:
+    """Brand-tab and region-filter warm URLs for /stores -- see the
+    "2026-07-11 filter-combo coverage" note in the module docstring for the
+    full rationale and measured URL-count impact. Free-text search combos
+    are intentionally NOT covered (unbounded input space); brand and region
+    are warmed independently, not as a cross product."""
+    out: list[WarmUrl] = []
+    for brand, group in brand_filter_groups(stores):
+        out.extend(build_paged_multi_urls(base, group, f"brand_{brand}"))
+    for region, group in region_filter_groups(stores):
+        out.extend(build_paged_multi_urls(base, group, f"region_{region}"))
+    return out
+
+
 def build_related_store_urls(base: str, stores: list[dict]) -> list[WarmUrl]:
     """Store detail page's "related stores" panel (StorePageClient.tsx
     digestStores): one range_multi per store, keyed to that store's own
-    nearest-4-by-distance CSV (43 distinct combos, since the CSV order/
-    membership depends on the current store)."""
+    nearest-4-by-distance CSV (one distinct combo per store, since the CSV
+    order/membership depends on the current store)."""
     out: list[WarmUrl] = []
     for s in stores:
         slug = s["slug"]
@@ -457,17 +599,28 @@ def build_top_page_urls(base: str, stores: list[dict]) -> list[WarmUrl]:
 
 def build_all_urls(base: str, stores: list[dict], now_jst: datetime) -> list[WarmUrl]:
     """Assembles the full warm list. IMPORTANT ordering note (found via a
-    live 429 burst in the first verification run of this script): the 43
-    "related stores" range_multi hits (build_related_store_urls) must NOT
-    be appended as one contiguous block -- that clusters 43 same-prefix
-    ("range_multi") requests together, blowing past the route's 30/min
-    rate limit (frontend/src/lib/rateLimit/apiRateLimit.ts) in well under a
-    minute and causing self-inflicted 429s (confirmed: 13/43 failed with
-    429 when this was a trailing block). Instead each store's related-stores
-    hit is interleaved right after that same store's own 4-request block, so
-    the 47 total range_multi hits (4 list-page + 43 related) are spread
-    across the whole pass (which runs several minutes end-to-end against a
+    live 429 burst in the first verification run of this script): the
+    "related stores" range_multi hits (build_related_store_urls, one per
+    store) must NOT be appended as one contiguous block -- that clusters
+    many same-prefix ("range_multi") requests together, blowing past the
+    route's 30/min rate limit (frontend/src/lib/rateLimit/apiRateLimit.ts)
+    in well under a minute and causing self-inflicted 429s (confirmed:
+    13/43 failed with 429 when this was a trailing block, back when the
+    store roster was 43 stores). Instead each store's related-stores hit is
+    interleaved right after that same store's own 4-request block, so the
+    range_multi hits (4 list-page + one per store) are spread across the
+    whole pass (which runs several minutes end-to-end against a
     single-worker backend) rather than bursted.
+
+    2026-07-11 filter-combo coverage: the brand-tab/region-filter page pairs
+    from `build_filter_page_urls` (each pair = 1 range_multi +
+    1 forecast_today_multi) are spread evenly across the per-store loop for
+    the same reason -- appending all of them as one dense trailing block
+    would double the local range_multi/forecast_multi request density right
+    at the end of the pass versus the rest of the loop (those pages
+    alternate range_multi/forecast_multi with no other requests in between,
+    unlike the per-store blocks which have 4 other-prefix requests between
+    each range_multi hit) and risk the same class of 429 burst.
     """
     urls: list[WarmUrl] = []
     urls.extend(build_top_page_urls(base, stores))
@@ -476,11 +629,34 @@ def build_all_urls(base: str, stores: list[dict], now_jst: datetime) -> list[War
     store_urls = build_store_urls(base, stores, now_jst)
     related_by_slug = {u.label.split(":", 1)[0]: u for u in build_related_store_urls(base, stores)}
     per_store = len(store_urls) // len(stores) if stores else 0
+
+    # Each brand/region page is a (range_multi, forecast_today_multi) pair;
+    # keep the pair adjacent (mirrors how build_list_page_urls emits them)
+    # but spread the pairs themselves evenly across the store loop below.
+    filter_urls = build_filter_page_urls(base, stores)
+    filter_units = [tuple(filter_urls[i : i + 2]) for i in range(0, len(filter_urls), 2)]
+    n_units = len(filter_units)
+    n_stores = len(stores)
+
+    unit_idx = 0
     for idx, s in enumerate(stores):
         urls.extend(store_urls[idx * per_store : (idx + 1) * per_store])
         rel = related_by_slug.get(s["slug"])
         if rel is not None:
             urls.append(rel)
+        if n_units and n_stores:
+            # Evenly distribute n_units insertion points across n_stores
+            # loop iterations (e.g. 13 units / 42 stores -> roughly one
+            # every ~3 stores), same spirit as the related-hit interleaving.
+            target = (idx + 1) * n_units // n_stores
+            while unit_idx < target:
+                urls.extend(filter_units[unit_idx])
+                unit_idx += 1
+    # Stores list can be empty (n_stores == 0) or evenly-distribution
+    # rounding can leave a remainder -- flush any not-yet-inserted units.
+    while unit_idx < n_units:
+        urls.extend(filter_units[unit_idx])
+        unit_idx += 1
     return urls
 
 
