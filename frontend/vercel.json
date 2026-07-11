@@ -1,0 +1,3 @@
+{
+  "ignoreCommand": "bash -c 'test \"$VERCEL_GIT_COMMIT_REF\" != \"main\"'"
+}
