@@ -4,22 +4,23 @@
 運用・制約・設計の正本は **[`plan/README.md`](plan/README.md)**（ナビ）と `plan/*.md` にあります。
 
 ## Read First（読む順番）
-1. README.md（本ファイル）
-2. **[plan/README.md](plan/README.md)**（`plan/` の目次・**Cursor/AI はここから**）
-3. [plan/INDEX.md](plan/INDEX.md)（主要パス・Constraints のクイック参照）
-4. [plan/CODEx_PROMPTS.md](plan/CODEx_PROMPTS.md)
-5. [plan/STATUS.md](plan/STATUS.md)（プロジェクト全体の STATUS）
+1. **[CLAUDE.md](CLAUDE.md)**（3分マップ・**最初に読む**。plan/ 配下より新しく、迷ったらここを優先）
+2. README.md（本ファイル）
+3. **[plan/README.md](plan/README.md)**（`plan/` の目次・**Cursor/AI はここから**）
+4. [plan/INDEX.md](plan/INDEX.md)（主要パス・Constraints のクイック参照）
+5. [plan/CODEx_PROMPTS.md](plan/CODEx_PROMPTS.md)
+6. [plan/STATUS.md](plan/STATUS.md)（プロジェクト全体の STATUS）
    - **定時ブログ Cron の監視・再実行**はリポジトリ直下 [**STATUS.md**](STATUS.md) を参照
-6. [plan/DECISIONS.md](plan/DECISIONS.md)
-7. [plan/API_CONTRACT.md](plan/API_CONTRACT.md)
-8. [plan/API_CURRENT.md](plan/API_CURRENT.md)（`/api/current` の位置づけ・補足）
-9. [plan/ARCHITECTURE.md](plan/ARCHITECTURE.md)
-10. [plan/RUNBOOK.md](plan/RUNBOOK.md)（起動・定期ジョブ・オンボーディング）
-11. [plan/ENV.md](plan/ENV.md)
-12. [plan/SECOND_VENUES.md](plan/SECOND_VENUES.md)
-13. [plan/VISION_AND_FUTURE.md](plan/VISION_AND_FUTURE.md)（構想・今後の実装段取り）
-14. [plan/ROADMAP.md](plan/ROADMAP.md)
-15. [plan/GLOSSARY.md](plan/GLOSSARY.md)（用語）
+7. [plan/DECISIONS.md](plan/DECISIONS.md)
+8. [plan/API_CONTRACT.md](plan/API_CONTRACT.md)
+9. [plan/API_CURRENT.md](plan/API_CURRENT.md)（`/api/current` の位置づけ・補足）
+10. [plan/ARCHITECTURE.md](plan/ARCHITECTURE.md)
+11. [plan/RUNBOOK.md](plan/RUNBOOK.md)（起動・定期ジョブ・オンボーディング）
+12. [plan/ENV.md](plan/ENV.md)
+13. [plan/SECOND_VENUES.md](plan/SECOND_VENUES.md)
+14. [plan/VISION_AND_FUTURE.md](plan/VISION_AND_FUTURE.md)（構想・今後の実装段取り）
+15. [plan/ROADMAP.md](plan/ROADMAP.md)
+16. [plan/GLOSSARY.md](plan/GLOSSARY.md)（用語）
 
 ## Quick Start（ローカル起動）
 Backend（Flask）

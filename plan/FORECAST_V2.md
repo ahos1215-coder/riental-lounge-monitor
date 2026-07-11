@@ -101,7 +101,7 @@ classify_night(d):
      平均予測総数（過剰予測=ゴースト、小さいほど良い）。
    - **band_coverage**（v2 のみ）: p10<=実測<=p90 のスロット割合。
    結果は夜次 scores JSON の `v2` / `scorecard` キーに additive 記録（既存キー・
-   `routes/forecast.py _fetch_live_accuracy` は不変）。exit code は従来通り A vs baseline のみ。
+   `routes/forecast_accuracy.py _fetch_live_accuracy`（B8 で forecast.py から分離）は不変）。exit code は従来通り A vs baseline のみ。
 
 ---
 

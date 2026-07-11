@@ -1,5 +1,6 @@
 # ENV
-Last updated: 2026-03-28
+Last updated: 2026-07-11（Batch G: 2026-03-28 以降にコードへ追加された環境変数を棚卸しして追記。
+既存セクションの記述は当時のまま。差分は各セクションの新規箇条書きを参照）
 Target commit: (see git)
 
 値そのものは書かず、環境変数名のみ記載。
@@ -89,6 +90,9 @@ LINE Webhook（`frontend/src/app/api/line/route.ts`）:
 - `DATA_FILE`
 - `PORT`
 - `FLASK_DEBUG`
+- `DISABLE_MODEL_PRELOAD`（新規, `oriental/__init__.py`。`"1"` で `create_app()` 起動時の ML モデル preload バックグラウンドスレッド起動をスキップ。テスト用途向け。未設定時はプリロードする）
+- `RENDER` / `RENDER_SERVICE_ID`（新規, `oriental/routes/tasks.py` の `_require_cron_secret()`。**Render が自動注入するプラットフォーム変数**でユーザー設定は不要。`FLASK_ENV=production` と合わせ「本番かどうか」の判定に使う）
+- `FLASK_ENV`（新規, 同上。`"production"` なら `CRON_SECRET` 未設定時に `/tasks/*` を fail-closed（401）にする。`RENDER`/`RENDER_SERVICE_ID` いずれかが立っている場合も同じ扱い。ローカル/CI では未設定なら許可（テスト互換）——2026-07 の ops-safety 修正）
 
 Forecast:
 - `ENABLE_FORECAST`
@@ -105,10 +109,37 @@ Forecast:
 - `ML_TRAIN_WEIGHT_RAIN`（float, 既定 `1.8`。雨天データの学習重み）
 - `ML_OPTUNA_ENABLED`（`1` or `0`, 既定 `1`。Optuna ハイパーパラメータ最適化の有効化）
 - `ML_OPTUNA_TRIALS`（int, 既定 `30`。店舗ごとの Optuna 試行回数）
+- `ML_OBJECTIVE`（新規, `scripts/train_ml_model.py`。`regression` / `poisson` / `tweedie`、既定 `regression`。LightGBM の目的関数を切替えて A/B するための実験用フラグ。metric は全objectiveで `mae` 固定）
+- `ML_TWEEDIE_VARIANCE_POWER`（新規, 同上。float, 既定 `1.3`。`ML_OBJECTIVE=tweedie` のときのみ有効）
+- `ML_OPTUNA_MAX_ROWS`（新規, 同上。int, 既定 `0`＝上限なし。週次 Optuna が遅すぎる場合に各店舗の直近N行だけでHPOを回す高速化オプション。最終モデルは常に全データで学習）
+- `ML_GATE_MAX_REGRESSION_PCT`（新規, 同上。float, 既定 `20.0`。Champion/Challenger gate: 新モデルの holdout `total_mae` が現行モデルよりこの%以上悪化したら upload せず現行モデルを維持する）
+- `ML_STALE_STORE_DAYS`（新規, 同上。float, 既定 `7.0`。最新取得行がこの日数より古い店舗は学習をスキップ（閉店・停止店舗が古いデータで学習され続けるのを防ぐ））
+- `ML_RECENCY_HALFLIFE_DAYS`（新規, 同上。float, 既定 `90.0`。サンプル重み付けの指数減衰half-life（日）。値を下げると直近データをより重視し、レジームシフトに素早く追従する）
+- `ML_RECENCY_FLOOR`（新規, 同上。float, 既定 `0.5`、`0.0`-`1.0` の範囲。上記減衰の下限）
 
 重み付け・HPO 運用の注意:
 - `ML_TRAIN_WEIGHT_PEAK` / `ML_TRAIN_WEIGHT_RAIN` を上げすぎると、ピーク・雨天以外（平常時）の予測精度が低下する可能性がある。まずは `1.5-1.8` で評価し、店舗別 MAE/RMSE（overall と weekend_night_segment）を見ながら段階調整する。
-- Optuna は 38 店舗 × 30 trials で約 30-40 分。GHA の実行時間に注意。`ML_OPTUNA_TRIALS=0` または `ML_OPTUNA_ENABLED=0` で無効化可能。CLI では `--no-optuna` フラグも利用可
+- Optuna は 37 店舗（2026-07-11 sapporo_ag閉店で38→37）× 30 trials で約 30-40 分。GHA の実行時間に注意。`ML_OPTUNA_TRIALS=0` または `ML_OPTUNA_ENABLED=0` で無効化可能。CLI では `--no-optuna` フラグも利用可
+
+キャッシュ（2026-07〜、新規）:
+- `/api/range` 系（`oriental/routes/data_range.py`。B8 で data.py から分割）:
+  - `RANGE_CACHE_TTL`（int, 既定 `120`。TTL秒）
+  - `RANGE_CACHE_WAIT_TIMEOUT`（float, 既定 `25`。single-flight 合流待ちタイムアウト秒）
+  - `RANGE_CACHE_MAX_ENTRIES`（int, 既定 `500`。上限超過で全消去してから新規エントリを入れる）
+- `/api/forecast_today` 系（`oriental/routes/forecast.py`、Blueprint `url_prefix="/api"`）:
+  - `FORECAST_RESULT_CACHE_TTL`（int, 既定 `180` = 3分）
+  - `FORECAST_CACHE_WAIT_TIMEOUT`（float, 既定 `25`）
+  - `FORECAST_CACHE_MAX_ENTRIES`（int, 既定 `500`）
+  - 実装は `oriental/routes/_cache.py` の `SingleFlightTTLCache`（range/forecast 共通のプレーンな TTL+single-flight キャッシュ）
+
+予測後処理（2026-07〜、新規。`oriental/ml/postprocess.py` / `oriental/ml/forecast_service.py`）:
+- `FORECAST_LATE_CLAMP`（`0` で無効化、既定 `1`。予測後段の上限クランプ全体のスイッチ）
+- `FORECAST_LATE_CLAMP_HEADROOM`（float, 既定 `1.3`。クランプ上限に持たせる余裕係数）
+- `FORECAST_CLAMP_DOW_AWARE`（`1`=ON既定。クランプ統計を平日/週末バケット別に取るか。閾値未満やOFF時は従来の全日結合統計にフォールバック）
+- `FORECAST_BASELINE_BLEND`（`0` で無効化、既定 `1`。ML予測と実測ベースの同時刻統計をブレンドするか）
+- `FORECAST_BLEND_WEIGHTS_TTL`（float, 既定 `3600`。`score_forecasts.py` が書き出す `accuracy/blend_weights.json`（本番スコア由来の逆誤差ブレンド重み）のプロセス内キャッシュTTL秒）
+- `FORECAST_ANCHOR_TONIGHT`（`0` で無効化、既定 `1`。今夜の経過スロット実測でこれから先のスロットを補正する「今夜アンカー」機能）
+- `FORECAST_ANCHOR_DECAY`（float, 既定 `0.85`。アンカー補正係数がモデル自身のカーブ(1.0)へ減衰していく割合（スロットごと））
 
 推奨モデル配置（`FORECAST_MODEL_PREFIX` 配下）:
 - `metadata.json`（`schema_version` v2, `feature_columns`（19列）, `metrics`, `store_models` を含む）
@@ -143,6 +174,37 @@ Legacy / Optional:
 - `INSIGHTS_GENDER_WEIGHT`
 - `INSIGHTS_HTTP_TIMEOUT_SECONDS`
 - `INSIGHTS_HTTP_RETRIES`
+- `WEEKLY_STALE_DAYS`（新規, 2026-07〜。int, 既定 `10`＝`DEFAULT_WEEKLY_STALE_DAYS`。最新データがこの日数より古い場合に stale 警告を出す）
+- `WEEKLY_MIN_NIGHT_SAMPLES`（新規, 同上。int, 既定 `24`＝`DEFAULT_WEEKLY_MIN_NIGHT_SAMPLES`。週報生成に必要な最小夜間サンプル数）
+- `INSIGHTS_GENERATE_AI_COMMENTARY`（新規, 同上。`"1"` のときのみ Phase C 自然文解説（`last_week_summary`/`next_week_forecast`）を生成する）
+- `INSIGHTS_LLM_BACKEND`（新規, 同上。`ollama`（既定）/ `gemini`。`ollama` はローカル `gemma4:e4b`（`GEMINI_API_KEY` 不要・コスト削減版）、`gemini` は従来通り Gemini REST API（`GEMINI_API_KEY` 必須）。ローカル定時実行（Task Scheduler `MEGRIBI-weekly`）は `ollama`、GHA 緊急経路 `generate-weekly-insights.yml` は `gemini`）
 
 ## Public Facts (frontend/scripts/generate-public-facts.mjs)
 - `BACKEND_URL`（または CLI `--backend`）
+
+## CDN Warming (scripts/warm_cdn_local.py) — 新規セクション（2026-07〜、`plan/CDN_WARMING_LOCAL.md` 参照）
+Task Scheduler `MEGRIBI-warm-cdn` が主経路（GHA `warm-cdn.yml` は実測発火率8.3%のバックアップ）。stdlib のみで動作。
+- `WARM_WINDOW_START` / `WARM_WINDOW_END`（既定 `18:55`-`24:05`。営業ピーク帯の実行時間窓。テスト時は例えば `WARM_WINDOW_START=00:00 WARM_WINDOW_END=23:59` で強制実行可能）
+- `WARM_BASE_URL`（warming 対象のベース URL。既定は本番 URL 定数 `DEFAULT_BASE_URL`）
+- `WARM_SLEEP_SECONDS`（リクエスト間隔の安全フロア秒数。既定 `DEFAULT_SLEEP_SECONDS`）
+- `WARM_CDN_LOG_DIR`（warming ログの出力先ディレクトリ。既定は `%TEMP%`）
+
+## Logs Maintenance (scripts/cleanup_old_logs.py) — 新規セクション（Supabase logs の肥大化対策）
+- `LOGS_MAX_ROWS`（int, 既定 `3000000`。logs テーブルの行数上限）
+- `LOGS_DOWNSAMPLE_AFTER_DAYS`（int, 既定 `365`。この日数より古い行をダウンサンプリング対象にする）
+- `LOGS_DOWNSAMPLE_MINUTES`（int, 既定 `30`。ダウンサンプリング後の間引き間隔（分））
+- `LOGS_EMERGENCY_DELETE_BATCH`（int, 既定 `10000`。緊急削除時のバッチサイズ）
+- `LOGS_PROTECT_DAYS`（int, 既定 `200`。緊急削除でも絶対に消さない直近日数。`train_ml_model.py` の `ML_TRAIN_DAYS`(180) + 20日の安全マージン——`ML_TRAIN_DAYS` を変更した場合はこちらも合わせて見直すこと）
+
+## v2 Shadow Accuracy (scripts/score_forecasts.py) — 新規セクション（答え合わせ専用。本番配信には影響しない。`plan/FORECAST_V2.md` / `plan/FORECAST_ACCURACY.md` 参照）
+- `ACCURACY_FAIL_ON_BASELINE_LOSS`（`0` で無効化、既定 `1`。艦隊 ML がナイーブ・ベースラインに負けた夜に GHA ジョブを FAIL させ `notify-on-failure` を発火させる。既定 ON が「Act 断線の修理」——2026-07 の broken-logic audit 起源）
+
+## Shared GPU Lock (scripts/gpu_lock.py) — 新規セクション（音楽プロジェクトと共有する GPU の排他ロック。正本は `C:\Users\Public\共有データ系\gpu_lock.py`、リポジトリ内は復旧用ミラー）
+- `SHARED_GPU_LOCK`（ロックファイルの位置。既定 `C:\Users\Public\共有データ系\.gpu_shared.lock`。両プロジェクトが同じパスを見る）
+- `SHARED_GPU_LOCK_STALE_SEC`（int, 既定 `1200` = 20分。この秒数を超えたロックは stale とみなし奪取可能にする）
+
+## Collection Heartbeat (.github/workflows/check-collection-heartbeat.yml)
+- `PER_STORE_STALE_DAYS` — **2026-07-11 時点で本 worktree のベースにはまだ存在しない。同時進行中の別バッチ（heartbeat改修、店舗別の許容停止日数を導入）で追加予定のため、マージ後に `check-collection-heartbeat.yml` / 対応スクリプトを実コードで確認し、purpose・デフォルト値をこの行に確定させること。**
+
+## Debug / Manual Tools
+- `FORCE_MODEL_REGISTRY_REFRESH`（`scripts/debug/verify_store_model_connection.py` のみ。`"1"` でモデルレジストリのキャッシュを無視して強制再取得する手動デバッグ用）

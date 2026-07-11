@@ -1,5 +1,6 @@
 CLAUDE.md — MEGRIBI（Oriental Lounge Monitor）3分マップ
-最終更新: 2026-07-11（Batch B3: 新規作成。全ての記述は実コードを確認して書いた。詳細な根拠・過去の設計判断は plan/*.md を参照）
+最終更新: 2026-07-11（Batch B3: 新規作成。全ての記述は実コードを確認して書いた。詳細な根拠・過去の設計判断は plan/*.md を参照。
+Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追記 + sapporo_ag閉店で店舗数42（37+5）に更新）
 
 このファイルは「初めてこのリポジトリを開いた AI が3分で全体像を掴み、古いドキュメントに
 騙されないようにする」ためのものです。plan/ 配下の各ファイルより新しく、迷ったときは
@@ -30,17 +31,18 @@ CLAUDE.md — MEGRIBI（Oriental Lounge Monitor）3分マップ
   `/compare`, `/area/[area]`, `/reports`, `/reports/daily|weekly/[store_slug]`, `/blog`,
   `/blog/[slug]`, `/mypage` 等。
 - **バックエンド**: `oriental/`（Flask アプリファクトリ）。`wsgi.py` が `oriental.create_app()` を
-  呼ぶだけの薄いエントリポイント。`Procfile`: `gunicorn wsgi:app --timeout 300
+  呼ぶだけの薄いエントリポイント。`Procfile`: `gunicorn wsgi:app --timeout 300 --graceful-timeout 30
   --workers ${WEB_CONCURRENCY:-2} --threads ${GUNICORN_THREADS:-4}`（`--preload` は意図的に
   未使用。fork-after-thread hazard を避けるため）。
 - **収集スクリプト**: リポジトリ直下の `multi_collect.py`（`STORES` / `AISEKIYA_STORES` /
   `PREF_COORDS` を定義。`oriental/routes/tasks.py` が import して使う）。
 - **バッチスクリプト**: `scripts/` 配下（ML学習・ローカルレポート生成・CDN warming・v2 shadow評価
   など。一覧は `plan/ARCHITECTURE.md` の Key Files 参照）。
-- **店舗数は 43**（オリエンタル38 + 相席屋5）。オリエンタルには韓国・ソウルの `ol_gangnam` を含む。
-  正本は `oriental/utils/stores.py` の `ALL_STORE_IDS`（= `STORE_IDS`38 + `AISEKIYA_STORE_IDS`5）と
-  `frontend/src/data/stores.json`（行数が一致必須）。plan/ 配下に残る「38店舗」「44店舗」という
-  **総数**表記は誤り（オリエンタル単体の文脈での「38」は正しい）。
+- **店舗数は 42**（オリエンタル37 + 相席屋5）。**2026-07-11 sapporo_ag閉店により43（38+5）から
+  42（37+5）に変更**。オリエンタルには韓国・ソウルの `ol_gangnam` を含む。
+  正本は `oriental/utils/stores.py` の `ALL_STORE_IDS`（= `STORE_IDS`37 + `AISEKIYA_STORE_IDS`5）と
+  `frontend/src/data/stores.json`（行数が一致必須）。plan/ 配下に残る「38店舗」「43店舗」「44店舗」
+  という**総数**表記は誤り（オリエンタル単体の文脈での「37」が現行正しい値）。
 
 ### コンテンツの3分類（`blog_drafts.content_type`）
 
@@ -67,12 +69,12 @@ CLAUDE.md — MEGRIBI（Oriental Lounge Monitor）3分マップ
 
 | 時刻(JST) | 何が起きるか | 主体 |
 |---|---|---|
-| 5分毎 | 混雑データ収集 | cron-job.org → `/tasks/multi_collect`（`CRON_SECRET`認証）→ `collect_all_once()` → Supabase `logs`。オリエンタル・相席屋それぞれのトップページSSRから2リクエストで全43店舗分を取得 |
-| 18:00 / 21:30 | **Daily Report生成** | 【主】Task Scheduler `MEGRIBI-daily-evening`/`-late` → `scripts/local_report_job.py --stores all --edition <evening_preview\|late_update> --mode publish` → ローカル Ollama（`gemma4:e4b`、`localhost:11434`）→ Supabase `blog_drafts` upsert。【緊急時のみ】`.github/workflows/trigger-blog-cron.yml` は `schedule:` コメントアウト済み、`workflow_dispatch`のみ（matrixはオリエンタル38店舗、相席屋5店舗は対象外、Gemini使用） |
+| 5分毎 | 混雑データ収集 | cron-job.org → `/tasks/multi_collect`（`CRON_SECRET`認証）→ `collect_all_once()` → Supabase `logs`。オリエンタル・相席屋それぞれのトップページSSRから2リクエストで全42店舗分を取得 |
+| 18:00 / 21:30 | **Daily Report生成** | 【主】Task Scheduler `MEGRIBI-daily-evening`/`-late` → `scripts/local_report_job.py --stores all --edition <evening_preview\|late_update> --mode publish` → ローカル Ollama（`gemma4:e4b`、`localhost:11434`）→ Supabase `blog_drafts` upsert。【緊急時のみ】`.github/workflows/trigger-blog-cron.yml` は `schedule:` コメントアウト済み、`workflow_dispatch`のみ（matrixはオリエンタル37店舗、相席屋5店舗は対象外、Gemini使用） |
 | 18:10 | v2 shadow: 予測スナップショット保存 | GHA `forecast-accuracy-track.yml`（mode=snapshot）→ `scripts/snapshot_forecasts.py` → Storage `ml-models/accuracy/snapshots/<date>.json` |
 | 19:00〜23:50・10分毎 | CDN warming（`/api/range`等の温め） | 【主】Task Scheduler `MEGRIBI-warm-cdn` → `scripts/warm_cdn_local.py`。【バックアップ】GHA `warm-cdn.yml`（実測発火率8.3%と低いため保険止まり） |
-| 水曜 06:30 | **Weekly Report生成** | 【主】Task Scheduler `MEGRIBI-weekly` → `run_weekly_local.ps1 -Stores all` → `generate_weekly_insights.py --stores all`（`INSIGHTS_LLM_BACKEND=ollama`）が全43店舗を単一プロセスで処理 → Supabase upsert + `frontend/content/insights/weekly/*.json` + `index.json` 直接更新。【緊急時のみ】`generate-weekly-insights.yml`（`workflow_dispatch`, Fan-in Matrix, オリエンタル38店舗のみ, Gemini使用） |
-| 05:30 毎日 | ML再学習（固定パラメータ） | GHA `train-ml-model.yml` → `scripts/train_ml_model.py`。`ALL_STORE_IDS`（43店舗）allow-listでLightGBM学習 → Storage `ml-models/forecast/latest/` |
+| 水曜 06:30 | **Weekly Report生成** | 【主】Task Scheduler `MEGRIBI-weekly` → `run_weekly_local.ps1 -Stores all` → `generate_weekly_insights.py --stores all`（`INSIGHTS_LLM_BACKEND=ollama`）が全42店舗を単一プロセスで処理 → Supabase upsert + `frontend/content/insights/weekly/*.json` + `index.json` 直接更新。【緊急時のみ】`generate-weekly-insights.yml`（`workflow_dispatch`, Fan-in Matrix, オリエンタル37店舗のみ, Gemini使用） |
+| 05:30 毎日 | ML再学習（固定パラメータ） | GHA `train-ml-model.yml` → `scripts/train_ml_model.py`。`ALL_STORE_IDS`（42店舗）allow-listでLightGBM学習 → Storage `ml-models/forecast/latest/` |
 | 07:00 月曜 | ML再学習 + Optuna HPO | 同じ `train-ml-model.yml`（cronパターンで分岐。日次はOptunaなし、週次のみHPOあり） |
 | 06:10 | v2 shadow: 前夜の答え合わせ | GHA `forecast-accuracy-track.yml`（mode=score）→ `scripts/score_forecasts.py` → Storage `ml-models/accuracy/scores/<date>.json` + `summary.json` |
 | 07:30 | v2 shadow: テンプレ再生成 | GHA `build-templates.yml` → `scripts/build_templates.py` → Storage `forecast/templates_v2.json` |

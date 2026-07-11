@@ -1,5 +1,5 @@
 # INDEX（クイック参照）
-Last updated: 2026-03-30 (Round 9 整合)  
+Last updated: 2026-03-30 (Round 9 整合)。**2026-07-11 (Batch G): Backend routes の4分割反映 + 店舗数38→37（sapporo_ag閉店）**
 Target commit: (see git)
 
 **読む順・各ファイルの役割の一覧は [`README.md`](README.md) を正とする。**
@@ -20,8 +20,11 @@ Target commit: (see git)
 ## Key Entry Points
 
 ### Backend
-- `oriental/routes/data.py`（/api/range, /api/current）— `/api/current` の方針補足は **`plan/API_CURRENT.md`**
-- `oriental/routes/forecast.py`（/api/forecast_*）
+- `oriental/routes/data.py`（Blueprint集約のみ。実ハンドラは下記2ファイルに分割済み — B8）
+- `oriental/routes/data_range.py`（/api/range, /api/current, /api/range_multi）— `/api/current` の方針補足は **`plan/API_CURRENT.md`**
+- `oriental/routes/data_meta.py`（/api/meta, /api/holiday_status, /api/second_venues）
+- `oriental/routes/forecast.py`（Blueprint `url_prefix="/api"`。/api/forecast_*, /api/megribi_score）
+- `oriental/routes/forecast_accuracy.py`（/api/forecast_accuracy, /api/forecast_snapshot — B8 で forecast.py から分離）
 - `oriental/routes/tasks.py`（/tasks/multi_collect, /tasks/tick など）
 - `oriental/data/provider.py`（Supabase logs）
 
@@ -65,8 +68,8 @@ Target commit: (see git)
 - Blog MDX: `frontend/content/blog`
 
 ### Workflows
-- `trigger-blog-cron.yml` — Daily Report（matrix 38店舗, max-parallel: 15）
-- `generate-weekly-insights.yml` — Weekly Report（Fan-in Matrix 38店舗, max-parallel: 10）
+- `trigger-blog-cron.yml` — Daily Report（matrix 37店舗, max-parallel: 15）
+- `generate-weekly-insights.yml` — Weekly Report（Fan-in Matrix 37店舗, max-parallel: 10）
 - `train-ml-model.yml` — ML 日次学習（Optuna HPO + Early Stopping）
 - `x-auto-post.yml` — X 自動投稿（Daily 完了後 workflow_run）
 - `generate-public-facts.yml` — Public Facts
