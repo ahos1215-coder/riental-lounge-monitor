@@ -3,7 +3,8 @@
 forecast.py から機械的に分離（B8 route split）。ハンドラは `.forecast` の
 Blueprint `bp`（url_prefix="/api"）にそのまま生えるため、URL / エンドポイント名は
 一切変わらない。Supabase Storage から実測精度 / 過去スナップショットを読む専用ヘルパー
-（_storage_get / _night_avg_by_store / _augment_relative_fields など）もここに集約する。
+（_storage_get / _realized_night_avg_by_store / _night_avg_by_store / _augment_relative_fields
+など）もここに集約する。
 """
 
 from __future__ import annotations
@@ -65,12 +66,16 @@ def _is_num(v: object) -> bool:
 
 def _night_avg_by_store(snapshot: dict | None) -> dict[str, float]:
     """予測スナップショット (accuracy/snapshots/<date>.json の by_slug) から、
-    店舗ごとの「その夜の予測総数の平均」を返す。これを店舗規模（＝想定夜間来客数）の
-    近似値として使い、相対誤差 relative_mae = live_mae / night_avg の分母にする。
+    店舗ごとの「その夜の予測総数の平均」を返す。
+
+    rank3 fix (2026-07): これは「予測」総数の平均であり、店舗規模の近似としては
+    自己参照バグを持つ（過大予測している店ほど分母が大きくなり、relative_mae が
+    不当に小さく＝高精度に見える）。そのため通常経路では使わず、
+    _realized_night_avg_by_store（実測ベース）が使えない**旧フォーマットのスコアに
+    対する一時的なフォールバックとしてのみ**残す（_fetch_live_accuracy 参照）。
 
     キーは snapshot 側と同じ slug（オリエンタルは "ol_" なしの短縮 slug、相席屋は "ay_*"）。
-    予測点が無い/壊れている店は結果に含めない（呼び出し側で相対誤差を付けない）。
-    純関数（ネットワーク I/O 無し）なのでユニットテストしやすい。
+    予測点が無い/壊れている店は結果に含めない。純関数（ネットワーク I/O 無し）。
     """
     if not isinstance(snapshot, dict):
         return {}
@@ -91,13 +96,42 @@ def _night_avg_by_store(snapshot: dict | None) -> dict[str, float]:
     return out
 
 
-def _augment_relative_fields(per_store: dict, night_avg: dict[str, float]) -> None:
+def _realized_night_avg_by_store(per_store: dict | None) -> dict[str, float]:
+    """夜間スコア (accuracy/scores/<date>.json の per_store, scripts/score_forecasts.py が
+    additive に書く `realized_night_avg`) から、店舗ごとの「実測(REALIZED)夜間平均」を
+    取り出す。live_mae と同じマッチ済みスロット群の実測値平均なので、予測が過大/過少でも
+    分母が歪まない（= rank3 fix の本体。_night_avg_by_store の自己参照を解消する）。
+
+    `realized_night_avg` が無い（この修正より前に書かれた古いスコアファイル）店は
+    結果に含めない。呼び出し側はその店だけ _night_avg_by_store の予測平均にフォールバック
+    する（transition: 新しい夜のスコアが溜まるほど自己修復する）。純関数。
+    """
+    if not isinstance(per_store, dict):
+        return {}
+    out: dict[str, float] = {}
+    for slug, entry in per_store.items():
+        if not isinstance(entry, dict):
+            continue
+        v = entry.get("realized_night_avg")
+        if _is_num(v) and v > 0:
+            out[slug] = float(v)
+    return out
+
+
+def _augment_relative_fields(
+    per_store: dict,
+    night_avg: dict[str, float],
+    night_avg_source: dict[str, str] | None = None,
+) -> None:
     """per_store の各エントリに「店舗規模で正規化した相対性能」シグナルを追加する
     （additive・in-place、既存キーは触らない）。
 
     - beats_baseline: live_mae < live_baseline_mae（ナイーブ基準＝先週同時刻に勝っているか）。
       規模に依存しない頑健なシグナルで、両値が揃うときのみ付与する。
-    - night_avg: 想定夜間来客数（スケール正規化の分母）。スナップショットがある店のみ。
+    - night_avg: 想定夜間来客数（スケール正規化の分母）。night_avg にエントリがある店のみ。
+    - night_avg_source: night_avg の由来。"realized"（実測ベース、正しい）か
+      "predicted"（旧フォーマットからの一時フォールバック）かを透過的に示す（additive）。
+      呼び出し側が渡さない場合は "predicted" 扱い（既存呼び出し元との後方互換）。
     - relative_mae: live_mae / night_avg（店舗規模で正規化した相対誤差）。night_avg があるときのみ。
 
     これにより精度バッジを「絶対人数」ではなく「相対性能」で判定できる（小規模店が
@@ -106,6 +140,7 @@ def _augment_relative_fields(per_store: dict, night_avg: dict[str, float]) -> No
     """
     if not isinstance(per_store, dict):
         return
+    source_map = night_avg_source or {}
     for slug, entry in per_store.items():
         if not isinstance(entry, dict):
             continue
@@ -116,6 +151,7 @@ def _augment_relative_fields(per_store: dict, night_avg: dict[str, float]) -> No
         avg = night_avg.get(slug)
         if _is_num(avg) and avg > 0:
             entry["night_avg"] = round(float(avg), 2)
+            entry["night_avg_source"] = source_map.get(slug, "predicted")
             if _is_num(lm):
                 entry["relative_mae"] = round(float(lm) / float(avg), 3)
 
@@ -168,19 +204,41 @@ def _fetch_live_accuracy(cfg: AppConfig) -> dict | None:
                     live["per_store"] = per_store
 
         # 追加(後方互換): 店舗規模で正規化した相対性能シグナル（beats_baseline /
-        # night_avg / relative_mae）を per_store に付与する。分母の「想定夜間来客数」は
-        # その夜の予測スナップショットの総数平均で近似する（1 リクエスト＝Storage 1 read
-        # 追加のみ）。スナップショットが無い/壊れていても beats_baseline は日次スコアだけで
-        # 付き、relative_mae のみスキップされる（カードは相対誤差なしでも基準比較で判定可能）。
+        # night_avg / relative_mae / night_avg_source）を per_store に付与する。
+        #
+        # rank3 fix (2026-07): 分母の「想定夜間来客数」は本来 実測(REALIZED) の夜間平均を
+        # 使う（scripts/score_forecasts.py が同じ日次スコアに additive で書く
+        # `realized_night_avg`）。過大予測している店ほど分母が膨らんで不当に高精度化する
+        # 自己参照バグ（旧: 予測スナップショットの総数平均を分母にしていた）を解消する。
+        #
+        # Graceful transition: この修正より前に書かれた古いスコアファイルには
+        # `realized_night_avg` が無いため、そういう店だけ一時的に予測スナップショットの
+        # 総数平均へフォールバックする（Storage read はフォールバックが要る店が
+        # 1店でもある場合のみ発生＝自己修復後は追加読み込みも消える）。
+        # night_avg_source: "realized"|"predicted" でどちらを使ったかを常に明示する。
         if live["per_store"] and latest_date:
+            realized_avg = _realized_night_avg_by_store(live["per_store"])
+            missing_realized = [s for s in live["per_store"] if s not in realized_avg]
+
+            predicted_avg: dict[str, float] = {}
+            if missing_realized:
+                try:
+                    snap_raw = _storage_get(cfg, f"accuracy/snapshots/{latest_date}.json")
+                    if snap_raw is not None:
+                        predicted_avg = _night_avg_by_store(json.loads(snap_raw.decode()))
+                except Exception:  # noqa: BLE001 — スナップショット取得/解析失敗は相対誤差なしで続行
+                    predicted_avg = {}
+
             night_avg: dict[str, float] = {}
-            try:
-                snap_raw = _storage_get(cfg, f"accuracy/snapshots/{latest_date}.json")
-                if snap_raw is not None:
-                    night_avg = _night_avg_by_store(json.loads(snap_raw.decode()))
-            except Exception:  # noqa: BLE001 — スナップショット取得/解析失敗は相対誤差なしで続行
-                night_avg = {}
-            _augment_relative_fields(live["per_store"], night_avg)
+            night_avg_source: dict[str, str] = {}
+            for slug in live["per_store"]:
+                if slug in realized_avg:
+                    night_avg[slug] = realized_avg[slug]
+                    night_avg_source[slug] = "realized"
+                elif slug in predicted_avg:
+                    night_avg[slug] = predicted_avg[slug]
+                    night_avg_source[slug] = "predicted"
+            _augment_relative_fields(live["per_store"], night_avg, night_avg_source)
 
         return live
     except Exception:  # noqa: BLE001

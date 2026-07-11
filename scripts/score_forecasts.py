@@ -644,6 +644,12 @@ def main() -> int:
                 if b > 0:
                     # >0 means ML beats "same slot last week" in production; <=0 means it does not
                     entry["ml_vs_baseline_live_pct"] = round((b - entry["live_mae"]) / b * 100.0, 1)
+            # 追加(additive, rank3 fix): 実測(REALIZED)の夜間平均。ml_err と同じマッチ済み
+            # スロット群(a_actual)の実測値平均であり、/api/forecast_accuracy が相対誤差
+            # (relative_mae)の分母に使う「想定夜間来客数」を、予測総数の平均（過大予測ほど
+            # 分母が膨らみ不当に高精度化する自己参照バグの原因）ではなく実測ベースにする。
+            if a_actual:
+                entry["realized_night_avg"] = round(sum(a_actual) / len(a_actual), 2)
             per_store[slug] = entry
 
         # --- v2 (shadow) の MAE + 帯カバレッジ + スコアカード用配列 ---
