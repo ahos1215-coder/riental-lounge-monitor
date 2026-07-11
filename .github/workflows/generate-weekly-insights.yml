@@ -52,7 +52,6 @@ jobs:
           - kagoshima
           - okinawa_ag
           - gangnam
-          - sapporo_ag
           - sendai_ag
           - shibuya
           - ebisu

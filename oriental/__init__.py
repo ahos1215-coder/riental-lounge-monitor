@@ -45,7 +45,7 @@ def _preload_models(app: Flask) -> None:
             if not store_ids:
                 store_ids = [f"ol_{s}" for s in [
                     "nagasaki", "fukuoka", "kokura", "shibuya", "ebisu", "shinjuku",
-                    "sapporo_ag", "sendai_ag", "umeda_ag", "namba", "kyoto", "kobe",
+                    "sendai_ag", "umeda_ag", "namba", "kyoto", "kobe",
                 ]]
 
             loaded = 0

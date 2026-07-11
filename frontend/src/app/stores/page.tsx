@@ -7,6 +7,7 @@ import { AREAS } from "@/app/config/areas";
 import { fetchBackendSnapshot } from "@/lib/serverSnapshot";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { buildBreadcrumbList, serializeJsonLd } from "@/lib/jsonLd";
+import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
 import {
   STORE_CARD_RANGE_LIMIT,
   STORE_CARD_SPARKLINE_POINTS,
@@ -71,10 +72,14 @@ async function fetchInitialStoreCards(): Promise<Record<string, StoreRealtimeCar
       `/api/range_multi?stores=${encodeURIComponent(slugsCsv)}&limit=${STORE_CARD_RANGE_LIMIT}`,
       60,
     ),
-    fetchBackendSnapshot<MegribiScoreResponse>(
-      `/api/megribi_score?stores=${encodeURIComponent(slugsCsv)}`,
-      120,
-    ),
+    // 判定表示OFF中はスコアバッジ自体が非表示のため取得をスキップ
+    // （featureFlags.ts の SHOW_MEGRIBI_JUDGMENTS を true に戻せば自動復活）。
+    SHOW_MEGRIBI_JUDGMENTS
+      ? fetchBackendSnapshot<MegribiScoreResponse>(
+          `/api/megribi_score?stores=${encodeURIComponent(slugsCsv)}`,
+          120,
+        )
+      : Promise.resolve(null),
   ]);
 
   // range が取れなければカードの土台が作れないため snapshot 自体を諦める

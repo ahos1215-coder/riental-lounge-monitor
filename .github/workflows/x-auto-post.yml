@@ -90,7 +90,7 @@ jobs:
           declare -A STORE_LABELS=(
             [nagasaki]="長崎" [fukuoka]="福岡" [kokura]="小倉" [oita]="大分"
             [kumamoto]="熊本" [miyazaki]="宮崎" [kagoshima]="鹿児島" [okinawa_ag]="沖縄"
-            [gangnam]="江南" [sapporo_ag]="札幌" [sendai_ag]="仙台"
+            [gangnam]="江南" [sendai_ag]="仙台"
             [shibuya]="渋谷" [ebisu]="恵比寿" [shibuya_ag]="渋谷ANNEX"
             [shinjuku]="新宿" [ueno]="上野" [ueno_ag]="上野ANNEX"
             [kashiwa]="柏" [machida]="町田" [yokohama]="横浜" [omiya]="大宮"
