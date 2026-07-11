@@ -3,6 +3,7 @@ import { formatYmdToSlash, getAllPostMetas } from "@/lib/blog/content";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { fetchBackendSnapshot } from "@/lib/serverSnapshot";
 import { buildBreadcrumbList, serializeJsonLd } from "@/lib/jsonLd";
+import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
 import { STORES, buildStoreFullName } from "@/app/config/stores";
 import HomePage, { type HomeMegribiScoreItem } from "./home-client";
 
@@ -42,6 +43,9 @@ export const metadata: Metadata = {
  * （コールドスタート/バックエンド不調時も build・初期表示を落とさない）。
  */
 async function fetchInitialTop5(): Promise<HomeMegribiScoreItem[] | null> {
+  // 判定表示OFF中は「今夜のおすすめ TOP5」自体が非表示のため取得をスキップする
+  // （featureFlags.ts の SHOW_MEGRIBI_JUDGMENTS を true に戻せば fetch は自動的に復活する）。
+  if (!SHOW_MEGRIBI_JUDGMENTS) return null;
   const json = await fetchBackendSnapshot<MegribiScoreResponse>("/api/megribi_score", 180);
   if (!json?.ok || !Array.isArray(json.data)) return null;
   return json.data;

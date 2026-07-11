@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
 import { StoreCard } from "@/components/StoreCard";
 import {
   BRAND_DISPLAY_LABEL,
@@ -244,40 +245,44 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
         // フォールバックで個別 /api/range に任せる（batchOk=false 相当）
         .catch(() => ({ ok: false, bySlug: new Map() }));
 
-      const megribiPromise = (async () => {
-        try {
-          const mRes = await fetch(
-            `/api/megribi_score?stores=${encodeURIComponent(slugsCsv)}`,
-            { signal },
-          );
-          if (!signal.aborted && mRes.ok) {
-            // megribi_score は {ok, data:[{slug,score}]} 形式。slug->score の Map にする。
-            const mJson = (await mRes.json()) as { ok?: boolean; data?: { slug: string; score?: number }[] };
-            const scoreMap = new Map<string, number>();
-            if (Array.isArray(mJson.data)) {
-              for (const it of mJson.data) {
-                if (it && typeof it.slug === "string" && typeof it.score === "number") {
-                  scoreMap.set(it.slug, it.score);
-                }
-              }
-            }
-            if (!signal.aborted) {
-              setStoreRealtime((prev) => {
-                const next = { ...prev };
-                for (const t of targets) {
-                  const score = scoreMap.has(t.slug) ? (scoreMap.get(t.slug) as number) : null;
-                  if (next[t.slug]) {
-                    next[t.slug] = { ...next[t.slug], megribiScore: score };
+      // 判定表示OFF中は一覧カードの判定バッジ自体が非表示のため取得をスキップする
+      // （featureFlags.ts の SHOW_MEGRIBI_JUDGMENTS を true に戻せば fetch は自動的に復活する）。
+      const megribiPromise = !SHOW_MEGRIBI_JUDGMENTS
+        ? Promise.resolve()
+        : (async () => {
+            try {
+              const mRes = await fetch(
+                `/api/megribi_score?stores=${encodeURIComponent(slugsCsv)}`,
+                { signal },
+              );
+              if (!signal.aborted && mRes.ok) {
+                // megribi_score は {ok, data:[{slug,score}]} 形式。slug->score の Map にする。
+                const mJson = (await mRes.json()) as { ok?: boolean; data?: { slug: string; score?: number }[] };
+                const scoreMap = new Map<string, number>();
+                if (Array.isArray(mJson.data)) {
+                  for (const it of mJson.data) {
+                    if (it && typeof it.slug === "string" && typeof it.score === "number") {
+                      scoreMap.set(it.slug, it.score);
+                    }
                   }
                 }
-                return next;
-              });
+                if (!signal.aborted) {
+                  setStoreRealtime((prev) => {
+                    const next = { ...prev };
+                    for (const t of targets) {
+                      const score = scoreMap.has(t.slug) ? (scoreMap.get(t.slug) as number) : null;
+                      if (next[t.slug]) {
+                        next[t.slug] = { ...next[t.slug], megribiScore: score };
+                      }
+                    }
+                    return next;
+                  });
+                }
+              }
+            } catch {
+              // スコア取得失敗は非致命的
             }
-          }
-        } catch {
-          // スコア取得失敗は非致命的
-        }
-      })();
+          })();
 
       const forecastBatchPromise: Promise<ForecastBatchBody | null> = fetch(
         `/api/forecast_today_multi?stores=${encodeURIComponent(slugsCsv)}`,

@@ -180,9 +180,13 @@ export default function CompareClient() {
     const csvSlugs = selectedSlugs.join(",");
 
     // Fetch range_multi + megribi_score + forecast in parallel
+    // 判定表示OFF中は比較カードの判定ラベル自体が非表示のため megribi_score の取得をスキップする
+    // （featureFlags.ts の SHOW_MEGRIBI_JUDGMENTS を true に戻せば fetch は自動的に復活する）。
     Promise.all([
       fetch(`/api/range_multi?stores=${csvSlugs}&limit=200`).then((r) => r.json()).catch(() => ({})),
-      fetch(`/api/megribi_score?stores=${csvSlugs}`).then((r) => r.json()).catch(() => ({})),
+      SHOW_MEGRIBI_JUDGMENTS
+        ? fetch(`/api/megribi_score?stores=${csvSlugs}`).then((r) => r.json()).catch(() => ({}))
+        : Promise.resolve({}),
       fetch(`/api/forecast_today_multi?stores=${csvSlugs}`).then((r) => r.json()).catch(() => ({})),
     ]).then(([rangeData, scoreData, forecastData]) => {
       // megribi_score は {data:[{slug,score}]} 形式。slug->score の Map にする。

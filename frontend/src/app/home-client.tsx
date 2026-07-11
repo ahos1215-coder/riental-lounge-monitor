@@ -85,6 +85,12 @@ export default function HomePage({
   const [topStoresLoading, setTopStoresLoading] = useState(seededTop5 === null);
 
   useEffect(() => {
+    // 判定表示OFF中は「今夜のおすすめ TOP5」自体が非表示のため取得をスキップする
+    // （featureFlags.ts の SHOW_MEGRIBI_JUDGMENTS を true に戻せば fetch は自動的に復活する）。
+    if (!SHOW_MEGRIBI_JUDGMENTS) {
+      setTopStoresLoading(false);
+      return;
+    }
     const ac = new AbortController();
     (async () => {
       try {
