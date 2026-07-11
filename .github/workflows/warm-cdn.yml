@@ -34,10 +34,16 @@
 #   一覧ページ（フィルタ無し・12件/ページ）× 1〜4ページ目:
 #     /api/range_multi?stores=<csv>&limit=48
 #     /api/forecast_today_multi?stores=<csv>
-#     /api/megribi_score?stores=<csv>
 #   トップページ:
-#     /api/megribi_score（パラメータ無し・全店舗）
 #     /api/range?store=<先頭店舗>&limit=48（未訪問者のフォールバック "last visited"）
+#
+# 【2026-07-11 削除】megribi_score（一覧ページ・トップページ双方）。バグ監査rank7:
+# このAPIが支える「判定」表示（スコアバッジ・トップの「今夜のおすすめ TOP5」等）は
+# frontend/src/lib/featureFlags.ts の SHOW_MEGRIBI_JUDGMENTS で一括OFF（2026-07-10〜、
+# スコアロジックが実態と不一致のため）。UIが出ない間の温めは Render への純粋な無駄
+# 負荷になるため対象から外した。フラグが true に戻ったら、上記URL一覧に
+# `/api/megribi_score?stores=<csv>`（一覧ページ）と `/api/megribi_score`
+# （トップページ、パラメータ無し・全店舗）を復元し、下の warm_one 呼び出しも戻すこと。
 #
 # 【意図的に含めないもの】店舗詳細ページの「ほかの店舗を見る」欄
 # （StorePageClient.tsx digestStores）は店舗ごとに haversine 距離で選んだ最寄り4店舗の
@@ -47,9 +53,10 @@
 #
 # コスト試算（無料枠を前提に保守的に設計）:
 #   - 店舗数: 43（frontend/src/data/stores.json から動的取得。ハードコードしない）
-#   - リクエスト数/回: 43店舗×4本 + 4ページ×3本 + トップ2本 = 186
+#   - リクエスト数/回: 43店舗×4本 + 4ページ×2本 + トップ1本 = 181
+#     （2026-07-11: megribi_score削除前は186。上のURL一覧参照）
 #   - 実行間隔: 10分毎、19:00〜23:50 JST の窓のみ → 30回/日
-#   - リクエスト数: 186 × 30 ≒ 5,580 リクエスト/日（≒ 17万/月）
+#   - リクエスト数: 181 × 30 ≒ 5,430 リクエスト/日（≒ 16万/月）
 #     ただし GitHub Actions の cron 精度の都合で実際に発火するのはこの一部
 #     （このワークフローはあくまでバックアップ。主たる負荷はローカル実行側）。
 #
@@ -195,13 +202,13 @@ jobs:
             PAGE_LABEL="list_page$((p + 1))"
             warm_one "${BASE}/api/range_multi?stores=${CSV}&limit=48" "${PAGE_LABEL}:range_multi"
             warm_one "${BASE}/api/forecast_today_multi?stores=${CSV}" "${PAGE_LABEL}:forecast_today_multi"
-            warm_one "${BASE}/api/megribi_score?stores=${CSV}" "${PAGE_LABEL}:megribi_score"
+            # 2026-07-11 削除: megribi_score（バグ監査rank7、上のヘッダーコメント参照）。
             sleep 0.3
           done
 
-          # トップページ（home-client.tsx）: パラメータ無しの megribi_score（全店舗）＋
-          # localStorage 未設定の初回訪問者が引くフォールバック店舗（先頭店舗）の range。
-          warm_one "${BASE}/api/megribi_score" "top:megribi_score"
+          # トップページ（home-client.tsx）: localStorage 未設定の初回訪問者が引く
+          # フォールバック店舗（先頭店舗）の range。
+          # 2026-07-11 削除: 無条件 megribi_score（バグ監査rank7、上のヘッダーコメント参照）。
           warm_one "${BASE}/api/range?store=${SLUGS[0]}&limit=48" "top:range_default_store"
 
           TOTAL_REQUESTS=$((OK_COUNT + FAIL_COUNT))

@@ -55,6 +55,38 @@ that, not the primary defense. Tolerated regardless: any individual failure
 (including a stray 429) just counts against the run's fail ratio, it doesn't
 abort the pass. See plan/CDN_WARMING_LOCAL.md for the full writeup.
 
+2026-07-11 429 mitigation (bug audit rank5): even with the interleaving
+above, real overnight logs showed recurring 429 bursts (fail=34/48/44/57 out
+of 229 on several passes, up to ~25% of a pass). Three additional layers on
+top of the interleaving, all tunable via env/CLI without a code change:
+  - WARM_SLEEP_SECONDS raised from 0.2 to 0.3s (DEFAULT_SLEEP_SECONDS) --
+    a slightly larger secondary floor.
+  - WARM_EXTRA_SLEEP_SECONDS (default 1.0s) inserted every
+    WARM_EXTRA_SLEEP_EVERY (default 20) requests -- a periodic longer pause
+    so no single route's 1-minute sliding window fills up from steady-state
+    pacing alone.
+  - On an HTTP 429, sleep WARM_BACKOFF_SECONDS (default 2.5s) -- letting the
+    offending route's window roll forward -- then retry that one URL exactly
+    once (see `fetch_with_backoff`). No unbounded retries, so a bad pass's
+    worst-case duration stays bounded (see the module-level duration
+    estimate below `EXTRA_SLEEP_EVERY_N_REQUESTS`).
+See plan/CDN_WARMING_LOCAL.md for the before/after live-pass numbers.
+
+2026-07-11 megribi_score removal (bug audit rank7): the "判定" (judgment) UI
+that consumes /api/megribi_score is behind the SHOW_MEGRIBI_JUDGMENTS feature
+flag (frontend/src/lib/featureFlags.ts), which has been `false` since
+2026-07-10 (broken scoring logic, see that file's doc comment). While the
+flag is off, warming megribi_score is pure wasted load on the Render
+backend (it still runs the real capacity/score computation) for a UI that
+isn't shown. `build_list_page_urls` and `build_top_page_urls` below no
+longer emit megribi_score warm URLs. Restore them (re-add the
+`WarmUrl(..., "megribi_score")` lines removed from both functions, mirroring
+build_list_page_urls's range_multi/forecast_today_multi pattern) if/when
+SHOW_MEGRIBI_JUDGMENTS goes back to `true`. The frontend fetch itself
+(home-client.tsx's unconditional `/api/megribi_score` call, stores-list-
+client.tsx, etc.) is a separate concern tracked/owned by another batch --
+this script only stops *pre-warming* the URL.
+
 Design constraints
 ------------------
 - Standard library only (urllib/json/datetime/math) — no pip install step
@@ -80,7 +112,7 @@ mirrors the existing MEGRIBI-* tasks' conventions (docs/LOCAL_LLM_SETUP.md):
     $py = "C:\\Users\\ahos1\\AppData\\Local\\Programs\\Python\\Python314\\python.exe"
     $root = "C:\\Users\\Public\\共有データ系\\ORIENTAL\\ORIENTAL\\riental-lounge-monitor-main"
 
-    schtasks /Create /TN "MEGRIBI-warm-cdn" /SC DAILY /ST 19:00 /RI 10 /DU 0005:00 /F `
+    schtasks /Create /TN "MEGRIBI-warm-cdn" /SC DAILY /ST 19:00 /RI 10 /DU 0005:00 /RU SYSTEM /F `
       /TR "$py $root\\scripts\\warm_cdn_local.py"
 
     $s = New-ScheduledTaskSettingsSet -StartWhenAvailable -WakeToRun -AllowStartIfOnBatteries `
@@ -89,8 +121,20 @@ mirrors the existing MEGRIBI-* tasks' conventions (docs/LOCAL_LLM_SETUP.md):
 
 /SC DAILY /ST 19:00 /RI 10 /DU 0005:00 = daily at 19:00, then repeat every 10
 minutes for a 5-hour duration (last fire 23:50) — the Task Scheduler-native
-equivalent of the GHA `cron: "*/10 10-14 * * *"` window. No admin//RU needed
-(same as the other MEGRIBI-* tasks — interactive logon is fine).
+equivalent of the GHA `cron: "*/10 10-14 * * *"` window.
+
+2026-07-11 correction (bug audit rank5a): this task MUST run as `/RU SYSTEM`
+("Run whether user is logged on or not" / Logon Mode "Background only"),
+NOT the interactive-logon default the earlier revision of this docstring
+claimed was "fine". It was not: the task was registered interactive-only,
+so its first trigger on 2026-07-10 only fired at 21:04 instead of 19:00
+(the ~12 triggers during the 19:00-21:00 ramp-up window were silently
+skipped because no interactive session existed yet). Requires an elevated
+(Administrator) shell to create with /RU SYSTEM. See
+plan/CDN_WARMING_LOCAL.md for the exact orchestrator command to fix an
+*existing* interactive-only registration (schtasks /Change /RU has a known
+bug where it silently resets the logon-mode setting back to interactive-only
+-- do not use it for this).
 """
 
 from __future__ import annotations
@@ -128,12 +172,29 @@ RELATED_STORE_COUNT = 4
 # The primary defense against self-inflicted 429s is `build_all_urls`
 # interleaving same-prefix requests across the whole pass (rather than
 # clustering them); this sleep is a secondary floor on top of that. Measured
-# in a live pass against production: 229 URLs against the single-worker
+# in a live pass against production: ~224 URLs against the single-worker
 # Render backend (several forecast endpoints doing real ML inference) take
 # several minutes end-to-end regardless of this value, since real request
-# latency dominates -- so this stays close to the originally-suggested
-# 0.15-0.25s rather than being stretched further for rate-limit purposes.
-DEFAULT_SLEEP_SECONDS = 0.2
+# latency dominates.
+#
+# 2026-07-11 (bug audit rank5b): real overnight passes still showed
+# recurring 429 bursts (34-57 fails out of 229 on several passes) even with
+# the interleaving, so the base sleep was raised 0.2 -> 0.3s and two more
+# pacing layers were added below (EXTRA_SLEEP_EVERY_N_REQUESTS /
+# DEFAULT_EXTRA_SLEEP_SECONDS, and the 429 backoff in `fetch_with_backoff`).
+DEFAULT_SLEEP_SECONDS = 0.3
+# Every EXTRA_SLEEP_EVERY_N_REQUESTS requests, pause an extra
+# DEFAULT_EXTRA_SLEEP_SECONDS on top of the per-request sleep above -- a
+# periodic longer breather so steady-state pacing alone can't fill up any
+# one route's 1-minute rate-limit window over a long pass.
+EXTRA_SLEEP_EVERY_N_REQUESTS = 20
+DEFAULT_EXTRA_SLEEP_SECONDS = 1.0
+# On an HTTP 429, back off this long (letting the offending route's
+# sliding window roll forward) before retrying that single URL exactly once
+# -- see `fetch_with_backoff`. Deliberately a single retry (not a loop) so a
+# bad pass's worst case is still bounded: at most
+# len(urls) * DEFAULT_BACKOFF_SECONDS of extra time, not unbounded.
+DEFAULT_BACKOFF_SECONDS = 2.5
 DEFAULT_TIMEOUT_SECONDS = 20
 DEFAULT_WINDOW_START = "18:55"
 DEFAULT_WINDOW_END = "24:05"
@@ -313,7 +374,16 @@ def build_store_urls(base: str, stores: list[dict], now_jst: datetime) -> list[W
 
 def build_list_page_urls(base: str, stores: list[dict]) -> list[WarmUrl]:
     """List page (/stores), default view (no filter/search): pages of
-    STORES_PER_PAGE in stores.json order (stores-list-client.tsx)."""
+    STORES_PER_PAGE in stores.json order (stores-list-client.tsx).
+
+    2026-07-11 (bug audit rank7): no longer warms megribi_score here -- the
+    only UI that consumes it (score badges/judgment chips) is behind
+    SHOW_MEGRIBI_JUDGMENTS (frontend/src/lib/featureFlags.ts), which is
+    `false`. Warming it is wasted Render load for a hidden UI. Restore a
+    `WarmUrl(f"{base}/api/megribi_score?stores={csv}",
+    f"list_page{page_no}:megribi_score", "megribi_score")` append here if the
+    flag goes back to `true`.
+    """
     out: list[WarmUrl] = []
     page_count = math.ceil(len(stores) / STORES_PER_PAGE) if stores else 0
     for page in range(page_count):
@@ -332,13 +402,6 @@ def build_list_page_urls(base: str, stores: list[dict]) -> list[WarmUrl]:
                 f"{base}/api/forecast_today_multi?stores={csv}",
                 f"list_page{page_no}:forecast_today_multi",
                 "forecast_multi",
-            )
-        )
-        out.append(
-            WarmUrl(
-                f"{base}/api/megribi_score?stores={csv}",
-                f"list_page{page_no}:megribi_score",
-                "megribi_score",
             )
         )
     return out
@@ -367,11 +430,19 @@ def build_related_store_urls(base: str, stores: list[dict]) -> list[WarmUrl]:
 
 
 def build_top_page_urls(base: str, stores: list[dict]) -> list[WarmUrl]:
-    """Top page (home-client.tsx): bare megribi_score (all stores, no
-    filter) + the "last visited store" range fetch, warmed for the
-    fallback default store (DEFAULT_STORE = STORES[0].slug) since that's
-    what a first-time visitor with no localStorage history gets."""
-    out = [WarmUrl(f"{base}/api/megribi_score", "top:megribi_score", "megribi_score")]
+    """Top page (home-client.tsx): the "last visited store" range fetch,
+    warmed for the fallback default store (DEFAULT_STORE = STORES[0].slug)
+    since that's what a first-time visitor with no localStorage history
+    gets.
+
+    2026-07-11 (bug audit rank7): no longer warms the bare megribi_score
+    call here -- it only feeds the "今夜のおすすめ TOP5" panel, which is
+    behind SHOW_MEGRIBI_JUDGMENTS (frontend/src/lib/featureFlags.ts) and
+    currently `false`. Restore a leading
+    `WarmUrl(f"{base}/api/megribi_score", "top:megribi_score",
+    "megribi_score")` entry if the flag goes back to `true`.
+    """
+    out: list[WarmUrl] = []
     if stores:
         default_slug = stores[0]["slug"]
         out.append(
@@ -457,6 +528,32 @@ def fetch_one(url: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> tuple[bool,
         return False, 0, str(exc)[:160]
 
 
+def fetch_with_backoff(
+    url: str,
+    timeout: float = DEFAULT_TIMEOUT_SECONDS,
+    backoff_seconds: float = DEFAULT_BACKOFF_SECONDS,
+    sleep_fn=time.sleep,
+) -> tuple[bool, int, str, bool]:
+    """Wraps `fetch_one` with 429 mitigation (bug audit rank5): on a first
+    attempt that comes back HTTP 429, sleep `backoff_seconds` (letting the
+    offending route's 1-minute sliding window roll forward -- see the
+    "Rate-limit note" in the module docstring) and retry that same URL
+    exactly once. Deliberately not a retry loop: worst case is bounded at
+    one extra request + one backoff sleep per URL, not unbounded.
+
+    Returns (success, final_status, extra, hit_429) where `hit_429` is True
+    whenever the *first* attempt returned 429, regardless of whether the
+    retry then succeeded -- callers use this to report a 429 count that's
+    independent of the final ok/fail tally.
+    """
+    success, status, extra = fetch_one(url, timeout=timeout)
+    if status != 429:
+        return success, status, extra, False
+    sleep_fn(backoff_seconds)
+    success2, status2, extra2 = fetch_one(url, timeout=timeout)
+    return success2, status2, extra2, True
+
+
 def log_path_for(now_jst: datetime) -> Path:
     log_dir = Path(os.environ.get("WARM_CDN_LOG_DIR") or tempfile.gettempdir())
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -485,6 +582,26 @@ def main(argv: list[str] | None = None) -> int:
         "--sleep",
         type=float,
         default=float(os.environ.get("WARM_SLEEP_SECONDS", str(DEFAULT_SLEEP_SECONDS))),
+        help="base per-request pacing floor in seconds (default 0.3, see the "
+        "429 mitigation note in the module docstring).",
+    )
+    ap.add_argument(
+        "--extra-sleep",
+        type=float,
+        default=float(os.environ.get("WARM_EXTRA_SLEEP_SECONDS", str(DEFAULT_EXTRA_SLEEP_SECONDS))),
+        help="extra pause inserted every --extra-sleep-every requests (default 1.0s).",
+    )
+    ap.add_argument(
+        "--extra-sleep-every",
+        type=int,
+        default=int(os.environ.get("WARM_EXTRA_SLEEP_EVERY", str(EXTRA_SLEEP_EVERY_N_REQUESTS))),
+        help="how often (in requests) to insert --extra-sleep (default 20; 0 disables it).",
+    )
+    ap.add_argument(
+        "--backoff",
+        type=float,
+        default=float(os.environ.get("WARM_BACKOFF_SECONDS", str(DEFAULT_BACKOFF_SECONDS))),
+        help="sleep this long after a 429 before retrying that URL once (default 2.5s).",
     )
     args = ap.parse_args(argv)
 
@@ -511,30 +628,37 @@ def main(argv: list[str] | None = None) -> int:
     t0 = time.monotonic()
     ok = 0
     fail = 0
-    rate_limited = 0
+    rate_limited = 0  # count of URLs whose *first* attempt hit 429 (see fetch_with_backoff)
+    recovered = 0  # subset of rate_limited where the single retry then succeeded
     failures: list[str] = []
 
     with log_path.open("a", encoding="utf-8") as log_f:
         log_f.write(f"\n=== pass start {now_jst:%Y-%m-%d %H:%M:%S} JST | {len(urls)} urls | base={base} ===\n")
         for i, item in enumerate(urls):
-            success, status, extra = fetch_one(item.url)
+            success, status, extra, hit_429 = fetch_with_backoff(item.url, backoff_seconds=args.backoff)
+            if hit_429:
+                rate_limited += 1
             if success and status == 200:
                 ok += 1
+                if hit_429:
+                    recovered += 1
             else:
                 fail += 1
-                if status == 429:
-                    rate_limited += 1
                 failures.append(f"{item.label}({status})")
-            log_f.write(f"{item.label}\t{status}\t{extra}\t{item.url}\n")
+            log_f.write(f"{item.label}\t{status}\t{extra}\t{'429-retried' if hit_429 else ''}\t{item.url}\n")
             if i < len(urls) - 1:
                 time.sleep(args.sleep)
+                if args.extra_sleep_every > 0 and (i + 1) % args.extra_sleep_every == 0:
+                    time.sleep(args.extra_sleep)
 
     duration = time.monotonic() - t0
     total = len(urls)
     fail_ratio = (fail / total) if total else 0.0
+    still_failed_429 = rate_limited - recovered
     summary = (
         f"[warm_cdn_local] done: total={total} ok={ok} fail={fail} "
-        f"(429={rate_limited}) duration={duration:.1f}s log={log_path}"
+        f"(429_hit={rate_limited} recovered_after_retry={recovered} "
+        f"still_429_after_retry={still_failed_429}) duration={duration:.1f}s log={log_path}"
     )
     print(summary)
     with log_path.open("a", encoding="utf-8") as log_f:

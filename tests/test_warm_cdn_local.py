@@ -78,8 +78,9 @@ def test_build_list_page_urls_splits_into_pages_of_12_in_file_order():
     stores = [{"slug": f"s{i}", "lat": 0.0, "lon": 0.0} for i in range(1, 15)]  # 14 stores
     urls = warm.build_list_page_urls("https://example.test", stores)
 
-    # 2 pages (12 + 2) * 3 endpoints each.
-    assert len(urls) == 6
+    # 2 pages (12 + 2) * 2 endpoints each (megribi_score removed -- see
+    # test_build_list_page_urls_does_not_warm_megribi_score below).
+    assert len(urls) == 4
 
     page1_csv = ",".join(f"s{i}" for i in range(1, 13))
     page2_csv = ",".join(["s13", "s14"])
@@ -95,8 +96,6 @@ def test_build_list_page_urls_splits_into_pages_of_12_in_file_order():
         == f"https://example.test/api/forecast_today_multi?stores={page1_csv}"
     )
     assert by_label["list_page1:forecast_today_multi"].prefix == "forecast_multi"
-    assert by_label["list_page1:megribi_score"].url == f"https://example.test/api/megribi_score?stores={page1_csv}"
-    assert by_label["list_page1:megribi_score"].prefix == "megribi_score"
 
     assert (
         by_label["list_page2:range_multi"].url
@@ -104,15 +103,31 @@ def test_build_list_page_urls_splits_into_pages_of_12_in_file_order():
     )
 
 
-def test_build_top_page_urls_uses_bare_megribi_score_and_first_store_as_default():
+def test_build_list_page_urls_does_not_warm_megribi_score():
+    # Regression test for bug audit rank7: the judgment UI that consumes
+    # megribi_score is behind SHOW_MEGRIBI_JUDGMENTS (currently false), so
+    # warming it is wasted backend load. See featureFlags.ts.
+    stores = [{"slug": f"s{i}", "lat": 0.0, "lon": 0.0} for i in range(1, 15)]
+    urls = warm.build_list_page_urls("https://example.test", stores)
+    assert all("megribi_score" not in u.label and "megribi_score" not in u.prefix for u in urls)
+    assert all("megribi_score" not in u.url for u in urls)
+
+
+def test_build_top_page_urls_uses_first_store_as_default_and_no_megribi_score():
     stores = [{"slug": "nagasaki", "lat": 0.0, "lon": 0.0}, {"slug": "fukuoka", "lat": 0.0, "lon": 0.0}]
     urls = warm.build_top_page_urls("https://example.test", stores)
     by_label = {u.label: u for u in urls}
 
-    assert by_label["top:megribi_score"].url == "https://example.test/api/megribi_score"
-    assert by_label["top:megribi_score"].prefix == "megribi_score"
+    # Regression test for bug audit rank7: bare megribi_score removed (only
+    # fed the now-hidden "今夜のおすすめ TOP5" panel).
+    assert "top:megribi_score" not in by_label
+    assert len(urls) == 1
     assert by_label["top:range_default_store"].url == "https://example.test/api/range?store=nagasaki&limit=48"
     assert by_label["top:range_default_store"].prefix == "range"
+
+
+def test_build_top_page_urls_empty_stores_yields_no_urls():
+    assert warm.build_top_page_urls("https://example.test", []) == []
 
 
 def test_haversine_km_matches_closed_form_for_one_degree_of_longitude_at_equator():
@@ -178,8 +193,10 @@ def test_build_all_urls_interleaves_related_range_multi_instead_of_clustering():
     urls = warm.build_all_urls("https://example.test", stores, now)
     labels = [u.label for u in urls]
 
-    # top(2) + list_page(1 page * 3) + per-store(5 stores * 5: 4 own + 1 related) = 30
-    assert len(labels) == 2 + 3 + 5 * 5
+    # top(1: megribi_score removed, rank7) + list_page(1 page * 2: megribi_score
+    # removed) + per-store(5 stores * 5: 4 own + 1 related) = 28
+    assert len(labels) == 1 + 2 + 5 * 5
+    assert all("megribi_score" not in label for label in labels)
 
     a_block_start = labels.index("a:range_today")
     # Store "a"'s own 4 requests, immediately followed by its related hit --
@@ -210,3 +227,64 @@ def test_in_warm_window_handles_midnight_wraparound():
     assert warm.in_warm_window(datetime(2026, 7, 11, 0, 3, tzinfo=JST), start, end) is True
     assert warm.in_warm_window(datetime(2026, 7, 11, 0, 10, tzinfo=JST), start, end) is False
     assert warm.in_warm_window(datetime(2026, 7, 10, 12, 0, tzinfo=JST), start, end) is False
+
+
+# --------------------------------------------------------------------------
+# 429 mitigation (bug audit rank5) — pacing constants + fetch_with_backoff
+# --------------------------------------------------------------------------
+
+
+def test_pacing_constants_raised_for_429_mitigation():
+    # 2026-07-11: base sleep raised 0.2 -> 0.3s, plus two new pacing layers.
+    # Locks in the values referenced by plan/CDN_WARMING_LOCAL.md so the doc
+    # and code can't silently drift apart.
+    assert warm.DEFAULT_SLEEP_SECONDS == pytest.approx(0.3)
+    assert warm.EXTRA_SLEEP_EVERY_N_REQUESTS == 20
+    assert warm.DEFAULT_EXTRA_SLEEP_SECONDS == pytest.approx(1.0)
+    assert warm.DEFAULT_BACKOFF_SECONDS == pytest.approx(2.5)
+
+
+def test_fetch_with_backoff_passes_through_non_429_without_sleeping(monkeypatch):
+    sleeps: list[float] = []
+    monkeypatch.setattr(warm, "fetch_one", lambda url, timeout=20: (True, 200, "HIT"))
+
+    success, status, extra, hit_429 = warm.fetch_with_backoff(
+        "https://example.test/x", sleep_fn=sleeps.append
+    )
+
+    assert (success, status, extra, hit_429) == (True, 200, "HIT", False)
+    assert sleeps == []  # no backoff sleep for a clean 200
+
+
+def test_fetch_with_backoff_backs_off_and_retries_once_then_succeeds(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_fetch_one(url, timeout=20):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return False, 429, ""
+        return True, 200, "MISS"
+
+    monkeypatch.setattr(warm, "fetch_one", fake_fetch_one)
+    sleeps: list[float] = []
+
+    success, status, extra, hit_429 = warm.fetch_with_backoff(
+        "https://example.test/x", backoff_seconds=2.5, sleep_fn=sleeps.append
+    )
+
+    assert calls["n"] == 2  # exactly one retry, not a loop
+    assert sleeps == [2.5]  # backed off before the retry
+    assert (success, status, extra, hit_429) == (True, 200, "MISS", True)
+
+
+def test_fetch_with_backoff_still_429_after_retry_reports_failure_and_hit_429(monkeypatch):
+    monkeypatch.setattr(warm, "fetch_one", lambda url, timeout=20: (False, 429, ""))
+    sleeps: list[float] = []
+
+    success, status, extra, hit_429 = warm.fetch_with_backoff(
+        "https://example.test/x", backoff_seconds=2.5, sleep_fn=sleeps.append
+    )
+
+    # Still exactly one retry attempt (bounded worst case), not repeated backoff.
+    assert sleeps == [2.5]
+    assert (success, status, hit_429) == (False, 429, True)
