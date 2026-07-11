@@ -60,6 +60,29 @@ export type StorePreviewControls = {
 };
 
 /**
+ * サーバー（page.tsx）で焼き込んだ initialSnapshot を、今のクライアント状態で
+ * 初期シードとして採用してよいかを判定する純粋関数。
+ *
+ * slug 一致に加えて、夜境界（19:00 / 翌05:00 JST）を跨いだケースを弾く:
+ * ISR で焼いた時点と、クライアントがマウントした時点で `completedNight` の判定が
+ * 変わっている場合（例: 04:59 に焼いた「進行中」シードを 05:01 に描く／19:00 直後に
+ * 「完了夜の回顧」シードを描く）、そのシードは前夜の回顧 or 逆に古い進行中表示に
+ * なってしまう。一致しなければ採用せず、baseSnapshot から即 run() で最新化して
+ * 60-90s のシード遅延をスキップする。
+ */
+export function isUsableInitialSnapshot(
+  initialSnapshot: Pick<StoreSnapshot, "slug" | "completedNight"> | null | undefined,
+  slug: string,
+  clientCompletedNight: boolean,
+): boolean {
+  return (
+    !!initialSnapshot &&
+    initialSnapshot.slug === slug &&
+    initialSnapshot.completedNight === clientCompletedNight
+  );
+}
+
+/**
  * PREVIEW 用のデータ取得フック
  * - /api/range（store/limit のみ）を叩き、選択した baseDate の夜窓（19:00-05:00）をフロントで絞り込む
  * - 予測（/api/forecast_today）は today モードのみ取得（それ以外は取得しない）
@@ -88,11 +111,26 @@ export function useStorePreviewData(
     return formatYMD(base);
   }, [rangeMode, customDate]);
 
+  // クライアントがマウントした時点での「今日の夜は既に完了しているか」。initialSnapshot は
+  // today モード前提で焼かれているので、page.tsx と同じ computeNightBaseDate(now) で判定する。
+  // マウント時に一度だけ評価すれば十分（夜境界は 12 時間に 1 度しか動かない）。
+  const clientCompletedNight = useMemo(() => {
+    const now = new Date();
+    return isNightCompleted(computeNightBaseDate(now), now);
+  }, []);
+
   // 初期表示（today モード・同じ店舗）にのみ適用可能な initialSnapshot かどうか。
   // rangeMode の初期値は常に "today" なので、マウント直後はこの判定がそのまま有効。
-  // 計算コストが軽い（null チェックと文字列比較のみ）ので、毎レンダー再計算して問題ない。
-  const usableInitialSnapshot =
-    initialSnapshot && initialSnapshot.slug === meta.slug ? initialSnapshot : null;
+  // slug 一致に加え、夜境界を跨いだ（焼き込み時と mount 時で completedNight が食い違う）
+  // シードは破棄する。破棄されると usableInitialSnapshot=null → shouldPreserveInitialSeed=false
+  // → initialRunDelayMs=0 で即 run() が走り、前夜回顧を最大60-90s出し続ける問題を防ぐ。
+  const usableInitialSnapshot = isUsableInitialSnapshot(
+    initialSnapshot,
+    meta.slug,
+    clientCompletedNight,
+  )
+    ? initialSnapshot ?? null
+    : null;
 
   // initialSnapshot がある場合はサーバー取得済みの実データなので loading:false で即描画する
   // （StoreRealtimeStatusCard 等の loading ゲートでスケルトンに戻さないため）。
@@ -171,6 +209,12 @@ export function useStorePreviewData(
         const forecastPromise = forecastUrl
           ? fetch(forecastUrl, { signal }).then((r) => r.json().catch(() => ({})))
           : Promise.resolve(null);
+        // タブ連打（AbortController.abort()）で range が先に reject すると、この関数は
+        // 下の `await rangePromise` で throw して catch へ抜け、同じ signal の forecastPromise を
+        // await しないまま放置する。その拒否が未処理のまま残ると
+        // pageerror('signal is aborted without reason') になる。解決値は変えずに
+        // 保険のハンドラだけ付けて未処理拒否を防ぐ（正常系は下の `await forecastPromise` が従来どおり）。
+        forecastPromise.catch(() => {});
 
         const rangeJson = await rangePromise;
 
@@ -239,7 +283,11 @@ export function useStorePreviewData(
           const mergedCurrent = pickCurrentActual(effectiveMergedSeries);
           const mergedNowMen = latestActual?.nowMen ?? mergedCurrent.nowMen;
           const mergedNowWomen = latestActual?.nowWomen ?? mergedCurrent.nowWomen;
-          const mergedPeak = pickPeak(effectiveMergedSeries);
+          // 完了済みの夜（overlayAllForecast=true）は実測(実線)の上に予測(点線)を夜全体で
+          // 重ねるため、系列に予測点が併存する。ピークは「その夜に実際どれだけ混んだか」を
+          // 表すべきなので実測点のみから算出する（予測点で上書きされるのを防ぐ）。進行中の
+          // today（overlayAllForecast=false）は従来どおり予測ピークも含めた算出を維持する。
+          const mergedPeak = pickPeak(effectiveMergedSeries, { actualOnly: completedNight });
           const mergedSnapshot: StoreSnapshot = {
             ...baseSnapshotResolved,
             nowMen: Math.round(mergedNowMen),

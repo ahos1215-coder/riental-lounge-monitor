@@ -186,7 +186,12 @@ async function fetchInitialSnapshotOnce(meta: StoreMeta): Promise<StoreSnapshot 
       const current = pickCurrentActual(effectiveSeries);
       const nowMen = latestActual?.nowMen ?? current.nowMen;
       const nowWomen = latestActual?.nowWomen ?? current.nowWomen;
-      const { peakTotal, peakTimeLabel, peakTs, peakMen, peakWomen } = pickPeak(effectiveSeries);
+      // 完了済みの夜は実測(実線)＋予測(点線)を overlayAllForecast:true で重ねているため、
+      // 系列に予測点が併存する。ピークは実測点のみから算出し、予測点が「その夜のピーク」を
+      // 上書きするのを防ぐ（useStorePreviewData の完了夜分岐と一致させる）。
+      const { peakTotal, peakTimeLabel, peakTs, peakMen, peakWomen } = pickPeak(effectiveSeries, {
+        actualOnly: true,
+      });
       const latestActualTs =
         latestActual?.ts ??
         [...effectiveSeries].reverse().find((p) => p.menActual !== null || p.womenActual !== null)?.ts ??

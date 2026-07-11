@@ -16,12 +16,17 @@ function crowdHintFromTotals(nowTotal: number, peakTotal: number): string {
 type Props = {
   snapshot: StoreSnapshot;
   loading?: boolean;
+  /**
+   * 鮮度計算に使う現在時刻。PreviewMainSection の now ティック（60秒毎）から渡され、
+   * 15分ポーリングを待たずに「◯分前更新」が進む。未指定時は描画時の new Date()。
+   */
+  now?: Date;
 };
 
 /**
  * 男性・女性・男女比・混雑の目安を1枚にまとめたリアルタイムカード（モバイルの縦スクロール節約用）
  */
-export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
+export function StoreRealtimeStatusCard({ snapshot, loading, now }: Props) {
   const men = Math.max(0, Math.round(Number(snapshot.nowMen ?? 0)));
   const women = Math.max(0, Math.round(Number(snapshot.nowWomen ?? 0)));
   const total = Math.max(0, Math.round(Number(snapshot.nowTotal ?? men + women)));
@@ -44,8 +49,9 @@ export function StoreRealtimeStatusCard({ snapshot, loading }: Props) {
   // リアルタイム人数の鮮度。最新実測 ts と現在時刻から「◯分前更新」を出し、しきい値以上
   // 古ければ「閉店中・最終 HH:MM 時点」に切り替える（古い数値を"今"に見せない）。
   // PreviewMainSection は ssr:false のクライアント専用なので、描画時の new Date() で
-  // ハイドレーション不整合は起きない。
-  const freshness = computeFreshness(snapshot.latestActualTs);
+  // ハイドレーション不整合は起きない。now は親の 60 秒ティックから渡り、15分ポーリングを
+  // 待たずに分数表示が進む（未指定なら computeFreshness 側の既定 new Date() を使う）。
+  const freshness = computeFreshness(snapshot.latestActualTs, now);
 
   if (loading) {
     return (

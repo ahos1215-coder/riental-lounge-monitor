@@ -118,16 +118,35 @@ export function pickCurrentActual(series: TimeSeriesPoint[]) {
   };
 }
 
-export function pickPeak(series: TimeSeriesPoint[]) {
+/**
+ * ピーク（最も混雑した系列点）を求める。
+ *
+ * `options.actualOnly`（既定 false）:
+ * - false（進行中の夜）: 従来どおり actual を優先し、無ければ forecast を使う。
+ *   進行中の today モードでは「予測ピーク＝今夜これから来る想定ピーク」を出すのが意図なので
+ *   forecast 点も含める。
+ * - true（完了済みの夜の答え合わせ）: 実測点（menActual/womenActual が非 null）だけを対象に
+ *   ピークを算出する。完了夜のオーバーレイ（overlayAllForecast=true）では実測（秒粒度 ts）と
+ *   予測（15分グリッド ts）が別キーで併存するため、実測ピークより高い予測点が「表示ピーク」に
+ *   化ける不具合を防ぐ（例: shibuya 実測202 → 予測220で+35分ズレ）。
+ */
+export function pickPeak(
+  series: TimeSeriesPoint[],
+  options: { actualOnly?: boolean } = {},
+) {
+  const actualOnly = options.actualOnly ?? false;
   let bestLabel = "";
   let bestTs: string | null = null;
   let bestTotal = 0;
   let bestMen: number | null = null;
   let bestWomen: number | null = null;
   series.forEach((p) => {
-    // actual があればそちらを優先、なければ forecast（二重カウント防止）
-    const men = p.menActual ?? p.menForecast ?? 0;
-    const women = p.womenActual ?? p.womenForecast ?? 0;
+    // 完了夜の答え合わせでは実測点のみを対象にする（予測点は無視）。
+    if (actualOnly && p.menActual === null && p.womenActual === null) return;
+    // actual があればそちらを優先、なければ forecast（二重カウント防止）。
+    // actualOnly の場合は forecast へフォールバックせず実測値だけで総数を出す。
+    const men = actualOnly ? p.menActual ?? 0 : p.menActual ?? p.menForecast ?? 0;
+    const women = actualOnly ? p.womenActual ?? 0 : p.womenActual ?? p.womenForecast ?? 0;
     const total = men + women;
     if (total > bestTotal) {
       bestTotal = total;

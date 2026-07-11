@@ -13,7 +13,7 @@ type Payload =
   | { ok: false; error: string };
 
 /** リアルタイムカードの「予測ハイライト」と同じ数値から、要約用バッジ文言を最大3つ生成 */
-function mlHighlightChips(snapshot: StoreSnapshot): string[] {
+function mlHighlightChips(snapshot: StoreSnapshot, now: Date = new Date()): string[] {
   // 相席屋は在店人数を公開しておらず%のみ。ピーク要約も人数ではなく席の埋まり具合(%)で出す。
   const percentMode = isPercentCrowdBrand(snapshot.brand) && !!snapshot.capacity;
   const cap = snapshot.capacity ?? 0;
@@ -46,7 +46,8 @@ function mlHighlightChips(snapshot: StoreSnapshot): string[] {
   }
   // ピーク進捗チップ（ピーク前=「あと約…」/ 通過後=「ピークは過ぎました」/ 完了済みの夜=非表示）は
   // 純粋関数に集約。ピークを過ぎた後も「あと約◯人」が閉店へ向かって増える誤誘導を防ぐ。
-  const progressChip = peakProgressChip(snapshot);
+  // now は親の 60 秒ティック由来で、ピーク通過判定（isPeakPassed）が15分ポーリングを待たず進む。
+  const progressChip = peakProgressChip(snapshot, now);
   if (progressChip) {
     chips.push(progressChip);
   }
@@ -79,10 +80,16 @@ function useDeferredFetchGate(mainReady: boolean, fallbackMs = DEFERRED_FETCH_FA
 export function LatestForecastSummaryCard({
   storeSlug,
   snapshot,
+  now,
 }: {
   storeSlug: string;
   /** 予測ハイライト要点（バッジ）用。未指定なら記事要約のみ */
   snapshot?: StoreSnapshot;
+  /**
+   * ピーク進捗チップの時刻判定に使う現在時刻。PreviewMainSection の now ティック（60秒毎）から
+   * 渡され、15分ポーリングを待たずに「ピークは過ぎました」への切替が進む。未指定時は new Date()。
+   */
+  now?: Date;
 }) {
   const [state, setState] = useState<{ loading: boolean; payload: Payload | null }>({
     loading: true,
@@ -142,7 +149,7 @@ export function LatestForecastSummaryCard({
   const bullets = Array.isArray(p.bullets) ? p.bullets.filter(Boolean).slice(0, 3) : [];
   if (bullets.length === 0) return null;
 
-  const highlightChips = snapshot ? mlHighlightChips(snapshot) : [];
+  const highlightChips = snapshot ? mlHighlightChips(snapshot, now) : [];
 
   return (
     <section className="rounded-2xl border border-indigo-500/20 bg-indigo-950/10 p-4">

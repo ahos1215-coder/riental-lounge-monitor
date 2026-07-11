@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import SecondVenuesList from "./SecondVenuesList";
 import { StoreRealtimeStatusCard } from "./store/StoreRealtimeStatusCard";
@@ -18,6 +18,25 @@ import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
 import { getStorePricing } from "@/lib/pricing";
 
 const cardClass = "rounded-3xl border border-slate-800 bg-slate-950/80";
+
+/**
+ * 時刻依存の表示（リアルタイム鮮度「◯分前更新」・ピーク進捗チップ）を、データ再取得を
+ * 待たずに最大1分の遅延で更新するための now ティック。
+ *
+ * 経緯: computeFreshness / peakProgressChip は描画時の now を使うが、これらを再計算させる
+ * 唯一のトリガーが 15 分ごとのポーリング再描画だったため、「5分前更新」等の文言が最長15分
+ * 凍結していた。ここで 60 秒ごとに now だけを更新して純粋関数へ渡す（fetch は一切走らせない）。
+ * PreviewMainSection は ssr:false の dynamic import なのでサーバーでは実行されず、
+ * ハイドレーション不整合も起きない。
+ */
+function useNowTick(intervalMs = 60_000): Date {
+  const [now, setNow] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
 
 type PreviewMainSectionProps = {
   storeSlug: string;
@@ -49,6 +68,9 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
   const hasData = snapshot.hasData;
   const activeRangeMode = rangeMode ?? "today";
   const canControlRange = typeof onChangeRangeMode === "function";
+
+  // 鮮度・ピーク進捗の時刻依存表示を最大1分遅延で更新する now（データ再取得はしない）。
+  const now = useNowTick();
 
   // 相席屋は在店人数を公開しておらず「席の埋まり具合(%)」表示なので、タイムラインも
   // 人数ではなく % に変換して描画する（見出しの数値と整合させる）。
@@ -118,7 +140,7 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
           </div>
         </div>
 
-        <StoreRealtimeStatusCard snapshot={snapshot} loading={!!loading} />
+        <StoreRealtimeStatusCard snapshot={snapshot} loading={!!loading} now={now} />
       </section>
 
       {/* ② この後どうなる？ — 日付切替 + タイムライン（キラーコンテンツ） */}
@@ -143,7 +165,7 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
         )}
 
         <LongHolidayBanner />
-        <LatestForecastSummaryCard storeSlug={storeSlug} snapshot={snapshot} />
+        <LatestForecastSummaryCard storeSlug={storeSlug} snapshot={snapshot} now={now} />
       </section>
 
       {/* ③ 料金の目安 — 対応データがある店舗のみ（プロトタイプ: 長崎店） */}
