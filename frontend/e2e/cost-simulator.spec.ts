@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 // ────────────────────────────────────────────
 // 料金シミュレーター（オリエンタルラウンジ36店舗 + 相席屋6店舗）の描画確認

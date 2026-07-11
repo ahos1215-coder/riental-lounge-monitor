@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 
+import { track } from "@/lib/analytics";
 import SecondVenuesList from "./SecondVenuesList";
 import { StoreRealtimeStatusCard } from "./store/StoreRealtimeStatusCard";
 import { LatestForecastSummaryCard } from "./store/LatestForecastSummaryCard";
@@ -68,6 +69,18 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
   const hasData = snapshot.hasData;
   const activeRangeMode = rangeMode ?? "today";
   const canControlRange = typeof onChangeRangeMode === "function";
+
+  // 日付レンジ（今日/昨日/先週/カスタム）の切替を GA に記録する。実際にモードが変わった時だけ
+  // 1回だけ計測し、元の onChangeRangeMode の挙動はそのまま呼ぶ（UI・挙動への影響ゼロ）。
+  const handleChangeRangeMode = useCallback(
+    (mode: PreviewRangeMode) => {
+      if (mode !== activeRangeMode) {
+        track("range_mode_change", { mode });
+      }
+      onChangeRangeMode?.(mode);
+    },
+    [activeRangeMode, onChangeRangeMode],
+  );
 
   // 鮮度・ピーク進捗の時刻依存表示を最大1分遅延で更新する now（データ再取得はしない）。
   const now = useNowTick();
@@ -157,7 +170,7 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
         {canControlRange && (
           <RangeModeSelector
             activeRangeMode={activeRangeMode}
-            onChangeRangeMode={onChangeRangeMode}
+            onChangeRangeMode={handleChangeRangeMode}
             customDate={customDate}
             onChangeCustomDate={onChangeCustomDate}
             selectedBaseDate={selectedBaseDate}

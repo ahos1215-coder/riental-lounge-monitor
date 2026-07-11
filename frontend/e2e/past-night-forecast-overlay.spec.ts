@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page } from "./fixtures";
 
 /**
  * 完了済みの夜（昨日/先週/カスタム過去日、または「今日」モードで既に夜が終わった場合）に、

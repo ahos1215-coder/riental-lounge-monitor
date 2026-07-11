@@ -47,6 +47,8 @@ type StoreCardProps = {
   isLoading?: boolean;
   /** めぐりびスコア 0.0〜1.0。≥0.65 → 緑 狙い目 / ≥0.40 → 黄 様子見 / <0.40 → 赤 他店へ */
   megribiScore?: number | null;
+  /** カード（リンク）クリック時の任意フック。計測などに使う（既定の遷移挙動は変えない）。 */
+  onNavigate?: () => void;
 };
 
 /**
@@ -75,6 +77,7 @@ function StoreCardImpl({
   forecastPending = false,
   isLoading = false,
   megribiScore,
+  onNavigate,
 }: StoreCardProps) {
   const resolvedHref = useMemo(
     () => href ?? `/store/${slug}?store=${slug}`,
@@ -144,6 +147,7 @@ function StoreCardImpl({
 
   const handleClick = () => {
     recordStoreVisit(slug);
+    onNavigate?.();
   };
 
   return (

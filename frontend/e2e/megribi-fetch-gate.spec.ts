@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 // ────────────────────────────────────────────
 // 判定表示OFF後の /api/megribi_score フェッチ遮断（bug rank7）の回帰テスト。

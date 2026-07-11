@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect } from "./fixtures";
 
 // ────────────────────────────────────────────
 // スモークテスト: 主要ページが正しくレンダリングされるか確認

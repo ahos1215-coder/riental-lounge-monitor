@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
+import { track } from "@/lib/analytics";
 import {
   STORES,
   STORE_REGION_FILTER_ORDER,
@@ -118,6 +119,9 @@ export default function CompareClient() {
 
   const addStore = useCallback(
     (slug: string) => {
+      // 比較ページでの店舗追加を GA に記録する。ピッカーは未選択かつ上限未満の店舗にしか
+      // 追加ボタンを出さないため、ここは常に実追加のイベントハンドラ（副作用は計測のみ）。
+      track("compare_add_store", { slug });
       setSelectedSlugs((prev) => {
         if (prev.includes(slug) || prev.length >= MAX_COMPARE) return prev;
         const next = [...prev, slug];

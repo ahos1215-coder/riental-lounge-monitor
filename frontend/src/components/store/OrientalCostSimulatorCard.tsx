@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { track } from "@/lib/analytics";
 import type { OrientalPricingTable, PricingTable } from "@/data/pricing/types";
 import {
   computeStayCost,
@@ -144,7 +145,15 @@ function BreakdownTable({ result }: { result: CostResult }) {
 }
 
 /** 自由計算（アコーディオン内・オリエンタル版）。曜日タイプはカード上部の共通トグルを使う */
-function FreeCalcSection({ pricing, dayType }: { pricing: OrientalPricingTable; dayType: DayType }) {
+function FreeCalcSection({
+  pricing,
+  dayType,
+  onInteract,
+}: {
+  pricing: OrientalPricingTable;
+  dayType: DayType;
+  onInteract?: () => void;
+}) {
   const entryOptions = useMemo(() => buildEntryTimeOptions(pricing, dayType), [pricing, dayType]);
   const [entryHHMM, setEntryHHMM] = useState(() => {
     // 既定の22:00がその曜日タイプの選択肢に存在しない店舗（例: 開店が22時以降の
@@ -182,6 +191,7 @@ function FreeCalcSection({ pricing, dayType }: { pricing: OrientalPricingTable; 
           <select
             value={entryHHMM}
             onChange={(e) => {
+              onInteract?.();
               const nextEntry = e.target.value;
               setEntryHHMM(nextEntry);
               const nextExitOptions = buildExitTimeOptions(pricing, dayType, nextEntry);
@@ -203,7 +213,10 @@ function FreeCalcSection({ pricing, dayType }: { pricing: OrientalPricingTable; 
           退店時刻
           <select
             value={effectiveExit}
-            onChange={(e) => setExitHHMM(e.target.value)}
+            onChange={(e) => {
+              onInteract?.();
+              setExitHHMM(e.target.value);
+            }}
             className="min-h-[44px] rounded-lg border border-white/15 bg-black/40 px-2.5 text-[12px] text-slate-100"
           >
             {exitOptions.map((o) => (
@@ -220,7 +233,10 @@ function FreeCalcSection({ pricing, dayType }: { pricing: OrientalPricingTable; 
           <input
             type="checkbox"
             checked={appCheckin}
-            onChange={(e) => setAppCheckin(e.target.checked)}
+            onChange={(e) => {
+              onInteract?.();
+              setAppCheckin(e.target.checked);
+            }}
             className="h-4 w-4 shrink-0 rounded border-white/20 bg-black/40"
           />
           アプリチェックイン済み（チャージ{yen(pricing.charges.entry)}→無料）
@@ -229,7 +245,10 @@ function FreeCalcSection({ pricing, dayType }: { pricing: OrientalPricingTable; 
           <input
             type="checkbox"
             checked={solo}
-            onChange={(e) => setSolo(e.target.checked)}
+            onChange={(e) => {
+              onInteract?.();
+              setSolo(e.target.checked);
+            }}
             className="h-4 w-4 shrink-0 rounded border-white/20 bg-black/40"
           />
           おひとり利用（シングルチャージ +{yen(pricing.charges.single)}）
@@ -271,6 +290,18 @@ export function OrientalCostSimulatorCard({
   const [dayType, setDayType] = useState<DayType>(detection.dayType);
   const [showRationale, setShowRationale] = useState(false);
 
+  // 料金シミュレータの「最初の操作」だけを GA に1回記録する（入力の連打で連発しない）。
+  // 別店舗（＝別ページビュー）に切り替わったらリセットして再び1回計測できるようにする。
+  const costSimInteractedRef = useRef(false);
+  useEffect(() => {
+    costSimInteractedRef.current = false;
+  }, [pricing]);
+  const markCostSimInteract = useCallback(() => {
+    if (costSimInteractedRef.current) return;
+    costSimInteractedRef.current = true;
+    track("cost_sim_interact", { brand: "oriental" });
+  }, []);
+
   const recommendation = useMemo(
     () => (hasForecast ? recommendEntryTime(series, pricing, { dayType }) : null),
     [hasForecast, series, pricing, dayType],
@@ -310,7 +341,13 @@ export function OrientalCostSimulatorCard({
           <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[10px] text-slate-300">
             今日（{detectionLabel}）→ {detection.dayType === "weekend" ? "週末" : "平日"}料金
           </span>
-          <DayTypeToggle dayType={dayType} onChange={setDayType} />
+          <DayTypeToggle
+            dayType={dayType}
+            onChange={(d) => {
+              markCostSimInteract();
+              setDayType(d);
+            }}
+          />
         </div>
       </div>
       <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500">
@@ -407,7 +444,7 @@ export function OrientalCostSimulatorCard({
           </span>
         </summary>
         <div className="border-t border-white/[0.06] px-3 pb-3">
-          <FreeCalcSection pricing={pricing} dayType={dayType} />
+          <FreeCalcSection pricing={pricing} dayType={dayType} onInteract={markCostSimInteract} />
         </div>
       </details>
 

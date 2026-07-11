@@ -201,7 +201,7 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
       onClick={() => {
         const next = toggleFavoriteStore(slug);
         setFavorite(next);
-        sendEvent(next ? "favorite_add" : "favorite_remove", { store_slug: slug });
+        sendEvent(next ? "favorite_add" : "favorite_remove", { slug });
       }}
       className="rounded-full border border-amber-400/35 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-100 transition hover:border-amber-300/60 hover:bg-amber-500/20"
       aria-pressed={favorite}
@@ -237,6 +237,7 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
         digestStores={digestStores}
         relatedRealtime={relatedRealtime}
         relatedLoading={relatedLoading}
+        fromSlug={slug}
       />
     </div>
   );

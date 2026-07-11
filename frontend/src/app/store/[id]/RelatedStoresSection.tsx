@@ -1,6 +1,7 @@
 "use client";
 
 import { StoreCard } from "@/components/StoreCard";
+import { track } from "@/lib/analytics";
 import { BRAND_DISPLAY_LABEL, type StoreMeta } from "../../config/stores";
 import type { RelatedRealtimeMap } from "./storePageTypes";
 
@@ -8,12 +9,15 @@ type RelatedStoresSectionProps = {
   digestStores: StoreMeta[];
   relatedRealtime: RelatedRealtimeMap;
   relatedLoading: boolean;
+  /** 現在表示中の店舗 slug（related_store_click の from 側）。 */
+  fromSlug?: string;
 };
 
 export function RelatedStoresSection({
   digestStores,
   relatedRealtime,
   relatedLoading,
+  fromSlug,
 }: RelatedStoresSectionProps) {
   return (
     <section className="mx-auto w-full max-w-6xl space-y-3 px-4">
@@ -35,6 +39,9 @@ export function RelatedStoresSection({
             sparklineMen={relatedRealtime[store.slug]?.sparklineMen}
             sparklineWomen={relatedRealtime[store.slug]?.sparklineWomen}
             isLoading={relatedLoading && !relatedRealtime[store.slug]}
+            onNavigate={() =>
+              track("related_store_click", { from: fromSlug ?? "", to: store.slug })
+            }
           />
         ))}
       </div>

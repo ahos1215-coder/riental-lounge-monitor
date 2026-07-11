@@ -3,6 +3,12 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = process.env.PORT ?? "3000";
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${PORT}`;
 
+// e2e 用のダミー GA 測定 ID。localhost（=非本番ホスト）では GA は本番ガードで無効化されるため、
+// この ID が設定されていても gtag はロード/発火しない。それでも設定しておくことで
+// 「有効な ID があっても localhost では計測ゼロ」を証明でき、?dev の ga-disable 反映も検証できる。
+// 本番の実 ID とは別物なので、万一リクエストが漏れても実プロパティを汚さない（fixtures 側でも abort）。
+const E2E_GA_TEST_ID = "G-TEST00E2E0";
+
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -31,5 +37,6 @@ export default defineConfig({
         port: Number(PORT),
         reuseExistingServer: !process.env.CI,
         timeout: 60_000,
+        env: { NEXT_PUBLIC_GA_MEASUREMENT_ID: E2E_GA_TEST_ID },
       },
 });
