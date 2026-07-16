@@ -93,6 +93,7 @@ LINE Webhook（`frontend/src/app/api/line/route.ts`）:
 - `DISABLE_MODEL_PRELOAD`（新規, `oriental/__init__.py`。`"1"` で `create_app()` 起動時の ML モデル preload バックグラウンドスレッド起動をスキップ。テスト用途向け。未設定時はプリロードする）
 - `RENDER` / `RENDER_SERVICE_ID`（新規, `oriental/routes/tasks.py` の `_require_cron_secret()`。**Render が自動注入するプラットフォーム変数**でユーザー設定は不要。`FLASK_ENV=production` と合わせ「本番かどうか」の判定に使う）
 - `FLASK_ENV`（新規, 同上。`"production"` なら `CRON_SECRET` 未設定時に `/tasks/*` を fail-closed（401）にする。`RENDER`/`RENDER_SERVICE_ID` いずれかが立っている場合も同じ扱い。ローカル/CI では未設定なら許可（テスト互換）——2026-07 の ops-safety 修正）
+- `MEMORY_WARN_MB`（新規, 2026-07 memory-budget 修正。`oriental/routes/health.py`。float, 既定 `350`。`/healthz` が返す worker の RSS(MB) がこの値を超えたら `health.memory_high` を WARNING でログ出力し OOM 再発の予兆を監視できるようにする。Render Starter は master+2worker で 512MB 共有のため 1worker が 350MB を超えたら黄信号。`/healthz` の `memory.rss_mb` は本番 Linux で `/proc/self/status` VmRSS、取得不能環境では `null`）
 
 Forecast:
 - `ENABLE_FORECAST`
@@ -125,12 +126,12 @@ Forecast:
 - `/api/range` 系（`oriental/routes/data_range.py`。B8 で data.py から分割）:
   - `RANGE_CACHE_TTL`（int, 既定 `120`。TTL秒）
   - `RANGE_CACHE_WAIT_TIMEOUT`（float, 既定 `25`。single-flight 合流待ちタイムアウト秒）
-  - `RANGE_CACHE_MAX_ENTRIES`（int, 既定 `500`。上限超過で全消去してから新規エントリを入れる）
+  - `RANGE_CACHE_MAX_ENTRIES`（int, 既定 `160`。**2026-07 memory-budget 修正で 500→160**。1200行級の重いボディ〜427KB/件が Render Starter 512MB を食い潰す OOM の主因だったため、warm キー母集団〜155本を収容できる最小値まで絞った。上限超過時は「TTL切れ→なお超過なら最古~25%」を落とす段階 eviction（旧: 全消去）に変更）
 - `/api/forecast_today` 系（`oriental/routes/forecast.py`、Blueprint `url_prefix="/api"`）:
   - `FORECAST_RESULT_CACHE_TTL`（int, 既定 `180` = 3分）
   - `FORECAST_CACHE_WAIT_TIMEOUT`（float, 既定 `25`）
-  - `FORECAST_CACHE_MAX_ENTRIES`（int, 既定 `500`）
-  - 実装は `oriental/routes/_cache.py` の `SingleFlightTTLCache`（range/forecast 共通のプレーンな TTL+single-flight キャッシュ）
+  - `FORECAST_CACHE_MAX_ENTRIES`（int, 既定 `120`。**2026-07 memory-budget 修正で 500→120**。forecast エントリは〜16KB/件と軽いが warm 母集団〜70本に合わせて右サイズ化）
+  - 実装は `oriental/routes/_cache.py` の `SingleFlightTTLCache`（range/forecast 共通のプレーンな TTL+single-flight キャッシュ。段階 eviction と hit/set 時の LRU touch を持つ）
 
 予測後処理（2026-07〜、新規。`oriental/ml/postprocess.py` / `oriental/ml/forecast_service.py`）:
 - `FORECAST_LATE_CLAMP`（`0` で無効化、既定 `1`。予測後段の上限クランプ全体のスイッチ）

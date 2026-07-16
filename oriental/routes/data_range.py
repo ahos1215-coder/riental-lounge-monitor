@@ -37,7 +37,11 @@ MAX_MULTI_STORES = len(SLUG_TO_ID)
 _RANGE_CACHE_TTL = int(os.getenv("RANGE_CACHE_TTL", "120"))
 # 同じキーへの同時アクセスが cold なとき、合流待ちを諦めるまでの秒数（fail-open）。
 _RANGE_CACHE_WAIT_TIMEOUT = float(os.getenv("RANGE_CACHE_WAIT_TIMEOUT", "25"))
-_RANGE_CACHE_MAX_ENTRIES = int(os.getenv("RANGE_CACHE_MAX_ENTRIES", "500"))
+# 既定 160。warm な range キー母集団（全42店×2の今夜/昨夜=84 + 関連店の43組合せ +
+# 一覧/フィルタの multi ~26 ≒ 155）を丸ごと収容しつつ、上限が高すぎると 1200 行級の
+# 重いボディ（実測 ~427KB/件）が積み上がって Render Starter 512MB を食い潰すため
+# 絞る（旧既定 500 は per-worker 最悪 ~208MB＝OOM の主因）。詳細は fix/memory-budget。
+_RANGE_CACHE_MAX_ENTRIES = int(os.getenv("RANGE_CACHE_MAX_ENTRIES", "160"))
 
 
 @dataclass(slots=True)

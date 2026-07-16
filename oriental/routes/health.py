@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, jsonify
@@ -16,7 +17,77 @@ def healthz():
     payload = {"ok": True, **cfg.health_summary()}
     payload["forecast_model"] = _forecast_model_status()
     payload["data_freshness"] = _data_freshness(cfg)
+    payload["memory"] = _memory_status()
     return jsonify(payload)
+
+
+def _process_rss_mb() -> float | None:
+    """現在プロセスの RSS を MB で返す。
+
+    本番 Linux (Render) は `/proc/self/status` の VmRSS を読む（stdlib のみ・追加依存なし）。
+    Windows 開発機ではベストエフォートで ctypes(GetProcessMemoryInfo) を試し、
+    失敗・非対応環境では None を返す。/healthz は追加フィールドのみで、None でも
+    `memory.rss_mb` キー自体は常に存在する（レスポンス形状は後方互換）。
+    """
+    # Linux 本番: /proc/self/status VmRSS（kB 表記）
+    try:
+        with open("/proc/self/status", "r", encoding="utf-8", errors="ignore") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return round(float(line.split()[1]) / 1024.0, 1)
+    except (OSError, ValueError, IndexError):
+        pass
+    # Windows 開発機フォールバック（best-effort。失敗しても静かに None）
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _PMC(ctypes.Structure):
+            _fields_ = [
+                ("cb", wintypes.DWORD),
+                ("PageFaultCount", wintypes.DWORD),
+                ("PeakWorkingSetSize", ctypes.c_size_t),
+                ("WorkingSetSize", ctypes.c_size_t),
+                ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+                ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+                ("PagefileUsage", ctypes.c_size_t),
+                ("PeakPagefileUsage", ctypes.c_size_t),
+            ]
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        psapi = ctypes.WinDLL("psapi", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.GetCurrentProcess.argtypes = []
+        psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(_PMC), wintypes.DWORD]
+        psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+        c = _PMC()
+        c.cb = ctypes.sizeof(_PMC)
+        if psapi.GetProcessMemoryInfo(kernel32.GetCurrentProcess(), ctypes.byref(c), c.cb):
+            return round(c.WorkingSetSize / (1024.0 * 1024.0), 1)
+    except Exception:  # noqa: BLE001 — 非 Windows / 取得失敗は None にフォールバック
+        pass
+    return None
+
+
+def _memory_status() -> dict:
+    """`/healthz` 用のメモリ観測。rss_mb が MEMORY_WARN_MB(既定350) を超えたら WARNING を出す。
+
+    Render Starter は master + 2 worker で 512MB を共有するため、worker 単体 RSS が
+    350MB を超えたら OOM 再発の予兆として監視ログに残す（fix/memory-budget）。
+    """
+    rss_mb = _process_rss_mb()
+    if rss_mb is not None:
+        try:
+            warn_mb = float(os.getenv("MEMORY_WARN_MB", "350"))
+        except (TypeError, ValueError):
+            warn_mb = 350.0
+        if rss_mb > warn_mb:
+            current_app.logger.warning(
+                "health.memory_high rss_mb=%.1f warn_mb=%.1f", rss_mb, warn_mb
+            )
+    return {"rss_mb": rss_mb}
 
 
 @bp.get("/readyz")

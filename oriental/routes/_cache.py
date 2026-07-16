@@ -50,9 +50,18 @@ class SingleFlightTTLCache(Generic[T]):
     ttl:
         エントリの有効秒数。
     max_entries:
-        `_store` のサイズ上限。超えたら（シンプルさ優先で）全消去してから
-        新しいエントリを入れる。個別 LRU は実装しない —— どうせ TTL で
-        すぐ再構築されるため、複雑さに見合わない。
+        `_store` のサイズ上限。超えたときの eviction は「全消去」ではなく
+        段階的に行う（2026-07 memory-budget 修正。旧実装は overflow のたびに
+        warm な 150 本前後のエントリを毎回巻き添えで全消去していた）:
+          1. まず TTL 切れのエントリを落とす。/api/range は from/to/limit が
+             ユーザー由来で鍵空間が無限に広がるため、使い捨ての one-off キーは
+             大半がここで消え、warm なキー（今夜/昨夜・全店の定番窓）は残る。
+          2. それでも上限を超えていたら、最も古い（＝最近使われていない）
+             ~25% をまとめて落とす（バッチ eviction で毎挿入の O(n) 走査を償却）。
+        アクセス（hit）と set のたびに当該キーを末尾へ移す軽量な LRU 並びを
+        保つので、繰り返しヒットする warm キーは junk キーの洪水が来ても
+        eviction の先頭（最古）に落ちにくい。ヒット回数カウント等の重い LRU
+        機構までは持たない —— どうせ TTL で再構築されるため。
     wait_timeout:
         他スレッドの計算待ち（合流）を諦めるまでの秒数。計算側スレッドが
         異常に長くかかった/ハングした場合でも、待っている側がここで
@@ -80,16 +89,52 @@ class SingleFlightTTLCache(Generic[T]):
             return None
         return data
 
+    def _touch_locked(self, key: str) -> None:
+        """当該キーを dict の末尾（most-recently-used）へ移す。
+
+        dict は挿入順を保持するため、pop してから再挿入することで軽量な LRU
+        並びを維持する。eviction は先頭（最古＝最近使われていない）から落とすので、
+        繰り返しヒットする warm キーはこの touch により junk キーの洪水が来ても
+        巻き込まれにくくなる。呼び出し側はロック保持済みであること。
+        """
+        entry = self._store.pop(key, None)
+        if entry is not None:
+            self._store[key] = entry
+
+    def _evict_locked(self, now: float) -> None:
+        """max_entries 超過時の段階的 eviction（ロック保持済み前提）。
+
+        ① TTL 切れを先に落とす（ユーザー由来の使い捨てキーはここで大半が消える）。
+        ② まだ超過していれば、挿入/更新順が最も古い ~25% をまとめて落とす。
+        全消去（旧実装）は warm なエントリを毎回巻き添えにするため行わない。
+        """
+        if len(self._store) <= self._max_entries:
+            return
+        expired = [k for k, (at, _d) in self._store.items() if now - at > self._ttl]
+        for k in expired:
+            self._store.pop(k, None)
+        if len(self._store) > self._max_entries:
+            drop_n = max(1, len(self._store) // 4)
+            # dict は挿入順（touch 済みなら LRU 順）なので先頭 drop_n 件＝最古を落とす。
+            for k in list(self._store.keys())[:drop_n]:
+                self._store.pop(k, None)
+
     def get(self, key: str) -> T | None:
         with self._lock:
-            return self._get_locked(key)
+            data = self._get_locked(key)
+            if data is not None:
+                self._touch_locked(key)
+            return data
 
     def set(self, key: str, data: T) -> None:
         with self._lock:
+            now = _clock()
+            # 更新時も末尾へ（最近セットされた＝新しい扱い）。一旦 pop してから
+            # 再挿入することで LRU 並びを保つ。
+            self._store.pop(key, None)
+            self._store[key] = (now, data)
             if len(self._store) > self._max_entries:
-                # 個別 eviction はせず全消去する（すぐ再構築されるため十分）。
-                self._store.clear()
-            self._store[key] = (_clock(), data)
+                self._evict_locked(now)
 
     def invalidate(self, key: str) -> None:
         with self._lock:
@@ -124,6 +169,9 @@ class SingleFlightTTLCache(Generic[T]):
         with self._lock:
             cached = self._get_locked(key)
             if cached is not None:
+                # hit した warm キーを末尾（most-recently-used）へ移し、junk キーの
+                # 洪水による eviction で先に落とされないようにする。
+                self._touch_locked(key)
                 return cached, "hit"
 
             call = self._inflight.get(key)

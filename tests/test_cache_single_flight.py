@@ -110,15 +110,60 @@ def test_non_cacheable_result_is_not_persisted():
     assert cache.size() == 0
 
 
-def test_max_entries_eviction_clears_store_when_exceeded():
-    cache = SingleFlightTTLCache(ttl=60, max_entries=3)
-    for i in range(5):
-        cache.get_or_compute(f"k{i}", lambda i=i: (i, True))
+def test_overflow_drops_oldest_quarter_not_whole_store():
+    """max_entries 超過時、旧実装のような全消去ではなく最古 ~25% だけを落とす
+    （memory-budget 修正。junk キーの洪水で warm エントリを毎回巻き添えにしない）。"""
+    cache = SingleFlightTTLCache(ttl=60, max_entries=8)
+    for i in range(9):  # 9個目の set で 9 > 8 → evict
+        cache.set(f"k{i}", i)
 
-    # 5個目の挿入時点で size(4) > max_entries(3) となり全消去 -> 最後の1件だけ残る
-    assert cache.size() == 1
-    data, status = cache.get_or_compute("k4", lambda: (99, True))
-    assert (data, status) == (4, "hit")
+    # 旧実装（全消去）なら size==1。新実装は expired 無し → drop_n = 9//4 = 2 を落として size 7。
+    assert cache.size() == 7
+    # 最古の k0,k1 が落ち、最新の k8 は残る。
+    assert cache.get("k0") is None
+    assert cache.get("k1") is None
+    assert cache.get("k8") == 8
+
+
+def test_overflow_drops_expired_before_oldest(monkeypatch):
+    """overflow 時はまず TTL 切れ（使い捨て junk）を落とす。fresh な warm は
+    たとえ挿入順が古くても巻き添えにしない。"""
+    fake_time = [0.0]
+    monkeypatch.setattr("oriental.routes._cache._clock", lambda: fake_time[0])
+
+    cache = SingleFlightTTLCache(ttl=10, max_entries=6)
+    for i in range(5):  # t=0 に使い捨て junk を5本
+        cache.set(f"junk{i}", i)
+
+    fake_time[0] = 20.0  # junk は TTL(10) 超過。warm を入れて overflow を起こす。
+    cache.set("warm0", "a")  # size 6（まだ overflow せず）
+    cache.set("warm1", "b")  # size 7 > 6 → evict: 期限切れ junk5本を先に落とす
+
+    assert cache.get("warm0") == "a"
+    assert cache.get("warm1") == "b"
+    for i in range(5):
+        assert cache.get(f"junk{i}") is None
+    assert cache.size() == 2
+
+
+def test_warm_keys_survive_junk_flood_via_lru():
+    """繰り返しヒットする warm キーは、junk キーの洪水が何度 overflow を
+    起こしても LRU touch により生き残る（junk は一度きりで先頭へ流れ落ちる）。"""
+    cache = SingleFlightTTLCache(ttl=600, max_entries=10)
+    warm = [f"warm{i}" for i in range(5)]
+    for k in warm:
+        cache.get_or_compute(k, lambda k=k: (k, True))
+
+    for j in range(200):
+        # junk を1本流し込むたびに warm 全部を再ヒット（touch で末尾＝最新へ移動）。
+        cache.get_or_compute(f"junk{j}", lambda j=j: (j, True))
+        for k in warm:
+            data, status = cache.get_or_compute(k, lambda k=k: (k, True))
+            assert status == "hit"  # warm は evict されず常にキャッシュヒット
+
+    assert cache.size() <= 10
+    for k in warm:
+        assert cache.get(k) == k
 
 
 def test_single_flight_coalesces_concurrent_callers():
