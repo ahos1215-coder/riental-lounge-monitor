@@ -42,6 +42,9 @@ _RANGE_CACHE_WAIT_TIMEOUT = float(os.getenv("RANGE_CACHE_WAIT_TIMEOUT", "25"))
 # 重いボディ（実測 ~427KB/件）が積み上がって Render Starter 512MB を食い潰すため
 # 絞る（旧既定 500 は per-worker 最悪 ~208MB＝OOM の主因）。詳細は fix/memory-budget。
 _RANGE_CACHE_MAX_ENTRIES = int(os.getenv("RANGE_CACHE_MAX_ENTRIES", "160"))
+# 1エントリとしてキャッシュしてよい最大行数。温め済みの正規最大は1200行(昨日ビュー)。
+# これを超える巨大limit応答はキャッシュに乗せない(メモリ防御・応答内容は不変)。
+_RANGE_CACHE_MAX_ROWS = int(os.getenv("RANGE_CACHE_MAX_ROWS", "1500"))
 
 
 @dataclass(slots=True)
@@ -143,7 +146,12 @@ def _compute_range_for_store(
             query.limit,
         )
         body = {"ok": True, "rows": _trim_range_rows(limited)}
-        return (body, 200), True
+        # メモリ防御: 巨大 limit（MAX_RANGE_LIMIT=50000 まで指定可能）の応答を丸ごと
+        # TTL キャッシュに乗せると 1 エントリで数 MB を占め、512MB の器を再び脅かす。
+        # 温め済みの正規経路は最大 1200 行（昨日ビュー）なので、それを超える行数の
+        # 応答は「返すがキャッシュしない」(レスポンス内容は不変・キャッシュ可否のみ)。
+        cacheable = len(body["rows"]) <= _RANGE_CACHE_MAX_ROWS
+        return (body, 200), cacheable
 
     if backend == "supabase" and provider is None:
         logger.warning(

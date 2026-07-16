@@ -208,3 +208,31 @@ def test_range_single_flight_coalesces_concurrent_requests(app_and_provider):
 
     assert results == [200] * 6
     assert provider.calls == ["ol_gangnam"]  # 6並列でも Supabase 問い合わせは1回だけ
+
+
+def test_giant_limit_response_not_cached(app_and_provider):
+    """巨大limit(RANGE_CACHE_MAX_ROWS=1500超)の応答は返すがキャッシュしない(メモリ防御)。
+
+    1エントリ数MB級のボディがTTLキャッシュに積み上がるとRender 512MBを再び脅かすため、
+    温め済み正規経路の最大(1200行)を超える行数はcacheable=Falseで素通しする。
+    レスポンス内容自体は不変。
+    """
+    app, provider = app_and_provider
+    # 1600行(>1500)のフェイクデータ
+    # ts は i ごとに一意（重複排除で行数が縮まないように: 日/時/分を i から一意に導出）
+    provider.rows_by_store["ol_gangnam"] = [
+        {"ts": f"2026-06-{(i // 1440) + 1:02d}T{(i // 60) % 24:02d}:{i % 60:02d}:00+09:00",
+         "men": 1, "women": 1, "total": 2}
+        for i in range(1600)
+    ]
+    client = app.test_client()
+    url = "/api/range?store=gangnam&limit=5000"
+
+    resp1 = client.get(url)
+    assert resp1.status_code == 200
+    calls_after_first = len(provider.calls)
+
+    resp2 = client.get(url)
+    assert resp2.status_code == 200
+    # キャッシュされていない=2回目もproviderへ問い合わせが走る
+    assert len(provider.calls) > calls_after_first
