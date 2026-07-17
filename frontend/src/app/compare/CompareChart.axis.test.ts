@@ -3,6 +3,7 @@ import {
   COUNT_AXIS_ID,
   PERCENT_AXIS_ID,
   axisIdForBrand,
+  formatCompareTooltipValue,
   resolveCompareAxes,
 } from "./CompareChart";
 
@@ -45,5 +46,28 @@ describe("axisIdForBrand", () => {
     expect(axisIdForBrand("aisekiya")).toBe(PERCENT_AXIS_ID);
     expect(axisIdForBrand("oriental")).toBe(COUNT_AXIS_ID);
     expect(axisIdForBrand("jis")).toBe(COUNT_AXIS_ID);
+  });
+});
+
+describe("formatCompareTooltipValue — rank15 raw-float tooltip fix", () => {
+  it("rounds a long floating-point value to an integer before appending the unit", () => {
+    // 本番で確認された生値: "26.111711784503775人"
+    expect(formatCompareTooltipValue(26.111711784503775, "人")).toBe("26人");
+  });
+
+  it("rounds a percent value the same way", () => {
+    expect(formatCompareTooltipValue(63.499999999999, "%")).toBe("63%");
+  });
+
+  it("rounds .5 up (standard Math.round behavior)", () => {
+    expect(formatCompareTooltipValue(10.5, "人")).toBe("11人");
+  });
+
+  it("passes through already-integer values unchanged (aside from unit)", () => {
+    expect(formatCompareTooltipValue(42, "人")).toBe("42人");
+  });
+
+  it("falls back to passing the raw value through for non-numeric input (defensive)", () => {
+    expect(formatCompareTooltipValue("N/A", "人")).toBe("N/A人");
   });
 });

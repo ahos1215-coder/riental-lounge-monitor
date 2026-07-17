@@ -28,9 +28,6 @@ const FILESYSTEM_BLOG_SLUGS = new Set([
   "how-to-use-prediction",
   "manager-interview",
   "prediction-how-it-works",
-  "shibuya-tonight-20251220",
-  "shibuya-tonight-20251221",
-  "shibuya-tonight-20251228",
 ]);
 
 async function blogSlugExists(slug: string): Promise<boolean> {

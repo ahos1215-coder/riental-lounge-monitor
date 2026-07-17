@@ -244,6 +244,7 @@ export {
   pickLatestActualPoint,
   isPeakPassed,
   peakProgressChip,
+  crowdHintChip,
   REALTIME_STALE_THRESHOLD_MIN,
   computeFreshness,
 } from "@/lib/forecast/seriesAnalysis";

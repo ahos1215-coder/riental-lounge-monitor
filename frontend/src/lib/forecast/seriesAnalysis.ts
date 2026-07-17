@@ -262,6 +262,38 @@ export function peakProgressChip(
 }
 
 /**
+ * 混雑度（目安）チップの中身（rank3 バグ修正）。
+ *
+ * バグ: `nowTotal` は latestActualTs（夜窓フィルタ前の全レンジ内の最新実測点）優先で
+ * 計算される「今まさにの人数」であるのに対し、`peakTotal` は選択中の夜（昨日/先週/
+ * カスタム＝過去の完了済みの夜）だけに絞ったピークになる。完了夜タブを見ているのに
+ * 分子だけ「今夜のリアルタイム人数」のままだと、無関係な値同士の比率になり
+ * 「ピーク比480%」のような無意味な数字と誤った混雑ラベルが出る
+ * （例: shibuya 199÷71=280%、ay_ueno 48÷10=480%）。
+ *
+ * 修正: 完了済みの夜（completedNight）ではチップ自体を出さない（null を返す）。
+ * 進行中（今夜ライブ）の自店ピーク比としてのみ意味を持つため、それ以外は非表示にする。
+ */
+export function crowdHintChip(
+  snapshot: Pick<StoreSnapshot, "completedNight" | "nowTotal" | "peakTotal">,
+): { crowd: string; occupancyPercent: number | null } | null {
+  if (snapshot.completedNight) return null;
+  const total = Math.max(0, Math.round(Number(snapshot.nowTotal ?? 0)));
+  const peak = Math.max(0, Math.round(Number(snapshot.peakTotal ?? 0)));
+  const crowd = crowdHintFromTotals(total, peak);
+  const occupancyPercent = peak > 0 ? Math.round((total / peak) * 100) : null;
+  return { crowd, occupancyPercent };
+}
+
+function crowdHintFromTotals(nowTotal: number, peakTotal: number): string {
+  if (peakTotal <= 0) return "予測データ待ち";
+  const r = nowTotal / peakTotal;
+  if (r >= 0.85) return "混雑に近い目安";
+  if (r >= 0.45) return "ほどよい目安";
+  return "空いている目安";
+}
+
+/**
  * リアルタイム人数の「鮮度」表示のしきい値（分）。
  * 最新実測がこの分数以上前なら「今の数値」とは見なさず、閉店中/計測停止として
  * 「最終 HH:MM 時点」の注記に切り替える。

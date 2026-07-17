@@ -109,6 +109,20 @@ test.describe("Blog page", () => {
     await page.goto("/blog");
     await expect(page.locator("main").first()).toBeVisible();
   });
+
+  test("does not overflow horizontally at 390px (rank8: decorative blob overflow fix)", async ({ page }) => {
+    // 以前は装飾用の w-[520px] blob がコンテナの overflow-hidden 無しで画面外へはみ出し、
+    // document 幅が 618px に広がって(=viewport 390pxに対し縮小されて見える)いた。
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/blog");
+    await expect(page.locator("main").first()).toBeVisible();
+    const widths = await page.evaluate(() => ({
+      documentWidth: document.documentElement.scrollWidth,
+      viewportWidth: window.innerWidth,
+    }));
+    expect(widths.documentWidth).toBe(widths.viewportWidth);
+    expect(widths.documentWidth).toBe(390);
+  });
 });
 
 test.describe("Navigation flow", () => {

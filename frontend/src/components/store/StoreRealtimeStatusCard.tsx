@@ -2,16 +2,8 @@
 
 import { GenderRatioBar } from "@/components/home/GenderRatioBar";
 import type { StoreSnapshot } from "@/app/hooks/useStorePreviewData";
-import { computeFreshness } from "@/app/hooks/storePreviewSnapshot";
+import { computeFreshness, crowdHintChip } from "@/app/hooks/storePreviewSnapshot";
 import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
-
-function crowdHintFromTotals(nowTotal: number, peakTotal: number): string {
-  if (peakTotal <= 0) return "予測データ待ち";
-  const r = nowTotal / peakTotal;
-  if (r >= 0.85) return "混雑に近い目安";
-  if (r >= 0.45) return "ほどよい目安";
-  return "空いている目安";
-}
 
 type Props = {
   snapshot: StoreSnapshot;
@@ -30,9 +22,9 @@ export function StoreRealtimeStatusCard({ snapshot, loading, now }: Props) {
   const men = Math.max(0, Math.round(Number(snapshot.nowMen ?? 0)));
   const women = Math.max(0, Math.round(Number(snapshot.nowWomen ?? 0)));
   const total = Math.max(0, Math.round(Number(snapshot.nowTotal ?? men + women)));
-  const peak = Math.max(0, Math.round(Number(snapshot.peakTotal ?? 0)));
-  const crowd = crowdHintFromTotals(total, peak);
-  const occupancy = peak > 0 ? Math.round((total / peak) * 100) : null;
+  // 完了済みの夜（昨日/先週/カスタム過去日）は、今夜のライブ人数を選択中の過去夜のピークと
+  // 比べても無意味な比率になるため null（rank3: 「ピーク比480%」バグの修正）。
+  const crowdInfo = crowdHintChip(snapshot);
   const menPct = total > 0 ? Math.round((men / total) * 100) : 50;
   const womenPct = total > 0 ? Math.round((women / total) * 100) : 50;
 
@@ -173,12 +165,14 @@ export function StoreRealtimeStatusCard({ snapshot, loading, now }: Props) {
       </div>
 
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-slate-200">
-          混雑度（目安）: <span className="font-semibold text-white">{crowd}</span>
-          {occupancy !== null && (
-            <span className="text-slate-400">（ピーク比 {occupancy}%）</span>
-          )}
-        </span>
+        {crowdInfo && (
+          <span className="rounded-full border border-white/10 bg-white/[0.04] px-2.5 py-1 text-[11px] text-slate-200">
+            混雑度（目安）: <span className="font-semibold text-white">{crowdInfo.crowd}</span>
+            {crowdInfo.occupancyPercent !== null && (
+              <span className="text-slate-400">（ピーク比 {crowdInfo.occupancyPercent}%）</span>
+            )}
+          </span>
+        )}
         {snapshot.recommendation &&
           snapshot.recommendation !== "データなし" &&
           snapshot.recommendation !== "データ取得済み" && (

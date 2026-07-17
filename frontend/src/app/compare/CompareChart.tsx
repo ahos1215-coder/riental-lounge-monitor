@@ -65,6 +65,18 @@ export function axisIdForBrand(brand: BrandId): string {
 }
 
 /**
+ * ツールチップの数値表示（rank15 バグ修正）。
+ * Recharts に渡す値は補間・演算を経て浮動小数点の生値（例: 26.111711784503775）に
+ * なり得るため、四捨五入した整数 + 単位で表示する（人/％は小数で意味を持たない）。
+ * 数値化できない値はそのまま素通しする（防御的フォールバック）。
+ */
+export function formatCompareTooltipValue(value: unknown, unit: string): string {
+  const n = Number(value);
+  const display = Number.isFinite(n) ? Math.round(n) : value;
+  return `${display}${unit}`;
+}
+
+/**
  * 混雑推移の比較チャート（Recharts）。
  * Recharts (+d3) は First Load JS への影響が大きい（gzip 換算で ~113KB）ため、
  * /compare のページ本体からは切り離し、店舗選択後に next/dynamic(ssr:false) で
@@ -146,7 +158,7 @@ export default function CompareChart({
                 const key = String(item?.dataKey ?? "");
                 const slug = key.replace(/^(actual_|forecast_)/, "");
                 const unit = isPercentCrowdBrand(storeDataMap[slug]?.brand ?? "oriental") ? "%" : "人";
-                return [`${value}${unit}`, item?.name ?? ""];
+                return [formatCompareTooltipValue(value, unit), item?.name ?? ""];
               }}
             />
             <Legend wrapperStyle={{ fontSize: 12 }} />

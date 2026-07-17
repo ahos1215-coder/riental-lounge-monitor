@@ -70,6 +70,35 @@ export type StorePreviewControls = {
  * なってしまう。一致しなければ採用せず、baseSnapshot から即 run() で最新化して
  * 60-90s のシード遅延をスキップする。
  */
+/**
+ * BUG B (rank4) 回帰防止用の純粋関数: 「鮮度が『1分前』→70秒後『13分前』へ逆行する」問題の
+ * モノトニシティ・ガード。
+ *
+ * today（ライブ）モードの 60-90s 遅延バックグラウンド再取得や 15 分毎ポーリングは、
+ * CDN → Next → backend のキャッシュ層を経由するため、既に表示中のスナップショットより
+ * 古い実測（X-Vercel-Cache STALE で最大 13 分ほど古いデータが返る事例を観測）を
+ * 返すことがある。これをそのまま上書きすると、鮮度表示が「1分前」→「13分前」のように
+ * 時間が巻き戻って見える。
+ *
+ * - candidateLatestActualTs が null/不正 → 新しい実測が無いだけなので古さは判定できず
+ *   false（上書きは許可し、呼び出し側の既存フォールバックに委ねる）。
+ * - currentLatestActualTs が null/不正 → 保護すべき既存表示が無い（初回ロード等）ので
+ *   false（上書き許可）。これにより「今日」→「昨日」等のモード切替直後（effect 再実行時に
+ *   loading へリセットされ latestActualTs が null に戻ってから新規フェッチが走る）は
+ *   このガードの対象にならず、従来どおり反映される。
+ * - どちらも有効な ISO 文字列で candidate < current のときだけ true（stale = 上書き拒否）。
+ */
+export function isStaleRefetch(
+  candidateLatestActualTs: string | null | undefined,
+  currentLatestActualTs: string | null | undefined,
+): boolean {
+  if (!candidateLatestActualTs || !currentLatestActualTs) return false;
+  const candidate = new Date(candidateLatestActualTs).getTime();
+  const current = new Date(currentLatestActualTs).getTime();
+  if (Number.isNaN(candidate) || Number.isNaN(current)) return false;
+  return candidate < current;
+}
+
 export function isUsableInitialSnapshot(
   initialSnapshot: Pick<StoreSnapshot, "slug" | "completedNight"> | null | undefined,
   slug: string,
@@ -268,7 +297,19 @@ export function useStorePreviewData(
         };
 
         if (!cancelled) {
-          setState({ loading: false, error: null, snapshot: baseSnapshotResolved });
+          setState((prev) => {
+            // BUG B (rank4) モノトニシティ・ガード: today のバックグラウンド再取得が
+            // 現在表示中より古い実測を返した場合は上書きしない（次の再取得を待つ）。
+            // モード切替（今日→昨日等）は effect 再実行時に loading へリセットされ
+            // prev.snapshot.latestActualTs が null に戻ってから走るため対象外。
+            if (
+              rangeMode === "today" &&
+              isStaleRefetch(baseSnapshotResolved.latestActualTs, prev.snapshot.latestActualTs)
+            ) {
+              return prev.loading ? { ...prev, loading: false } : prev;
+            }
+            return { loading: false, error: null, snapshot: baseSnapshotResolved };
+          });
         }
 
         // range と予測(forecastPoints)をマージして描画する共通処理。completedNight の
@@ -304,7 +345,16 @@ export function useStorePreviewData(
             forecastStatus: "ok",
           };
           if (!cancelled) {
-            setState({ loading: false, error: null, snapshot: mergedSnapshot });
+            setState((prev) => {
+              // BUG B (rank4) モノトニシティ・ガード（forecast 合流後も同様に適用）。
+              if (
+                rangeMode === "today" &&
+                isStaleRefetch(mergedSnapshot.latestActualTs, prev.snapshot.latestActualTs)
+              ) {
+                return prev.loading ? { ...prev, loading: false } : prev;
+              }
+              return { loading: false, error: null, snapshot: mergedSnapshot };
+            });
           }
         };
 

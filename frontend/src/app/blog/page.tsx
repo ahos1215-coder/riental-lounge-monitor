@@ -103,7 +103,7 @@ export default async function BlogPage({ searchParams }: { searchParams?: Promis
 
   return (
     <main className="relative min-h-[calc(100vh-80px)] bg-black text-white">
-      <div className="pointer-events-none absolute inset-0">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute left-1/4 top-[-120px] h-[520px] w-[520px] rounded-full bg-indigo-600/10 blur-3xl" />
         <div className="absolute right-1/4 top-[80px] h-[520px] w-[520px] rounded-full bg-amber-400/10 blur-3xl" />
       </div>
