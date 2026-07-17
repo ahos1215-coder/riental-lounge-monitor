@@ -185,6 +185,10 @@ class SingleFlightTTLCache(Generic[T]):
         if is_leader:
             try:
                 data, cacheable = compute_fn()
+                # 重要: event.set() より前に data を書く。旧実装は finally(event.set)の
+                # 後に call.data を代入しており、起こされた待機側が None を読む微小レースが
+                # あった(2026-07-17修正)。
+                call.data = data
             except BaseException as exc:  # noqa: BLE001 - 待機側にも伝播させる
                 call.error = exc
                 raise
@@ -192,7 +196,6 @@ class SingleFlightTTLCache(Generic[T]):
                 with self._lock:
                     self._inflight.pop(key, None)
                 call.event.set()
-            call.data = data
             if cacheable:
                 self.set(key, data)
             return data, "miss"

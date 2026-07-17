@@ -36,6 +36,11 @@ class LoadedModelBundle:
     model: ForecastModel
     metadata: dict[str, Any]
     loaded_at_unix: float
+    # ロード時に解決したモデルファイル名 (men, women)。refresh 時にこれと比較し、
+    # 名前が同じ＝モデル実体が変わっていなければ再ダウンロード/再パースをスキップする
+    # (2026-07-17 メモリ成長事件#2の根治: 旧実装は15分毎に同一モデルを再構築し、
+    #  glibc arena 断片化で RSS が単調増加していた。モデル名は日付入りで一意)。
+    model_names: tuple[str, str] | None = None
 
 
 class ForecastModelRegistry:
@@ -183,6 +188,20 @@ class ForecastModelRegistry:
 
         model_men_name, model_women_name, source = self._resolve_model_names(metadata, store_id)
 
+        # 変更検知: 解決されたモデルファイル名が「現在ロード済みのものと同一」なら、
+        # モデル実体は変わっていない（名前は学習日付入りで一意）ので、ダウンロードと
+        # LightGBM 再パースを丸ごとスキップして既存 Booster を使い続ける。
+        # モデルが実際に変わるのは日次再学習(05:30 JST)後の初回 refresh のみで、
+        # それ以外の 1 日 ~95 回の refresh はここで即帰りになる。metadata だけは
+        # 毎回取得済み（上）なので、schema 更新等の検知は従来どおり働く。
+        existing = self._bundles.get(store_id)
+        if (
+            existing is not None
+            and existing.model_names == (model_men_name, model_women_name)
+        ):
+            existing.metadata = metadata
+            return existing
+
         model_men_path = self.cache_dir / Path(model_men_name).name
         model_women_path = self.cache_dir / Path(model_women_name).name
         self.logger.info(
@@ -204,7 +223,12 @@ class ForecastModelRegistry:
             model_women_name,
             self.cache_dir,
         )
-        return LoadedModelBundle(model=model, metadata=metadata, loaded_at_unix=time.time())
+        return LoadedModelBundle(
+            model=model,
+            metadata=metadata,
+            loaded_at_unix=time.time(),
+            model_names=(model_men_name, model_women_name),
+        )
 
     def _resolve_model_names(self, metadata: dict[str, Any], store_id: str) -> tuple[str, str, str]:
         has_store_models = bool(metadata.get("has_store_models", False))

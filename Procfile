@@ -19,4 +19,10 @@
 # create_app() が preload スレッドも再起動する）。1500 件ごとの再生成頻度なら
 # モデル再ロードのコストは償却され、リサイクル直後のワーカーもエラーではなく
 # 「最初の1リクエストだけ遅い」で degrade する。jitter で全ワーカー同時リサイクルを避ける。
-web: gunicorn wsgi:app --timeout 300 --graceful-timeout 30 --workers ${WEB_CONCURRENCY:-2} --threads ${GUNICORN_THREADS:-4} --max-requests 1500 --max-requests-jitter 200
+# 【2026-07-17 メモリ成長事件#2】既定を workers 2→1 / threads 4→8 に変更。
+# 根拠: Render Starter は 0.5 vCPU のため2プロセス目は「CPU並列にならないのに
+# メモリ床だけ2倍(モデル84個×2セット≒+180MB)」の純コスト。LightGBM predict は
+# ネイティブ計算中に GIL を解放するのでスレッドでも実用上並行する。
+# MALLOC_ARENA_MAX=2 は glibc の malloc arena 増殖(スレッド数に比例して RSS が
+# 断片化で膨らむ既知問題)の定番対策。
+web: env MALLOC_ARENA_MAX=2 gunicorn wsgi:app --timeout 300 --graceful-timeout 30 --workers ${WEB_CONCURRENCY:-1} --threads ${GUNICORN_THREADS:-8} --max-requests 1500 --max-requests-jitter 200
