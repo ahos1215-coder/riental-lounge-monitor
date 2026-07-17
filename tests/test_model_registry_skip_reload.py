@@ -80,3 +80,16 @@ def test_changed_names_trigger_reload(registry):
     b2 = reg.get_bundle(store_id="ol_shibuya")
     assert calls["from_files"] == 2, "モデル名が変わったら再構築される"
     assert b2.model_names == ("model_ol_shibuya_20260717_men.txt", "model_ol_shibuya_20260717_women.txt")
+
+
+def test_metadata_shared_across_bundles(registry):
+    """同一内容のメタデータは全bundleで1オブジェクトを共有する(43部コピー~26MBの排除)。"""
+    reg, calls = registry
+    calls["meta"]["store_models"]["ol_ueno"] = {
+        "model_men": "model_ol_ueno_20260716_men.txt",
+        "model_women": "model_ol_ueno_20260716_women.txt",
+    }
+    b1 = reg.get_bundle(store_id="ol_shibuya")
+    reg._next_refresh_unix = 0.0
+    b2 = reg.get_bundle(store_id="ol_ueno")
+    assert b1.metadata is b2.metadata, "内容同一ならmetadata dictは共有される"

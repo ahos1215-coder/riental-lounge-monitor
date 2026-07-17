@@ -184,7 +184,14 @@ class ForecastModelRegistry:
         self._download_to_cache("metadata.json", metadata_path)
         metadata = self._load_metadata(metadata_path)
         self._validate_metadata(metadata)
-        self._metadata = metadata
+        # メタデータ重複排除: 内容が前回と同一なら共有オブジェクトを使い回す。
+        # 旧実装は store ごとの refresh で毎回新しい dict をパースして各 bundle が
+        # 個別に抱え込み、42店で同一内容のコピーが43部(実測~26MB)常駐していた
+        # (2026-07-17 実証班の発見)。内容が変わった時だけ差し替える。
+        if self._metadata is not None and metadata == self._metadata:
+            metadata = self._metadata
+        else:
+            self._metadata = metadata
 
         model_men_name, model_women_name, source = self._resolve_model_names(metadata, store_id)
 
