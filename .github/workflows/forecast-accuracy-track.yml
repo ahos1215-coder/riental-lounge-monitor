@@ -37,8 +37,15 @@ on:
           - snapshot
           - score
   schedule:
-    - cron: "10 9 * * *"   # 18:10 JST — snapshot the pure forward forecast
-    - cron: "10 21 * * *"  # 06:10 JST — score last night vs actuals
+    # 【2026-07-18・B1バグ#1根治】snapshot(18:10 JST)のGHA定発火を停止した。
+    # 理由: GHA schedule間引きで実際は19-21時(開店後)に走り、その時刻の予測は
+    # 当夜アンカー補正で「答えを見た後」になる=精度測定がカンニング状態だった
+    # (現存16夜すべて汚染を実証)。snapshotのプライマリはオーナーPCの Task Scheduler
+    # 「MEGRIBI-snapshot」(毎日18:10厳守)へ完全移管。ローカル18:10の直後にGHAが
+    # 遅れて発火すると「きれいな夜」を「汚染夜」で上書きしてしまうため、GHA側の
+    # 定発火は残さない(warm-cdn/daily/weeklyと同じローカル主導判断)。
+    # 手動の穴埋めが要る時は workflow_dispatch で mode=snapshot を明示実行できる。
+    - cron: "10 21 * * *"  # 06:10 JST — score last night vs actuals（採点はGHAのまま）
 
 jobs:
   track:
