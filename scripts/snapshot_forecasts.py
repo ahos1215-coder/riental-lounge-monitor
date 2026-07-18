@@ -10,6 +10,28 @@ weather/skew bugs. See plan/FORECAST_ACCURACY.md.
 Storage layout (reuses the existing model bucket, no new infra):
     <FORECAST_MODEL_BUCKET>/accuracy/snapshots/<YYYYMMDD>.json   (night of YYYYMMDD, JST)
 
+Every payload includes `captured_at_utc` (see main() below) precisely so
+score_forecasts.py can detect a late capture: if this job fires meaningfully
+after 18:10 JST, tonight-anchoring may already be blending in the real-time
+actuals by the time the forecast is captured, which would make the "pure
+forward forecast" answer-check secretly peek at the answer. See
+score_forecasts.py's module docstring (contamination detection) and
+plan/FORECAST_ACCURACY.md for the full writeup.
+
+2026-07-18 (B1): GHA `schedule:` for this job was measured to fire ~72-186min
+late on 8 sampled nights (19:22-21:16 JST instead of 18:10) — the same
+scheduler-throttling behavior documented in scripts/warm_cdn_local.py /
+plan/CDN_WARMING_LOCAL.md (GHA `schedule:` fired only 8.3% on time there).
+Migrating this job's primary execution to the owner's local Task Scheduler
+(mirroring MEGRIBI-warm-cdn) is the durable fix in progress; this script
+already runs standalone off .env/.env.local (stdlib only for the `by_slug`
+path; the v2 composition needs `jpholiday`, already a requirements.txt dep
+that the owner's PC has installed for the existing local
+generate_weekly_insights.py / local_report_job.py jobs, which import the same
+oriental.ml.night_type module) and needs no code change to run from Task
+Scheduler — see .github/workflows/forecast-accuracy-track.yml for the
+primary/backup note and the registration command.
+
 Stdlib only. Requires SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY; BACKEND_URL optional.
 """
 

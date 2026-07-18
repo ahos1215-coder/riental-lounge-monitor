@@ -5,6 +5,25 @@ name: Forecast accuracy tracking
 #   - score   (~06:10 JST): compare last night's snapshot to the actual 19:00-05:00
 #     counts and record per-store live MAE + a rolling summary in Supabase Storage.
 # See plan/FORECAST_ACCURACY.md. No new DB/bucket — reuses the model bucket.
+#
+# 【2026-07-18 追記・B1固定バグ#1】snapshot(mode=snapshot, 18:10 JST想定)は、
+# warm-cdn.yml で実測済みの同じ GitHub Actions `schedule:` 間引き問題
+# （10分毎・19:00-23:50想定60回に対し実発火5回=8.3%、plan/CDN_WARMING_LOCAL.md）を
+# 踏んでおり、実測8夜で実際の発火は19:22〜21:16 JST（遅延72〜186分）だった。
+# この遅延が18:40 JST（18:10+30分猶予）のカットオフを超えると、本番の
+# tonight-anchoring が既にかかった予測を「開店前・アンカー無しの答え合わせ」として
+# 保存してしまう汚染（カンニング）が起きる。scripts/score_forecasts.py 側は
+# captured_at_utc からこれを検知し contaminated_capture フラグでローリング集計
+# （live_mae履歴・blend_weights）から除外する対処を実装済み（根治ではなく検知+除外）。
+#
+# 根治として、warm-cdn.yml / scripts/warm_cdn_local.py と同じパターンで、snapshot の
+# プライマリ実行主体をオーナーPCの Task Scheduler（タスク名 `MEGRIBI-snapshot`、
+# 毎日18:10 JST、実体は `python scripts/snapshot_forecasts.py`）へ移す方針とする
+# （このコメントは移行準備の告知。Task Scheduler 登録はオーナー側の実施待ちのため、
+# 下の `schedule:` はそのまま維持し、GHA側はローカルジョブが未登録の間の実質プライマリ
+# 兼、登録後はバックアップ/日和見実行として残す）。
+# score（06:10 JST・mode=score）側は変更しない — GHA のままで問題ない
+# （汚染検知はスコアリング側で完結するため、スコアリングの実行主体には依存しない）。
 
 on:
   workflow_dispatch:

@@ -14,6 +14,21 @@ Storage layout (reuses the existing model bucket):
     <bucket>/accuracy/scores/<YYYYMMDD>.json
     <bucket>/accuracy/scores/summary.json        (rolling, newest first)
 
+Capture-contamination detection (2026-07-18, B1 固定バグ#1):
+    snapshot は 18:10 JST 発火（開店前・tonight-anchoring 無しの純粋な forward
+    forecast を捉える設計）が前提だが、GHA `schedule:` の遅延実測で実際の発火が
+    19:22〜21:16 JST にずれ込んでいた（8夜、遅延72〜186分）。この間に本番の
+    tonight-anchoring が既にかかった予測を「開店前スナップショット」として保存して
+    しまうと、答え合わせが事後の実測を覗いた自己採点（カンニング）になり、精度カード・
+    blend_weights.json（配信への self-flattery loop）・v2-vs-A比較を汚染する。
+    対処: snapshot の `captured_at_utc` が「18:10 + 30分猶予 = 18:40 JST」の
+    カットオフを過ぎていたら、その夜を `contaminated_capture=true` として
+    accuracy/scores/<date>.json と summary.json の該当夜エントリに記録する
+    （provenance のため夜次スコア自体は引き続き書く）。ローリング集計
+    （live_mae の直近履歴・blend_weights 算出に使う night_dates）からは
+    `_uncontaminated_recent()` で除外する。過去分（このフィールド追加より前の夜）は
+    遡及的に汚染判定しない＝非汚染扱い（後方互換。既存分は別途 dry-run で確認する）。
+
 Stdlib only. Requires SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
 """
 
@@ -34,6 +49,12 @@ SLOT_MIN = 15
 SUMMARY_KEEP = 60
 FETCH_PAGE_SIZE = 1000     # PostgREST 1リクエスト最大行数と揃える（build_templates.pyと同一）
 FETCH_ABSURD_ROWS = 50_000  # 1店・1夜でこれを超えたら暴走クエリを疑い、大声で警告する
+
+# 汚染検知（上のモジュールdocstring参照）: snapshot の目標発火時刻は 18:10 JST、
+# カットオフは 18:10 + CAPTURE_GRACE_MIN(30分) = 18:40 JST。
+CAPTURE_TARGET_HOUR = 18
+CAPTURE_TARGET_MIN = 10
+CAPTURE_GRACE_MIN = 30
 
 
 def _load_env() -> None:
@@ -201,6 +222,42 @@ def _store_id_for(slug: str) -> str:
     相席屋は slug==store_id ("ay_*")、オリエンタルは短縮 slug に "ol_" を付与。
     """
     return slug if slug.startswith("ay_") else f"ol_{slug}"
+
+
+def _capture_lateness(
+    captured_at: datetime | None, night_midnight_jst: datetime
+) -> tuple[float | None, bool]:
+    """snapshot の captured_at_utc が 18:10 JST 目標から何分遅れたか、および
+    汚染判定(18:40 JST カットオフ超過)を返す。
+
+    captured_at が無い（旧スナップショット/フィールド欠如）場合は (None, False) —
+    判定不能を「非汚染」として扱う後方互換（過去分を誤って一律除外しない）。
+    汚染 = 遅延 > CAPTURE_GRACE_MIN 分（ちょうど18:40は非汚染、境界は厳密に超過のみ）。
+    """
+    if captured_at is None:
+        return None, False
+    target_jst = night_midnight_jst.replace(
+        hour=CAPTURE_TARGET_HOUR, minute=CAPTURE_TARGET_MIN, second=0, microsecond=0
+    )
+    target_utc = target_jst.astimezone(timezone.utc)
+    minutes_late = (captured_at - target_utc).total_seconds() / 60.0
+    return round(minutes_late, 1), minutes_late > CAPTURE_GRACE_MIN
+
+
+def _uncontaminated_recent(nights: list[dict], limit: int = 7) -> list[dict]:
+    """summary.json の nights（新しい順）から contaminated_capture=true の夜を除いた
+    直近 limit 件を返す。ローリング live_mae 集計・blend_weights 算出の入力を
+    ここに統一する。フィールドが無い夜（この修正より前の履歴）は非汚染として扱う
+    （後方互換 — 遡及的な再判定はしない）。
+    """
+    out: list[dict] = []
+    for n in nights:
+        if n.get("contaminated_capture") is True:
+            continue
+        out.append(n)
+        if len(out) >= limit:
+            break
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -531,12 +588,15 @@ def _write_scorecard_summary(
     )
     lines.append(f"| band_coverage (v2) | — | {fmt(v2.get('band_coverage'))} | — |\n")
     try:
-        ra = _mean_opt([n.get("overall_live_mae") for n in nights[:7]])
-        rv2 = _mean_opt([n.get("overall_v2_mae") for n in nights[:7]])
-        rbl = _mean_opt([n.get("overall_baseline_mae") for n in nights[:7]])
-        dates = [n.get("night_date") for n in nights if n.get("night_date")][:7]
+        # 汚染夜(contaminated_capture=true)はローリング集計から除外する
+        # （モジュールdocstring参照）。
+        rolling_nights = _uncontaminated_recent(nights, 7)
+        ra = _mean_opt([n.get("overall_live_mae") for n in rolling_nights])
+        rv2 = _mean_opt([n.get("overall_v2_mae") for n in rolling_nights])
+        rbl = _mean_opt([n.get("overall_baseline_mae") for n in rolling_nights])
+        dates = [n.get("night_date") for n in rolling_nights if n.get("night_date")]
         rsc = _read_recent_scorecards(bucket, url, key, dates)
-        lines.append(f"\n### Rolling last-{len(dates)} nights\n\n")
+        lines.append(f"\n### Rolling last-{len(dates)} nights (contaminated capture除外)\n\n")
         lines.append("| metric | A | v2 | baseline |\n|---|---|---|---|\n")
         lines.append(f"| MAE | {fmt(ra)} | {fmt(rv2)} | {fmt(rbl)} |\n")
         lines.append(
@@ -580,6 +640,24 @@ def main() -> int:
     expected = len(by_slug)
 
     base = datetime.strptime(night_date, "%Y%m%d").replace(tzinfo=JST)
+
+    # 汚染検知（モジュールdocstring参照）: snapshot が 18:10+30分猶予=18:40 JST の
+    # カットオフを過ぎて取得されていたら、tonight-anchoring 後の答え覗きを疑い
+    # contaminated_capture=true にする。captured_at_utc が無い旧スナップショットは
+    # 判定不能として非汚染扱い（後方互換）。
+    captured_at = _parse_iso(snapshot.get("captured_at_utc"))
+    capture_minutes_late, contaminated_capture = _capture_lateness(captured_at, base)
+    if captured_at is not None:
+        print(
+            f"[score] night={night_date} captured_at_utc={captured_at.isoformat()} "
+            f"capture_minutes_late={capture_minutes_late} contaminated_capture={contaminated_capture}"
+        )
+    else:
+        print(
+            f"[score] night={night_date} captured_at_utc missing from snapshot — "
+            "capture timing unknown, treating as NOT contaminated (back-compat)."
+        )
+
     start = base.replace(hour=19, minute=0, second=0, microsecond=0)
     end = (start + timedelta(days=1)).replace(hour=5, minute=0, second=0, microsecond=0)
     start_iso = start.astimezone(timezone.utc).isoformat()
@@ -727,6 +805,11 @@ def main() -> int:
     result = {
         "night_date": night_date,
         "scored_at_utc": datetime.now(timezone.utc).isoformat(),
+        # --- 汚染検知(provenance): この夜の snapshot がいつ取得されたか、18:10+30分
+        # 猶予=18:40 JST カットオフに対して何分遅れたか、汚染判定（モジュールdocstring参照）。
+        "captured_at_utc": captured_at.isoformat() if captured_at is not None else None,
+        "capture_minutes_late": capture_minutes_late,
+        "contaminated_capture": contaminated_capture,
         "overall_live_mae": overall,
         "overall_baseline_mae": overall_baseline,
         "stores_scored": len(per_store),
@@ -756,7 +839,11 @@ def main() -> int:
         [{"night_date": night_date, "overall_live_mae": overall,
           "overall_baseline_mae": overall_baseline, "stores_scored": len(per_store),
           # 追加(後方互換): v2 の夜次 MAE。_fetch_live_accuracy は無視する（既存キーは不変）。
-          "overall_v2_mae": overall_v2}]
+          "overall_v2_mae": overall_v2,
+          # 追加(後方互換, 汚染検知provenance): 既存 consumer は無視できる新キー。
+          "captured_at_utc": captured_at.isoformat() if captured_at is not None else None,
+          "capture_minutes_late": capture_minutes_late,
+          "contaminated_capture": contaminated_capture}]
         + [n for n in summary["nights"] if n.get("night_date") != night_date]
     )[:SUMMARY_KEEP]
     summary["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
@@ -766,11 +853,22 @@ def main() -> int:
     # serving が取り込む accuracy/blend_weights.json を更新する（本丸③）。
     weights: dict[str, float] = {}
     try:
-        recent_dates = [n.get("night_date") for n in summary["nights"] if n.get("night_date")][:7]
+        # 汚染夜(contaminated_capture=true)はブレンド重み算出から除外する
+        # （self-flattery loop into serving を断つ。モジュールdocstring参照）。
+        recent_dates = [
+            n.get("night_date") for n in _uncontaminated_recent(summary["nights"], 7)
+            if n.get("night_date")
+        ]
+        excluded_contaminated = [
+            n.get("night_date") for n in summary["nights"][:7]
+            if n.get("contaminated_capture") is True and n.get("night_date")
+        ]
         weights = compute_blend_weights(bucket, supabase_url, key, recent_dates)
         weights_payload = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "nights_used": len(recent_dates),
+            # provenance: どの夜が汚染検知で除外されたか。
+            "nights_excluded_contaminated": excluded_contaminated,
             "weights": weights,
         }
         _storage_put(
@@ -789,7 +887,9 @@ def main() -> int:
     alerts: list[str] = []
     if overall is not None and overall_baseline is not None and overall > overall_baseline:
         alerts.append(f"ML is NOT beating the naive baseline in production (live MAE {overall} vs naive {overall_baseline}).")
-    recent = [n.get("overall_live_mae") for n in summary["nights"][1:8]
+    # 汚染夜は「直近の中央値」からも除外する（さもないと汚染された過去夜が
+    # スパイク検知の基準そのものを歪める）。
+    recent = [n.get("overall_live_mae") for n in _uncontaminated_recent(summary["nights"][1:], 7)
               if isinstance(n.get("overall_live_mae"), (int, float))]
     if overall is not None and recent:
         med = sorted(recent)[len(recent) // 2]
@@ -824,7 +924,11 @@ def main() -> int:
           f"scorecard={json.dumps(fleet_scorecard, ensure_ascii=True)}")
 
     # GitHub Actions のジョブ画面に艦隊サマリを表示（PDCAの可視化）。
-    _write_step_summary(night_date, overall, overall_baseline, per_store, weights, len(summary["nights"][:7]))
+    # nights_used は blend_weights が実際に使った夜数（汚染夜を除いた recent_dates）と揃える。
+    _write_step_summary(
+        night_date, overall, overall_baseline, per_store, weights,
+        len(recent_dates) if "recent_dates" in locals() else len(summary["nights"][:7]),
+    )
     # 追加: A vs v2 vs baseline の夜次スコアカード + 直近7夜のローリング集計。
     _write_scorecard_summary(
         night_date, overall, overall_v2, overall_baseline, fleet_scorecard,
