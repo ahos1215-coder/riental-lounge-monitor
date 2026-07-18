@@ -38,3 +38,62 @@ def test_memory_status_warns_over_threshold(monkeypatch, caplog):
 
     assert status == {"rss_mb": 123.4}
     assert any("health.memory_high" in rec.message for rec in caplog.records)
+
+
+class _FakeModelRegistry:
+    """ForecastModelRegistry.current_status() の代わりに固定の辞書を返すフェイク。
+
+    Fable監査 Batch B5 bug#7: current_status() が trained_at_min/trained_at_max +
+    loaded_store_count を追加で返すようになった (既存キーは維持)。/healthz が
+    その追加キーをそのまま透過することを確認する。
+    """
+
+    def __init__(self, status: dict):
+        self._status = status
+
+    def current_status(self) -> dict:
+        return self._status
+
+
+class _FakeForecastService:
+    def __init__(self, registry: _FakeModelRegistry):
+        self.model_registry = registry
+
+
+def test_healthz_forecast_model_reports_trained_at_min_max_and_loaded_count(monkeypatch):
+    """/healthz の forecast_model は additive keys (trained_at_min/max, loaded_store_count)
+    を透過しつつ、既存キー (schema_version, trained_at, stores_loaded 等) も壊さない。"""
+    monkeypatch.setenv("DISABLE_MODEL_PRELOAD", "1")
+    app = create_app()
+
+    fake_status = {
+        "loaded": True,
+        "stores_loaded": ["ol_a", "ol_b"],
+        "loaded_store_count": 2,
+        "refresh_sec": 900,
+        "next_refresh_in_sec": 300,
+        "schema_version": "v7",
+        "trained_at": "2026-07-16T05:30:00+00:00",
+        "trained_at_min": "2026-07-16T05:30:00+00:00",
+        "trained_at_max": "2026-07-17T05:30:00+00:00",
+        "loaded_at_unix": 1.0,
+        "age_sec": 1.0,
+        "last_refresh_ok_unix": 1.0,
+        "last_error": None,
+        "last_error_at_unix": None,
+    }
+    app.config["FORECAST_SERVICE"] = _FakeForecastService(_FakeModelRegistry(fake_status))
+
+    client = app.test_client()
+    body = client.get("/healthz").get_json()
+    fm = body["forecast_model"]
+
+    # 追加キー: 伝播が滞留している店舗があれば min != max で見える
+    assert fm["loaded_store_count"] == 2
+    assert fm["trained_at_min"] == "2026-07-16T05:30:00+00:00"
+    assert fm["trained_at_max"] == "2026-07-17T05:30:00+00:00"
+    # 既存キーは維持（後方互換）
+    assert fm["schema_version"] == "v7"
+    assert fm["trained_at"] == "2026-07-16T05:30:00+00:00"
+    assert fm["stores_loaded"] == ["ol_a", "ol_b"]
+    assert fm["loaded"] is True

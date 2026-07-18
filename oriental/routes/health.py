@@ -74,8 +74,10 @@ def _process_rss_mb() -> float | None:
 def _memory_status() -> dict:
     """`/healthz` 用のメモリ観測。rss_mb が MEMORY_WARN_MB(既定350) を超えたら WARNING を出す。
 
-    Render Starter は master + 2 worker で 512MB を共有するため、worker 単体 RSS が
-    350MB を超えたら OOM 再発の予兆として監視ログに残す（fix/memory-budget）。
+    Render Starter は 1worker×8threads（既定 WEB_CONCURRENCY=1 / GUNICORN_THREADS=8、
+    2026-07-17 メモリ成長事件#2以降の構成。Procfile 参照）で 512MB を使うため、
+    プロセス RSS が 350MB を超えたら OOM 再発の予兆として監視ログに残す
+    （fix/memory-budget）。
     """
     rss_mb = _process_rss_mb()
     if rss_mb is not None:
