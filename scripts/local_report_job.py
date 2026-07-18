@@ -13,20 +13,36 @@
   - scripts/experiments/local_llm_spike.py の fetch_store_facts / facts_block /
     run_ollama（Ollama /api/chat, keep_alive:0）/ SYSTEM プロンプト / gpu_lock
     の取り込み方。
+  - scripts/generate_weekly_insights.py の _fetch_existing_weekly_commentary
+    （新規生成が失敗した際に、直前の Supabase 行から本文を引き継ぐ carry-over 設計）
+    を daily 用にミラーする（_fetch_existing_daily_report / _apply_carry_over_or_fail）。
 
 使い方:
   python scripts/local_report_job.py --kind daily --stores shibuya,shinjuku \
       --edition evening_preview --mode dry-run
 
   --mode dry-run  (デフォルト): 生成のみ。書き込み予定の完全なレコードを表示するだけで
-                   Supabase には一切触れない。
+                   Supabase には一切触れない（読み取りも含め一切アクセスしない。そのため
+                   失敗時の carry-over 判定もできず、常に空本文の失敗プレビューになる。
+                   実際の --mode publish 実行では前回の公開済み本文を引き継げる場合がある）。
   --mode shadow  : 書き込みは行うが is_published は常に False に強制する（実験用）。
   --mode publish : 成功/失敗に応じた本番の is_published で実際に書き込む。
 
-安全設計 (#16/#17 由来):
-  生成が成功（本文が空でない）した場合のみ is_published=True かつ error_message=None。
-  facts 取得失敗・Ollama 失敗・空出力など、あらゆる失敗時は is_published=False,
-  error_message=<理由>, mdx_content="" とする。この2状態以外は作らない。
+安全設計 (#16/#17 由来 → #2 で carry-over を追加し3状態に拡張):
+  1) 成功                         : is_published=True,  error_message=None,  mdx_content=本文
+  2) 失敗・前回の公開済み本文あり : is_published=True,  error_message=<理由>, mdx_content=前回の本文
+  3) 失敗・前回の公開済み本文なし : is_published=False, error_message=<理由>, mdx_content=""
+
+  (2) が今回のコア修正（#2 CONFIRMED BUG）: 2026-07-16 21:30、facts 取得が backend の
+  メモリイベントに起因するタイムアウトで失敗し、42店中1店しか生成できなかった。従来は
+  失敗時に必ず (3) を書いており、これが既に公開されていた「前回の良品」まで空本文で
+  上書きして消していた。この修正では失敗時にまず直前の Supabase 行を読み
+  (_fetch_existing_daily_report)、is_published=True かつ本文が非空の行があれば
+  それを維持したまま error_message だけ今回の失敗理由に更新する
+  (_apply_carry_over_or_fail)。前回も公開済みでなければ (3) のまま
+  （新規店舗・前回も失敗していた場合は引き継ぐものが無いため、これは仕様どおり）。
+  facts 取得自体もタイムアウト延長 + リトライ (local_llm_spike.FACTS_FETCH_RETRIES) で
+  一時的な backend 劣化を吸収し、そもそも (2)/(3) に落ちる頻度を下げる。
 """
 
 from __future__ import annotations
@@ -35,6 +51,7 @@ import argparse
 import json
 import os
 import sys
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -95,6 +112,56 @@ def _pr(*parts: Any) -> None:
     内容は失われず、ログから復元可能（json.loads 等で戻せる）。"""
     text = " ".join(str(p) for p in parts)
     print(text.encode("ascii", "backslashreplace").decode("ascii"))
+
+
+# ---------------------------------------------------------------------------
+# バッチ開始前の backend 健全性チェック（#2 CONFIRMED BUG 由来）
+# ---------------------------------------------------------------------------
+
+# oriental/routes/health.py の _memory_status が使う MEMORY_WARN_MB の既定値と同じ数字。
+# バッチ開始前に一度だけ /healthz を覗き、超えていれば「メモリイベント直後で不安定かも
+# しれない」とみなして短く待つ（env で上書き可）。
+DEFAULT_HEALTH_MEMORY_WARN_MB = 350.0
+DEFAULT_HEALTH_PRECHECK_WAIT_SEC = 20.0
+
+
+def _maybe_wait_for_degraded_backend() -> None:
+    """バッチ開始前に backend `/healthz` を一度だけ覗き、メモリ逼迫の兆候があれば
+    短く待ってから続行する（ベストエフォート・#2 由来）。
+
+    2026-07-16 21:30 の障害（facts fetch が backend のメモリイベントでタイムアウトし、
+    42店中1店しか生成できなかった）を受けての追加。無限/長時間のリトライループには
+    しない: 一度だけ待ったら、その後は健全性に関わらず通常どおり全店の生成を進める
+    （このチェックだけでバッチ全体を止めたくないため）。/healthz 自体に到達できない
+    場合は「不明」として待たずに続行する。`LOCAL_REPORT_HEALTH_PRECHECK=0` で無効化できる。
+    """
+    if (os.environ.get("LOCAL_REPORT_HEALTH_PRECHECK") or "1").strip() == "0":
+        _pr("[info] health precheck disabled (LOCAL_REPORT_HEALTH_PRECHECK=0)")
+        return
+
+    health = spk.check_backend_health()
+    if not health:
+        _pr("[info] /healthz precheck skipped (backend unreachable or non-JSON response)")
+        return
+
+    rss_mb = (health.get("memory") or {}).get("rss_mb")
+    try:
+        warn_mb = float(os.environ.get("LOCAL_REPORT_MEMORY_WARN_MB") or DEFAULT_HEALTH_MEMORY_WARN_MB)
+    except ValueError:
+        warn_mb = DEFAULT_HEALTH_MEMORY_WARN_MB
+    try:
+        wait_sec = float(os.environ.get("LOCAL_REPORT_HEALTH_WAIT_SEC") or DEFAULT_HEALTH_PRECHECK_WAIT_SEC)
+    except ValueError:
+        wait_sec = DEFAULT_HEALTH_PRECHECK_WAIT_SEC
+
+    if isinstance(rss_mb, (int, float)) and rss_mb > warn_mb:
+        _pr(
+            f"[warn] backend memory looks degraded (rss_mb={rss_mb} > {warn_mb}); "
+            f"waiting {wait_sec}s before starting the batch"
+        )
+        time.sleep(wait_sec)
+    else:
+        _pr(f"[info] /healthz precheck ok (rss_mb={rss_mb})")
 
 
 # ---------------------------------------------------------------------------
@@ -199,14 +266,15 @@ def _build_mdx_content(*, slug: str, facts_id: str, target_date: str, body: str)
 
 
 # ---------------------------------------------------------------------------
-# レコード組み立て（成功/失敗の2状態のみ。#16/#17 セーフティ）
+# レコード組み立て（成功 / carry-over / 空失敗の3状態。#16/#17 → #2 で拡張。
+# モジュール docstring の「安全設計」節を参照）
 # ---------------------------------------------------------------------------
 
-def _failure_record(
-    slug: str, store_row: dict[str, Any], edition: str, target_date: str, reason: str
+def _base_record(
+    slug: str, store_row: dict[str, Any], edition: str, target_date: str
 ) -> dict[str, Any]:
-    """生成に到達できなかった場合の失敗レコード（#16/#17: is_published=False）。
-    ロック取得タイムアウト等、build_record の外で起きた例外用。"""
+    """成功/失敗どちらの record にも共通するメタデータ部分を組み立てる共有ヘルパー
+    （build_record と _failure_record の重複を避けるため）。"""
     return {
         "store_id": _store_id_for(store_row),
         "store_slug": slug,
@@ -218,10 +286,100 @@ def _failure_record(
         "edition": edition,
         "public_slug": None,
         "line_user_id": None,
+    }
+
+
+def _fetch_existing_daily_report(facts_id: str) -> dict[str, Any]:
+    """既存の daily blog_drafts 行から mdx_content/is_published/target_date を取得する。
+
+    scripts/generate_weekly_insights.py の _fetch_existing_weekly_commentary と同じ
+    考え方（新規生成が失敗した際に前回の良品を引き継ぐための読み取り）を daily 用に
+    ミラーする。行が無い/SUPABASE未設定/ネットワーク・JSONエラーはすべて空 dict を返す
+    （呼び出し側は「引き継げる前回分は無い」として扱えばよい。例外は投げない）。
+    """
+    conf = _supabase_conf()
+    if conf is None:
+        return {}
+    base, key = conf
+    url = (
+        f"{base}/rest/v1/blog_drafts"
+        f"?facts_id=eq.{facts_id}&select=mdx_content,is_published,target_date&limit=1"
+    )
+    try:
+        req = Request(
+            url,
+            headers={
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+                "Accept": "application/json",
+            },
+        )
+        with urlopen(req, timeout=15) as resp:
+            rows = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(rows, list) or not rows:
+            return {}
+        return rows[0] or {}
+    except Exception as exc:  # noqa: BLE001
+        _pr(f"[local-report] fetch existing daily report failed for facts_id={facts_id}: {exc}")
+        return {}
+
+
+def _apply_carry_over_or_fail(
+    base: dict[str, Any], reason: str, *, allow_fetch: bool
+) -> dict[str, Any]:
+    """生成失敗時のレコードを組み立てる（#2 CONFIRMED BUG のコア修正）。
+
+    直前に公開済みの本文が Supabase に残っていれば、それを消さずに引き継ぐ
+    (mdx_content/is_published は前回のまま、error_message だけ今回の失敗理由に更新)。
+    無ければ（新規店舗・前回も失敗していた等、引き継ぐものが無い場合）従来どおり
+    空本文 + is_published=False で書く。
+
+    「前回の良品」は is_published=True かつ mdx_content が非空の行のみを指す
+    （前回も失敗行だった場合は引き継ぐものが無いのと同じ扱いになる）。
+
+    allow_fetch=False（--mode dry-run から渡される）のときは Supabase に一切触れない
+    既存の契約（モジュール docstring 参照）を守るためフェッチ自体を省略し、常に
+    空失敗レコードを返す（dry-run のプレビューは carry-over を反映しないという
+    既知の制約。実際の --mode publish 実行ではフェッチが行われ、前回の良品があれば
+    それを引き継ぐ）。
+    """
+    existing = _fetch_existing_daily_report(base["facts_id"]) if allow_fetch else {}
+    prior_mdx = existing.get("mdx_content")
+    prior_published = bool(existing.get("is_published"))
+    if prior_published and isinstance(prior_mdx, str) and prior_mdx.strip():
+        _pr(
+            f"      [carry-over] keeping prior published body for facts_id={base['facts_id']} "
+            f"(prior target_date={existing.get('target_date')}); today's failure: {reason}"
+        )
+        return {
+            **base,
+            "mdx_content": prior_mdx,
+            "is_published": True,
+            "error_message": reason,
+        }
+    return {
+        **base,
         "mdx_content": "",
         "is_published": False,
         "error_message": reason,
     }
+
+
+def _failure_record(
+    slug: str,
+    store_row: dict[str, Any],
+    edition: str,
+    target_date: str,
+    reason: str,
+    *,
+    mode: str = "publish",
+) -> dict[str, Any]:
+    """生成に到達できなかった場合の失敗レコード。
+    ロック取得タイムアウト等、build_record の外で起きた例外用。
+    build_record の失敗分岐と同じ carry-over ポリシー (_apply_carry_over_or_fail) を適用する。
+    """
+    base = _base_record(slug, store_row, edition, target_date)
+    return _apply_carry_over_or_fail(base, reason, allow_fetch=(mode != "dry-run"))
 
 
 def build_record(
@@ -230,49 +388,30 @@ def build_record(
     store_row: dict[str, Any],
     edition: str,
     target_date: str,
+    mode: str = "publish",
 ) -> dict[str, Any]:
-    facts_id = f"auto_{slug}_{edition}"
-    store_id = _store_id_for(store_row)
     store_label = _store_display_name(store_row)
-
-    base = {
-        "store_id": store_id,
-        "store_slug": slug,
-        "target_date": target_date,
-        "facts_id": facts_id,
-        "insight_json": {},
-        "source": "local_gemma_daily",
-        "content_type": "daily",
-        "edition": edition,
-        "public_slug": None,
-        "line_user_id": None,
-    }
+    base = _base_record(slug, store_row, edition, target_date)
+    allow_fetch = mode != "dry-run"
 
     # 1) facts 取得
     try:
         facts = spk.fetch_store_facts(slug)
     except Exception as exc:  # noqa: BLE001
-        return {
-            **base,
-            "mdx_content": "",
-            "is_published": False,
-            "error_message": f"facts fetch failed: {exc}",
-        }
+        return _apply_carry_over_or_fail(
+            base, f"facts fetch failed: {exc}", allow_fetch=allow_fetch
+        )
 
     # 実データが一切取れずサンプル値へフォールバックした場合は絶対に公開しない。
     # (旧条件は「両方エラー かつ source がフォールバックでない」だったが、両方エラーの
     #  ときは fetch_store_facts が必ず source="sample(fallback)" を立てるため一度も
     #  発動しない死にコードで、架空数値のレポートが公開される穴になっていた)
     if facts.get("source") == "sample(fallback)":
-        return {
-            **base,
-            "mdx_content": "",
-            "is_published": False,
-            "error_message": (
-                f"facts fetch failed (sample fallback): megribi={facts.get('megribi_error')} "
-                f"forecast={facts.get('forecast_error')}"
-            ),
-        }
+        reason = (
+            f"facts fetch failed (sample fallback): megribi={facts.get('megribi_error')} "
+            f"forecast={facts.get('forecast_error')}"
+        )
+        return _apply_carry_over_or_fail(base, reason, allow_fetch=allow_fetch)
 
     # 2) Ollama 生成（呼び出し側で gpu_lock を取得済みの前提）
     user_prompt = prompt_daily(store_label, facts)
@@ -285,17 +424,12 @@ def build_record(
         text, elapsed, err = spk.run_ollama(MODEL, spk.SYSTEM, user_prompt, think=False, keep_alive="10m")
 
     if err or not text or not text.strip():
-        reason = err or "empty output from ollama"
-        return {
-            **base,
-            "mdx_content": "",
-            "is_published": False,
-            "error_message": f"ollama generation failed: {reason}",
-        }
+        reason = f"ollama generation failed: {err or 'empty output from ollama'}"
+        return _apply_carry_over_or_fail(base, reason, allow_fetch=allow_fetch)
 
     # 3) 成功: mdx_content 組み立て
     mdx_content = _build_mdx_content(
-        slug=slug, facts_id=facts_id, target_date=target_date, body=text.strip()
+        slug=slug, facts_id=base["facts_id"], target_date=target_date, body=text.strip()
     )
     return {
         **base,
@@ -441,6 +575,10 @@ def main() -> int:
     target_date = datetime.now(JST).strftime("%Y-%m-%d")
     _pr(f"[info] mode={args.mode} edition={args.edition} target_date={target_date} stores={slugs}")
 
+    # #2 CONFIRMED BUG 由来: backend がメモリイベント直後で不安定な可能性を一度だけ
+    # 覗く（ベストエフォート）。
+    _maybe_wait_for_degraded_backend()
+
     # gpu_lock は「店舗ごと」に取得/解放する（各レポート生成後に GPU を手放し、
     # 音楽PJがバッチの合間に割り込めるようにする＝共有GPUの良き市民）。
     from contextlib import nullcontext
@@ -456,7 +594,7 @@ def main() -> int:
         _pr(f"[info] per-store GPU lock enabled (free VRAM now: {gpu_lock.gpu_free_mb()} MiB)")
 
     total = len(slugs)
-    gen_ok = gen_fail = wrote = write_err = 0
+    gen_ok = gen_carried = gen_fail = wrote = write_err = 0
     for i, slug in enumerate(slugs, 1):
         _pr(f"[run {i}/{total}] generating daily report for slug={slug} (acquiring GPU lock) ...")
         # GPU を使う生成だけロック内。書き込み(ネットワーク)はロック外で行い、GPU を早く手放す。
@@ -468,18 +606,36 @@ def main() -> int:
                     store_row=store_map[slug],
                     edition=args.edition,
                     target_date=target_date,
+                    mode=args.mode,
                 )
         except Exception as exc:  # noqa: BLE001
             _pr(f"      [lock/gen ERROR] {slug}: {exc}")
-            record = _failure_record(slug, store_map[slug], args.edition, target_date, f"lock/gen error: {exc}")
-        if record["is_published"]:
+            record = _failure_record(
+                slug, store_map[slug], args.edition, target_date, f"lock/gen error: {exc}", mode=args.mode
+            )
+
+        # #2 由来: is_published だけでなく error_message の有無で「今回の生成が
+        # 成功したか」を区別する。is_published=True かつ error_message ありは
+        # carry-over（前回の良品を維持しつつ今回の失敗を記録した状態）で、
+        # 今回の生成自体は失敗している。
+        if record["is_published"] and record["error_message"] is None:
             gen_ok += 1
+            status = "OK"
+        elif record["is_published"]:
+            gen_carried += 1
+            status = f"CARRY-OVER(kept prior body; {record['error_message']})"
         else:
             gen_fail += 1
-        _pr(f"      -> gen {'OK' if record['is_published'] else 'FAIL(' + str(record['error_message']) + ')'}")
+            status = f"FAIL({record['error_message']})"
+        _pr(f"      -> gen {status}")
 
         if args.mode == "dry-run":
             _print_record(slug, record)
+            if not record["is_published"]:
+                _pr(
+                    "      (note) dry-run never queries Supabase, so this preview cannot "
+                    "reflect carry-over; --mode publish may keep a prior published body instead."
+                )
             continue
 
         # 生成直後に即 upsert（バッチが途中で止まっても、そこまでの分は保存済み＝中断に強い／
@@ -500,7 +656,8 @@ def main() -> int:
     spk.unload_ollama(MODEL)
     _pr(
         f"\n[summary] mode={args.mode} stores={total} generated_ok={gen_ok} "
-        f"generated_fail={gen_fail} written={wrote} write_errors={write_err} (model unloaded)"
+        f"generated_carried_over={gen_carried} generated_fail={gen_fail} "
+        f"written={wrote} write_errors={write_err} (model unloaded)"
     )
     if args.mode == "dry-run":
         _pr("[info] mode=dry-run -> NOTHING was written to Supabase.")

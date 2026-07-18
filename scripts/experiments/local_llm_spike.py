@@ -53,18 +53,61 @@ OUT_DIR = Path("local_llm_spike_out")
 WEEKDAY_JP = ["月", "火", "水", "木", "金", "土", "日"]
 
 
-def _get_json(url: str, timeout: int = 25):
+def _get_json(url: str, timeout: int = 25, retries: int = 1, backoff_base: float = 2.0):
+    """GET して JSON デコードする。
+
+    retries>1 を指定すると、一時的な失敗（タイムアウト・接続エラー・5xx 等の
+    urlopen 例外全般）を指数バックオフ（backoff_base * 2^(試行-1) 秒）で再試行し、
+    全試行が失敗した場合のみ最後の例外を送出する。既存呼び出し元（check_ollama 等）は
+    retries=1（既定）のままなので 1 発勝負で従来どおり変化しない。
+
+    2026-07-16 21:30 の日次レポート障害（CONFIRMED BUG #2: backend のメモリイベントに
+    起因する一時的なタイムアウトで facts 取得が失敗し、42 店中 1 店しか生成できなかった）
+    を受けて、fetch_store_facts がこの retries 機構を使うよう変更した。
+    """
     req = urllib.request.Request(url, headers={"User-Agent": "megribi-spike"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8"))
+    last_exc: Exception | None = None
+    attempts = max(1, retries)
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            if attempt < attempts:
+                sleep_sec = backoff_base * (2 ** (attempt - 1))
+                print(
+                    f"[facts-fetch] attempt {attempt}/{attempts} failed for {url}: {exc}; "
+                    f"retrying in {sleep_sec:.1f}s",
+                    file=sys.stderr,
+                )
+                time.sleep(sleep_sec)
+    assert last_exc is not None
+    raise last_exc
+
+
+# 2026-07-16 21:30 障害（CONFIRMED BUG #2）: backend がメモリイベント直後で一時的に
+# 詰まっていたため、facts 取得（megribi_score / forecast_today）が単発 25s タイムアウトで
+# 失敗し、sample(fallback) 化 -> local_report_job.py 側で公開停止、という連鎖が起きた。
+# facts 取得だけタイムアウトを延ばし・指数バックオフで再試行して一時的な劣化を吸収する。
+FACTS_FETCH_TIMEOUT_SEC = 45
+FACTS_FETCH_RETRIES = 3
 
 
 def fetch_store_facts(slug: str) -> dict:
     """megribi_score(最新の混雑/男女比) + forecast_today(今夜のピーク予測) から
-    レポート用の facts を組み立てる。失敗時はサンプルにフォールバック。"""
+    レポート用の facts を組み立てる。失敗時はサンプルにフォールバック。
+
+    各エンドポイントは FACTS_FETCH_RETRIES 回まで・FACTS_FETCH_TIMEOUT_SEC 秒/回で
+    再試行する（#2: backend の一時的なメモリイベント degradation を吸収するため）。
+    """
     facts = {"slug": slug, "source": "live"}
     try:
-        ms = _get_json(f"{BACKEND}/api/megribi_score?stores={slug}")
+        ms = _get_json(
+            f"{BACKEND}/api/megribi_score?stores={slug}",
+            timeout=FACTS_FETCH_TIMEOUT_SEC,
+            retries=FACTS_FETCH_RETRIES,
+        )
         row = next((d for d in (ms.get("data") or []) if d.get("slug") == slug), None)
         if row:
             facts["megribi_score"] = row.get("score")
@@ -76,7 +119,11 @@ def fetch_store_facts(slug: str) -> dict:
     except Exception as e:  # noqa: BLE001
         facts["megribi_error"] = str(e)
     try:
-        fc = _get_json(f"{BACKEND}/api/forecast_today?store={slug}")
+        fc = _get_json(
+            f"{BACKEND}/api/forecast_today?store={slug}",
+            timeout=FACTS_FETCH_TIMEOUT_SEC,
+            retries=FACTS_FETCH_RETRIES,
+        )
         data = fc.get("data") or []
         pts = [(p.get("ts", ""), float(p.get("total_pred", 0) or 0)) for p in data]
         if pts:
@@ -214,6 +261,22 @@ def check_ollama() -> list[str]:
         return [m.get("name", "") for m in (d.get("models") or [])]
     except Exception:
         return []
+
+
+def check_backend_health(timeout: int = 10) -> dict:
+    """backend の /healthz を一度だけ覗く（リトライ無し・ベストエフォート）。
+
+    local_report_job.py がバッチ開始前に呼び、`memory.rss_mb`（oriental/routes/health.py
+    が返す RSS 実測値）が閾値を超えていれば「backend がメモリイベントで劣化しているかも
+    しれない」とみなし、生成を始める前に短く待つ判断に使う（#2 由来）。
+    到達不可・タイムアウト・JSON 以外の応答はすべて空 dict を返す（呼び出し側は
+    「健全性は分からない」として続行してよい設計。診断のためだけにバッチ全体を
+    止めたくない）。
+    """
+    try:
+        return _get_json(f"{BACKEND}/healthz", timeout=timeout)
+    except Exception:  # noqa: BLE001
+        return {}
 
 
 def main() -> int:
