@@ -56,7 +56,11 @@ class AppConfig:
         window_end = _as_int(os.getenv("WINDOW_END", "5"), fallback=5)
         http_timeout = float(os.getenv("HTTP_TIMEOUT_S", "12"))
         http_retry = _as_int(os.getenv("HTTP_RETRY", "3"), fallback=3)
-        max_range_limit = _as_int(os.getenv("MAX_RANGE_LIMIT", "50000"), fallback=50000)  # FIX
+        # 既定 6000（旧 50000）: 無認証で叩ける /api/range が limit=50000 まで受理してしまい、
+        # 1リクエストで巨大な応答を強制生成できる OOM レバーになっていたため絞る
+        # （bug #6, 2026-07 Fable audit）。温め済みの正規経路は最大 1200 行（昨日ビュー）
+        # なので 6000 でも十分な余裕がある。env MAX_RANGE_LIMIT で上書き可能なのは維持。
+        max_range_limit = _as_int(os.getenv("MAX_RANGE_LIMIT", "6000"), fallback=6000)  # FIX
         forecast_model_refresh_sec = _as_int(os.getenv("FORECAST_MODEL_REFRESH_SEC", "900"), fallback=900)
         enable_forecast = os.getenv("ENABLE_FORECAST", "0").strip() == "1"
         supabase_url = os.getenv("SUPABASE_URL", "")

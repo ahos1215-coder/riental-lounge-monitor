@@ -21,13 +21,18 @@ from ..utils import storage, timeutil
 from ..utils.log import format_payload
 from ..utils.stores import SLUG_TO_ID
 from ._cache import SingleFlightTTLCache
-from .common import get_config as _config, get_supabase_provider, resolve_store_id
+from .common import (
+    get_config as _config,
+    get_supabase_provider,
+    resolve_store_id,
+    resolve_store_id_strict,
+)
 from .data import bp
 
 _supabase_provider = get_supabase_provider
 _resolve_store_id = resolve_store_id
 
-# マルチストア系エンドポイントの上限。既知の全店舗数（43店舗）を下回らないようにする。
+# マルチストア系エンドポイントの上限。既知の全店舗数（42店舗）を下回らないようにする。
 # DoS 対策は SLUG_TO_ID による既知 slug のみのフィルタリングとレート制限で担保する。
 MAX_MULTI_STORES = len(SLUG_TO_ID)
 
@@ -146,7 +151,7 @@ def _compute_range_for_store(
             query.limit,
         )
         body = {"ok": True, "rows": _trim_range_rows(limited)}
-        # メモリ防御: 巨大 limit（MAX_RANGE_LIMIT=50000 まで指定可能）の応答を丸ごと
+        # メモリ防御: 巨大 limit（既定 MAX_RANGE_LIMIT=6000、env で上書き可能）の応答を丸ごと
         # TTL キャッシュに乗せると 1 エントリで数 MB を占め、512MB の器を再び脅かす。
         # 温め済みの正規経路は最大 1200 行（昨日ビュー）なので、それを超える行数の
         # 応答は「返すがキャッシュしない」(レスポンス内容は不変・キャッシュ可否のみ)。
@@ -218,8 +223,16 @@ def api_range():
         )
         return jsonify({"ok": False, "error": "invalid-parameters", "detail": str(exc)}), 422
 
+    resolved = resolve_store_id_strict(cfg)
+    if resolved is None:
+        logger.warning(
+            "api_range.unknown_store raw=%s",
+            request.args.get("store_id") or request.args.get("store"),
+        )
+        return jsonify({"ok": False, "error": "unknown-store"}), 404
+    store_id, _slug = resolved
+
     backend = (cfg.data_backend or "legacy").lower()
-    store_id = _resolve_store_id(cfg)
     provider = _supabase_provider(cfg) if backend == "supabase" else None
     gas_client = current_app.config["GAS_CLIENT"]
 

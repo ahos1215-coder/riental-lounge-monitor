@@ -128,15 +128,23 @@ SLUG_TO_ID = {sid.split("ol_", 1)[-1]: sid for sid in STORE_IDS}
 SLUG_TO_ID.update({sid: sid for sid in AISEKIYA_STORE_IDS})
 
 
-def resolve_store_identifier(raw: str | None, default_id: str) -> Tuple[str, str]:
+def resolve_store_identifier_strict(raw: str | None) -> Tuple[str, str] | None:
     """
-    Resolve user-provided store slug/id to canonical Supabase store_id.
-    Returns (store_id, slug). Falls back to default_id when unknown/empty.
+    Resolve user-provided store slug/id to canonical Supabase store_id, with
+    NO fallback to a default store. Returns None when `raw` is empty/missing
+    or does not match any known store (unknown slug, or a slug for a store
+    that has since closed and been removed from stores.json, e.g. sapporo_ag).
+
+    Used by callers that must distinguish "known store" from "unknown store"
+    (e.g. single-store /api/range, where silently falling back to a default
+    store_id would leak that default store's data under an unrelated/closed
+    slug — see bug #5 in the 2026-07 Fable audit).
     """
-    if raw:
-        candidate = raw.strip()
-    else:
-        candidate = ""
+    if not raw:
+        return None
+    candidate = raw.strip()
+    if not candidate:
+        return None
 
     # Explicit store_id match (オリエンタル "ol_*" / 相席屋 "ay_*" どちらも)
     if candidate in ALL_STORE_IDS:
@@ -147,7 +155,28 @@ def resolve_store_identifier(raw: str | None, default_id: str) -> Tuple[str, str
         if not sid and slug.startswith("ol_") and slug[3:] in SLUG_TO_ID:
             sid = SLUG_TO_ID[slug[3:]]
         if not sid:
-            sid = default_id
+            return None
 
+    slug = sid.split("ol_", 1)[-1]
+    return sid, slug
+
+
+def resolve_store_identifier(raw: str | None, default_id: str) -> Tuple[str, str]:
+    """
+    Resolve user-provided store slug/id to canonical Supabase store_id.
+    Returns (store_id, slug). Falls back to default_id when unknown/empty.
+
+    NOTE: this lenient fallback is intentionally kept for callers where an
+    unresolved slug legitimately means "use the configured default store"
+    (e.g. /api/forecast_*, /api/second_venues — see oriental/routes/common.py
+    resolve_store_id()). For endpoints where an unknown/closed slug must NOT
+    silently return another store's data (single-store /api/range), use
+    resolve_store_identifier_strict() instead and surface a 404.
+    """
+    resolved = resolve_store_identifier_strict(raw)
+    if resolved is not None:
+        return resolved
+
+    sid = default_id
     slug = sid.split("ol_", 1)[-1]
     return sid, slug

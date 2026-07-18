@@ -32,9 +32,39 @@ def get_supabase_provider(cfg: AppConfig) -> SupabaseLogsProvider | None:
 
 
 def resolve_store_id(cfg: AppConfig) -> str:
-    """Resolve `store` / `store_id` query param to an internal store identifier."""
+    """Resolve `store` / `store_id` query param to an internal store identifier.
+
+    Lenient: an unknown slug silently falls back to cfg.store_id. This is the
+    right behaviour for endpoints where "unresolved -> use configured default"
+    is legitimate (/api/forecast_*, /api/second_venues). Do NOT use this for
+    single-store data endpoints where an unknown/closed slug must not quietly
+    return a different store's data — use resolve_store_id_strict() there.
+    """
     from ..utils.stores import resolve_store_identifier
 
     store_arg = request.args.get("store_id") or request.args.get("store")
     store_id, _ = resolve_store_identifier(store_arg, cfg.store_id)
     return store_id
+
+
+def resolve_store_id_strict(cfg: AppConfig) -> tuple[str, str] | None:
+    """Resolve `store` / `store_id` query param, requiring an exact match
+    against a known store slug/id when one is supplied.
+
+    - No `store`/`store_id` query param at all -> falls back to cfg.store_id
+      (preserves the historical single-store default behaviour for callers
+      that omit the param entirely).
+    - An unknown or closed-store slug (e.g. a removed store like sapporo_ag,
+      or a nonexistent slug) -> returns None so the caller can respond with a
+      clear 404 instead of silently serving cfg.store_id's data under an
+      unrelated slug (bug #5, 2026-07 Fable audit).
+
+    Returns (store_id, slug) on success.
+    """
+    from ..utils.stores import resolve_store_identifier_strict
+
+    store_arg = request.args.get("store_id") or request.args.get("store")
+    if not store_arg:
+        default_id = cfg.store_id
+        return default_id, default_id.split("ol_", 1)[-1]
+    return resolve_store_identifier_strict(store_arg)
