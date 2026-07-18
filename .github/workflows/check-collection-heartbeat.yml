@@ -23,6 +23,13 @@ name: Check collection heartbeat
 # 店名付きで検知する店舗別チェックを追加した(全体ロジックは不変、加算判定)。stores.json を
 # 読むため checkout ステップを追加している。
 #
+# 【2026-07-18 修正】夜間モード(19:00〜翌05:00)の判定は19:00:00ちょうどから30分閾値を
+# 適用していたが、実データでは夜の1行目は19:03〜19:04 JST頃にしか着地しない。そのため
+# 19:00:00〜19:04台にチェックが走ると「前夜最後の行からの経過(=昼間ぶん、数百分)」が
+# そのまま閾値超過となり誤報していた(実例: 2026-07-15 19:01:57「846分停止」、実際の
+# 1行目は19:03:20着地）。夜窓開始(19:00 JST)から30分間はグレースピリオドとして無条件
+# OKにし、それ以降は従来どおりの30分閾値判定に戻す(詳細はチェックスクリプト内コメント)。
+#
 # 必要な Secrets: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
 on:
@@ -126,8 +133,35 @@ jobs:
           in_window = (now_jst.hour >= 19) or (now_jst.hour < 5)
 
           if in_window:
-              mode = f"夜間窓(閾値={threshold_minutes}分)"
-              ok = age_minutes <= threshold_minutes
+              # 【2026-07-18 修正】夜窓の開始境界(19:00:00 JST ちょうど)に実データの
+              # 1行目が着地するわけではない。実測では最初の1行は 19:03〜19:04 JST 頃に
+              # 届く(収集トリガーの cron-job.org は5分毎で、店舗一覧SSRの取得・書き込み
+              # にも数十秒かかるため)。旧実装は age_minutes(=最新行からの経過)を
+              # そのまま30分閾値と比較していたため、19:00:00〜19:04台にチェックが
+              # 走ると、前夜最後の行からの経過(=昼間ぶん丸ごと、数百分)がそのまま
+              # 閾値超過となり誤報していた
+              # (実例: 2026-07-15 19:01:57 に「846分停止」で誤アラート。実際の1行目は
+              # 19:03:20着地で、その数分後には正常化していた)。
+              # 対策: 夜窓開始(19:00 JST。日付跨ぎの 00:00〜04:59 帯は前日19:00)から
+              # 何分経ったかも算出し、min(実経過, 夜窓開始からの経過) を閾値と比較する。
+              # 夜窓開始から threshold_minutes 以内は、まだ1行も来ていなくてもそもそも
+              # 「陳腐化」しようがない(開店直後で当然データが薄い)ため無条件でOKとする。
+              # threshold_minutes を超えて経過した後は、夜窓開始からの経過が閾値を
+              # 上回るため実質的に従来どおり age_minutes <= threshold_minutes と同じ
+              # 判定に戻る(収集が正常なら age_minutes は常に小さいまま)。
+              if now_jst.hour >= 19:
+                  night_start = now_jst.replace(hour=19, minute=0, second=0, microsecond=0)
+              else:
+                  night_start = (now_jst - timedelta(days=1)).replace(
+                      hour=19, minute=0, second=0, microsecond=0
+                  )
+              minutes_since_night_start = (now_jst - night_start).total_seconds() / 60.0
+              effective_age_minutes = min(age_minutes, minutes_since_night_start)
+
+              mode = (
+                  f"夜間窓(閾値={threshold_minutes}分、開始から{minutes_since_night_start:.1f}分)"
+              )
+              ok = effective_age_minutes <= threshold_minutes
               fail_msg = f"収集が {age_minutes:.1f} 分間停止しています（閾値 {threshold_minutes} 分）。"
           else:
               # 直近の営業終了 = 今日の 05:00 JST (05:00〜19:00 の昼間帯なので必ず今日)
