@@ -27,7 +27,7 @@ from .common import get_config as _config, get_supabase_provider, resolve_store_
 
 bp = Blueprint("forecast", __name__, url_prefix="/api")
 
-# マルチストア系エンドポイントの上限。既知の全店舗数（43店舗）を下回らないようにする。
+# マルチストア系エンドポイントの上限。既知の全店舗数（42店舗）を下回らないようにする。
 # DoS 対策は SLUG_TO_ID による既知 slug のみのフィルタリングとレート制限で担保する。
 MAX_MULTI_STORES = len(SLUG_TO_ID)
 

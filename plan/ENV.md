@@ -75,7 +75,11 @@ LINE Webhook（`frontend/src/app/api/line/route.ts`）:
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SERVICE_KEY`
 - `STORE_ID`（または `SUPABASE_STORE_ID`）
-- `MAX_RANGE_LIMIT`
+- `MAX_RANGE_LIMIT`（int, 既定 `6000`。`oriental/config.py`。以前の既定は50000だったが、未認証の
+  `/api/range?limit=` からの安価なOOMレバーを塞ぐため2026-07に6000へクランプ済み。実際の適用は
+  `oriental/routes/data_range.py`（`default_limit=min(500, cfg.max_range_limit)` /
+  `limit=max(1, min(limit, cfg.max_range_limit))`）。`forecast_service.py` の履歴取得は
+  `min(cfg.max_range_limit, 1200)` で別途キャップされる）
 - `TIMEZONE`
 
 基本設定:
@@ -103,6 +107,11 @@ Forecast:
 - `FORECAST_MODEL_PREFIX`（バケット内のモデル配置 prefix。例: `forecast/latest`）
 - `FORECAST_MODEL_SCHEMA_VERSION`（`metadata.json` の `schema_version` と一致必須。不一致時は 503）
 - `FORECAST_MODEL_REFRESH_SEC`（モデル再取得の TTL 秒。既定 900）
+- `MODEL_REFRESH_BATCH`（新規, `oriental/ml/model_registry.py`。int, 既定 `10`（下限1）。TTL到来時に
+  実際に再ダウンロード＋再パース（LightGBMロード）する店舗数の上限。軽量なメタデータ変更チェック
+  自体は毎回全店舗に対して走る。再学習直後に全42店舗のモデルを一斉に再ロードするとRender Starter
+  の0.5vCPUでCPUスパイクが起きるため段階的に反映する（B5修正。全店伝播が45時間→約75分に短縮された
+  施策の一部）
 - `FORECAST_MODEL_CACHE_DIR`（Render ローカルキャッシュ先。既定 `data/ml_models`）
 - `FORECAST_MODEL_CACHE_MAX_AGE_SEC`（int, 既定 `604800` = 7 日。Supabase Storage からの DL が失敗した際、`FORECAST_MODEL_CACHE_DIR` 上の既存ファイルを fallback として採用できる最大有効期限。これを超えた古いキャッシュは fallback として使わず、本来の例外を伝播させる）
 - `ML_TRAIN_LIMIT`（int, 既定 `120000`。学習で使用する最大ログ件数。大きいほど網羅性は上がるが、学習時間・メモリ使用量も増える）
@@ -143,9 +152,11 @@ Forecast:
 - `FORECAST_ANCHOR_DECAY`（float, 既定 `0.85`。アンカー補正係数がモデル自身のカーブ(1.0)へ減衰していく割合（スロットごと））
 
 推奨モデル配置（`FORECAST_MODEL_PREFIX` 配下）:
-- `metadata.json`（`schema_version` v2, `feature_columns`（19列）, `metrics`, `store_models` を含む）
-- `model_<store>_men.json`（XGBoost Native, 店舗別）
-- `model_<store>_women.json`（XGBoost Native, 店舗別）
+- `metadata.json`（`schema_version` v7, `feature_columns`（24列。単一ソースは
+  `oriental/ml/preprocess.py` の `FEATURE_COLUMNS`）, `metrics`, `store_models` を含む）
+- `model_<store>_men.json`（LightGBM、店舗別。ファイル名 `model_xgb.py` は2026-04-12の
+  XGBoost→LightGBM移行後もimport互換のためだけに残置されている——改名しないこと）
+- `model_<store>_women.json`（LightGBM、店舗別）
 - `model_men.json` / `model_women.json`（後方互換グローバルエイリアス）
 
 Legacy / Optional:
@@ -205,7 +216,35 @@ Task Scheduler `MEGRIBI-warm-cdn` が主経路（GHA `warm-cdn.yml` は実測発
 - `SHARED_GPU_LOCK_STALE_SEC`（int, 既定 `1200` = 20分。この秒数を超えたロックは stale とみなし奪取可能にする）
 
 ## Collection Heartbeat (.github/workflows/check-collection-heartbeat.yml)
-- `PER_STORE_STALE_DAYS` — **2026-07-11 時点で本 worktree のベースにはまだ存在しない。同時進行中の別バッチ（heartbeat改修、店舗別の許容停止日数を導入）で追加予定のため、マージ後に `check-collection-heartbeat.yml` / 対応スクリプトを実コードで確認し、purpose・デフォルト値をこの行に確定させること。**
+- `PER_STORE_STALE_DAYS`（float, 既定 `3`。実装済み——コミット63b4ae9「閉店した札幌AGを削除...+
+  店舗別ハートビート監視を追加」でマージ済み。独立スクリプトファイルは無く、ワークフロー内の
+  インラインPython（`python3 - <<'PY'` ヘレドキュメント）が読む。`frontend/src/data/stores.json`
+  の店舗ごとに、その店舗の最新 `logs` 行がこの日数より古い、または一件も無い場合に stale として
+  フラグする。全店合算のハートビート監視だけでは、他店の新しい行に隠れて「1店舗だけ収集が死んで
+  いる」ケースが見えなくなるため、これを補完する。`workflow_dispatch` の入力デフォルトも同じ値）
 
 ## Debug / Manual Tools
 - `FORCE_MODEL_REGISTRY_REFRESH`（`scripts/debug/verify_store_model_connection.py` のみ。`"1"` でモデルレジストリのキャッシュを無視して強制再取得する手動デバッグ用）
+
+## 依存関係の既知の未対応事項（2026-07 dependency audit、Fable監査分）
+2026-07にFableの依存関係監査を受けて適用/見送りを判断した記録。次回の棚卸し時に参照すること。
+
+- **適用済み（安全な範囲内のパッチ）**: `requirements.txt` の `flask`（3.1.0→3.1.2）・`requests`
+  （2.32.3→2.32.5、既存installed版と一致）・`lightgbm`（上限未指定→`<5`のガード追加）。
+  `frontend/package.json` の `next`（^16.0.10→^16.0.11、companion の `eslint-config-next` /
+  `@next/eslint-plugin-next` も追随）。いずれも `python -m pytest` / `npm run type-check` /
+  `npm run lint` / `npm run test` / `npm run build` が全てgreenであることを確認済み。
+- **見送り（要判断・別バッチ推奨）**: `npm audit` は next に対し `9.3.4-canary.0 - 16.3.0-canary.5`
+  という広い脆弱範囲を報告しており、うち **HIGH/CRITICAL含む約20件中、16.0.x内のパッチで直る
+  のは1件のみ**（GHSA-h25m-26qc-wcjf、`<16.0.11`で修正済み＝適用済み）。残りは修正版が
+  `16.1.5+` / `16.1.7+` / `16.2.3+` / `16.2.5+` / `16.2.6+` など**マイナー以上**のバンプでしか
+  解消しない（例: Middleware/Proxyバイパス系複数件、Server Components DoS系複数件はいずれも
+  `<16.2.5`〜`<16.2.6`まで修正されない）。今回は「パッチのみ・no majors」という保守的な指示
+  スコープのため意図的に見送った。**次のアクション候補**: next を `16.2.x` 系（2026-07時点の
+  最新は `16.2.10`）へのマイナーアップグレードとして別途計画し、App Router/キャッシュ挙動の
+  変更を見ながら回帰テストする専用バッチを組むこと。
+- **スコープ外（今回判断していない）**: `npm audit` はこの他に vitest（`<3.2.6`、critical、UIサーバ
+  経由の任意ファイル読み取り）・esbuild・minimatch・flatted 等の devDependencies 由来の指摘も
+  出しているが、いずれも本番ランタイムに影響しないビルド/テストツール側の脆弱性であり、今回の
+  指示スコープ（lightgbm/requests/flask/next のみ）に含まれないため未対応。別途 `npm audit fix`
+  の影響範囲を確認した上で対応を検討すること。

@@ -1,5 +1,6 @@
 # RUNBOOK
-Last updated: 2026-03-30 (Round 9 整合)
+Last updated: 2026-03-30 (Round 9 整合) / 2026-07-18 追記（店舗数42店(37+5)表記統一・
+`MAX_RANGE_LIMIT` 実値6000へ修正・weekly `index.json` 廃止の反映。Fable監査docs修正）
 Target commit: (see git)
 
 ローカル起動・本番メモ・**初回オンボーディング**・**定期処理（cron）**・トラブルシュート。  
@@ -11,7 +12,7 @@ Target commit: (see git)
 
 ### Backend（Render / Flask）
 - 常時起動想定。`DATA_BACKEND=supabase`。
-- 環境変数例: `BACKEND_URL`（フロントから参照）、`SUPABASE_*`、`ENABLE_FORECAST`、`STORE_ID`、`MAX_RANGE_LIMIT=50000`（`plan/ENV.md`）。
+- 環境変数例: `BACKEND_URL`（フロントから参照）、`SUPABASE_*`、`ENABLE_FORECAST`、`STORE_ID`、`MAX_RANGE_LIMIT=6000`（2026-07に旧50000からクランプ済み。`plan/ENV.md`）。
 - デプロイ後、`/tasks/tick` が一定間隔で動く構成があり得る（夜間も収集）。`ENABLE_FORECAST=1` のときのみ予測更新。
 
 ### Frontend（Vercel / Next.js 16）
@@ -73,7 +74,9 @@ npm run dev
 ## Local Checks
 - `/api/range?store=...&limit=...` が `ts` 昇順で返ること
 - `/api/forecast_today?store=...`（`ENABLE_FORECAST=1` のとき）
-- `/insights/weekly` が `index.json` を読めること
+- `/reports/weekly/<store_slug>` が Supabase `blog_drafts`（`content_type='weekly'`）の最新行を
+  表示できること（`index.json` は読み手が存在しない死蔵ファイルと判明し別バッチ〔weekly-cleanup〕
+  で廃止中。そもそも `/insights/weekly` という個別URLは現行コードに存在しない）
 - LINE 下書き試験: `GET http://localhost:3000/api/line` がヘルス相当。`POST /api/line` は **development** で `SKIP_LINE_SIGNATURE_VERIFY=1` 等によりローカル検証可能（`ENV.md`）
 - 定時ブログ試験: `GET /api/cron/blog-draft?edition=evening_preview&source=github_actions_cron`（要 `CRON_SECRET` または development で `SKIP_CRON_AUTH=1`）。本番の定時は **GitHub Actions**（**`plan/BLOG_CRON_GHA.md`**）
 - 一括: `cd frontend` → `npm run smoke:blog-apis -- --quick` / `npm run smoke:blog-apis`（`frontend/scripts/smoke-blog-apis.mjs`）
@@ -82,7 +85,7 @@ npm run dev
 
 ## ML 3.0 Operational Notes（Round 8, 2026-03-29。2026-07 時点の schema/店舗数は Batch B3 で追記・訂正）
 
-- **モデル方針**: 本番学習（`scripts/train_ml_model.py`）は **店舗別 LightGBM**（`oriental/utils/stores.py` の `ALL_STORE_IDS` = 43店舗 allow-list、`men/women` 回帰モデル）を自動学習。「XGBoost」表記が残っているのは 2026-04-12 の LightGBM 移行前の名残 — 実装ファイル名 `model_xgb.py` は import 互換のため改名していないだけで、中身は LightGBM が優先ロードされる。
+- **モデル方針**: 本番学習（`scripts/train_ml_model.py`）は **店舗別 LightGBM**（`oriental/utils/stores.py` の `ALL_STORE_IDS` = 42店舗 allow-list、`men/women` 回帰モデル）を自動学習。「XGBoost」表記が残っているのは 2026-04-12 の LightGBM 移行前の名残 — 実装ファイル名 `model_xgb.py` は import 互換のため改名していないだけで、中身は LightGBM が優先ロードされる。
 - **学習頻度**: **日次（毎日05:30 JST）は固定パラメータで再学習のみ**（Optunaなし、GHA実行時間90%削減）。**週次（毎週月曜07:00 JST）のみ Optuna HPO** を実行。`workflow_dispatch`（手動）時は `vars.ML_OPTUNA_ENABLED` に従う。
 - **Optuna HPO**: 店舗ごとに最適なハイパーパラメータを探索（`max_depth`, `learning_rate`, `subsample` 等）。デフォルト 30 trials/店舗。`ML_OPTUNA_ENABLED=1` / `ML_OPTUNA_TRIALS=30` で制御。
 - **Early Stopping**: `n_estimators=300` 上限 + `early_stopping_rounds=15` で最適な木の数を自動決定。
@@ -135,7 +138,7 @@ npm run dev
 | Blog 手動依頼 | `workflow_dispatch` のみ | `blog-request.yml` |
 | 失敗通知（再利用） | `workflow_call` | `notify-on-failure.yml` |
 
-- Weekly（GHA 緊急時経路）: 手動 `workflow_dispatch` で `stores` / threshold 等を指定可能。成果物 `frontend/content/insights/weekly`。matrix はオリエンタル38店舗のみ（相席屋5店舗は対象外）。ローカル主経路（`--stores all`）は全43店舗をカバーする。
+- Weekly（GHA 緊急時経路）: 手動 `workflow_dispatch` で `stores` / threshold 等を指定可能。成果物 `frontend/content/insights/weekly`。matrix はオリエンタル37店舗のみ（相席屋5店舗は対象外）。ローカル主経路（`--stores all`）は全42店舗をカバーする。
 - Public Facts: 成果物 `frontend/content/facts/public`
 
 ### Actions 失敗通知（任意・2026-03 追加）
@@ -176,7 +179,8 @@ npm run dev
 - `/api/range` が空: Supabase `logs` と `/tasks/multi_collect` を確認
 - Forecast 503: `ENABLE_FORECAST=1`
 - DNS エラー: URL を安易に変えず、ログで確認
-- `/insights/weekly` が読めない: `index.json` の有無・JSON 破損
+- `/reports/weekly/[store_slug]` が読めない: Supabase `blog_drafts` の該当行・`error_message` を確認
+  （`index.json` は別バッチで廃止中の死蔵ファイルのため確認対象から除外）
 - **ブラウザで `/api/range` が 502**: Flask（`BACKEND_URL`、通常 `http://127.0.0.1:5000`）が起動していない、または URL が間違い。Flask を起動してから再読み込み。
 - **予測が直近値に引きずられる（秘伝のタレ）**: ラグ/MAへの依存が強すぎる可能性。`scripts/experiments/delta_target_nagasaki.py` と `scripts/experiments/ablation_signal_extraction.py` で Delta モデルを再検証し、AUC/Gain を確認してから本番ハイパラ・重みを調整する。
 

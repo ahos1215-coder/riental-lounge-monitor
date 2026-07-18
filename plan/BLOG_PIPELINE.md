@@ -1,6 +1,7 @@
 # MEGRIBI Blog Pipeline（ローカル Ollama / LINE / Next.js / GitHub Actions / Supabase / GitHub）
 
-最終更新: 2026-07-11（Batch B3: Daily/Weekly の生成元をローカル Ollama 主経路に更新。3分類・URL・LINE フローの構造自体は変わっていない）
+最終更新: 2026-07-11（Batch B3: Daily/Weekly の生成元をローカル Ollama 主経路に更新。3分類・URL・LINE フローの構造自体は変わっていない）。
+2026-07-18: 店舗数42店(37+5)表記統一 + weekly `index.json` 廃止（別バッチ）の反映（Fable監査docs修正）
 
 > **2026-07〜の変更**: Daily / Weekly の生成元は **GitHub Actions + Gemini から ローカル Ollama
 > （`gemma4:e4b`）へ主経路が移行済み**。GitHub Actions は `workflow_dispatch` の緊急用のみ残る。
@@ -43,14 +44,14 @@
 
 ### 定時実行（主経路: Task Scheduler `MEGRIBI-daily-evening` / `MEGRIBI-daily-late`）
 1. 毎日 JST 18:00（evening_preview）/ 21:30（late_update）に発火
-2. `scripts/local_report_job.py --stores all --edition <edition> --mode publish` が全43店舗を単一プロセスで順次処理
+2. `scripts/local_report_job.py --stores all --edition <edition> --mode publish` が全42店舗を単一プロセスで順次処理
 3. `/api/range` + `/api/forecast_today` 相当のデータ取得 → Ollama（`gemma4:e4b`）で本文生成
 4. Supabase `blog_drafts` に upsert（`content_type='daily'`, `is_published=true`, `edition=<edition>`）。失敗時は本文空・`is_published=false`・`error_message` あり
 5. `/reports/daily/[store_slug]` が最新行を自動表示
 
 ### 緊急時経路（`.github/workflows/trigger-blog-cron.yml`, `workflow_dispatch` のみ）
 1. `EDITION` を手動指定して起動
-2. matrix でオリエンタル 38 店舗を並列実行（`max-parallel: 5`。相席屋5店舗は対象外）
+2. matrix でオリエンタル 37 店舗を並列実行（`max-parallel: 5`。相席屋5店舗は対象外）
 3. `GET /api/cron/blog-draft?store=<slug>&edition=<edition>&source=github_actions_cron`
 4. `/api/cron/blog-draft/route.ts` 内で Gemini MDX 生成 → Supabase `blog_drafts` に upsert
 
@@ -62,14 +63,14 @@
 
 ### 定時実行（主経路: Task Scheduler `MEGRIBI-weekly`）
 1. 毎週水曜 JST 06:30 に発火
-2. `run_weekly_local.ps1 -Stores all` → `generate_weekly_insights.py --stores all`（`INSIGHTS_LLM_BACKEND=ollama`）が全43店舗を単一プロセスで順次処理
-3. `/api/range` から過去データ取得 → Good Window 分析 → `frontend/content/insights/weekly/<store>/<date>.json` に書き込み + `index.json` を直接更新（Fan-in 不要）
+2. `run_weekly_local.ps1 -Stores all` → `generate_weekly_insights.py --stores all`（`INSIGHTS_LLM_BACKEND=ollama`）が全42店舗を単一プロセスで順次処理
+3. `/api/range` から過去データ取得 → Good Window 分析 → `frontend/content/insights/weekly/<store>/<date>.json` に書き込み（Fan-in 不要）。**`index.json` の直接更新は廃止**——実際に読むフロントエンドが存在しない死蔵アウトプットと判明し、別バッチ（weekly-cleanup）で廃止中。消費側（`sitemap.ts` 等）はディレクトリ内の最新日付ファイルを直接列挙する方式で、そもそも `index.json` に依存していない
 4. Supabase upsert（`content_type='weekly'`, `is_published=true`, `edition='weekly'`, `facts_id='weekly_<store>'`, `public_slug='weekly-report-<store>'`）
 
 ### 緊急時経路（`generate-weekly-insights.yml`, `workflow_dispatch` のみ）— Fan-in Matrix
 
 #### Fan-out（`generate-store` ジョブ）
-1. 手動起動時、matrix でオリエンタル 38 店舗を独立実行（`max-parallel: 10`。相席屋5店舗は対象外）
+1. 手動起動時、matrix でオリエンタル 37 店舗を独立実行（`max-parallel: 10`。相席屋5店舗は対象外）
 2. `python scripts/generate_weekly_insights.py --stores <one_store> --skip-index`（`INSIGHTS_LLM_BACKEND=gemini`）
 3. JSON を Artifact としてアップロード（retention: 1日）
 
@@ -79,7 +80,15 @@
 3. `pytest` 実行
 4. `git commit && git push`（1回のみ）
 
-`/reports/weekly/[store_slug]` は Supabase から最新行を表示。`/insights/weekly/[store]` は JSON ファイル（Recharts 可視化）。
+**`index.json` 廃止について**: 上記の `--skip-index` フラグと Fan-in の再構築ステップは、いずれも
+`index.json` を維持するためだけに存在する仕組み。`index.json` 自体を実際に読むフロントエンドが
+存在しないと判明したため別バッチ（weekly-cleanup）で廃止中で、これらも用途を失い次第整理される
+見込み（本ドキュメント執筆時点ではまだ `generate-weekly-insights.yml` に残っている＝過渡期の記述
+と理解すること）。
+
+`/reports/weekly/[store_slug]` は Supabase から最新行を表示。`/insights/weekly/[store]` という
+個別URLは存在しない（JSON ファイル自体は `frontend/content/insights/weekly/<store>/<date>.json`
+に保存され、sitemap 生成のディレクトリ列挙にのみ使われる）。
 
 ---
 

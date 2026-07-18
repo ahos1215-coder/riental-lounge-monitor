@@ -138,7 +138,7 @@ def _bad_request(message: str):
 @bp.route("/tasks/multi_collect", methods=["GET", "POST"])
 def tasks_multi_collect():
     """
-    43 店舗（オリエンタル38 + 相席屋5）を multi_collect.collect_all_once() で一括収集し、Supabase(public.logs) に保存するタスク。
+    42 店舗（オリエンタル37 + 相席屋5）を multi_collect.collect_all_once() で一括収集し、Supabase(public.logs) に保存するタスク。
 
     デフォルト: 202 Accepted + バックグラウンドスレッド実行。
     ?mode=sync: 旧互換の同期実行（完了まで HTTP を保持）。

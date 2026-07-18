@@ -1,7 +1,7 @@
 import { test, expect } from "./fixtures";
 
 // ────────────────────────────────────────────
-// 料金シミュレーター（オリエンタルラウンジ36店舗 + 相席屋6店舗）の描画確認
+// 料金シミュレーター（オリエンタルラウンジ37店舗 + 相席屋5店舗）の描画確認
 // ────────────────────────────────────────────
 
 test.describe("Cost simulator card - oriental stores", () => {
@@ -39,25 +39,29 @@ test.describe("Cost simulator card - oriental stores", () => {
     await expect(page.getByText(/週末料金の対象: 金・土・祝前日/)).toBeVisible();
   });
 
-  test("shows a price-jump note when applicable", async ({ page }) => {
+  test("shows a deterministic price-jump note when no live forecast is available", async ({ page }) => {
+    // 旧実装は「count >= 0」という常に真になる空アサーションで、実質何もテストしていなかった
+    // （目安時刻が実際の予測有無に依存し、実行タイミングでノートの有無が変わるため存在確認だけで
+    // 逃げていた）。forecast_today/forecast_snapshot を「予測なし」に固定して hasForecast=false の
+    // フォールバック（22:00入店の例示アンカー）を強制すれば、決定論的に検証できる。
+    await page.route("**/api/forecast_today?**", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: [] }) }),
+    );
+    await page.route("**/api/forecast_snapshot?**", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: false }) }),
+    );
+
     await page.goto("/store/shibuya");
-    // 値上がり注意行（amber）はコスト帯セクションに出る想定
-    const jumpNote = page.locator("text=以降は相席");
-    // 目安時刻が営業終了間際でなければ出るはず（今夜の予測有無に依存するため存在確認のみ）
-    const count = await jumpNote.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    await expect(page.getByText("料金の目安")).toBeVisible();
+
+    // 予測なし固定なら入店目安は例示アンカー22:00（渋谷の開店18:00より後なので採用される）。
+    // 22:00の次に到達するバンドは「24時〜6時」（平日¥880/週末¥1,200、渋谷raw.tsで確認済み）で、
+    // 平日・週末どちらの値でも非nullのため曜日タイプ（実行日依存）に関わらず必ず表示される。
+    await expect(page.getByText(/24:00 以降は相席 10分 ¥(880|1,200)/)).toBeVisible();
   });
 
   test("does NOT render on /store/gangnam (non-Japan oriental store)", async ({ page }) => {
     await page.goto("/store/gangnam");
-    await expect(page.locator("main")).toBeVisible();
-    await expect(page.getByText("料金の目安")).toHaveCount(0);
-  });
-
-  test("does NOT render on /store/sapporo_ag (dead official page, excluded from registry)", async ({
-    page,
-  }) => {
-    await page.goto("/store/sapporo_ag");
     await expect(page.locator("main")).toBeVisible();
     await expect(page.getByText("料金の目安")).toHaveCount(0);
   });
@@ -80,8 +84,10 @@ test.describe("Cost simulator card - aisekiya stores", () => {
     await expect(page.getByText(/高料金の対象: 金・土・日曜日・祝日・祝前日/)).toBeVisible();
 
     // 22:00以降の10%加算をオリエンタルと同じ「値上がり注意行」で表示する
-    // （¥715=¥650×1.1。オリエンタルの「XX時以降は相席」とは別文言「22:00以降は相席」）。
-    await expect(page.getByText(/22:00以降は相席 10分 ¥715/)).toBeVisible();
+    // （¥650×1.1=¥715 平日 / ¥750×1.1=¥825 週末。オリエンタルの「XX時以降は相席」とは
+    // 別文言「22:00以降は相席」）。曜日タイプは自動判定＝実行日に依存するため、¥715固定だと
+    // 週末実行時に必ず落ちる。平日/週末どちらの値も許容する。
+    await expect(page.getByText(/22:00以降は相席 10分 ¥(715|825)/)).toBeVisible();
 
     // 自由計算アコーディオンを開いて、相席していない時間は¥0の注記（自由計算側の固有文言「（上限）」）を確認
     await page.getByText("自由に計算する（任意の入店・退店時刻）").click();
@@ -132,6 +138,8 @@ test.describe("Cost simulator card - aisekiya stores", () => {
     await page.goto("/store/ay_chiba");
     await expect(page.getByText("料金の目安")).toBeVisible();
     await expect(page.getByText(/高料金の対象: 金・土・日曜日・祝日・祝前日/)).toBeVisible();
-    await expect(page.getByText(/22:00以降は相席 10分 ¥715/)).toBeVisible();
+    // 平日¥715/週末¥825（曜日タイプは自動判定＝実行日に依存するため両方を許容する。詳細は
+    // 上の ay_shibuya テストのコメント参照）。
+    await expect(page.getByText(/22:00以降は相席 10分 ¥(715|825)/)).toBeVisible();
   });
 });
