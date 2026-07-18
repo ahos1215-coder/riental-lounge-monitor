@@ -11,6 +11,7 @@ import {
   addDays,
   buildBaseSnapshot,
   buildSeries,
+  computeFreshness,
   computeInitialRefreshDelayMs,
   computeNightBaseDate,
   computeNightWindowFromBaseDate,
@@ -63,12 +64,27 @@ export type StorePreviewControls = {
  * サーバー（page.tsx）で焼き込んだ initialSnapshot を、今のクライアント状態で
  * 初期シードとして採用してよいかを判定する純粋関数。
  *
- * slug 一致に加えて、夜境界（19:00 / 翌05:00 JST）を跨いだケースを弾く:
- * ISR で焼いた時点と、クライアントがマウントした時点で `completedNight` の判定が
- * 変わっている場合（例: 04:59 に焼いた「進行中」シードを 05:01 に描く／19:00 直後に
- * 「完了夜の回顧」シードを描く）、そのシードは前夜の回顧 or 逆に古い進行中表示に
- * なってしまう。一致しなければ採用せず、baseSnapshot から即 run() で最新化して
- * 60-90s のシード遅延をスキップする。
+ * 1. slug 一致に加えて、夜境界（19:00 / 翌05:00 JST）を跨いだケースを弾く:
+ *    ISR で焼いた時点と、クライアントがマウントした時点で `completedNight` の判定が
+ *    変わっている場合（例: 04:59 に焼いた「進行中」シードを 05:01 に描く／19:00 直後に
+ *    「完了夜の回顧」シードを描く）、そのシードは前夜の回顧 or 逆に古い進行中表示に
+ *    なってしまう。一致しなければ採用せず、baseSnapshot から即 run() で最新化して
+ *    60-90s のシード遅延をスキップする。
+ *
+ * 2. BUG #9: ライブ表示（clientCompletedNight===false、＝「今日」進行中）のときだけ、
+ *    seed の `latestActualTs` の鮮度も追加でチェックする。滅多に訪問されない店舗ページは
+ *    ISR の stale-while-revalidate により古い HTML（例: 22:05 時点が最新実測のまま）が
+ *    そのまま返ることがあり、slug/completedNight は一致していても、mount 時点で既に
+ *    `computeFreshness` が "stale"（既定 20 分＝REALTIME_STALE_THRESHOLD_MIN）と判定するほど
+ *    古い実測を初期シードとして採用すると、実際は営業中で人数が動いているのに
+ *    「閉店中・最終22:05時点」のような誤表示を、60-90s の遅延バックグラウンド再取得が
+ *    終わるまで（最大90秒）出し続けてしまう。この場合もシードを破棄し、baseSnapshot + 即
+ *    run() に倒す（既存の slug/completedNight 不一致パスと同じ扱い）。
+ *    完了済みの夜（clientCompletedNight===true）は回顧的表示であり、古い実測が仕様どおり
+ *    正しい値なので、この鮮度チェックは行わない（古いというだけではシードを破棄しない）。
+ *    latestActualTs が null（実測が1件も無い）の場合は computeFreshness が "none" を返し
+ *    "stale" にはならない＝この鮮度チェックだけでは破棄されない（「データなし」の
+ *    シード自体は誤りではないため、null を理由に破棄はしない）。
  */
 /**
  * BUG B (rank4) 回帰防止用の純粋関数: 「鮮度が『1分前』→70秒後『13分前』へ逆行する」問題の
@@ -100,15 +116,29 @@ export function isStaleRefetch(
 }
 
 export function isUsableInitialSnapshot(
-  initialSnapshot: Pick<StoreSnapshot, "slug" | "completedNight"> | null | undefined,
+  initialSnapshot:
+    | Pick<StoreSnapshot, "slug" | "completedNight" | "latestActualTs">
+    | null
+    | undefined,
   slug: string,
   clientCompletedNight: boolean,
+  now: Date = new Date(),
 ): boolean {
-  return (
-    !!initialSnapshot &&
-    initialSnapshot.slug === slug &&
-    initialSnapshot.completedNight === clientCompletedNight
-  );
+  if (
+    !initialSnapshot ||
+    initialSnapshot.slug !== slug ||
+    initialSnapshot.completedNight !== clientCompletedNight
+  ) {
+    return false;
+  }
+  // ライブ表示（今日進行中）のときだけ seed の実測鮮度をチェックする。完了済みの夜は
+  // 古い実測が仕様どおり（回顧的表示）なので対象外。latestActualTs が null（実測なし）の
+  // 場合は computeFreshness が "none" を返すため、この判定だけでは破棄されない。
+  if (!clientCompletedNight) {
+    const freshness = computeFreshness(initialSnapshot.latestActualTs, now);
+    if (freshness.state === "stale") return false;
+  }
+  return true;
 }
 
 /**
@@ -140,23 +170,33 @@ export function useStorePreviewData(
     return formatYMD(base);
   }, [rangeMode, customDate]);
 
+  // クライアントがマウントした時点の「今」。completedNight 判定と、直後の seed 鮮度チェック
+  // （BUG #9）の両方で同じ基準時刻を使う。レンダーごとに new Date() を呼んで判定し直すと、
+  // 壁時計が進んだだけで usableInitialSnapshot の真偽・参照が変わり、それが下の useEffect の
+  // 依存配列を通じて意図しない再実行（初期シード消費後の不要な即時再フェッチ）を招くため、
+  // マウント時に一度だけ確定させる。
+  const mountNow = useMemo(() => new Date(), []);
+
   // クライアントがマウントした時点での「今日の夜は既に完了しているか」。initialSnapshot は
   // today モード前提で焼かれているので、page.tsx と同じ computeNightBaseDate(now) で判定する。
   // マウント時に一度だけ評価すれば十分（夜境界は 12 時間に 1 度しか動かない）。
-  const clientCompletedNight = useMemo(() => {
-    const now = new Date();
-    return isNightCompleted(computeNightBaseDate(now), now);
-  }, []);
+  const clientCompletedNight = useMemo(
+    () => isNightCompleted(computeNightBaseDate(mountNow), mountNow),
+    [mountNow],
+  );
 
   // 初期表示（today モード・同じ店舗）にのみ適用可能な initialSnapshot かどうか。
   // rangeMode の初期値は常に "today" なので、マウント直後はこの判定がそのまま有効。
-  // slug 一致に加え、夜境界を跨いだ（焼き込み時と mount 時で completedNight が食い違う）
-  // シードは破棄する。破棄されると usableInitialSnapshot=null → shouldPreserveInitialSeed=false
-  // → initialRunDelayMs=0 で即 run() が走り、前夜回顧を最大60-90s出し続ける問題を防ぐ。
+  // slug 一致・夜境界一致（completedNight）に加え、ライブ表示では seed の実測鮮度も
+  // チェックする（BUG #9: 滅多に訪問されないページで ISR が古い HTML を返し、営業中なのに
+  // 「閉店中・最終◯時◯分時点」と誤表示するのを防ぐ。詳細は isUsableInitialSnapshot 参照）。
+  // 破棄されると usableInitialSnapshot=null → shouldPreserveInitialSeed=false
+  // → initialRunDelayMs=0 で即 run() が走り、古い/誤った表示を最大60-90s出し続ける問題を防ぐ。
   const usableInitialSnapshot = isUsableInitialSnapshot(
     initialSnapshot,
     meta.slug,
     clientCompletedNight,
+    mountNow,
   )
     ? initialSnapshot ?? null
     : null;
