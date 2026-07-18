@@ -262,7 +262,8 @@ STORES_JSON_PATH = REPO_ROOT / "frontend" / "src" / "data" / "stores.json"
 def _load_all_store_slugs() -> list[str]:
     """`--stores all` / `INSIGHTS_STORES=all` 用: stores.json の全店舗 slug を返す。
 
-    ローカル実行で 44 店舗を 1 回でカバーするための便宜機能。
+    ローカル実行で 42 店舗を 1 回でカバーするための便宜機能
+    （2026-07-11 sapporo_ag 閉店で 44→42 に変更。stores.json が単一ソース）。
     """
     if not STORES_JSON_PATH.exists():
         raise SystemExit(f"stores.json not found: {STORES_JSON_PATH}")
@@ -1312,7 +1313,14 @@ def main() -> int:
         "--skip-index",
         action="store_true",
         default=False,
-        help="index.json の更新をスキップする（matrix 並列ジョブ用）",
+        help=(
+            "廃止済み・no-op（2026-07-18 index.json retirement）。index.json 生成コード"
+            "自体を削除済み: frontend 側に読み手がゼロだったこと（weekly report ページは "
+            "Supabase blog_drafts から直接取得、sitemap.ts は各店ディレクトリのファイル名"
+            "一覧から lastModified を導出）をgrepで確認した上で退役した。"
+            "generate-weekly-insights.yml（GHA 緊急手動実行）がまだこのフラグを渡すため、"
+            "後方互換のため引数としてのみ残している。"
+        ),
     )
     args = parser.parse_args()
 
@@ -1355,17 +1363,13 @@ def main() -> int:
     base_dir = REPO_ROOT / "frontend" / "content" / "insights" / "weekly"
     _ensure_dir(base_dir)
 
-    index_path = base_dir / "index.json"
-    index_payload: dict[str, Any] = {}
-    if index_path.exists():
-        try:
-            index_payload = json.loads(index_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            index_payload = {}
-
-    stores_index = index_payload.get("stores")
-    if not isinstance(stores_index, dict):
-        stores_index = {}
+    # 2026-07-18 index.json retirement: index.json 生成は退役済み。run_weekly_local.ps1
+    # が常に --skip-index を付けて呼んでいたため 2026-06-30 以降 1 度も更新されておらず、
+    # かつ frontend 側に index.json の読み手が存在しないことを grep で確認した
+    # （weekly report ページ frontend/src/app/reports/weekly/[store_slug]/page.tsx は
+    # Supabase blog_drafts から直接取得し、sitemap.ts の lastModified も
+    # frontend/content/insights/weekly/<slug>/ 配下のファイル名一覧を fs.readdirSync
+    # するだけで index.json を見ない）。集約インデックスは元々不要だった。
 
     now = datetime.now(timezone.utc)
     date_label = now.date().isoformat()
@@ -1570,7 +1574,6 @@ def main() -> int:
             json.dump(payload, handle, ensure_ascii=True, indent=2)
             handle.write("\n")
 
-        stores_index[store] = {"latest_file": out_path.name, "generated_at": generated_at}
         if sync_to_supabase:
             _upsert_weekly_report_to_supabase(
                 store=store,
@@ -1591,14 +1594,9 @@ def main() -> int:
     except Exception:  # noqa: BLE001
         pass
 
-    if args.skip_index:
-        return 0
-
-    index_payload["generated_at"] = generated_at
-    index_payload["stores"] = stores_index
-    with index_path.open("w", encoding="utf-8", newline="\n") as handle:
-        json.dump(index_payload, handle, ensure_ascii=True, indent=2)
-        handle.write("\n")
+    # index.json は退役済み（2026-07-18 index.json retirement）。args.skip_index は
+    # ここでは一切参照しない (generate-weekly-insights.yml との後方互換のため
+    # argparse には残す no-op)。
     return 0
 
 

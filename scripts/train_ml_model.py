@@ -608,6 +608,43 @@ def _filter_allowed_stores(store_ids: list[str], allow_list: set[str]) -> tuple[
     return allowed, rejected
 
 
+def _filter_store_models_to_allowlist(
+    store_models: dict[str, Any],
+    all_metrics: dict[str, Any],
+    allow_list: set[str],
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    """Final convergence filter (fix #16a, 2026-07-18 Fable audit): drop any store_id
+    not in ``allow_list`` from both ``store_models`` and ``all_metrics``, no matter
+    which upstream path put it there.
+
+    Why this is needed even though ``_filter_allowed_stores`` already rejects
+    not-in-allowlist store_ids found in the freshly-fetched training data: a store
+    that is PERMANENTLY removed from ALL_STORE_IDS (closed, e.g. sapporo_ag /
+    ay_niigata) eventually stops sending any rows at all, so it never appears in
+    ``stores_in_data`` and is therefore never even seen by ``_filter_allowed_stores``.
+    It only exists in ``existing_store_models`` (downloaded from the currently
+    deployed metadata.json). The "completeness" carry-forward loop in main() copies
+    every entry in ``existing_store_models`` that this run didn't otherwise touch —
+    with no allow-list check — so a closed store's last-deployed model/metrics entry
+    gets copied into metadata.json forever, on every single training run. (The
+    not-in-allowlist rejection path has the same issue: ``_carry_forward_store`` is
+    reused for it and unconditionally copies the old entry forward too, despite the
+    store having just been rejected for being off the allow-list.)
+
+    Applying one filter here, right before metadata is built, guarantees
+    ``store_models``/``metrics`` in metadata.json always converge to exactly the
+    current ``ALL_STORE_IDS`` set, regardless of which carry-forward code path
+    (not-in-allowlist, stale-store guard, gate regression, insufficient rows, or the
+    completeness loop) produced a stale entry.
+
+    Returns ``(filtered_store_models, filtered_all_metrics, dropped_store_ids)``.
+    """
+    dropped = sorted(set(store_models) - allow_list)
+    filtered_store_models = {sid: sm for sid, sm in store_models.items() if sid in allow_list}
+    filtered_all_metrics = {sid: m for sid, m in all_metrics.items() if sid in allow_list}
+    return filtered_store_models, filtered_all_metrics, dropped
+
+
 def _is_stale_store(last_ts: "pd.Timestamp", now: "pd.Timestamp", stale_days: float) -> bool:
     """True if a store's most recent training row is older than ``stale_days``
     days relative to ``now`` (e.g. a store that stopped reporting/closed)."""
@@ -1057,6 +1094,22 @@ def main() -> int:
                 carried.setdefault("gate_skipped", True)
                 carried.setdefault("gate_reason", "no_data_this_run")
                 all_metrics[sid] = carried
+
+        # Allow-list convergence (fix #16a, 2026-07-18 Fable audit): every carry-forward
+        # path above can copy an OLD existing_store_models/existing_metrics entry
+        # forward unchanged, including for stores that have been PERMANENTLY removed
+        # from ALL_STORE_IDS (closed, e.g. sapporo_ag/ay_niigata) — see
+        # _filter_store_models_to_allowlist's docstring for why. Filter both dicts to
+        # the allow-list here, once, right before metadata is built, so the result
+        # always converges to exactly the currently active store set.
+        store_models, all_metrics, dropped_from_allowlist = _filter_store_models_to_allowlist(
+            store_models, all_metrics, set(ALL_STORE_IDS)
+        )
+        if dropped_from_allowlist:
+            print(
+                "[train-ml][filter] dropped store_models/metrics not in ALL_STORE_IDS "
+                f"allow-list: {dropped_from_allowlist}"
+            )
 
         if not store_models:
             raise SystemExit("no per-store models were trained or carried forward (all stores skipped)")

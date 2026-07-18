@@ -10,10 +10,12 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
+import scripts.generate_weekly_insights as gwi
 from scripts.generate_weekly_insights import (
     DAY_LABELS_JA,
     DEFAULT_WEEKLY_MIN_NIGHT_SAMPLES,
@@ -558,3 +560,66 @@ class TestDailySummaryLowSampleGuard:
         points = [_point(base + timedelta(minutes=2 * i), 0.5) for i in range(30)]
         assert _build_daily_summary(points, min_night_samples=24)[0]["low_sample"] is False
         assert _build_daily_summary(points, min_night_samples=40)[0]["low_sample"] is True
+
+
+# ---------------------------------------------------------------------------
+# 2026-07-18 index.json retirement: main() must no longer create/rewrite
+# frontend/content/insights/weekly/index.json under any circumstance. Verified
+# to have zero frontend readers by grepping frontend/src: the weekly report page
+# (frontend/src/app/reports/weekly/[store_slug]/page.tsx) fetches from Supabase
+# blog_drafts directly, and sitemap.ts derives lastModified from a directory
+# listing of each store's dated JSON files (fs.readdirSync), never index.json.
+# ---------------------------------------------------------------------------
+
+
+def _run_main_dry(tmp_path, monkeypatch, extra_argv: list[str]) -> int:
+    """Run generate_weekly_insights.main() as a read-only dry run.
+
+    - REPO_ROOT is monkeypatched to an isolated tmp_path so nothing is ever
+      written under the real frontend/content/insights/weekly (production
+      content is never touched by this test).
+    - _load_rows is stubbed to return no rows for any store, so every store
+      hits the "no timestamped data" skip path immediately (no real HTTP
+      fetch, no Ollama call, no Supabase upsert).
+    """
+    monkeypatch.setattr(gwi, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(gwi, "_load_rows", lambda *a, **kw: [])
+    monkeypatch.setattr(gwi, "_load_store_active_map", lambda: {})
+    monkeypatch.delenv("INSIGHTS_SYNC_SUPABASE", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["generate_weekly_insights.py", "--stores", "shibuya,ebisu", *extra_argv],
+    )
+    return gwi.main()
+
+
+class TestIndexJsonRetired:
+    def test_skip_index_flag_still_accepted_but_writes_nothing(self, tmp_path, monkeypatch) -> None:
+        # generate-weekly-insights.yml (GHA 緊急手動実行) は今も --skip-index を渡す。
+        # argparse がこのフラグを拒否しない (後方互換の no-op) ことを確認する。
+        rc = _run_main_dry(tmp_path, monkeypatch, ["--skip-index"])
+        assert rc == 0
+        index_path = tmp_path / "frontend" / "content" / "insights" / "weekly" / "index.json"
+        assert not index_path.exists()
+
+    def test_no_skip_index_flag_also_writes_nothing(self, tmp_path, monkeypatch) -> None:
+        # --skip-index を付けなくても index.json は生成されない
+        # (真の退役: フラグの有無に関係なく書き込みコード自体が無い)。
+        rc = _run_main_dry(tmp_path, monkeypatch, [])
+        assert rc == 0
+        index_path = tmp_path / "frontend" / "content" / "insights" / "weekly" / "index.json"
+        assert not index_path.exists()
+
+    def test_preexisting_stale_index_json_is_left_untouched(self, tmp_path, monkeypatch) -> None:
+        # 2026-06-30 で凍結していたような既存の index.json が万一残っていても、
+        # main() はそれを読みも書きもしない (バイト単位で不変)。
+        weekly_dir = tmp_path / "frontend" / "content" / "insights" / "weekly"
+        weekly_dir.mkdir(parents=True)
+        index_path = weekly_dir / "index.json"
+        stale_content = '{"generated_at": "2026-06-30T00:00:00+00:00", "stores": {}}'
+        index_path.write_text(stale_content, encoding="utf-8")
+
+        rc = _run_main_dry(tmp_path, monkeypatch, [])
+        assert rc == 0
+        assert index_path.read_text(encoding="utf-8") == stale_content

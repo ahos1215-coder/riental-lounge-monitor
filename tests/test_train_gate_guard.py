@@ -16,6 +16,7 @@ from scripts.train_ml_model import (
     _carry_forward_store,
     _coverage_stats,
     _filter_allowed_stores,
+    _filter_store_models_to_allowlist,
     _gate_decision,
     _is_stale_store,
     _reused_hpo_params,
@@ -220,6 +221,126 @@ def test_carry_forward_store_noop_when_nothing_existing():
     assert store_models == {}
     assert all_metrics == {}
     assert gate_decisions == [{"store_id": "unknown_new_store", "decision": "skipped", "reason": "not_in_allowlist"}]
+
+
+# ---------------------------------------------------------------------------
+# Allow-list convergence filter (fix #16a, 2026-07-18 Fable audit)
+#
+# _carry_forward_store (exercised above) unconditionally copies whatever
+# existing_store_models/existing_metrics had for a store_id into store_models/
+# all_metrics, REGARDLESS of why it was skipped -- including "not_in_allowlist".
+# The main() "completeness" loop does the same for any existing_store_models
+# entry this run never touched at all. Both are correct for stores still in
+# ALL_STORE_IDS that transiently produced no data, but wrong for a store
+# PERMANENTLY removed from ALL_STORE_IDS (closed, e.g. sapporo_ag/ay_niigata):
+# such a store never appears in the freshly-fetched training data again, so it
+# is never explicitly rejected -- its last-deployed entry just keeps getting
+# carried forward forever. _filter_store_models_to_allowlist is the final
+# convergence filter applied once, right before metadata.json is built, that
+# guarantees this can't happen regardless of which upstream path added the
+# stale entry.
+# ---------------------------------------------------------------------------
+
+
+def test_filter_store_models_to_allowlist_drops_closed_stores():
+    allow_list = {"ol_shibuya", "ay_ueno"}
+    store_models = {
+        "ol_shibuya": {"model_men": "a"},
+        "ol_sapporo_ag": {"model_men": "b"},  # closed 2026-07-11
+        "ay_ueno": {"model_men": "c"},
+        "ay_niigata": {"model_men": "d"},  # closed
+    }
+    all_metrics = {
+        "ol_shibuya": {"overall": {"total_mae": 5.0}},
+        "ol_sapporo_ag": {"overall": {"total_mae": 9.0}},
+        "ay_ueno": {"overall": {"total_mae": 3.0}},
+    }
+
+    filtered_models, filtered_metrics, dropped = _filter_store_models_to_allowlist(
+        store_models, all_metrics, allow_list
+    )
+
+    assert filtered_models == {"ol_shibuya": {"model_men": "a"}, "ay_ueno": {"model_men": "c"}}
+    assert filtered_metrics == {
+        "ol_shibuya": {"overall": {"total_mae": 5.0}},
+        "ay_ueno": {"overall": {"total_mae": 3.0}},
+    }
+    assert dropped == ["ay_niigata", "ol_sapporo_ag"]
+
+
+def test_filter_store_models_to_allowlist_noop_when_all_allowed():
+    allow_list = {"ol_shibuya", "ol_ebisu"}
+    store_models = {"ol_shibuya": {"a": 1}, "ol_ebisu": {"b": 2}}
+    all_metrics = {"ol_shibuya": {"c": 3}}
+
+    filtered_models, filtered_metrics, dropped = _filter_store_models_to_allowlist(
+        store_models, all_metrics, allow_list
+    )
+
+    assert filtered_models == store_models
+    assert filtered_metrics == all_metrics
+    assert dropped == []
+
+
+def test_filter_store_models_to_allowlist_metrics_key_absent_from_store_models_is_also_dropped():
+    # all_metrics can (in principle) carry a store_id that store_models doesn't --
+    # the filter must still drop it from all_metrics if it's off the allow-list,
+    # independently of what store_models contains.
+    allow_list = {"ol_shibuya"}
+    store_models = {"ol_shibuya": {"a": 1}}
+    all_metrics = {"ol_shibuya": {"a": 1}, "ol_sapporo_ag": {"b": 2}}
+
+    _, filtered_metrics, _ = _filter_store_models_to_allowlist(store_models, all_metrics, allow_list)
+
+    assert filtered_metrics == {"ol_shibuya": {"a": 1}}
+
+
+def test_filter_store_models_to_allowlist_handles_empty_inputs():
+    filtered_models, filtered_metrics, dropped = _filter_store_models_to_allowlist({}, {}, {"ol_shibuya"})
+    assert filtered_models == {}
+    assert filtered_metrics == {}
+    assert dropped == []
+
+
+def test_carry_forward_then_allowlist_filter_converges_to_42():
+    """End-to-end (pure/offline) regression for bug #16a: simulate the exact
+    scenario that used to keep closed stores alive forever -- a store rejected
+    this run for being off the allow-list still gets carried forward by
+    _carry_forward_store, but the final allow-list filter must drop it again."""
+    allow_list = {"ol_shibuya"}
+    existing_store_models = {
+        "ol_shibuya": {"model_men": "current"},
+        "ol_sapporo_ag": {"model_men": "stale-forever"},
+    }
+    existing_metrics = {
+        "ol_shibuya": {"overall": {"total_mae": 5.0}},
+        "ol_sapporo_ag": {"overall": {"total_mae": 12.0}},
+    }
+    store_models: dict = {"ol_shibuya": {"model_men": "current"}}
+    all_metrics: dict = {"ol_shibuya": {"overall": {"total_mae": 5.0}}}
+    gate_decisions: list = []
+
+    # Simulates main()'s rejected-store loop: `ol_sapporo_ag` was found in
+    # `stores_in_data` on some earlier run/import and rejected as not-in-allowlist,
+    # but _carry_forward_store copies its old entry forward anyway (the pre-existing,
+    # not-fixed-here behavior).
+    _carry_forward_store(
+        "ol_sapporo_ag",
+        "not_in_allowlist",
+        existing_store_models=existing_store_models,
+        existing_metrics=existing_metrics,
+        store_models=store_models,
+        all_metrics=all_metrics,
+        gate_decisions=gate_decisions,
+    )
+    assert "ol_sapporo_ag" in store_models  # confirms the pre-fix contamination happens
+
+    filtered_models, filtered_metrics, dropped = _filter_store_models_to_allowlist(
+        store_models, all_metrics, allow_list
+    )
+    assert filtered_models == {"ol_shibuya": {"model_men": "current"}}
+    assert filtered_metrics == {"ol_shibuya": {"overall": {"total_mae": 5.0}}}
+    assert dropped == ["ol_sapporo_ag"]
 
 
 # ---------------------------------------------------------------------------

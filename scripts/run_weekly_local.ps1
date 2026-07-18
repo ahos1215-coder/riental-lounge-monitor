@@ -44,7 +44,7 @@ $env:INSIGHTS_SYNC_SUPABASE = "1"
 
 $py = "C:\Users\ahos1\AppData\Local\Programs\Python\Python314\python.exe"
 $script = Join-Path $root "scripts\generate_weekly_insights.py"
-& $py $script --stores $Stores --skip-index
+& $py $script --stores $Stores
 $genExitCode = $LASTEXITCODE
 
 if ($genExitCode -ne 0) {
@@ -65,7 +65,7 @@ try {
     if ($LASTEXITCODE -eq 0) {
       Write-Host "[run_weekly_local] no staged changes under frontend/content/insights/weekly; nothing to publish."
     } else {
-      git commit -m "chore(weekly): 週次インサイトJSONを更新 (自動)"
+      git commit -m "chore(weekly): update weekly insights JSON (auto)"
       if ($LASTEXITCODE -ne 0) {
         Write-WeeklyWarn "git commit failed (exit $LASTEXITCODE); leaving changes staged locally for manual follow-up."
       } else {
