@@ -8,7 +8,20 @@ import { STORES, type StoreMeta } from "./stores";
  * 店舗の表示名・エリアラベル等は stores.json（config/stores.ts の STORES）から都度引くだけで、
  * ここでは store slug の並びのみを保持する（表示名のハードコード禁止）。
  */
-export type AreaId = "osaka" | "nagoya" | "shibuya" | "ueno" | "yokohama";
+export type AreaId =
+  | "osaka"
+  | "nagoya"
+  | "shibuya"
+  | "ueno"
+  | "yokohama"
+  | "shizuoka"
+  | "hamamatsu"
+  | "machida"
+  | "kokura"
+  | "kobe"
+  | "kumamoto"
+  | "oita"
+  | "takasaki";
 
 export type AreaConfig = {
   /** URLセグメント (/area/{id}) 兼キー */
@@ -22,8 +35,16 @@ export type AreaConfig = {
 };
 
 /**
- * 5エリア固定リスト。新しいエリアを追加する場合はここに1件足すだけで
+ * 13エリア固定リスト。新しいエリアを追加する場合はここに1件足すだけで
  * /area/[area]/page.tsx の generateStaticParams・sitemap.ts に自動反映される。
+ *
+ * 前半5件（osaka〜yokohama）は複数店舗が集まる集約ハブ。後半8件（shizuoka〜takasaki）は
+ * GSC実測（2026-08時点・直近28日）で「相席ラウンジ/相席 + 地名」の一般語検索が付いているのに
+ * 個別店舗ページが弱く、/stores（一覧）だけが拾って0クリックに終わっていた単独店舗エリア。
+ * 該当地名は実在店舗が1件のみのため、そのエリアの店舗一覧セクションも1件になる
+ * （空エリアの新設ではなく、既存の実在店舗にキーワード受け皿ページを1枚足すだけ）。
+ * page.tsx 側は stores.length===1 のときに「複数店舗を比較」を前提にした文言を出さないよう
+ * 単数/複数で分岐している。
  */
 export const AREAS: AreaConfig[] = [
   {
@@ -55,6 +76,54 @@ export const AREAS: AreaConfig[] = [
     displayName: "横浜",
     keyword: "横浜 相席ラウンジ",
     storeSlugs: ["yokohama", "ay_yokohama"],
+  },
+  {
+    id: "shizuoka",
+    displayName: "静岡",
+    keyword: "静岡 相席ラウンジ",
+    storeSlugs: ["shizuoka"],
+  },
+  {
+    id: "hamamatsu",
+    displayName: "浜松",
+    keyword: "浜松 相席ラウンジ",
+    storeSlugs: ["hamamatsu"],
+  },
+  {
+    id: "machida",
+    displayName: "町田",
+    keyword: "町田 相席ラウンジ",
+    storeSlugs: ["machida"],
+  },
+  {
+    id: "kokura",
+    displayName: "小倉",
+    keyword: "小倉 相席ラウンジ",
+    storeSlugs: ["kokura"],
+  },
+  {
+    id: "kobe",
+    displayName: "神戸",
+    keyword: "神戸 相席ラウンジ",
+    storeSlugs: ["kobe"],
+  },
+  {
+    id: "kumamoto",
+    displayName: "熊本",
+    keyword: "熊本 相席ラウンジ",
+    storeSlugs: ["kumamoto"],
+  },
+  {
+    id: "oita",
+    displayName: "大分",
+    keyword: "大分 相席ラウンジ",
+    storeSlugs: ["oita"],
+  },
+  {
+    id: "takasaki",
+    displayName: "高崎",
+    keyword: "高崎 相席ラウンジ",
+    storeSlugs: ["takasaki"],
   },
 ];
 

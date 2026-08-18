@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { STORES } from "./stores";
+import { STORES, buildStoreFullName } from "./stores";
 import {
   AREAS,
   getAreaConfig,
@@ -11,9 +11,23 @@ import {
 describe("AREAS", () => {
   const storeSlugSet = new Set(STORES.map((s) => s.slug));
 
-  it("has exactly the 5 expected area ids", () => {
+  it("has exactly the 13 expected area ids", () => {
     expect(AREAS.map((a) => a.id).sort()).toEqual(
-      ["nagoya", "osaka", "shibuya", "ueno", "yokohama"].sort(),
+      [
+        "nagoya",
+        "osaka",
+        "shibuya",
+        "ueno",
+        "yokohama",
+        "shizuoka",
+        "hamamatsu",
+        "machida",
+        "kokura",
+        "kobe",
+        "kumamoto",
+        "oita",
+        "takasaki",
+      ].sort(),
     );
   });
 
@@ -39,6 +53,21 @@ describe("AREAS", () => {
 
     it(`${area.id}: keyword contains the display name`, () => {
       expect(area.keyword).toContain(area.displayName);
+    });
+
+    // ブランド憲法: oriental店の見出しに「相席屋」、aisekiya店の見出しに「オリエンタルラウンジ」が
+    // 混ざってはいけない（サイト横断ページとして両ブランドの併記自体は許容だが、店名の帰属を誤らせるのは禁止）。
+    it(`${area.id}: each store's full name never carries the other brand's word`, () => {
+      const stores = getAreaStores(area);
+      for (const store of stores) {
+        const fullName = buildStoreFullName(store);
+        if (store.brand === "oriental") {
+          expect(fullName).not.toContain("相席屋");
+        }
+        if (store.brand === "aisekiya") {
+          expect(fullName).not.toContain("オリエンタルラウンジ");
+        }
+      }
     });
   }
 });

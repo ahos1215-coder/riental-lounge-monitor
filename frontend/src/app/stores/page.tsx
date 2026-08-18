@@ -22,8 +22,34 @@ export const revalidate = 60;
 
 const base = getMetadataBaseUrl();
 
+// GSC実測（2026-08時点・直近28日）で /stores 単体が「相席 小倉」「相席ラウンジ 町田」など
+// 個々の地名クエリで755表示・0クリック・平均29.9位という異常値を記録していた。原因の一つが
+// このページの title/description が未設定でルート既定（オリエンタルラウンジ限定の文言）を
+// 継承していたこと。ここでは「全店舗を横並びで比較する一覧ページ」という本来の性格を明示し、
+// 特定の地名クエリの受け皿としては /area/[area] や店舗ページに寄せる（cross-brand併記が許される
+// サイト横断ページなので両ブランド名を出してよい）。
+const orientalStoreCount = STORES.filter((s) => s.brand === "oriental").length;
+const aisekiyaStoreCount = STORES.filter((s) => s.brand === "aisekiya").length;
+const storesPageTitle = `全${STORES.length}店舗の混雑状況を一覧比較`;
+const storesPageDescription = `オリエンタルラウンジ${orientalStoreCount}店舗・相席屋${aisekiyaStoreCount}店舗、全${STORES.length}店舗の現在の混雑状況・男女比を一覧で比較できます。エリアやブランドで絞り込んで、今夜行くお店を選べます。`;
+const storesPageUrl = new URL("/stores", base).href;
+
 export const metadata: Metadata = {
-  alternates: { canonical: new URL("/stores", base).href },
+  title: storesPageTitle,
+  description: storesPageDescription,
+  alternates: { canonical: storesPageUrl },
+  openGraph: {
+    title: `${storesPageTitle} | めぐりび`,
+    description: storesPageDescription,
+    url: storesPageUrl,
+    type: "website",
+    locale: "ja_JP",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${storesPageTitle} | めぐりび`,
+    description: storesPageDescription,
+  },
 };
 
 /** デフォルト表示（フィルタ無し・1ページ目）の店舗数と一致させる。 */
@@ -142,9 +168,9 @@ async function fetchInitialStoreCards(): Promise<Record<string, StoreRealtimeCar
  * 独立した別ブロックなので、CSR の絞り込みロジックには一切触れない。
  */
 /**
- * 大阪・名古屋・渋谷・上野・横浜など、複数店舗が集まるエリアのハブページ（/area/{id}）への
- * 導線。エリアページは店舗ページ側から到達できるが、一覧ページからも張っておくことで
- * 孤立ページ化を防ぐ（SEO Phase2の内部リンク方針と同じ考え方）。
+ * 大阪・名古屋・渋谷・上野・横浜などの複数店舗ハブに加え、静岡・浜松・町田等の単独店舗エリアも
+ * 含む地名ハブページ（/area/{id}）への導線。エリアページは店舗ページ側から到達できるが、
+ * 一覧ページからも張っておくことで孤立ページ化を防ぐ（SEO Phase2の内部リンク方針と同じ考え方）。
  */
 function AreaHubsSsrNav() {
   if (AREAS.length === 0) return null;
@@ -154,7 +180,7 @@ function AreaHubsSsrNav() {
         エリア特集
       </h2>
       <p className="mt-1 text-[11px] text-white/40">
-        複数店舗が集まるエリアは、まとめて混雑状況を比較できるページも用意しています。
+        エリアごとに混雑状況をまとめたページも用意しています。
       </p>
       <ul className="mt-3 flex flex-wrap gap-x-3 gap-y-1.5">
         {AREAS.map((area) => (
@@ -199,7 +225,7 @@ function AllStoresSsrNav() {
                     href={`/store/${store.slug}`}
                     className="text-xs text-white/60 underline decoration-white/20 underline-offset-2 transition hover:text-indigo-200 hover:decoration-indigo-300"
                   >
-                    {buildStoreFullName(store)}（{store.areaLabel}）
+                    {buildStoreFullName(store)}の混雑状況（{store.areaLabel}）
                   </Link>
                 </li>
               ))}
