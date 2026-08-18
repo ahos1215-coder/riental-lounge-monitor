@@ -9,9 +9,19 @@ name: Backup logs table
 on:
   workflow_dispatch:
   schedule:
-    # Sunday 21:00 UTC = Monday 06:00 JST — runs BEFORE cleanup-old-logs.yml
-    # (Sun 22:00 UTC) so the snapshot is taken before any pruning.
-    - cron: "0 21 * * 0"
+    # Sunday 03:00 UTC = Sunday 12:00 JST — runs BEFORE cleanup-old-logs.yml
+    # (Sun 05:00 UTC) so the snapshot is taken before any pruning.
+    #
+    # 【2026-08-18 変更】旧スケジュールは Sun 21:00 UTC で、日次の ML 学習
+    # (train-ml-model.yml, 20:30 UTC 開始・実測30分〜2時間15分) の真っ最中に始まって
+    # いた。学習ジョブ自体が logs を1000行ずつ約1,300回ページングし、さらに84個の
+    # モデルを Storage にアップロードするため Supabase の接続プールを食い尽くし、
+    # backup 側に 500 / 544 DatabaseTimeout / 429 too_many_connections を返していた。
+    # 実例: 2026-08-16 は学習 20:43→21:35、backup 21:20 開始 → 21:34 に
+    # 184,000/1,281,825 行で read timeout で死亡（8/09 も同じ衝突で失敗）。
+    # 12:00 JST は収集ウィンドウ(19:00〜05:00 JST)の外かつ他バッチも無い最も静かな
+    # 時間帯なので、そこへ退避する。
+    - cron: "0 3 * * 0"
 
 permissions:
   contents: write # create/upload Release assets + tags

@@ -47,6 +47,51 @@ SELECT = "id,store_id,ts,men,women,total,weather_code,weather_label,temp_c,preci
 # far outside this tolerance).
 ROW_COUNT_TOLERANCE = 0.02  # 2%
 
+# Retry budget. Supabase caps PostgREST responses at 1000 rows/page (db-max-rows),
+# so a full dump of the ~1.28M-row logs table needs ~1,300 SEQUENTIAL requests.
+# At that request count even a low per-request failure rate is near-certain to hit
+# a run, so the budget has to absorb a multi-minute wobble rather than a blip.
+#
+# 2026-08-18: the 2026-08-09 and -08-16 runs both died with "read operation timed
+# out" partway through (the 08-16 run at 184k/1.28M rows). Supabase was returning
+# HTTP 500 / 544 DatabaseTimeout / 429 too_many_connections under concurrent batch
+# load -- the weekly backup (Sun 21:00 UTC) was overlapping the daily ML training
+# job (starts 20:30 UTC, runs 30min-2h15m and itself issues ~1,300 paged fetches
+# plus 84 model uploads). The old budget was 4 attempts with sleep(2*attempt) =
+# ~12s of tolerance, so one saturated minute killed a 12-minute job.
+# Fix: many more attempts, exponential backoff capped at BACKOFF_MAX_SEC, honour
+# Retry-After, and treat 429/5xx as retryable. Worst case per page is ~5 minutes
+# of waiting before giving up, which is what a saturated pooler needs.
+FETCH_RETRIES = int(os.environ.get("BACKUP_FETCH_RETRIES", "10"))
+BACKOFF_MAX_SEC = float(os.environ.get("BACKUP_BACKOFF_MAX_SEC", "45"))
+REQUEST_TIMEOUT_SEC = float(os.environ.get("BACKUP_REQUEST_TIMEOUT_SEC", "90"))
+
+
+def backoff_delay(attempt: int, retry_after: float | None = None, cap: float = BACKOFF_MAX_SEC) -> float:
+    """Exponential backoff for retry ``attempt`` (1-based), capped at ``cap`` seconds.
+
+    Honours a server-supplied ``Retry-After`` (seconds) when present and larger than
+    the computed delay -- Supabase sends it with 429 ``too_many_connections`` and it
+    reflects when the pooler actually expects to have capacity again.
+
+    Pure function (no I/O, no sleeping) so the retry policy is unit-testable.
+    """
+    delay = min(float(2 ** attempt), float(cap))
+    if retry_after is not None and retry_after > delay:
+        delay = min(float(retry_after), float(cap))
+    return delay
+
+
+def _retry_after_seconds(exc: urllib.error.HTTPError) -> float | None:
+    """Parse a Retry-After response header (integer-seconds form) if present."""
+    raw = exc.headers.get("Retry-After") if exc.headers else None
+    if not raw:
+        return None
+    try:
+        return float(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+
 
 def _load_env() -> None:
     # Real environment (e.g. GitHub Actions secrets) wins over local files.
@@ -62,28 +107,34 @@ def _load_env() -> None:
             os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
-def _get(endpoint: str, key: str, params: list[tuple[str, str]], retries: int = 4):
+def _get(endpoint: str, key: str, params: list[tuple[str, str]], retries: int = FETCH_RETRIES):
     query = endpoint + "?" + urllib.parse.urlencode(params)
     headers = {"apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json"}
     last = ""
     for attempt in range(1, retries + 1):
+        retry_after = None
         try:
             req = urllib.request.Request(query, headers=headers)
-            with urllib.request.urlopen(req, timeout=60) as resp:
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SEC) as resp:
                 return json.loads(resp.read().decode())
         except urllib.error.HTTPError as exc:
             last = f"HTTP {exc.code}"
-            # 4xx (other than rate limit) is not retryable
+            # 4xx other than 429 is a real error (bad auth/query) -- not retryable.
+            # 429 (too_many_connections / SlowDown) and 5xx (500, 544 DatabaseTimeout,
+            # 502/503/504) are all transient Supabase saturation signals -- retry them.
             if exc.code < 500 and exc.code != 429:
                 raise SystemExit(f"backup fetch failed: {last} {exc.read().decode()[:200]}")
+            retry_after = _retry_after_seconds(exc)
         except Exception as exc:  # noqa: BLE001
             last = str(exc)[:120]
         if attempt < retries:
-            time.sleep(2 * attempt)
+            wait = backoff_delay(attempt, retry_after)
+            print(f"[backup] transient error ({last}); retry {attempt}/{retries} in {wait:.0f}s", flush=True)
+            time.sleep(wait)
     raise SystemExit(f"backup fetch failed after {retries} attempts: {last}")
 
 
-def _get_exact_row_count(endpoint: str, key: str, retries: int = 4) -> int:
+def _get_exact_row_count(endpoint: str, key: str, retries: int = FETCH_RETRIES) -> int:
     """Ask PostgREST for the exact row count via Content-Range, without fetching rows.
 
     Uses ``Prefer: count=exact`` + ``Range: 0-0`` so the server returns only the
@@ -103,9 +154,10 @@ def _get_exact_row_count(endpoint: str, key: str, retries: int = 4) -> int:
     query = endpoint + "?" + urllib.parse.urlencode([("select", "id"), ("limit", "1")])
     last = ""
     for attempt in range(1, retries + 1):
+        retry_after = None
         try:
             req = urllib.request.Request(query, headers=headers)
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SEC) as resp:
                 content_range = resp.headers.get("Content-Range", "")
                 # e.g. "0-0/1074907"
                 if "/" in content_range:
@@ -119,10 +171,13 @@ def _get_exact_row_count(endpoint: str, key: str, retries: int = 4) -> int:
             last = f"HTTP {exc.code}"
             if exc.code < 500 and exc.code != 429:
                 raise SystemExit(f"row-count check failed: {last} {exc.read().decode()[:200]}")
+            retry_after = _retry_after_seconds(exc)
         except Exception as exc:  # noqa: BLE001
             last = str(exc)[:120]
         if attempt < retries:
-            time.sleep(2 * attempt)
+            wait = backoff_delay(attempt, retry_after)
+            print(f"[backup] row-count transient error ({last}); retry {attempt}/{retries} in {wait:.0f}s", flush=True)
+            time.sleep(wait)
     raise SystemExit(f"row-count check failed after {retries} attempts: {last}")
 
 

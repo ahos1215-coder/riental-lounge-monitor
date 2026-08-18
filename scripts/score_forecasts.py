@@ -88,25 +88,46 @@ def _slot_key(dt: datetime) -> str:
     return j.strftime("%Y-%m-%dT%H:%M")
 
 
-def _storage_get(bucket: str, path: str, url: str, key: str) -> bytes | None:
+def _storage_get(bucket: str, path: str, url: str, key: str, retries: int = 6) -> bytes | None:
+    """Storage GET。404/400(not_found) は None、飽和系(429/5xx)は再試行。
+
+    2026-08-18: Supabase Storage はオブジェクトのメタデータを同じ Postgres 上の
+    `storage.objects` に持つため、DB が混雑すると存在するオブジェクトに対しても
+    HTTP 544 (database_timeout) や 429 (too_many_connections) を返す。
+    旧実装は再試行が無く、この 544 がそのまま送出されて
+    「no snapshot for <date>（採点対象なし）」という本来の分かりやすい終了ではなく
+    生のトレースバックで落ちていた（2026-08-17 の実行例）。
+    """
     endpoint = f"{url}/storage/v1/object/{bucket}/{path}"
     req = urllib.request.Request(endpoint, headers={"apikey": key, "Authorization": f"Bearer {key}"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.read()
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return None
-        # Supabase Storage は存在しないオブジェクトに対し HTTP 400 + body {"error":"not_found",...}
-        # を返すことがある（初回でスナップショット/サマリが未作成のケース）。これは「無い」扱いで None。
-        if exc.code == 400:
-            try:
-                body = exc.read().decode("utf-8", "replace").lower()
-            except Exception:  # noqa: BLE001
-                body = ""
-            if "not_found" in body or "not found" in body or "object not found" in body:
+    last_err: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
                 return None
-        raise
+            # Supabase Storage は存在しないオブジェクトに対し HTTP 400 + body {"error":"not_found",...}
+            # を返すことがある（初回でスナップショット/サマリが未作成のケース）。これは「無い」扱いで None。
+            if exc.code == 400:
+                try:
+                    body = exc.read().decode("utf-8", "replace").lower()
+                except Exception:  # noqa: BLE001
+                    body = ""
+                if "not_found" in body or "not found" in body or "object not found" in body:
+                    return None
+            # 429 / 5xx（544 DatabaseTimeout を含む）は一時的な飽和 → 再試行
+            if exc.code != 429 and exc.code < 500:
+                raise
+            last_err = exc
+        except Exception as exc:  # noqa: BLE001 - transient network error
+            last_err = exc
+        if attempt < retries:
+            wait = min(2 ** attempt, 30)
+            print(f"[score] storage GET {path} transient error ({last_err}); retry {attempt}/{retries} in {wait}s")
+            time.sleep(wait)
+    raise last_err if last_err else RuntimeError(f"storage get failed: {path}")
 
 
 def _storage_put(bucket: str, path: str, payload: bytes, url: str, key: str) -> None:

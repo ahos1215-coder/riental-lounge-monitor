@@ -4,7 +4,7 @@ name: Cleanup Old Logs
 # 手動実行も可能（dry_run で確認してから execute）
 #
 # 安全装置: cleanup_old_logs.py --execute は破壊的（logs テーブルから実データを削除）。
-# backup-logs.yml（UTC 日曜 21:00 = JST 月曜 06:00、cleanup の1時間前）がその週の
+# backup-logs.yml（UTC 日曜 03:00 = JST 日曜 12:00、cleanup の2時間前）がその週の
 # バックアップを GitHub Release (logs-backup-YYYYMMDD) として作成する前提で動いているため、
 # その週のバックアップが存在しない状態で cleanup が --execute で走ると、
 # 「バックアップ失敗週に無防備で削除される」という致命的な穴になる。
@@ -36,8 +36,15 @@ on:
           - "false"
           - "true"
   schedule:
-    # 毎週月曜 07:00 JST = UTC 日曜 22:00
-    - cron: "0 22 * * 0"
+    # 毎週日曜 14:00 JST = UTC 日曜 05:00（backup-logs.yml の Sun 03:00 UTC の2時間後）
+    #
+    # 【2026-08-18 変更】旧スケジュールは Sun 22:00 UTC で、週次 ML 学習
+    # (train-ml-model.yml の "0 22 * * 0") と完全に同時刻だった。両者が Supabase を
+    # 奪い合い、cleanup 側は get_row_count() の count=exact が HTTP 500 で即死していた
+    # （2026-08-09 / 08-16 の実行がいずれも約30秒で失敗）。収集ウィンドウ
+    # (19:00〜05:00 JST) の外かつ他バッチの無い静かな時間帯へ退避する。
+    # backup が Sun 03:00 UTC に完了している前提は下の check-backup ジョブが検証する。
+    - cron: "0 5 * * 0"
 
 permissions:
   contents: read
@@ -64,8 +71,8 @@ jobs:
             exit 0
           fi
 
-          # backup-logs.yml は STAMP="$(date -u +%Y%m%d)" 実行時刻(UTC 日曜 21:00)で
-          # タグ logs-backup-<STAMP> を作成する。cleanup は同じ UTC 日曜の 22:00 に走るため
+          # backup-logs.yml は STAMP="$(date -u +%Y%m%d)" 実行時刻(UTC 日曜 03:00)で
+          # タグ logs-backup-<STAMP> を作成する。cleanup は同じ UTC 日曜の 05:00 に走るため
           # 通常は同一 UTC 日付になるが、GitHub Actions のスケジュール遅延を考慮して
           # 当日 + 前日の2つのタグ候補を許容する（遅延で日付を跨いでも誤検知しないため）。
           TODAY="$(date -u +%Y%m%d)"

@@ -583,25 +583,45 @@ def _load_env() -> None:
             os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
-def _storage_get(bucket: str, path: str, url: str, key: str) -> bytes | None:
+def _storage_get(bucket: str, path: str, url: str, key: str, retries: int = 6) -> bytes | None:
+    """Storage GET。404/400(not_found) は None、飽和系(429/5xx)は再試行。
+
+    2026-08-18: Supabase Storage のメタデータは同じ Postgres 上の `storage.objects`
+    にあるため、DB が混雑すると実在するオブジェクトにも HTTP 544 (database_timeout)
+    / 429 (too_many_connections) が返る。このワークフローは main() の最初の
+    ネットワーク呼び出しがここ（templates_v2.json の取得）なので、旧実装では
+    再試行が無く約6秒で即死していた（2026-08-09 以降 9回連続失敗）。
+    """
     endpoint = f"{url}/storage/v1/object/{bucket}/{path}"
     req = urllib.request.Request(
         endpoint, headers={"apikey": key, "Authorization": f"Bearer {key}"}
     )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.read()
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return None
-        if exc.code == 400:
-            try:
-                body = exc.read().decode("utf-8", "replace").lower()
-            except Exception:  # noqa: BLE001
-                body = ""
-            if "not_found" in body or "not found" in body:
+    last_err: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
                 return None
-        raise
+            if exc.code == 400:
+                try:
+                    body = exc.read().decode("utf-8", "replace").lower()
+                except Exception:  # noqa: BLE001
+                    body = ""
+                if "not_found" in body or "not found" in body:
+                    return None
+            # 429 / 5xx（544 DatabaseTimeout を含む）は一時的な飽和 → 再試行
+            if exc.code != 429 and exc.code < 500:
+                raise
+            last_err = exc
+        except Exception as exc:  # noqa: BLE001 - transient network error
+            last_err = exc
+        if attempt < retries:
+            wait = min(2 ** attempt, 30)
+            print(f"[templates] storage GET {path} transient error ({last_err}); retry {attempt}/{retries} in {wait}s")
+            time.sleep(wait)
+    raise last_err if last_err else RuntimeError(f"storage get failed: {path}")
 
 
 def _storage_put(bucket: str, path: str, payload: bytes, url: str, key: str) -> None:

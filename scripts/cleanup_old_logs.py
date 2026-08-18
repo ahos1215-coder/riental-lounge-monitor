@@ -31,6 +31,8 @@ import argparse
 import json
 import os
 import sys
+import time
+import urllib.error
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -47,6 +49,61 @@ EMERGENCY_DELETE_BATCH = int(os.getenv("LOGS_EMERGENCY_DELETE_BATCH", "10000"))
 # ここでは import せず、独立した env 変数 + 定数フォールバックで意図を明示する。
 PROTECT_DAYS = int(os.getenv("LOGS_PROTECT_DAYS", "200"))
 
+# Retry budget for every Supabase call in this script.
+#
+# 2026-08-18: the 2026-08-09 and -08-16 scheduled runs both died ~30s in with an
+# unhandled ``urllib.error.HTTPError: HTTP Error 500`` raised from get_row_count()
+# (the ``Prefer: count=exact`` call, which makes Postgres count all ~1.28M rows).
+# This script had NO retry logic anywhere, so a single transient 500 aborted the
+# whole job. Supabase returns 500 / 544 DatabaseTimeout / 429 too_many_connections
+# whenever it is saturated by the concurrent batch jobs, and cleanup runs at
+# Sun 22:00 UTC -- right on top of the weekly ML training job. Every REST call
+# here now goes through _rest_request() with exponential backoff.
+CLEANUP_RETRIES = int(os.getenv("LOGS_CLEANUP_RETRIES", "8"))
+CLEANUP_BACKOFF_MAX_SEC = float(os.getenv("LOGS_CLEANUP_BACKOFF_MAX_SEC", "45"))
+
+
+def backoff_delay(attempt: int, cap: float = CLEANUP_BACKOFF_MAX_SEC) -> float:
+    """Exponential backoff for retry ``attempt`` (1-based), capped at ``cap`` seconds.
+
+    Pure function (no I/O, no sleeping) so the retry policy is unit-testable.
+    """
+    return min(float(2 ** attempt), float(cap))
+
+
+def is_retryable_status(code: int) -> bool:
+    """True for Supabase saturation signals that deserve a retry.
+
+    429 = too_many_connections / SlowDown, 5xx = 500, 544 DatabaseTimeout,
+    502/503/504. Any other 4xx means a genuinely bad request (auth, malformed
+    filter) and retrying would just waste the budget.
+    """
+    return code == 429 or code >= 500
+
+
+def _rest_request(req: Request, *, what: str, timeout: float = 90.0):
+    """Perform a Supabase REST request with retries on transient saturation errors.
+
+    Returns the *already-read* ``(body_bytes, headers)`` so the caller can inspect
+    Content-Range without worrying about the connection being closed on retry.
+    """
+    last = ""
+    for attempt in range(1, CLEANUP_RETRIES + 1):
+        try:
+            with urlopen(req, timeout=timeout) as resp:
+                return resp.read(), resp.headers
+        except urllib.error.HTTPError as exc:
+            last = f"HTTP {exc.code}"
+            if not is_retryable_status(exc.code):
+                raise
+        except Exception as exc:  # noqa: BLE001 - transient network error
+            last = f"{type(exc).__name__}: {str(exc)[:100]}"
+        if attempt < CLEANUP_RETRIES:
+            wait = backoff_delay(attempt)
+            print(f"  [retry] {what}: transient error ({last}); attempt {attempt}/{CLEANUP_RETRIES}, waiting {wait:.0f}s")
+            time.sleep(wait)
+    raise SystemExit(f"[error] {what} failed after {CLEANUP_RETRIES} attempts: {last}")
+
 
 def _headers() -> dict[str, str]:
     return {
@@ -62,24 +119,23 @@ def _rest_get(path: str, params: dict | None = None) -> list[dict]:
     if params:
         url += "?" + urlencode(params)
     req = Request(url, headers={**_headers(), "Prefer": "return=representation"})
-    with urlopen(req, timeout=30) as resp:
-        return json.loads(resp.read())
+    body, _ = _rest_request(req, what=f"GET {path}")
+    return json.loads(body)
 
 
 def _rest_delete(path: str, params: dict) -> int:
     url = f"{SUPABASE_URL}/rest/v1/{path}?" + urlencode(params)
     headers = {**_headers(), "Prefer": "return=representation,count=exact"}
     req = Request(url, method="DELETE", headers=headers)
-    with urlopen(req, timeout=60) as resp:
-        content_range = resp.headers.get("Content-Range", "")
-        # Content-Range: */N or 0-M/N
-        if "/" in content_range:
-            return int(content_range.split("/")[-1]) if content_range.split("/")[-1] != "*" else 0
-        body = resp.read()
-        try:
-            return len(json.loads(body))
-        except Exception:
-            return 0
+    body, resp_headers = _rest_request(req, what=f"DELETE {path}")
+    content_range = resp_headers.get("Content-Range", "")
+    # Content-Range: */N or 0-M/N
+    if "/" in content_range:
+        return int(content_range.split("/")[-1]) if content_range.split("/")[-1] != "*" else 0
+    try:
+        return len(json.loads(body))
+    except Exception:
+        return 0
 
 
 def get_row_count() -> int:
@@ -87,13 +143,13 @@ def get_row_count() -> int:
     url = f"{SUPABASE_URL}/rest/v1/logs?select=id&limit=1"
     headers = {**_headers(), "Prefer": "count=exact"}
     req = Request(url, headers=headers)
-    with urlopen(req, timeout=30) as resp:
-        cr = resp.headers.get("Content-Range", "")
-        # Content-Range: 0-0/580786
-        if "/" in cr:
-            total = cr.split("/")[-1]
-            if total != "*":
-                return int(total)
+    _, resp_headers = _rest_request(req, what="get_row_count (count=exact)")
+    cr = resp_headers.get("Content-Range", "")
+    # Content-Range: 0-0/580786
+    if "/" in cr:
+        total = cr.split("/")[-1]
+        if total != "*":
+            return int(total)
     return -1
 
 
@@ -117,12 +173,12 @@ def get_row_count_before(cutoff_iso: str) -> int:
     url = f"{SUPABASE_URL}/rest/v1/logs?select=id&ts=lt.{cutoff_iso}&limit=1"
     headers = {**_headers(), "Prefer": "count=exact"}
     req = Request(url, headers=headers)
-    with urlopen(req, timeout=30) as resp:
-        cr = resp.headers.get("Content-Range", "")
-        if "/" in cr:
-            total = cr.split("/")[-1]
-            if total != "*":
-                return int(total)
+    _, resp_headers = _rest_request(req, what="get_row_count_before (count=exact)")
+    cr = resp_headers.get("Content-Range", "")
+    if "/" in cr:
+        total = cr.split("/")[-1]
+        if total != "*":
+            return int(total)
     return -1
 
 
@@ -172,8 +228,7 @@ def delete_by_ids(ids: list[str], dry_run: bool) -> int:
         id_filter = ",".join(batch)
         url = f"{SUPABASE_URL}/rest/v1/logs?id=in.({id_filter})"
         req = Request(url, method="DELETE", headers=_headers())
-        with urlopen(req, timeout=60) as resp:
-            resp.read()
+        _rest_request(req, what=f"delete_by_ids batch {i // batch_size + 1}")
         deleted += len(batch)
     return deleted
 

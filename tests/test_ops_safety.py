@@ -12,8 +12,10 @@
 
 from __future__ import annotations
 
+from scripts.backup_logs import backoff_delay as backup_backoff_delay
 from scripts.backup_logs import check_row_count_sane
-from scripts.cleanup_old_logs import emergency_delete_oldest
+from scripts.cleanup_old_logs import backoff_delay as cleanup_backoff_delay
+from scripts.cleanup_old_logs import emergency_delete_oldest, is_retryable_status
 
 
 class TestEmergencyDeleteOldestFloorProtection:
@@ -91,3 +93,55 @@ class TestBackupRowCountSanity:
         total = int(db_count * 0.97)  # 3%不足 -> 許容誤差(2%)を超える
         is_sane, _ = check_row_count_sane(total=total, db_count=db_count)
         assert is_sane is False
+
+
+class TestRetryPolicy:
+    """2026-08-09 以降のクラウド全滅（Supabase 飽和）に対する再試行方針のテスト。
+
+    backup / cleanup はいずれも Supabase を1000行ずつ約1,300回叩くため、
+    「1回のブリップで全体が死ぬ」旧実装（backup=4回/合計12秒、cleanup=再試行なし）
+    では約1,300回の試行を生き延びられなかった。
+    """
+
+    def test_backup_backoff_is_exponential_and_capped(self) -> None:
+        assert backup_backoff_delay(1, cap=45) == 2
+        assert backup_backoff_delay(2, cap=45) == 4
+        assert backup_backoff_delay(3, cap=45) == 8
+        # 上限で頭打ちになる（無限に伸びない）
+        assert backup_backoff_delay(10, cap=45) == 45
+
+    def test_backup_backoff_honours_larger_retry_after(self) -> None:
+        """429 too_many_connections に付く Retry-After が計算値より大きければ従う。"""
+        assert backup_backoff_delay(1, retry_after=30, cap=45) == 30
+
+    def test_backup_backoff_ignores_smaller_retry_after(self) -> None:
+        """Retry-After が計算値より小さければ、こちらのバックオフを優先する。"""
+        assert backup_backoff_delay(4, retry_after=1, cap=45) == 16
+
+    def test_backup_backoff_retry_after_still_capped(self) -> None:
+        """異常に長い Retry-After を渡されても上限を超えない。"""
+        assert backup_backoff_delay(1, retry_after=9999, cap=45) == 45
+
+    def test_backup_total_budget_survives_a_multi_minute_wobble(self) -> None:
+        """旧実装(4回/合計12秒)では吸収できなかった数分の混雑を吸収できること。"""
+        total = sum(backup_backoff_delay(a, cap=45) for a in range(1, 10))
+        assert total >= 180  # 3分以上は粘る
+
+    def test_cleanup_backoff_is_exponential_and_capped(self) -> None:
+        assert cleanup_backoff_delay(1, cap=45) == 2
+        assert cleanup_backoff_delay(3, cap=45) == 8
+        assert cleanup_backoff_delay(10, cap=45) == 45
+
+    def test_saturation_statuses_are_retryable(self) -> None:
+        """Supabase の飽和シグナルはすべて再試行対象。
+
+        429=too_many_connections/SlowDown, 500=statement timeout,
+        544=DatabaseTimeout（2026-08-17 の学習ジョブが受け取った実際のコード）。
+        """
+        for code in (429, 500, 502, 503, 504, 544):
+            assert is_retryable_status(code) is True, code
+
+    def test_client_errors_are_not_retryable(self) -> None:
+        """認証ミスや不正クエリを再試行しても無駄なので即座に失敗させる。"""
+        for code in (400, 401, 403, 404, 409, 422):
+            assert is_retryable_status(code) is False, code

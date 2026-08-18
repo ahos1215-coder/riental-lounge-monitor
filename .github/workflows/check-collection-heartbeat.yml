@@ -68,7 +68,7 @@ jobs:
           PER_STORE_STALE_DAYS: ${{ github.event.inputs.per_store_stale_days || '3' }}
         run: |
           python3 - <<'PY'
-          import json, os, sys, urllib.request, urllib.parse
+          import json, os, sys, time, urllib.request, urllib.parse
           from datetime import datetime, timedelta, timezone
 
           url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
@@ -92,15 +92,25 @@ jobs:
               headers={"apikey": key, "Authorization": f"Bearer {key}"},
           )
 
+          # 【2026-08-18 修正】旧実装は 30秒タイムアウトを待ち時間ゼロで3連打するだけ
+          # だった。Supabase が混雑している最中(バッチジョブと衝突している数分間)は
+          # 3回とも同じ90秒の窓に収まってしまい、必ず全滅する。実例: 2026-08-18
+          # 02:54:45→02:56:16 に「Supabase 照会に失敗: The read operation timed out」で
+          # 失敗(=収集自体は正常で、監視側だけが落ちていた偽アラート)。
+          # 指数バックオフ(4s/8s/16s/32s)と長めのタイムアウトで、混雑が収まるのを待つ。
           last_err = None
           rows = None
-          for _ in range(3):
+          for attempt in range(1, 6):
               try:
-                  with urllib.request.urlopen(req, timeout=30) as r:
+                  with urllib.request.urlopen(req, timeout=60) as r:
                       rows = json.loads(r.read().decode())
                       break
               except Exception as e:
                   last_err = e
+                  if attempt < 5:
+                      wait = min(2 ** (attempt + 1), 32)
+                      print(f"[heartbeat] 照会失敗({e}) — {wait}秒後に再試行 {attempt}/5")
+                      time.sleep(wait)
           if rows is None:
               print(f"::error::Supabase 照会に失敗: {last_err}")
               sys.exit(1)
@@ -206,14 +216,18 @@ jobs:
                   f"{url}/rest/v1/logs?{sq}",
                   headers={"apikey": key, "Authorization": f"Bearer {key}"},
               )
+              # 42店ぶんを直列に照会するため、混雑時は個々の照会も詰まりやすい。
+              # 15秒2連打(待ちなし)では混雑を待てないので、バックオフ付き3回に広げる。
               err = None
-              for _ in range(2):
+              for attempt in range(1, 4):
                   try:
-                      with urllib.request.urlopen(sreq, timeout=15) as r:
+                      with urllib.request.urlopen(sreq, timeout=30) as r:
                           data = json.loads(r.read().decode())
                           return (data[0]["ts"] if data else None), None
                   except Exception as e:
                       err = e
+                      if attempt < 3:
+                          time.sleep(2 ** attempt)
               return None, err
 
           stores_json_path = os.path.join(os.getcwd(), "frontend", "src", "data", "stores.json")

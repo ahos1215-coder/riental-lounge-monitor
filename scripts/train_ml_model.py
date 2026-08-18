@@ -831,7 +831,7 @@ def _upload_file(
     local_path: Path,
     remote_name: str,
     content_type: str,
-    max_retries: int = 3,
+    max_retries: int = 6,
 ) -> None:
     object_path = f"{cfg.prefix}/{remote_name}".strip("/")
     endpoint = f"{cfg.supabase_url}/storage/v1/object/{cfg.bucket}/{object_path}"
@@ -849,12 +849,19 @@ def _upload_file(
             if response.ok:
                 return
             last_err = f"status={response.status_code} body={response.text[:200]}"
-            if response.status_code < 500 and response.status_code != 400:
-                break  # 4xx (except 400) は再試行しない
+            # 429 (too_many_connections / SlowDown) は「今は混んでいる、後で来い」であり
+            # 最も再試行すべきステータス。2026-08-17 の学習ジョブは 544 DatabaseTimeout
+            # を2回再試行したあと 429 を受け取り、この条件が 429 を「4xx だから再試行
+            # しない」と判定して即 break → 学習完了後のアップロード段階で全体が失敗して
+            # いた（84個のモデルのうち1個目で終了）。429 は必ず再試行する。
+            if response.status_code < 500 and response.status_code not in (400, 429):
+                break  # 4xx (400/429 以外) は再試行しない
         except Exception as exc:
             last_err = str(exc)[:200]
         if attempt < max_retries:
-            wait = 5 * attempt
+            # 指数バックオフ（上限60s）。Supabase の pooler が空くのを待つには
+            # 旧実装の線形 5*attempt（最大15s）では短すぎた。
+            wait = min(5 * (2 ** (attempt - 1)), 60)
             print(f"[train-ml] upload retry {attempt}/{max_retries} for {remote_name} (wait {wait}s): {last_err}")
             time.sleep(wait)
     raise SystemExit(f"upload failed after {max_retries} attempts: {remote_name} {last_err}")
