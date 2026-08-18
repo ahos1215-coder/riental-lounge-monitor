@@ -51,7 +51,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   // SEO Phase2続き〜seo/c-area-hub: エリア横断ハブページ。大阪・名古屋・渋谷・上野・横浜の
   // 複数店舗集約ハブ5件に加え、静岡・浜松・町田・小倉・神戸・熊本・大分・高崎の単独店舗ハブ8件を
-  // 含む計13エリア（実体は AREAS 配列で自動反映、ここで件数をハードコードしない）。
+  // 含む計14エリア（実体は AREAS 配列で自動反映、ここで件数をハードコードしない）。
   // ビッグキーワード（例:「大阪 相席ラウンジ」）向けの集約ページ。店舗ページよりわずかに低い優先度。
   const areaRoutes: MetadataRoute.Sitemap = AREAS.map((a) => ({
     url: `${base}/area/${encodeURIComponent(a.id)}`,

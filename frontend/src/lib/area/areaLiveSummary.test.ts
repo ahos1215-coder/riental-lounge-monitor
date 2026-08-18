@@ -1,0 +1,92 @@
+import { describe, expect, it } from "vitest";
+
+import type { StoreMeta } from "@/app/config/stores";
+import { computeNightBaseDate, computeNightWindowFromBaseDate } from "@/lib/date/nightWindow";
+import { buildAreaLiveSummary, buildAreaStoreLiveLine } from "./areaLiveSummary";
+
+const oriental = {
+  slug: "nagasaki",
+  storeId: "ol_nagasaki",
+  label: "長崎",
+  areaLabel: "長崎・浜んまち",
+  regionLabel: "九州",
+  mapsQueryBase: "長崎 浜町",
+  brand: "oriental",
+  capacity: null,
+  lat: 32.74,
+  lon: 129.87,
+} as unknown as StoreMeta;
+
+const aisekiya = {
+  ...oriental,
+  slug: "ay_ueno",
+  storeId: "ay_ueno",
+  label: "上野",
+  brand: "aisekiya",
+  capacity: 60,
+} as unknown as StoreMeta;
+
+// 2026-08-18 22:00 JST（進行中の夜）
+const NOW = new Date("2026-08-18T13:00:00Z");
+const window = computeNightWindowFromBaseDate(computeNightBaseDate(NOW));
+
+const rows = [
+  { ts: "2026-08-18T11:05:00Z", men: 8, women: 6, total: 14 }, // 20:05 JST
+  { ts: "2026-08-18T12:10:00Z", men: 12, women: 9, total: 21 }, // 21:10
+  { ts: "2026-08-18T12:55:00Z", men: 15, women: 10, total: 25 }, // 21:55
+];
+
+describe("buildAreaStoreLiveLine", () => {
+  it("オリエンタル: 人数と男女比・時間帯別・時点を出す", () => {
+    const line = buildAreaStoreLiveLine(oriental, rows, window)!;
+    expect(line.storeName).toBe("オリエンタルラウンジ 長崎");
+    expect(line.nowText).toBe("男性15人 / 女性10人（男60% / 女40%）");
+    expect(line.hourlyText).toBe("20時 14人 / 21時 25人");
+    expect(line.updatedText).toBe("21:55 時点");
+  });
+
+  it("相席屋: 人数を一切出さず%のみ", () => {
+    const line = buildAreaStoreLiveLine(aisekiya, rows, window)!;
+    expect(line.nowText).toMatch(/^席の埋まり具合 約\d+%（男性\d+% \/ 女性\d+%）$/);
+    expect(line.nowText).not.toMatch(/\d+人/);
+    expect(line.hourlyText ?? "").not.toMatch(/\d+人/);
+    expect(line.hourlyText).toMatch(/^20時 約\d+% \/ 21時 約\d+%$/);
+  });
+
+  it("対象の夜の実測が無ければ null（昨夜の残骸を今夜として出さない）", () => {
+    const stale = [{ ts: "2026-08-17T12:00:00Z", men: 9, women: 9, total: 18 }];
+    expect(buildAreaStoreLiveLine(oriental, stale, window)).toBeNull();
+  });
+
+  it("合計0なら null（空箱を作らない）", () => {
+    expect(
+      buildAreaStoreLiveLine(oriental, [{ ts: "2026-08-18T12:00:00Z", men: 0, women: 0 }], window),
+    ).toBeNull();
+  });
+
+  it("1時間分しか無ければ hourlyText は null", () => {
+    const one = [{ ts: "2026-08-18T12:00:00Z", men: 3, women: 4, total: 7 }];
+    const line = buildAreaStoreLiveLine(oriental, one, window)!;
+    expect(line.hourlyText).toBeNull();
+    expect(line.nowText).toBe("男性3人 / 女性4人（男43% / 女57%）");
+  });
+});
+
+describe("buildAreaLiveSummary", () => {
+  it("進行中の夜は「今夜」・データのある店だけ並べる", () => {
+    const s = buildAreaLiveSummary([oriental, aisekiya], { nagasaki: rows }, NOW)!;
+    expect(s.nightLabel).toBe("今夜");
+    expect(s.lines.map((l) => l.slug)).toEqual(["nagasaki"]);
+  });
+
+  it("昼間（05:00〜19:00）は「直近の営業夜」ラベルで前夜の実測を使う", () => {
+    const noon = new Date("2026-08-19T03:00:00Z"); // 12:00 JST 8/19 → 対象は 8/18 の夜
+    const s = buildAreaLiveSummary([oriental], { nagasaki: rows }, noon)!;
+    expect(s.nightLabel).toBe("直近の営業夜");
+    expect(s.lines).toHaveLength(1);
+  });
+
+  it("1店も出せなければ null", () => {
+    expect(buildAreaLiveSummary([oriental], {}, NOW)).toBeNull();
+  });
+});

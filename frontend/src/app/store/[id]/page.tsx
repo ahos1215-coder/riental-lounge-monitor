@@ -32,6 +32,8 @@ import {
   type StoreSnapshot,
 } from "../../hooks/storePreviewSnapshot";
 import StorePageClient from "./StorePageClient";
+import Link from "next/link";
+import { getAreaConfigForStoreSlug } from "@/app/config/areas";
 
 type Props = {
   params: Promise<{ id: string }>;
@@ -393,6 +395,39 @@ export default async function StorePage({ params }: Props) {
       </h1>
 
       <StorePageClient initialSnapshot={initialSnapshot} />
+
+      {/*
+        SSR の内部リンク: /store/[id] の静的HTMLは h1 + Suspense fallback だけで、
+        「ほかの店舗」「エリア一覧」への実アンカーはクライアント描画後にしか出ない。
+        クローラが読む raw HTML にエリアハブ（/area/{id}）と全店舗一覧への導線を1行だけ載せる
+        （SEO Phase2 の /stores AllStoresSsrNav と同じ考え方）。エリア未設定の店舗は一覧のみ。
+      */}
+      <StoreAreaSsrNav slug={meta.slug} />
     </>
+  );
+}
+
+function StoreAreaSsrNav({ slug }: { slug: string }) {
+  const area = getAreaConfigForStoreSlug(slug);
+  return (
+    <nav
+      aria-label="エリア・店舗一覧へ"
+      className="mx-auto mt-6 flex w-full max-w-6xl flex-wrap gap-x-4 gap-y-2 px-4 pb-8 text-xs"
+    >
+      {area && (
+        <Link
+          href={`/area/${encodeURIComponent(area.id)}`}
+          className="text-indigo-300 underline decoration-indigo-300/30 underline-offset-2 hover:text-indigo-200"
+        >
+          {area.displayName}の相席ラウンジ一覧 →
+        </Link>
+      )}
+      <Link
+        href="/stores"
+        className="text-slate-400 underline decoration-white/20 underline-offset-2 hover:text-slate-200"
+      >
+        全店舗の混雑状況一覧 →
+      </Link>
+    </nav>
   );
 }

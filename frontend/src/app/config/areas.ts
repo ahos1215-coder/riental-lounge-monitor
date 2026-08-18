@@ -21,7 +21,8 @@ export type AreaId =
   | "kobe"
   | "kumamoto"
   | "oita"
-  | "takasaki";
+  | "takasaki"
+  | "nagasaki";
 
 export type AreaConfig = {
   /** URLセグメント (/area/{id}) 兼キー */
@@ -35,10 +36,10 @@ export type AreaConfig = {
 };
 
 /**
- * 13エリア固定リスト。新しいエリアを追加する場合はここに1件足すだけで
+ * 14エリア固定リスト。新しいエリアを追加する場合はここに1件足すだけで
  * /area/[area]/page.tsx の generateStaticParams・sitemap.ts に自動反映される。
  *
- * 前半5件（osaka〜yokohama）は複数店舗が集まる集約ハブ。後半8件（shizuoka〜takasaki）は
+ * 前半5件（osaka〜yokohama）は複数店舗が集まる集約ハブ。後半9件（shizuoka〜nagasaki）は
  * GSC実測（2026-08時点・直近28日）で「相席ラウンジ/相席 + 地名」の一般語検索が付いているのに
  * 個別店舗ページが弱く、/stores（一覧）だけが拾って0クリックに終わっていた単独店舗エリア。
  * 該当地名は実在店舗が1件のみのため、そのエリアの店舗一覧セクションも1件になる
@@ -124,6 +125,15 @@ export const AREAS: AreaConfig[] = [
     displayName: "高崎",
     keyword: "高崎 相席ラウンジ",
     storeSlugs: ["takasaki"],
+  },
+  // 長崎はGSC実測で「相席屋 長崎」の検索が付いている（相席屋の店舗はサイト対象外だが、
+  // 相席ラウンジを探す人の受け皿としてオリエンタルラウンジ長崎のハブを用意する。
+  // 発見最優先方針・2026-08-19）。
+  {
+    id: "nagasaki",
+    displayName: "長崎",
+    keyword: "長崎 相席ラウンジ",
+    storeSlugs: ["nagasaki"],
   },
 ];
 

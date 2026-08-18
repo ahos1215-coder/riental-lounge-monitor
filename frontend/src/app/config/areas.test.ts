@@ -11,7 +11,7 @@ import {
 describe("AREAS", () => {
   const storeSlugSet = new Set(STORES.map((s) => s.slug));
 
-  it("has exactly the 13 expected area ids", () => {
+  it("has exactly the 14 expected area ids", () => {
     expect(AREAS.map((a) => a.id).sort()).toEqual(
       [
         "nagoya",
@@ -27,6 +27,7 @@ describe("AREAS", () => {
         "kumamoto",
         "oita",
         "takasaki",
+        "nagasaki",
       ].sort(),
     );
   });

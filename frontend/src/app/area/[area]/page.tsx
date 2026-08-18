@@ -7,8 +7,16 @@ import {
   getAreaStores,
   type AreaConfig,
 } from "@/app/config/areas";
-import { buildStoreFullName, isPercentCrowdBrand, type StoreMeta } from "@/app/config/stores";
+import {
+  buildStoreBrandName,
+  buildStoreFullName,
+  isPercentCrowdBrand,
+  type StoreMeta,
+} from "@/app/config/stores";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { fetchBackendSnapshot } from "@/lib/serverSnapshot";
+import { STORE_CARD_RANGE_LIMIT, parseRangeResponse } from "@/lib/storeCardRangeSparkline";
+import { buildAreaLiveSummary, type AreaLiveSummary } from "@/lib/area/areaLiveSummary";
 import {
   buildAreaCollectionPageJsonLd,
   buildBreadcrumbList,
@@ -44,7 +52,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const url = new URL(`/area/${encodeURIComponent(config.id)}`, base);
 
   const title = `${config.displayName}の相席ラウンジ 混雑状況・今夜の予測`;
-  const description = `${config.displayName}エリアの相席ラウンジ${stores.length}店舗の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。`;
+  const description = `${config.displayName}エリアの相席ラウンジ${stores.length}店舗（${listBrandNames(stores)}）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。`;
 
   return {
     title,
@@ -65,13 +73,67 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-/** イントロ文。店舗数が1件のエリアでは「店舗ごとに傾向は異なる」という複数前提の一文を外す。 */
-function buildIntro(config: AreaConfig, stores: StoreMeta[]): string {
-  const base = `${config.displayName}にある相席ラウンジ${stores.length}店舗の、現在の混雑状況と今夜の混雑ピーク予測を、実測データと機械学習の予測でまとめています。行きたいお店の今の混み具合や男女比を、来店前にこのページでまとめて確認できます。`;
-  if (stores.length > 1) {
-    return `${base}店舗ごとに傾向は異なるため、気になるお店は個別ページで詳しいデータもあわせてご覧ください。`;
+/** エリア内に実在するブランド名を出現順・重複なしで「オリエンタルラウンジ・相席屋」のように並べる。 */
+function listBrandNames(stores: StoreMeta[]): string {
+  const seen: string[] = [];
+  for (const s of stores) {
+    const name = buildStoreBrandName(s);
+    if (!seen.includes(name)) seen.push(name);
   }
-  return `${base}個別ページでは、時間帯別の混雑推移などさらに詳しいデータもあわせてご覧いただけます。`;
+  return seen.join("・");
+}
+
+/**
+ * イントロ文。店舗数が1件のエリアでは「店舗ごとに傾向は異なる」という複数前提の一文を外す。
+ * 単独店舗エリアは店名（＝ブランド名込み）を本文に明記し、地名だけの薄い文章にしない。
+ */
+function buildIntro(config: AreaConfig, stores: StoreMeta[]): string {
+  if (stores.length > 1) {
+    return `${config.displayName}にある相席ラウンジ${stores.length}店舗（${listBrandNames(stores)}）の、現在の混雑状況と今夜の混雑ピーク予測を、実測データと機械学習の予測でまとめています。行きたいお店の今の混み具合や男女比を、来店前にこのページでまとめて確認できます。店舗ごとに傾向は異なるため、気になるお店は個別ページで詳しいデータもあわせてご覧ください。`;
+  }
+  const only = stores[0];
+  const name = only ? buildStoreFullName(only) : `${config.displayName}の相席ラウンジ`;
+  // areaLabel が地名そのもの（例: 静岡）なら「静岡（静岡）」と冗長になるので付けない
+  const place =
+    only?.areaLabel && only.areaLabel !== config.displayName ? `（${only.areaLabel}）` : "";
+  return `${config.displayName}の相席ラウンジ「${name}」${place}の、現在の混雑状況と今夜の混雑ピーク予測を、実測データと機械学習の予測でまとめています。今の混み具合や男女比を来店前に確認でき、個別ページでは時間帯別の混雑推移などさらに詳しいデータもあわせてご覧いただけます。`;
+}
+
+/**
+ * 「相席屋 ○○」で検索して来た人向けの案内（発見最優先方針・2026-08-19）。
+ * オリエンタルラウンジと相席屋は別ブランドで、この文言でも「同じ店」とは書かない。
+ * ただし GSC 実測で「相席屋+地名」の検索が付いている地名に、当サイトが把握している相席ラウンジ
+ * （オリエンタルラウンジ）しか無い場合、探している人にとって有用な選択肢なので正直に案内する。
+ * 相席屋の店舗がそのエリアに存在するかどうかは当サイトの対象外で断定できないため
+ * 「当サイトで扱っている○○の相席ラウンジは…」という言い方に留める。
+ */
+function buildAisekiyaSeekerNote(config: AreaConfig, stores: StoreMeta[]): string | null {
+  const hasAisekiya = stores.some((s) => s.brand === "aisekiya");
+  const orientals = stores.filter((s) => s.brand === "oriental");
+  if (hasAisekiya || orientals.length === 0) return null;
+  const names = orientals.map((s) => `「${buildStoreFullName(s)}」`).join("・");
+  return `「相席屋 ${config.displayName}」で相席できるお店を探している方へ：当サイトで混雑状況を扱っている${config.displayName}の相席ラウンジは${names}です。相席屋とオリエンタルラウンジは別ブランドですが、どちらも男女が相席して出会える相席系ラウンジで、${config.displayName}で相席ラウンジをお探しならこちらの混雑状況が参考になります。`;
+}
+
+/**
+ * エリア内の各店の実測（直近の人数/％・時間帯別・最終計測時刻）を /api/range_multi から取り、
+ * 静的HTMLのテキストとして載せる。一覧ページと同じ limit（per-store キャッシュ共有）なので
+ * バックエンドへの追加負荷はほぼ無い。失敗・タイムアウト・データ無しは null（セクションごと省く）。
+ */
+async function fetchAreaLive(stores: StoreMeta[]): Promise<AreaLiveSummary | null> {
+  if (stores.length === 0) return null;
+  const slugsCsv = stores.map((s) => s.slug).join(",");
+  const json = await fetchBackendSnapshot<{
+    ok?: boolean;
+    by_slug?: Record<string, { rows?: unknown[] }>;
+  }>(`/api/range_multi?stores=${encodeURIComponent(slugsCsv)}&limit=${STORE_CARD_RANGE_LIMIT}`, 60);
+  if (!json?.ok || !json.by_slug) return null;
+  const bySlug: Record<string, ReturnType<typeof parseRangeResponse>> = {};
+  for (const store of stores) {
+    const rows = json.by_slug[store.slug]?.rows;
+    if (Array.isArray(rows)) bySlug[store.slug] = parseRangeResponse({ rows });
+  }
+  return buildAreaLiveSummary(stores, bySlug, new Date());
 }
 
 /** 店舗カード1件の補足テキスト。相席屋(ay_*)は人数を約束せず％表示のみの案内にする。 */
@@ -134,6 +196,8 @@ export default async function AreaPage({ params }: Props) {
   ]);
 
   const intro = buildIntro(config, stores);
+  const aisekiyaSeekerNote = buildAisekiyaSeekerNote(config, stores);
+  const live = await fetchAreaLive(stores);
   const collectionDescription = `${config.displayName}エリアの相席ラウンジ${stores.length}店舗の混雑状況・今夜の予測をまとめたページ。`;
 
   const collectionPage = buildAreaCollectionPageJsonLd({
@@ -197,6 +261,51 @@ export default async function AreaPage({ params }: Props) {
             ))}
           </ul>
         </section>
+
+        {/* 各店の実測（SSRテキスト）: 取れた店だけ出す。0人・--:-- の空箱は作らない（areaLiveSummary.ts） */}
+        {live && (
+          <section aria-labelledby="area-live-heading" className="mt-10 max-w-3xl">
+            <h2 id="area-live-heading" className="text-base font-semibold text-slate-100">
+              {config.displayName}の各店の混雑（{live.nightLabel}の実測）
+            </h2>
+            <ul className="mt-4 space-y-4">
+              {live.lines.map((line) => (
+                <li key={line.slug} className="text-sm leading-relaxed text-slate-400">
+                  <Link
+                    href={`/store/${encodeURIComponent(line.slug)}`}
+                    className="font-semibold text-slate-200 hover:text-indigo-200"
+                  >
+                    {line.storeName}
+                  </Link>
+                  {line.updatedText && (
+                    <span className="ml-2 text-[11px] text-slate-500">{line.updatedText}</span>
+                  )}
+                  <p className="mt-1">
+                    <span className="text-slate-300">{line.nowText}</span>
+                  </p>
+                  {line.hourlyText && (
+                    <p className="mt-0.5 text-[12px]">
+                      時間帯別の混雑（実測） <span className="text-slate-300">{line.hourlyText}</span>
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-3 text-[11px] text-slate-500">
+              数値は営業時間中に数分おきに更新されます。時刻はいずれも日本時間です。
+            </p>
+          </section>
+        )}
+
+        {/* 「相席屋 ○○」で探して来た人向けの正直な案内（同じ店だとは書かない・buildAisekiyaSeekerNote 参照） */}
+        {aisekiyaSeekerNote && (
+          <section aria-labelledby="area-seeker-heading" className="mt-10 max-w-3xl">
+            <h2 id="area-seeker-heading" className="text-base font-semibold text-slate-100">
+              {config.displayName}で相席屋・相席ラウンジをお探しの方へ
+            </h2>
+            <p className="mt-3 text-sm leading-relaxed text-slate-400">{aisekiyaSeekerNote}</p>
+          </section>
+        )}
 
         {/* エリア文脈: 一般的な内容のみ。特定店舗の評価・穴場断定・お告げ表現は書かない */}
         <section aria-labelledby="area-context-heading" className="mt-10 max-w-3xl">
