@@ -126,6 +126,16 @@ Forecast:
 - `ML_STALE_STORE_DAYS`（新規, 同上。float, 既定 `7.0`。最新取得行がこの日数より古い店舗は学習をスキップ（閉店・停止店舗が古いデータで学習され続けるのを防ぐ））
 - `ML_RECENCY_HALFLIFE_DAYS`（新規, 同上。float, 既定 `90.0`。サンプル重み付けの指数減衰half-life（日）。値を下げると直近データをより重視し、レジームシフトに素早く追従する）
 - `ML_RECENCY_FLOOR`（新規, 同上。float, 既定 `0.5`、`0.0`-`1.0` の範囲。上記減衰の下限）
+- `MODEL_RETENTION_GENERATIONS`（新規 2026-08-19, `scripts/cleanup_old_models.py`。int, 既定 `7`。
+  `train_ml_model.py` が毎日アップロードする日付入りモデル世代（`model_<store>_<YYYYMMDD>_men|women.txt`,
+  42店舗×男女=84個/日、x-upsert 無し＝永久蓄積）のうち保持する世代数。`train_ml_model.py::main()` は
+  metadata.json のアップロード成功後に毎回 `run_cleanup(..., dry_run=False)` を呼び、最新N世代
+  ＋ metadata.json が参照するファイル（世代が古くても）を除く古い世代を削除する（prune 失敗は
+  ログ警告のみで学習ジョブ自体は失敗させない）。手動実行: `python scripts/cleanup_old_models.py`
+  （既定 dry-run、`--execute` で実際に削除）。関連: `MODEL_CLEANUP_RETRIES` / `MODEL_CLEANUP_BACKOFF_MAX_SEC`
+  / `MODEL_CLEANUP_DELETE_BATCH_SIZE` / `MODEL_CLEANUP_MAX_DELETE_FRACTION`（既定 `0.95`、削除率
+  サニティ上限）。背景: 2026-08-18 に `forecast/latest` が 9,000+オブジェクト/1.4GB超まで肥大し
+  Supabase Storage 無料プラン1GBクォータを超過（2026-09-05利用制限予告）していたことの根治）
 
 重み付け・HPO 運用の注意:
 - `ML_TRAIN_WEIGHT_PEAK` / `ML_TRAIN_WEIGHT_RAIN` を上げすぎると、ピーク・雨天以外（平常時）の予測精度が低下する可能性がある。まずは `1.5-1.8` で評価し、店舗別 MAE/RMSE（overall と weekend_night_segment）を見ながら段階調整する。

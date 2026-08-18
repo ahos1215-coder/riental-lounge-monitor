@@ -32,6 +32,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from oriental.ml.preprocess import FEATURE_COLUMNS, prepare_dataframe
 from oriental.utils.stores import ALL_STORE_IDS
+from scripts.cleanup_old_models import CleanupConfig, run_cleanup
 
 
 def _load_env() -> None:
@@ -885,6 +886,42 @@ def _download_existing_metadata(cfg: TrainingConfig, session: requests.Session) 
     return None
 
 
+def _prune_old_models_best_effort(cfg: TrainingConfig) -> None:
+    """学習成功後（metadata.json アップロード成功後）に、Storage 側の古い日付入りモデル
+    世代を整理する（scripts/cleanup_old_models.py, MODEL_RETENTION_GENERATIONS 既定7世代）。
+
+    2026-08-18: 毎日の再学習が42店舗×男女=84個の日付入りファイルをアップロードし続け、
+    一切削除しないため forecast/latest が8,200オブジェクト/1,233MBまで肥大し、Supabase
+    Storage 無料プランの1GBクォータを超過した。この関数はその蓄積源を日次で自動的に
+    止める（後方: 既存の溜まった分は scripts/cleanup_old_models.py を手動で一度実行して
+    整理する）。
+
+    belt-and-braces: prune の失敗は学習ジョブ自体を失敗させない（ログに警告を出すだけで
+    継続する）。学習・アップロードは既に完全に成功しているため、後片付けの失敗でジョブ
+    全体を赤くする理由が無い。
+
+    注意: cleanup_old_models.py は自身の abort 経路（設定不備・95%サニティ上限超過等）を
+    `SystemExit` で表現する（train_ml_model.py 自身の `cfg.validate()` 等と同じ規約）。
+    `SystemExit` は `Exception` を継承しない `BaseException` なので、ここで
+    `except Exception` だけだと素通りしてプロセスごと終了してしまう。それは
+    「prune失敗で学習ジョブが失敗した」ことになり、この関数の存在意義（belt-and-braces）
+    に反するため、`SystemExit` も明示的に捕捉してワーニングに格下げする
+    （`KeyboardInterrupt`/`GeneratorExit` 等の他の `BaseException` は素通りさせたい
+    ので `BaseException` は使わず、`(Exception, SystemExit)` を明示する）。
+    """
+    try:
+        cleanup_cfg = CleanupConfig(
+            supabase_url=cfg.supabase_url,
+            supabase_key=cfg.supabase_service_key,
+            bucket=cfg.bucket,
+            prefix=cfg.prefix,
+            retention_generations=_env_int("MODEL_RETENTION_GENERATIONS", 7),
+        )
+        run_cleanup(cleanup_cfg, dry_run=False)
+    except (Exception, SystemExit) as exc:  # noqa: BLE001 - prune failure must never fail the training job
+        print(f"[train-ml][prune][WARNING] model retention cleanup failed (non-fatal): {str(exc)[:300]}")
+
+
 def main() -> int:
     _load_env()
     parser = argparse.ArgumentParser(description="Train forecast XGBoost models and upload to Supabase Storage.")
@@ -1186,6 +1223,10 @@ def main() -> int:
             remote_name="metadata.json",
             content_type="application/json",
         )
+
+    # metadata.json のアップロードが成功した後（＝この run の新しい世代が正式に配信対象
+    # になった後）にだけ、古い世代の整理を試みる。失敗しても学習ジョブは成功のまま。
+    _prune_old_models_best_effort(cfg)
 
     _write_github_step_summary(coverage, gate_decisions)
 
