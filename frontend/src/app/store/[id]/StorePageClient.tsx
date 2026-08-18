@@ -254,7 +254,12 @@ type StorePageClientProps = {
 
 export default function StorePageClient({ initialSnapshot = null }: StorePageClientProps) {
   return (
-    <Suspense fallback={<StorePageFallback />}>
+    // fallback にも initialSnapshot を渡す。StorePageInner は useSearchParams() を使うため
+    // 静的プリレンダ時にこの Suspense 境界が CSR へ bail し、生成されるHTMLには fallback だけが
+    // 焼かれる。つまり fallback が「クローラが読めるテキストを出せる唯一の場所」であり、
+    // ここでサーバー取得済みの実データ（人数・男女比・ピーク・最終更新）をテキスト描画する。
+    // ハイドレーション後は下の StorePageInner に差し替わるので最終的な画面は変わらない。
+    <Suspense fallback={<StorePageFallback initialSnapshot={initialSnapshot} />}>
       <StorePageInner initialSnapshot={initialSnapshot} />
     </Suspense>
   );
