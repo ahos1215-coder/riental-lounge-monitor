@@ -21,7 +21,7 @@ type Props = {
 
 /**
  * エリアページは店舗ページと同じ静的生成方針（SEO Phase2 の store/[id]/page.tsx を参照）。
- * dynamicParams=false により、5エリア以外へのアクセスは確実に real 404 になる
+ * dynamicParams=false により、AREAS 掲載エリア以外へのアクセスは確実に real 404 になる
  * （fallback生成パスを通さずステータスがロックされる問題を避ける）。
  */
 export const dynamicParams = false;
@@ -65,9 +65,13 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
-/** エリアの店舗が「％表示のみ」ブランドを含むかどうか。イントロ文の言い回し分岐に使う。 */
+/** イントロ文。店舗数が1件のエリアでは「店舗ごとに傾向は異なる」という複数前提の一文を外す。 */
 function buildIntro(config: AreaConfig, stores: StoreMeta[]): string {
-  return `${config.displayName}にある相席ラウンジ${stores.length}店舗の、現在の混雑状況と今夜の混雑ピーク予測を、実測データと機械学習の予測でまとめています。行きたいお店の今の混み具合や男女比を、来店前にこのページでまとめて確認できます。店舗ごとに傾向は異なるため、気になるお店は個別ページで詳しいデータもあわせてご覧ください。`;
+  const base = `${config.displayName}にある相席ラウンジ${stores.length}店舗の、現在の混雑状況と今夜の混雑ピーク予測を、実測データと機械学習の予測でまとめています。行きたいお店の今の混み具合や男女比を、来店前にこのページでまとめて確認できます。`;
+  if (stores.length > 1) {
+    return `${base}店舗ごとに傾向は異なるため、気になるお店は個別ページで詳しいデータもあわせてご覧ください。`;
+  }
+  return `${base}個別ページでは、時間帯別の混雑推移などさらに詳しいデータもあわせてご覧いただけます。`;
 }
 
 /** 店舗カード1件の補足テキスト。相席屋(ay_*)は人数を約束せず％表示のみの案内にする。 */
@@ -79,18 +83,31 @@ function buildStoreNote(store: StoreMeta): string {
 
 type AreaFaqItem = { question: string; answer: string };
 
-function buildFaqItems(config: AreaConfig): AreaFaqItem[] {
+/**
+ * 2問目は店舗数で文言を分岐する: 複数店舗エリアは「選び方」、単独店舗エリアは
+ * 「選ぶ」前提の質問が成立しない（比較対象が無い）ため「確認のしかた」に差し替える。
+ */
+function buildFaqItems(config: AreaConfig, storeCount: number): AreaFaqItem[] {
+  const secondItem: AreaFaqItem =
+    storeCount > 1
+      ? {
+          question: `${config.displayName}エリアの店舗はどう選べばいいですか？`,
+          answer:
+            "このページでは各店の現在の混雑状況を横並びで確認できます。気になる店舗のページに移動すると、男女比や混雑推移のグラフなど、より詳しいデータを見られます。",
+        }
+      : {
+          question: `${config.displayName}の相席ラウンジの混雑状況はどこで確認できますか？`,
+          answer:
+            "このページ下部の店舗カードから店舗ページに移動すると、現在の人数・男女比や混雑推移のグラフなど、より詳しいデータを見られます。",
+        };
+
   return [
     {
       question: `${config.displayName}の相席ラウンジは何時ごろ混みますか？`,
       answer:
         "混みやすい時間帯は店舗・曜日によって異なります。各店の店舗ページでは、実測データをもとにした今夜の時間帯別の混雑予測を公開しているので、来店前にそちらでご確認ください。",
     },
-    {
-      question: `${config.displayName}エリアの店舗はどう選べばいいですか？`,
-      answer:
-        "このページでは各店の現在の混雑状況を横並びで確認できます。気になる店舗のページに移動すると、男女比や混雑推移のグラフなど、より詳しいデータを見られます。",
-    },
+    secondItem,
     {
       question: "データはどのくらいの頻度で更新されますか？",
       answer:
@@ -130,7 +147,7 @@ export default async function AreaPage({ params }: Props) {
   });
 
   const jsonLd = serializeJsonLd([breadcrumb, collectionPage]);
-  const faqItems = buildFaqItems(config);
+  const faqItems = buildFaqItems(config, stores.length);
   const otherAreas = AREAS.filter((a) => a.id !== config.id);
 
   return (
@@ -187,7 +204,9 @@ export default async function AreaPage({ params }: Props) {
             {config.displayName}で相席ラウンジを探すなら
           </h2>
           <p className="mt-3 text-sm leading-relaxed text-slate-400">
-            {config.displayName}エリアには複数の相席ラウンジ店舗があり、それぞれ独立して混雑状況が変動します。同じエリアでも店舗ごとに現在の人数・男女比・今夜の予測ピークは異なるため、このページでまとめて概況を確認したうえで、気になる店舗のページで詳しいデータを見るのがおすすめです。各店のデータは実測値とその推移から機械学習で予測した今夜のピークをあわせて掲載しています。
+            {stores.length > 1
+              ? `${config.displayName}エリアには複数の相席ラウンジ店舗があり、それぞれ独立して混雑状況が変動します。同じエリアでも店舗ごとに現在の人数・男女比・今夜の予測ピークは異なるため、このページでまとめて概況を確認したうえで、気になる店舗のページで詳しいデータを見るのがおすすめです。各店のデータは実測値とその推移から機械学習で予測した今夜のピークをあわせて掲載しています。`
+              : `${config.displayName}エリアの相席ラウンジは、実測データと機械学習の予測をもとに現在の混雑状況と今夜のピークをまとめて確認できます。来店タイミングを決める前に、下の店舗ページで人数・男女比の推移もあわせてチェックするのがおすすめです。`}
           </p>
         </section>
 
