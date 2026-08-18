@@ -217,7 +217,7 @@ def _compute_v2(
         and (datetime.now(timezone.utc) - gdt) <= timedelta(hours=V2_STALE_HOURS)
     )
     if not fresh:
-        print(f"[snapshot][warn] v2 templates missing/stale (>{V2_STALE_HOURS}h) — v2=null for all stores")
+        print(f"[snapshot][warn] v2 templates missing/stale (>{V2_STALE_HOURS}h) - v2=null for all stores")
         return {slug: None for slug in slugs}
 
     stores = doc["stores"]
