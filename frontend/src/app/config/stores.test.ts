@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildStoreBrandName,
   buildStoreFullName,
+  buildStoreTitleName,
   distanceKm,
   isPercentCrowdBrand,
   seatFullnessPercent,
@@ -105,5 +107,59 @@ describe("buildStoreFullName", () => {
     expect(
       buildStoreFullName({ ...baseMeta, brand: "oriental", label: "渋谷", capacity: null }),
     ).toBe("オリエンタルラウンジ 渋谷");
+  });
+});
+
+describe("buildStoreTitleName", () => {
+  const baseMeta: StoreMeta = {
+    slug: "shibuya",
+    storeId: "ay_shibuya",
+    label: "渋谷",
+    areaLabel: "渋谷",
+    regionLabel: "関東",
+    mapsQueryBase: "",
+    brand: "aisekiya",
+    capacity: 38,
+    lat: null,
+    lon: null,
+  };
+
+  it("concatenates brand + label with no space (compact <title> form)", () => {
+    expect(buildStoreTitleName({ ...baseMeta, brand: "aisekiya", label: "渋谷店" })).toBe(
+      "相席屋渋谷店",
+    );
+    expect(buildStoreTitleName({ ...baseMeta, brand: "oriental", label: "小倉" })).toBe(
+      "オリエンタルラウンジ小倉",
+    );
+  });
+});
+
+describe("buildStoreBrandName", () => {
+  const baseMeta: StoreMeta = {
+    slug: "shibuya",
+    storeId: "ay_shibuya",
+    label: "渋谷",
+    areaLabel: "渋谷",
+    regionLabel: "関東",
+    mapsQueryBase: "",
+    brand: "aisekiya",
+    capacity: 38,
+    lat: null,
+    lon: null,
+  };
+
+  it("returns 相席屋 for aisekiya", () => {
+    expect(buildStoreBrandName({ ...baseMeta, brand: "aisekiya" })).toBe("相席屋");
+  });
+
+  it("returns オリエンタルラウンジ for oriental", () => {
+    expect(buildStoreBrandName({ ...baseMeta, brand: "oriental" })).toBe("オリエンタルラウンジ");
+  });
+
+  it("never mixes brand strings between oriental and aisekiya", () => {
+    expect(buildStoreBrandName({ ...baseMeta, brand: "oriental" })).not.toContain("相席屋");
+    expect(buildStoreBrandName({ ...baseMeta, brand: "aisekiya" })).not.toContain(
+      "オリエンタルラウンジ",
+    );
   });
 });

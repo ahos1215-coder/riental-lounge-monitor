@@ -38,6 +38,12 @@ export type NightClubStoreInput = {
   areaLabel: string;
   lat?: number | null;
   lon?: number | null;
+  /**
+   * ブランド名（例: "オリエンタルラウンジ" / "相席屋"）。指定時のみ brand プロパティを追加する。
+   * 呼び出し側は必ず対象店舗と同一ブランドの文字列を渡すこと（config/stores.ts の
+   * buildStoreBrandName(meta) を使えば、渡す meta 自身のブランドと一致するため混同しようがない）。
+   */
+  brandName?: string;
 };
 
 /**
@@ -59,6 +65,8 @@ function inferAddressCountry(store: Pick<NightClubStoreInput, "regionLabel" | "a
  * schema.org NightClub（LocalBusiness）JSON-LD を組み立てる共通ヘルパー。
  * addressCountry は store の regionLabel/areaLabel から内部で自動判定する
  * （海外店舗＝韓国・江南 は "KR"、それ以外は "JP"）。
+ * areaServed は実データ(areaLabel)からのみ組み立てる。brand は brandName が渡された場合のみ追加し、
+ * 営業時間など未確認の値は一切含めない。
  */
 export function buildNightClubJsonLd(store: NightClubStoreInput): Record<string, unknown> {
   const localBusiness: Record<string, unknown> = {
@@ -71,8 +79,12 @@ export function buildNightClubJsonLd(store: NightClubStoreInput): Record<string,
       addressLocality: store.areaLabel,
       addressCountry: inferAddressCountry(store),
     },
+    areaServed: store.areaLabel,
     url: store.url,
   };
+  if (store.brandName) {
+    localBusiness.brand = { "@type": "Brand", name: store.brandName };
+  }
   if (store.lat != null && store.lon != null) {
     localBusiness.geo = {
       "@type": "GeoCoordinates",
