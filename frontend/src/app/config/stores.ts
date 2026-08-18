@@ -70,12 +70,38 @@ export const BRAND_DISPLAY_LABEL: Record<BrandId, string> = {
   jis: "JIS",
 };
 
+/**
+ * ブランドの短縮表示名（日本語）。buildStoreFullName / buildStoreTitleName / JSON-LDの brand
+ * 全てがここを単一ソースにする。BRAND_DISPLAY_LABEL とは別物（そちらは "ORIENTAL LOUNGE" という
+ * 英語表記で StoreCard 等の別UIが使っており、ここを変えると影響範囲が広いため触らない）。
+ */
+const BRAND_SHORT_NAME: Record<BrandId, string> = {
+  oriental: "オリエンタルラウンジ",
+  aisekiya: "相席屋",
+  jis: "JIS",
+};
+
 /** 店舗名表示のフルネーム生成 (例: "オリエンタルラウンジ 渋谷本店") */
 export function buildStoreFullName(meta: StoreMeta): string {
-  if (meta.brand === "oriental") return `オリエンタルラウンジ ${meta.label}`;
-  if (meta.brand === "aisekiya") return `相席屋 ${meta.label}`;
-  if (meta.brand === "jis") return `JIS ${meta.label}`;
-  return meta.label;
+  const prefix = BRAND_SHORT_NAME[meta.brand];
+  return prefix ? `${prefix} ${meta.label}` : meta.label;
+}
+
+/**
+ * <title>タグ専用の短縮表記（ブランド名+店舗名をスペース無しで連結。例: "オリエンタルラウンジ小倉"）。
+ * buildStoreFullName（スペースあり、本文・JSON-LD向け）より1文字節約するための別ヘルパー。
+ * 日本語タイトルはモバイルSERPで実質30〜35字で切れるため、店舗ページのタイトルはこちらを使う。
+ */
+export function buildStoreTitleName(meta: StoreMeta): string {
+  return `${BRAND_SHORT_NAME[meta.brand]}${meta.label}`;
+}
+
+/**
+ * ブランド名単体（例: "オリエンタルラウンジ" / "相席屋"）。JSON-LD の brand フィールド用。
+ * 必ず引数の meta と同じブランドの文字列を返すため、呼び出し側でブランドを混同する余地がない。
+ */
+export function buildStoreBrandName(meta: StoreMeta): string {
+  return BRAND_SHORT_NAME[meta.brand];
 }
 
 // Source of truth: frontend/src/data/stores.json (shared with Python backend)

@@ -66,4 +66,37 @@ describe("buildNightClubJsonLd", () => {
     });
     expect(ld.geo).toBeUndefined();
   });
+
+  it("always sets areaServed from the real areaLabel (no brandName required)", () => {
+    const ld = buildNightClubJsonLd({
+      name: "テスト店舗",
+      url: "https://www.meguribi.jp/store/test",
+      regionLabel: "関東",
+      areaLabel: "東京・渋谷",
+    });
+    expect(ld.areaServed).toBe("東京・渋谷");
+    expect(ld.brand).toBeUndefined();
+  });
+
+  it("adds a brand object only when brandName is provided, and never mixes brands", () => {
+    const oriental = buildNightClubJsonLd({
+      name: "オリエンタルラウンジ 渋谷本店",
+      url: "https://www.meguribi.jp/store/shibuya",
+      regionLabel: "関東",
+      areaLabel: "東京・渋谷",
+      brandName: "オリエンタルラウンジ",
+    });
+    expect(oriental.brand).toEqual({ "@type": "Brand", name: "オリエンタルラウンジ" });
+
+    const aisekiya = buildNightClubJsonLd({
+      name: "相席屋 渋谷店",
+      url: "https://www.meguribi.jp/store/ay_shibuya",
+      regionLabel: "関東",
+      areaLabel: "東京・渋谷",
+      brandName: "相席屋",
+    });
+    expect(aisekiya.brand).toEqual({ "@type": "Brand", name: "相席屋" });
+    expect(JSON.stringify(aisekiya)).not.toContain("オリエンタルラウンジ");
+    expect(JSON.stringify(oriental)).not.toContain("相席屋");
+  });
 });

@@ -2,13 +2,16 @@ import { cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import {
+  buildStoreBrandName,
   buildStoreFullName,
+  buildStoreTitleName,
   getStoreMetaBySlugStrict,
+  isPercentCrowdBrand,
   STORES,
   type StoreMeta,
 } from "../../config/stores";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
-import { serializeJsonLd } from "@/lib/jsonLd";
+import { buildBreadcrumbList, buildNightClubJsonLd, serializeJsonLd } from "@/lib/jsonLd";
 import {
   RANGE_LIMIT_BY_MODE,
   buildBaseSnapshot,
@@ -313,8 +316,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!meta) notFound();
 
   const fullName = buildStoreFullName(meta);
-  const title = `${fullName}（${meta.areaLabel}）の混雑状況・今夜の混雑予測`;
-  const description = `${fullName}の現在の混雑・男女比をリアルタイム表示。AIが今夜の混雑ピークを時間帯別に予測。毎日18:00と21:30にレポート更新。${meta.regionLabel}エリアで相席するならデータでチェック。`;
+  // モバイルSERPで実質切れる30〜35字の枠内に収めるため、<title>だけは空白無しの短縮表記を使う
+  // （本文・JSON-LDの表記はスペースありの buildStoreFullName のまま変えない）。
+  // ブランド名＋地名（=titleName自体）＋一般語「相席ラウンジ」の順で前半に並べる。
+  const titleName = buildStoreTitleName(meta);
+  const title = `${titleName}の混雑状況｜相席ラウンジの今夜の予測`;
+  // 相席屋は人数非公開（%のみ）。オリエンタルは人数+男女比。実際にページで表示している値のみ書く。
+  const metricLabel = isPercentCrowdBrand(meta.brand)
+    ? "現在の混雑度（％）"
+    : "現在の混雑人数・男女比";
+  const description = `${meta.areaLabel}の相席ラウンジ「${fullName}」。${metricLabel}をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。`;
   const base = getMetadataBaseUrl();
   const url = new URL(`/store/${encodeURIComponent(meta.slug)}`, base);
 
@@ -323,7 +334,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     description,
     alternates: { canonical: url.href },
     openGraph: {
-      title,
+      title: `${title} | めぐりび`,
       description,
       url,
       type: "website",
@@ -331,7 +342,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     },
     twitter: {
       card: "summary_large_image",
-      title,
+      title: `${title} | めぐりび`,
       description,
     },
   };
@@ -348,37 +359,24 @@ export default async function StorePage({ params }: Props) {
   const homeUrl = base.href.replace(/\/+$/, "") || base.href;
   const storesUrl = new URL("/stores", base).href;
 
-  const breadcrumb = {
-    "@context": "https://schema.org",
-    "@type": "BreadcrumbList",
-    itemListElement: [
-      { "@type": "ListItem", position: 1, name: "ホーム", item: homeUrl },
-      { "@type": "ListItem", position: 2, name: "店舗一覧", item: storesUrl },
-      { "@type": "ListItem", position: 3, name: fullName, item: storeUrl },
-    ],
-  };
+  const breadcrumb = buildBreadcrumbList([
+    { name: "ホーム", item: homeUrl },
+    { name: "店舗一覧", item: storesUrl },
+    { name: fullName, item: storeUrl },
+  ]);
 
-  const localBusiness: Record<string, unknown> = {
-    "@context": "https://schema.org",
-    "@type": "NightClub",
+  // addressCountry の判定・areaServed の組み立ては buildNightClubJsonLd 側に一本化済み
+  // （海外(韓国・江南)店のみ KR、それ以外は JP）。brandName は同じ meta から作るため、
+  // ブランドを混同する余地がない。
+  const localBusiness = buildNightClubJsonLd({
     name: fullName,
-    address: {
-      "@type": "PostalAddress",
-      addressRegion: meta.regionLabel,
-      addressLocality: meta.areaLabel,
-      // 海外(韓国・江南)店のみ KR。それ以外は国内 JP。構造化データの国情報を実体に一致させる。
-      addressCountry:
-        meta.regionLabel === "海外" && meta.areaLabel.includes("韓国") ? "KR" : "JP",
-    },
     url: storeUrl,
-  };
-  if (meta.lat != null && meta.lon != null) {
-    localBusiness.geo = {
-      "@type": "GeoCoordinates",
-      latitude: meta.lat,
-      longitude: meta.lon,
-    };
-  }
+    regionLabel: meta.regionLabel,
+    areaLabel: meta.areaLabel,
+    lat: meta.lat,
+    lon: meta.lon,
+    brandName: buildStoreBrandName(meta),
+  });
 
   const jsonLd = serializeJsonLd([breadcrumb, localBusiness]);
 
