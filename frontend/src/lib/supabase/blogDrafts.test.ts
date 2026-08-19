@@ -85,3 +85,114 @@ describe("fetchLatestPublishedReportByStore のクエリ契約", () => {
     expect(row?.mdx_content).toContain("昨夜のレポート");
   });
 });
+
+/**
+ * 番犬テスト（D-08 / C-03）: 各 GET 関数が実際に投げる URL・ヘッダ・キャッシュ指定を丸ごと固定する。
+ * fetch ブロックを共通ヘルパー（restGetRows）へ寄せてもクエリ契約が 1 文字も変わらないことの担保。
+ */
+describe("Supabase REST GET の呼び出し契約（URL・ヘッダ・キャッシュ）", () => {
+  const originalEnv = { ...process.env };
+  let calls: Array<{ url: string; init: Record<string, unknown> }> = [];
+
+  beforeEach(() => {
+    calls = [];
+    process.env.SUPABASE_URL = ENDPOINT_ENV.SUPABASE_URL;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = ENDPOINT_ENV.SUPABASE_SERVICE_ROLE_KEY;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: Record<string, unknown>) => {
+        calls.push({ url, init });
+        return { ok: true, json: async () => [] } as unknown as Response;
+      }),
+    );
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  const EXPECTED_HEADERS = {
+    apikey: "test-key",
+    Authorization: "Bearer test-key",
+    Accept: "application/json",
+  };
+
+  it.each([
+    [
+      "fetchLatestPublishedReportByStore",
+      (m: typeof import("./blogDrafts")) => m.fetchLatestPublishedReportByStore("Shibuya", "weekly"),
+      "https://proj.supabase.co/rest/v1/blog_drafts?select=facts_id,store_slug,target_date,mdx_content,insight_json,source,content_type,edition,public_slug,created_at,updated_at&store_slug=eq.shibuya&content_type=eq.weekly&is_published=eq.true&error_message=is.null&order=target_date.desc,updated_at.desc.nullslast,created_at.desc&limit=1",
+      "no-store",
+    ],
+    [
+      "fetchPublishedEditorialBySlug",
+      (m: typeof import("./blogDrafts")) => m.fetchPublishedEditorialBySlug("My-Post"),
+      "https://proj.supabase.co/rest/v1/blog_drafts?select=facts_id,public_slug,store_slug,target_date,mdx_content,insight_json,source,created_at&public_slug=eq.my-post&content_type=eq.editorial&is_published=eq.true&error_message=is.null&limit=1",
+      "no-store",
+    ],
+    [
+      "fetchAllPublishedEditorialSlugs",
+      (m: typeof import("./blogDrafts")) => m.fetchAllPublishedEditorialSlugs(1000),
+      "https://proj.supabase.co/rest/v1/blog_drafts?select=public_slug,target_date&content_type=eq.editorial&is_published=eq.true&error_message=is.null&public_slug=not.is.null&order=created_at.desc&limit=500",
+      "no-store",
+    ],
+    [
+      "fetchLatestUnpublishedEditorialByLineUser",
+      (m: typeof import("./blogDrafts")) => m.fetchLatestUnpublishedEditorialByLineUser("U123"),
+      "https://proj.supabase.co/rest/v1/blog_drafts?select=facts_id,public_slug,store_slug,target_date&line_user_id=eq.U123&content_type=eq.editorial&is_published=eq.false&error_message=is.null&mdx_content=not.eq.&order=created_at.desc&limit=1",
+      "no-store",
+    ],
+  ])("%s の URL・ヘッダ・cache 指定が固定値と一致する", async (_name, call, expectedUrl, cache) => {
+    const mod = await import("./blogDrafts");
+    await call(mod);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe(expectedUrl);
+    expect(calls[0].init.method).toBe("GET");
+    expect(calls[0].init.cache).toBe(cache);
+    expect(calls[0].init.headers).toEqual(EXPECTED_HEADERS);
+  });
+
+  it("fetchAllLatestPublishedReports だけは no-store ではなく next.revalidate=300 を使う", async () => {
+    const mod = await import("./blogDrafts");
+    await mod.fetchAllLatestPublishedReports("daily", 1000);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe(
+      "https://proj.supabase.co/rest/v1/blog_drafts?select=store_slug,target_date,edition,created_at,mdx_content&content_type=eq.daily&is_published=eq.true&error_message=is.null&mdx_content=not.eq.&order=created_at.desc&limit=200",
+    );
+    expect(calls[0].init.method).toBe("GET");
+    expect(calls[0].init.cache).toBeUndefined();
+    expect(calls[0].init.next).toEqual({ revalidate: 300 });
+    expect(calls[0].init.headers).toEqual(EXPECTED_HEADERS);
+  });
+
+  it("Supabase 未設定なら fetch を一度も呼ばない", async () => {
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    delete process.env.SUPABASE_SERVICE_KEY;
+    const mod = await import("./blogDrafts");
+    expect(await mod.fetchLatestPublishedReportByStore("shibuya", "daily")).toBeNull();
+    expect(await mod.fetchAllPublishedEditorialSlugs()).toEqual([]);
+    expect(await mod.fetchAllLatestPublishedReports("weekly")).toEqual([]);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("fetch が失敗（!ok / 非配列 / 例外）でも null / [] にフォールバックする", async () => {
+    const mod = await import("./blogDrafts");
+
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => [] }) as unknown as Response));
+    expect(await mod.fetchLatestPublishedReportByStore("shibuya", "daily")).toBeNull();
+    expect(await mod.fetchAllPublishedEditorialSlugs()).toEqual([]);
+
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({}) }) as unknown as Response));
+    expect(await mod.fetchPublishedEditorialBySlug("x")).toBeNull();
+    expect(await mod.fetchAllLatestPublishedReports("daily")).toEqual([]);
+
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("network down");
+    }));
+    expect(await mod.fetchLatestUnpublishedEditorialByLineUser("U1")).toBeNull();
+    expect(await mod.fetchAllPublishedEditorialSlugs()).toEqual([]);
+  });
+});

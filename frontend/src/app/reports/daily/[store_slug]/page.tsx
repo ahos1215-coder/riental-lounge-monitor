@@ -10,8 +10,9 @@ import { FactsSummaryCard } from "@/components/blog/FactsSummaryCard";
 import { ReservationLinkCard } from "@/components/ReservationLinkCard";
 import { ReportViewTracker } from "@/components/ReportViewTracker";
 import { readPublicFacts } from "@/lib/blog/publicFacts";
+import { stripFrontmatter } from "@/lib/blog/mdx";
 import { fetchLatestPublishedReportByStore, type PublishedReportRow } from "@/lib/supabase/blogDrafts";
-import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { buildPageMetadata } from "@/lib/seo/pageMetadata";
 import { formatJstTimestamp } from "@/lib/dateFormat";
 
 /** 18:00/21:30 に更新されるので 60 秒ごとに再検証 */
@@ -20,13 +21,6 @@ export const revalidate = 60;
 type Props = {
   params: Promise<{ store_slug: string }>;
 };
-
-function stripFrontmatter(raw: string): string {
-  if (!raw.startsWith("---\n")) return raw;
-  const end = raw.indexOf("\n---\n", 4);
-  if (end < 0) return raw;
-  return raw.slice(end + 5).trimStart();
-}
 
 /**
  * React cache() で同一リクエスト内の generateMetadata / page 呼び出しを重複排除する
@@ -48,27 +42,18 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const label = buildStoreFullName(meta);
   const title = `${label} · Daily Report`;
   const description = `${label} の最新AI予測予報（18:00/21:30更新のうち最新）を表示します。`;
-  const base = getMetadataBaseUrl();
-  return {
+  return buildPageMetadata({
     title,
     description,
+    path: `/reports/daily/${encodeURIComponent(store_slug)}`,
+    ogType: "article",
     // Daily Report は毎日上書きされる速報（SNS/直リンク用）。同じ店の混雑は安定URLの
     // 店舗ページ /store/[slug] が主役なので、Daily は noindex にして検索での重複・
     // クロール浪費を避け、評価を店舗ページに集約する（follow は残しリンクは辿らせる）。
+    // noindex なので canonical は出さない。
+    canonical: false,
     robots: { index: false, follow: true },
-    openGraph: {
-      title: `${title} | めぐりび`,
-      description,
-      url: new URL(`/reports/daily/${encodeURIComponent(store_slug)}`, base),
-      type: "article",
-      locale: "ja_JP",
-    },
-    twitter: {
-      card: "summary_large_image",
-      title: `${title} | めぐりび`,
-      description,
-    },
-  };
+  });
 }
 
 export default async function DailyReportStorePage({ params }: Props) {

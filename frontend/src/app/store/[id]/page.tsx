@@ -11,6 +11,7 @@ import {
   type StoreMeta,
 } from "../../config/stores";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { buildPageMetadata } from "@/lib/seo/pageMetadata";
 import { buildBreadcrumbList, buildNightClubJsonLd, serializeJsonLd } from "@/lib/jsonLd";
 import {
   RANGE_LIMIT_BY_MODE,
@@ -328,26 +329,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     ? "現在の混雑度（％）"
     : "現在の混雑人数・男女比";
   const description = `${meta.areaLabel}の相席ラウンジ「${fullName}」。${metricLabel}をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。`;
-  const base = getMetadataBaseUrl();
-  const url = new URL(`/store/${encodeURIComponent(meta.slug)}`, base);
 
-  return {
+  return buildPageMetadata({
     title,
     description,
-    alternates: { canonical: url.href },
-    openGraph: {
-      title: `${title} | めぐりび`,
-      description,
-      url,
-      type: "website",
-      locale: "ja_JP",
-    },
-    twitter: {
-      card: "summary_large_image",
-      title: `${title} | めぐりび`,
-      description,
-    },
-  };
+    path: `/store/${encodeURIComponent(meta.slug)}`,
+  });
 }
 
 export default async function StorePage({ params }: Props) {

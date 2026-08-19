@@ -162,7 +162,7 @@ npm run dev
 3. **緊急時に GHA `workflow_dispatch` を使う場合の Secrets**: GitHub → Repository → **Settings → Secrets and variables → Actions** に **`CRON_SECRET`** と **`VERCEL_BLOG_CRON_BASE_URL`**（本番の `https://...vercel.app`、末尾スラッシュなし）があるか。
 4. **Actions の実行ログ**: 補助情報。失敗時は `curl` の HTTP ステータス・Vercel 関数ログ（401 なら `CRON_SECRET` 不一致）。
 5. **一部店舗だけ失敗したとき（GHA 経路使用時）**: **Actions → Retry blog draft (selected stores)** で `stores` に slug をカンマ区切り指定して再実行（`plan/BLOG_CRON_GHA.md`）。
-6. **Vercel の古い Cron**: 過去に Vercel Cron を有効にしていた場合、ダッシュボード **Settings → Cron Jobs** に古いジョブが残っていれば **削除**（コード側は `vercel.json` なし）。
+6. **Vercel の古い Cron**: 過去に Vercel Cron を有効にしていた場合、ダッシュボード **Settings → Cron Jobs** に古いジョブが残っていれば **削除**（コード側の `frontend/vercel.json` は `ignoreCommand` 専用で `crons` を持たない）。
 
 **通常運用の正本**は **`docs/LOCAL_LLM_SETUP.md`**。**緊急時 GHA 手順・Secrets**は **`plan/BLOG_CRON_GHA.md`**。監視の要約・再実行の入口は **`STATUS.md`**（リポジトリ直下）。同期 HTTP の限界を超える場合の将来案は **`plan/BLOG_CRON_ASYNC_FUTURE.md`**。
 

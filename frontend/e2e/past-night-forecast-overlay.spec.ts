@@ -1,4 +1,10 @@
 import { test, expect, type Page } from "./fixtures";
+import {
+  jstNightBaseYmd,
+  nightActualRows,
+  stubEmptyForecastToday,
+  stubNonCriticalApis,
+} from "./helpers/storePageStubs";
 
 /**
  * 完了済みの夜（昨日/先週/カスタム過去日、または「今日」モードで既に夜が終わった場合）に、
@@ -7,42 +13,17 @@ import { test, expect, type Page } from "./fixtures";
  *
  * バックエンド（Flask）には到達せず、Next.js の API ルート（/api/range・
  * /api/forecast_snapshot・/api/forecast_today）を Playwright の route stub で
- * 差し替える。next build && next start（本番ビルド）に対して実行し、ネットワーク・
- * バックエンドの状態に依存せず「実測(実線)＋予測(点線)が両方描画されること」を
+ * 差し替える。playwright.config.ts の webServer（既定は `npm run dev`）に対して実行し、
+ * ネットワーク・バックエンドの状態に依存せず「実測(実線)＋予測(点線)が両方描画されること」を
  * 決定論的に検証する。
  */
 
 const STORE = "nagasaki";
 
-// JST 夜日付（YYYY-MM-DD, 19:00 始まり）を N 日前で得る。フロントの
-// computeNightBaseDate と同じ「19時未満なら前日」ロジックを近似する。
-function jstNightBaseYmd(daysAgo: number): string {
-  const now = new Date();
-  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  if (jst.getUTCHours() < 19) {
-    jst.setUTCDate(jst.getUTCDate() - 1);
-  }
-  jst.setUTCDate(jst.getUTCDate() - daysAgo);
-  const y = jst.getUTCFullYear();
-  const m = String(jst.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(jst.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
 // "YYYYMMDD" -> "YYYY-MM-DD"
 function compactToYmd(compact: string): string {
   if (!/^\d{8}$/.test(compact)) return jstNightBaseYmd(1);
   return `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`;
-}
-
-function nightActualRows(baseYmd: string) {
-  const rows: { ts: string; men: number; women: number; total: number }[] = [];
-  const start = new Date(`${baseYmd}T19:00:00+09:00`);
-  for (let i = 0; i <= 40; i += 1) {
-    const t = new Date(start.getTime() + i * 15 * 60 * 1000);
-    rows.push({ ts: t.toISOString(), men: 10 + i, women: 20 + i, total: 30 + 2 * i });
-  }
-  return rows;
 }
 
 // 予測スナップショット（answer-check overlay）用: 実測とは少し違う値にして
@@ -91,24 +72,10 @@ async function stubApis(page: Page) {
 
   // 進行中の「今日」用（テスト実行時刻によってはこちらが叩かれるケースもあるため、
   // 空でも壊れないダミーを用意しておく）。
-  await page.route("**/api/forecast_today?**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ ok: true, data: [] }),
-    });
-  });
+  await stubEmptyForecastToday(page);
 
   // その他の非クリティカル API はテスト対象外なので空で満たす。
-  await page.route("**/api/reports/store-summary?**", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, weekly: null }) }),
-  );
-  await page.route("**/api/range_multi?**", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, by_slug: {} }) }),
-  );
-  await page.route("**/api/forecast_accuracy?**", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }),
-  );
+  await stubNonCriticalApis(page);
 }
 
 type LineInfo = { hasGeometry: boolean; dashed: boolean };

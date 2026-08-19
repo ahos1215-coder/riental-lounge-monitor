@@ -104,4 +104,4 @@ Target commit: (see git)
 
 - **`/blog/auto-[store]-[slot]` URL**: `/reports/daily/[store_slug]` に移行済み
 - **`autoCards`（blog/page.tsx 内の自動更新カード表示）**: 削除済み。AI 予測レポートへの誘導バナーに置き換え
-- **ブログページでの daily 下書き一覧表示**: `fetchLatestAutoBlogDrafts` は UI から除去済み
+- **ブログページでの daily 下書き一覧表示**: `fetchLatestAutoBlogDrafts` は UI から除去し、関数自体も 2026-08-19 に削除済み

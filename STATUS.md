@@ -1,5 +1,12 @@
 # STATUS（定時ブログ Cron / 運用）
 
+> **【重要・2026-08-19 追記】このファイルは「GHA を主経路にしていた頃（〜2026-07）」の運用メモ。**
+> 現在の Daily / Weekly レポートの主経路は **オーナー PC の Task Scheduler + ローカル Ollama** で、
+> `trigger-blog-cron.yml` の `schedule:` はコメントアウト済み（`workflow_dispatch` のみの緊急時経路）。
+> **稼働実態の正本は `CLAUDE.md` §1-2**、緊急時の GHA 手順は `plan/BLOG_CRON_GHA.md`、
+> ローカル経路の正本は `docs/LOCAL_LLM_SETUP.md`。
+> 以下の「成功の定義（Supabase `blog_drafts` が正本）」と監視手順は経路によらず今も有効。
+
 ## 成功の定義（チーム共通）
 
 - **GitHub Actions の緑／赤だけで「成功」とはみなさない。**
@@ -24,11 +31,11 @@
 3. **stores** に、カンマ区切りで slug のみ（例: `nagasaki,fukuoka`）。空白は無視される。
 4. 実行後、再度 **Supabase `blog_drafts`** で当該店舗を確認する。
 
-全 38 店の定時実行は **Blog draft cron (GitHub Actions)**（`.github/workflows/trigger-blog-cron.yml`）。GHA native schedule（UTC 09:00 / 12:30）で自動起動。cron-job.org は不要。
+GHA 経由での実行は **Blog draft cron (GitHub Actions)**（`.github/workflows/trigger-blog-cron.yml`、matrix はオリエンタル 37 店）。**`schedule:` はコメントアウト済みで自動起動はしない**（`workflow_dispatch` 専用の緊急時経路）。通常の 18:00 / 21:30 便はオーナー PC の Task Scheduler が `scripts/local_report_job.py` を走らせる。なお cron-job.org は 5 分毎の混雑データ収集（`/tasks/multi_collect`）で現役。
 
 ## 定時 Cron 実行後のチェックリスト（初回・ワークフロー変更直後）
 
-**いつ**: JST **18:00 便**または **21:30 便**の直後（GHA schedule 自動起動、もしくは **`workflow_dispatch`** で全店を手動実行した直後）。
+**いつ**: JST **18:00 便**または **21:30 便**の直後に **`workflow_dispatch`** で GHA を手動実行したとき（schedule 自動起動は無効化済み）。
 
 1. **GitHub** → **Actions** → **Blog draft cron (GitHub Actions)** → いま完了した **run** を開く。
 2. **ジョブ一覧**で次を確認する。

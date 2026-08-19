@@ -1,0 +1,1335 @@
+{
+ "/": {
+  "title": "めぐりび | 相席ラウンジの混雑予測・リアルタイム人数",
+  "description": "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測し、ベストな来店タイミングの参考をお届けします。国内41・海外1の計42店舗対応。",
+  "alternates": {
+   "canonical": "http://localhost:3000/"
+  },
+  "openGraph": {
+   "title": "めぐりび | 相席ラウンジの混雑予測・リアルタイム人数",
+   "description": "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測し、ベストな来店タイミングの参考をお届けします。",
+   "url": "http://localhost:3000/",
+   "type": "website"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "めぐりび | 相席ラウンジの混雑予測",
+   "description": "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測。国内41・海外1の計42店舗対応。"
+  }
+ },
+ "/stores": {
+  "title": "全42店舗の混雑状況を一覧比較",
+  "description": "オリエンタルラウンジ37店舗・相席屋5店舗、全42店舗の現在の混雑状況・男女比を一覧で比較できます。エリアやブランドで絞り込んで、今夜行くお店を選べます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/stores"
+  },
+  "openGraph": {
+   "title": "全42店舗の混雑状況を一覧比較 | めぐりび",
+   "description": "オリエンタルラウンジ37店舗・相席屋5店舗、全42店舗の現在の混雑状況・男女比を一覧で比較できます。エリアやブランドで絞り込んで、今夜行くお店を選べます。",
+   "url": "http://localhost:3000/stores",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "全42店舗の混雑状況を一覧比較 | めぐりび",
+   "description": "オリエンタルラウンジ37店舗・相席屋5店舗、全42店舗の現在の混雑状況・男女比を一覧で比較できます。エリアやブランドで絞り込んで、今夜行くお店を選べます。"
+  }
+ },
+ "/reports": {
+  "title": "AI予測レポート（Daily / Weekly）",
+  "description": "オリエンタルラウンジ全店舗のAI予測レポートを一覧で確認。毎日自動更新のDaily Reportと毎週水曜のWeekly Reportを、エリア・店舗名で素早く探せます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/reports"
+  },
+  "openGraph": {
+   "title": "AI予測レポート | めぐりび",
+   "description": "全店舗のAI予測レポートをDaily/Weeklyで一覧確認。",
+   "url": "http://localhost:3000/reports",
+   "type": "website"
+  }
+ },
+ "/mypage": {
+  "title": "マイページ",
+  "description": "お気に入り店舗・最近見た店舗（このブラウザに保存）。店舗一覧・ブログ・週次 Insights へのショートカット。",
+  "openGraph": {
+   "title": "マイページ | めぐりび",
+   "description": "お気に入り・閲覧履歴（端末内）と主要ページへのリンク。",
+   "url": "http://localhost:3000/mypage",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "マイページ | めぐりび",
+   "description": "お気に入り・閲覧履歴（端末内）と主要ページへのリンク。"
+  }
+ },
+ "/compare": {
+  "title": "店舗比較",
+  "description": "オリエンタルラウンジの店舗を並べて比較。リアルタイムの混雑状況・男女比をチェック。",
+  "openGraph": {
+   "title": "店舗比較 | めぐりび",
+   "description": "店舗を並べて混雑状況・男女比を比較します。",
+   "url": "http://localhost:3000/compare",
+   "type": "website",
+   "locale": "ja_JP"
+  }
+ },
+ "/store/nagasaki": {
+  "title": "オリエンタルラウンジ長崎の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "長崎・浜んまちの相席ラウンジ「オリエンタルラウンジ 長崎」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/nagasaki"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ長崎の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "長崎・浜んまちの相席ラウンジ「オリエンタルラウンジ 長崎」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/nagasaki",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ長崎の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "長崎・浜んまちの相席ラウンジ「オリエンタルラウンジ 長崎」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/fukuoka": {
+  "title": "オリエンタルラウンジ福岡の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "福岡・天神の相席ラウンジ「オリエンタルラウンジ 福岡」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/fukuoka"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ福岡の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "福岡・天神の相席ラウンジ「オリエンタルラウンジ 福岡」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/fukuoka",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ福岡の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "福岡・天神の相席ラウンジ「オリエンタルラウンジ 福岡」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/kokura": {
+  "title": "オリエンタルラウンジ小倉の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "北九州・小倉の相席ラウンジ「オリエンタルラウンジ 小倉」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/kokura"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ小倉の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "北九州・小倉の相席ラウンジ「オリエンタルラウンジ 小倉」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/kokura",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ小倉の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "北九州・小倉の相席ラウンジ「オリエンタルラウンジ 小倉」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/oita": {
+  "title": "オリエンタルラウンジ大分の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "大分の相席ラウンジ「オリエンタルラウンジ 大分」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/oita"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ大分の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "大分の相席ラウンジ「オリエンタルラウンジ 大分」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/oita",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ大分の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "大分の相席ラウンジ「オリエンタルラウンジ 大分」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/kumamoto": {
+  "title": "オリエンタルラウンジ熊本の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "熊本の相席ラウンジ「オリエンタルラウンジ 熊本」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/kumamoto"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ熊本の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "熊本の相席ラウンジ「オリエンタルラウンジ 熊本」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/kumamoto",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ熊本の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "熊本の相席ラウンジ「オリエンタルラウンジ 熊本」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/miyazaki": {
+  "title": "オリエンタルラウンジ宮崎の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "宮崎の相席ラウンジ「オリエンタルラウンジ 宮崎」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/miyazaki"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ宮崎の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "宮崎の相席ラウンジ「オリエンタルラウンジ 宮崎」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/miyazaki",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ宮崎の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "宮崎の相席ラウンジ「オリエンタルラウンジ 宮崎」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/kagoshima": {
+  "title": "オリエンタルラウンジ鹿児島の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "鹿児島の相席ラウンジ「オリエンタルラウンジ 鹿児島」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/kagoshima"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ鹿児島の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "鹿児島の相席ラウンジ「オリエンタルラウンジ 鹿児島」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/kagoshima",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ鹿児島の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "鹿児島の相席ラウンジ「オリエンタルラウンジ 鹿児島」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/okinawa_ag": {
+  "title": "オリエンタルラウンジ沖縄AGの混雑状況｜相席ラウンジの今夜の予測",
+  "description": "沖縄・国際通りの相席ラウンジ「オリエンタルラウンジ 沖縄AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/okinawa_ag"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ沖縄AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "沖縄・国際通りの相席ラウンジ「オリエンタルラウンジ 沖縄AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/okinawa_ag",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ沖縄AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "沖縄・国際通りの相席ラウンジ「オリエンタルラウンジ 沖縄AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/gangnam": {
+  "title": "オリエンタルラウンジソウル カンナムの混雑状況｜相席ラウンジの今夜の予測",
+  "description": "韓国・江南の相席ラウンジ「オリエンタルラウンジ ソウル カンナム」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/gangnam"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジソウル カンナムの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "韓国・江南の相席ラウンジ「オリエンタルラウンジ ソウル カンナム」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/gangnam",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジソウル カンナムの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "韓国・江南の相席ラウンジ「オリエンタルラウンジ ソウル カンナム」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/sendai_ag": {
+  "title": "オリエンタルラウンジ仙台AGの混雑状況｜相席ラウンジの今夜の予測",
+  "description": "宮城・仙台の相席ラウンジ「オリエンタルラウンジ 仙台AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/sendai_ag"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ仙台AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "宮城・仙台の相席ラウンジ「オリエンタルラウンジ 仙台AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/sendai_ag",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ仙台AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "宮城・仙台の相席ラウンジ「オリエンタルラウンジ 仙台AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/shibuya": {
+  "title": "オリエンタルラウンジ渋谷本店の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "東京・渋谷の相席ラウンジ「オリエンタルラウンジ 渋谷本店」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/shibuya"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ渋谷本店の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・渋谷の相席ラウンジ「オリエンタルラウンジ 渋谷本店」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/shibuya",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ渋谷本店の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・渋谷の相席ラウンジ「オリエンタルラウンジ 渋谷本店」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/ebisu": {
+  "title": "オリエンタルラウンジ恵比寿の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "東京・恵比寿の相席ラウンジ「オリエンタルラウンジ 恵比寿」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/ebisu"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ恵比寿の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・恵比寿の相席ラウンジ「オリエンタルラウンジ 恵比寿」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/ebisu",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ恵比寿の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・恵比寿の相席ラウンジ「オリエンタルラウンジ 恵比寿」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/shibuya_ag": {
+  "title": "オリエンタルラウンジ渋谷AGの混雑状況｜相席ラウンジの今夜の予測",
+  "description": "東京・渋谷の相席ラウンジ「オリエンタルラウンジ 渋谷AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/shibuya_ag"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ渋谷AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・渋谷の相席ラウンジ「オリエンタルラウンジ 渋谷AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/shibuya_ag",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ渋谷AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・渋谷の相席ラウンジ「オリエンタルラウンジ 渋谷AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/shinjuku": {
+  "title": "オリエンタルラウンジ新宿の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "東京・新宿の相席ラウンジ「オリエンタルラウンジ 新宿」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/shinjuku"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ新宿の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・新宿の相席ラウンジ「オリエンタルラウンジ 新宿」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/shinjuku",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ新宿の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・新宿の相席ラウンジ「オリエンタルラウンジ 新宿」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/ueno": {
+  "title": "オリエンタルラウンジ上野の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "東京・上野の相席ラウンジ「オリエンタルラウンジ 上野」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/ueno"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ上野の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・上野の相席ラウンジ「オリエンタルラウンジ 上野」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/ueno",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ上野の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・上野の相席ラウンジ「オリエンタルラウンジ 上野」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/ueno_ag": {
+  "title": "オリエンタルラウンジ上野AGの混雑状況｜相席ラウンジの今夜の予測",
+  "description": "東京・上野の相席ラウンジ「オリエンタルラウンジ 上野AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/ueno_ag"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ上野AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・上野の相席ラウンジ「オリエンタルラウンジ 上野AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/ueno_ag",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ上野AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・上野の相席ラウンジ「オリエンタルラウンジ 上野AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/kashiwa": {
+  "title": "オリエンタルラウンジ柏の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "千葉・柏の相席ラウンジ「オリエンタルラウンジ 柏」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/kashiwa"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ柏の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "千葉・柏の相席ラウンジ「オリエンタルラウンジ 柏」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/kashiwa",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ柏の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "千葉・柏の相席ラウンジ「オリエンタルラウンジ 柏」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/machida": {
+  "title": "オリエンタルラウンジ町田の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "東京・町田の相席ラウンジ「オリエンタルラウンジ 町田」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/machida"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ町田の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・町田の相席ラウンジ「オリエンタルラウンジ 町田」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/machida",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ町田の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・町田の相席ラウンジ「オリエンタルラウンジ 町田」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/yokohama": {
+  "title": "オリエンタルラウンジ横浜の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "神奈川・横浜の相席ラウンジ「オリエンタルラウンジ 横浜」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/yokohama"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ横浜の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "神奈川・横浜の相席ラウンジ「オリエンタルラウンジ 横浜」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/yokohama",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ横浜の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "神奈川・横浜の相席ラウンジ「オリエンタルラウンジ 横浜」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/omiya": {
+  "title": "オリエンタルラウンジ大宮の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "埼玉・大宮の相席ラウンジ「オリエンタルラウンジ 大宮」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/omiya"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ大宮の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "埼玉・大宮の相席ラウンジ「オリエンタルラウンジ 大宮」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/omiya",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ大宮の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "埼玉・大宮の相席ラウンジ「オリエンタルラウンジ 大宮」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/utsunomiya": {
+  "title": "オリエンタルラウンジ宇都宮の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "栃木・宇都宮の相席ラウンジ「オリエンタルラウンジ 宇都宮」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/utsunomiya"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ宇都宮の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "栃木・宇都宮の相席ラウンジ「オリエンタルラウンジ 宇都宮」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/utsunomiya",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ宇都宮の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "栃木・宇都宮の相席ラウンジ「オリエンタルラウンジ 宇都宮」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/takasaki": {
+  "title": "オリエンタルラウンジ高崎の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "群馬・高崎の相席ラウンジ「オリエンタルラウンジ 高崎」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/takasaki"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ高崎の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "群馬・高崎の相席ラウンジ「オリエンタルラウンジ 高崎」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/takasaki",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ高崎の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "群馬・高崎の相席ラウンジ「オリエンタルラウンジ 高崎」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/nagoya_ag": {
+  "title": "オリエンタルラウンジ名古屋AGの混雑状況｜相席ラウンジの今夜の予測",
+  "description": "愛知・名古屋の相席ラウンジ「オリエンタルラウンジ 名古屋AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/nagoya_ag"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ名古屋AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "愛知・名古屋の相席ラウンジ「オリエンタルラウンジ 名古屋AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/nagoya_ag",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ名古屋AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "愛知・名古屋の相席ラウンジ「オリエンタルラウンジ 名古屋AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/nagoya_nishiki": {
+  "title": "オリエンタルラウンジ名古屋 錦の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "愛知・名古屋 錦の相席ラウンジ「オリエンタルラウンジ 名古屋 錦」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/nagoya_nishiki"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ名古屋 錦の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "愛知・名古屋 錦の相席ラウンジ「オリエンタルラウンジ 名古屋 錦」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/nagoya_nishiki",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ名古屋 錦の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "愛知・名古屋 錦の相席ラウンジ「オリエンタルラウンジ 名古屋 錦」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/nagoya_sakae": {
+  "title": "オリエンタルラウンジ名古屋 栄の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "愛知・名古屋 栄の相席ラウンジ「オリエンタルラウンジ 名古屋 栄」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/nagoya_sakae"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ名古屋 栄の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "愛知・名古屋 栄の相席ラウンジ「オリエンタルラウンジ 名古屋 栄」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/nagoya_sakae",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ名古屋 栄の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "愛知・名古屋 栄の相席ラウンジ「オリエンタルラウンジ 名古屋 栄」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/shizuoka": {
+  "title": "オリエンタルラウンジ静岡の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "静岡の相席ラウンジ「オリエンタルラウンジ 静岡」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/shizuoka"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ静岡の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "静岡の相席ラウンジ「オリエンタルラウンジ 静岡」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/shizuoka",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ静岡の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "静岡の相席ラウンジ「オリエンタルラウンジ 静岡」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/hamamatsu": {
+  "title": "オリエンタルラウンジ浜松の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "静岡・浜松の相席ラウンジ「オリエンタルラウンジ 浜松」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/hamamatsu"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ浜松の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "静岡・浜松の相席ラウンジ「オリエンタルラウンジ 浜松」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/hamamatsu",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ浜松の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "静岡・浜松の相席ラウンジ「オリエンタルラウンジ 浜松」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/kanazawa_ag": {
+  "title": "オリエンタルラウンジ金沢AGの混雑状況｜相席ラウンジの今夜の予測",
+  "description": "石川・金沢の相席ラウンジ「オリエンタルラウンジ 金沢AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/kanazawa_ag"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ金沢AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "石川・金沢の相席ラウンジ「オリエンタルラウンジ 金沢AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/kanazawa_ag",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ金沢AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "石川・金沢の相席ラウンジ「オリエンタルラウンジ 金沢AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/osaka_ekimae": {
+  "title": "オリエンタルラウンジ大阪駅前の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "大阪・梅田の相席ラウンジ「オリエンタルラウンジ 大阪駅前」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/osaka_ekimae"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ大阪駅前の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "大阪・梅田の相席ラウンジ「オリエンタルラウンジ 大阪駅前」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/osaka_ekimae",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ大阪駅前の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "大阪・梅田の相席ラウンジ「オリエンタルラウンジ 大阪駅前」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/umeda_ag": {
+  "title": "オリエンタルラウンジ梅田AGの混雑状況｜相席ラウンジの今夜の予測",
+  "description": "大阪・梅田の相席ラウンジ「オリエンタルラウンジ 梅田AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/umeda_ag"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ梅田AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "大阪・梅田の相席ラウンジ「オリエンタルラウンジ 梅田AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/umeda_ag",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ梅田AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "大阪・梅田の相席ラウンジ「オリエンタルラウンジ 梅田AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/tenma": {
+  "title": "オリエンタルラウンジ天満の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "大阪・天満の相席ラウンジ「オリエンタルラウンジ 天満」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/tenma"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ天満の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "大阪・天満の相席ラウンジ「オリエンタルラウンジ 天満」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/tenma",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ天満の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "大阪・天満の相席ラウンジ「オリエンタルラウンジ 天満」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/shinsaibashi": {
+  "title": "オリエンタルラウンジ心斎橋の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "大阪・心斎橋の相席ラウンジ「オリエンタルラウンジ 心斎橋」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/shinsaibashi"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ心斎橋の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "大阪・心斎橋の相席ラウンジ「オリエンタルラウンジ 心斎橋」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/shinsaibashi",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ心斎橋の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "大阪・心斎橋の相席ラウンジ「オリエンタルラウンジ 心斎橋」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/namba": {
+  "title": "オリエンタルラウンジ難波の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "大阪・難波の相席ラウンジ「オリエンタルラウンジ 難波」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/namba"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ難波の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "大阪・難波の相席ラウンジ「オリエンタルラウンジ 難波」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/namba",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ難波の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "大阪・難波の相席ラウンジ「オリエンタルラウンジ 難波」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/kyoto": {
+  "title": "オリエンタルラウンジ京都の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "京都・河原町の相席ラウンジ「オリエンタルラウンジ 京都」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/kyoto"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ京都の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "京都・河原町の相席ラウンジ「オリエンタルラウンジ 京都」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/kyoto",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ京都の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "京都・河原町の相席ラウンジ「オリエンタルラウンジ 京都」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/kobe": {
+  "title": "オリエンタルラウンジ神戸の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "兵庫・三宮の相席ラウンジ「オリエンタルラウンジ 神戸」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/kobe"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ神戸の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "兵庫・三宮の相席ラウンジ「オリエンタルラウンジ 神戸」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/kobe",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ神戸の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "兵庫・三宮の相席ラウンジ「オリエンタルラウンジ 神戸」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/okayama": {
+  "title": "オリエンタルラウンジ岡山の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "岡山の相席ラウンジ「オリエンタルラウンジ 岡山」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/okayama"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ岡山の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "岡山の相席ラウンジ「オリエンタルラウンジ 岡山」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/okayama",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ岡山の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "岡山の相席ラウンジ「オリエンタルラウンジ 岡山」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/hiroshima_ag": {
+  "title": "オリエンタルラウンジ広島AGの混雑状況｜相席ラウンジの今夜の予測",
+  "description": "広島・流川の相席ラウンジ「オリエンタルラウンジ 広島AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/hiroshima_ag"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ広島AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "広島・流川の相席ラウンジ「オリエンタルラウンジ 広島AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/hiroshima_ag",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ広島AGの混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "広島・流川の相席ラウンジ「オリエンタルラウンジ 広島AG」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/ay_shibuya": {
+  "title": "相席屋渋谷店の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "東京・渋谷の相席ラウンジ「相席屋 渋谷店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/ay_shibuya"
+  },
+  "openGraph": {
+   "title": "相席屋渋谷店の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・渋谷の相席ラウンジ「相席屋 渋谷店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/ay_shibuya",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "相席屋渋谷店の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・渋谷の相席ラウンジ「相席屋 渋谷店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/ay_ikebukuro": {
+  "title": "相席屋池袋東口店の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "東京・池袋の相席ラウンジ「相席屋 池袋東口店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/ay_ikebukuro"
+  },
+  "openGraph": {
+   "title": "相席屋池袋東口店の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・池袋の相席ラウンジ「相席屋 池袋東口店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/ay_ikebukuro",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "相席屋池袋東口店の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・池袋の相席ラウンジ「相席屋 池袋東口店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/ay_ueno": {
+  "title": "相席屋上野店の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "東京・上野の相席ラウンジ「相席屋 上野店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/ay_ueno"
+  },
+  "openGraph": {
+   "title": "相席屋上野店の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・上野の相席ラウンジ「相席屋 上野店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/ay_ueno",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "相席屋上野店の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "東京・上野の相席ラウンジ「相席屋 上野店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/ay_chiba": {
+  "title": "相席屋千葉中央店の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "千葉・中央の相席ラウンジ「相席屋 千葉中央店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/ay_chiba"
+  },
+  "openGraph": {
+   "title": "相席屋千葉中央店の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "千葉・中央の相席ラウンジ「相席屋 千葉中央店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/ay_chiba",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "相席屋千葉中央店の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "千葉・中央の相席ラウンジ「相席屋 千葉中央店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/store/ay_yokohama": {
+  "title": "相席屋横浜西口店の混雑状況｜相席ラウンジの今夜の予測",
+  "description": "神奈川・横浜の相席ラウンジ「相席屋 横浜西口店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/store/ay_yokohama"
+  },
+  "openGraph": {
+   "title": "相席屋横浜西口店の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "神奈川・横浜の相席ラウンジ「相席屋 横浜西口店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",
+   "url": "http://localhost:3000/store/ay_yokohama",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "相席屋横浜西口店の混雑状況｜相席ラウンジの今夜の予測 | めぐりび",
+   "description": "神奈川・横浜の相席ラウンジ「相席屋 横浜西口店」。現在の混雑度（％）をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。"
+  }
+ },
+ "/area/osaka": {
+  "title": "大阪の相席ラウンジ 混雑状況・今夜の予測",
+  "description": "大阪エリアの相席ラウンジ5店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/area/osaka"
+  },
+  "openGraph": {
+   "title": "大阪の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "大阪エリアの相席ラウンジ5店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+   "url": "http://localhost:3000/area/osaka",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "大阪の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "大阪エリアの相席ラウンジ5店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。"
+  }
+ },
+ "/area/nagoya": {
+  "title": "名古屋の相席ラウンジ 混雑状況・今夜の予測",
+  "description": "名古屋エリアの相席ラウンジ3店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/area/nagoya"
+  },
+  "openGraph": {
+   "title": "名古屋の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "名古屋エリアの相席ラウンジ3店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+   "url": "http://localhost:3000/area/nagoya",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "名古屋の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "名古屋エリアの相席ラウンジ3店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。"
+  }
+ },
+ "/area/shibuya": {
+  "title": "渋谷の相席ラウンジ 混雑状況・今夜の予測",
+  "description": "渋谷エリアの相席ラウンジ3店舗（オリエンタルラウンジ・相席屋）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/area/shibuya"
+  },
+  "openGraph": {
+   "title": "渋谷の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "渋谷エリアの相席ラウンジ3店舗（オリエンタルラウンジ・相席屋）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+   "url": "http://localhost:3000/area/shibuya",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "渋谷の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "渋谷エリアの相席ラウンジ3店舗（オリエンタルラウンジ・相席屋）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。"
+  }
+ },
+ "/area/ueno": {
+  "title": "上野の相席ラウンジ 混雑状況・今夜の予測",
+  "description": "上野エリアの相席ラウンジ3店舗（オリエンタルラウンジ・相席屋）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/area/ueno"
+  },
+  "openGraph": {
+   "title": "上野の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "上野エリアの相席ラウンジ3店舗（オリエンタルラウンジ・相席屋）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+   "url": "http://localhost:3000/area/ueno",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "上野の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "上野エリアの相席ラウンジ3店舗（オリエンタルラウンジ・相席屋）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。"
+  }
+ },
+ "/area/yokohama": {
+  "title": "横浜の相席ラウンジ 混雑状況・今夜の予測",
+  "description": "横浜エリアの相席ラウンジ2店舗（オリエンタルラウンジ・相席屋）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/area/yokohama"
+  },
+  "openGraph": {
+   "title": "横浜の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "横浜エリアの相席ラウンジ2店舗（オリエンタルラウンジ・相席屋）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+   "url": "http://localhost:3000/area/yokohama",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "横浜の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "横浜エリアの相席ラウンジ2店舗（オリエンタルラウンジ・相席屋）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。"
+  }
+ },
+ "/area/shizuoka": {
+  "title": "静岡の相席ラウンジ 混雑状況・今夜の予測",
+  "description": "静岡エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/area/shizuoka"
+  },
+  "openGraph": {
+   "title": "静岡の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "静岡エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+   "url": "http://localhost:3000/area/shizuoka",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "静岡の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "静岡エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。"
+  }
+ },
+ "/area/hamamatsu": {
+  "title": "浜松の相席ラウンジ 混雑状況・今夜の予測",
+  "description": "浜松エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/area/hamamatsu"
+  },
+  "openGraph": {
+   "title": "浜松の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "浜松エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+   "url": "http://localhost:3000/area/hamamatsu",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "浜松の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "浜松エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。"
+  }
+ },
+ "/area/machida": {
+  "title": "町田の相席ラウンジ 混雑状況・今夜の予測",
+  "description": "町田エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/area/machida"
+  },
+  "openGraph": {
+   "title": "町田の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "町田エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+   "url": "http://localhost:3000/area/machida",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "町田の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "町田エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。"
+  }
+ },
+ "/area/kokura": {
+  "title": "小倉の相席ラウンジ 混雑状況・今夜の予測",
+  "description": "小倉エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/area/kokura"
+  },
+  "openGraph": {
+   "title": "小倉の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "小倉エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+   "url": "http://localhost:3000/area/kokura",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "小倉の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "小倉エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。"
+  }
+ },
+ "/area/kobe": {
+  "title": "神戸の相席ラウンジ 混雑状況・今夜の予測",
+  "description": "神戸エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/area/kobe"
+  },
+  "openGraph": {
+   "title": "神戸の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "神戸エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+   "url": "http://localhost:3000/area/kobe",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "神戸の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "神戸エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。"
+  }
+ },
+ "/area/kumamoto": {
+  "title": "熊本の相席ラウンジ 混雑状況・今夜の予測",
+  "description": "熊本エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/area/kumamoto"
+  },
+  "openGraph": {
+   "title": "熊本の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "熊本エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+   "url": "http://localhost:3000/area/kumamoto",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "熊本の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "熊本エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。"
+  }
+ },
+ "/area/oita": {
+  "title": "大分の相席ラウンジ 混雑状況・今夜の予測",
+  "description": "大分エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/area/oita"
+  },
+  "openGraph": {
+   "title": "大分の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "大分エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+   "url": "http://localhost:3000/area/oita",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "大分の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "大分エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。"
+  }
+ },
+ "/area/takasaki": {
+  "title": "高崎の相席ラウンジ 混雑状況・今夜の予測",
+  "description": "高崎エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/area/takasaki"
+  },
+  "openGraph": {
+   "title": "高崎の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "高崎エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+   "url": "http://localhost:3000/area/takasaki",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "高崎の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "高崎エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。"
+  }
+ },
+ "/area/nagasaki": {
+  "title": "長崎の相席ラウンジ 混雑状況・今夜の予測",
+  "description": "長崎エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+  "alternates": {
+   "canonical": "http://localhost:3000/area/nagasaki"
+  },
+  "openGraph": {
+   "title": "長崎の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "長崎エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。",
+   "url": "http://localhost:3000/area/nagasaki",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "長崎の相席ラウンジ 混雑状況・今夜の予測 | めぐりび",
+   "description": "長崎エリアの相席ラウンジ1店舗（オリエンタルラウンジ）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。"
+  }
+ },
+ "/reports/daily/shibuya": {
+  "title": "オリエンタルラウンジ 渋谷本店 · Daily Report",
+  "description": "オリエンタルラウンジ 渋谷本店 の最新AI予測予報（18:00/21:30更新のうち最新）を表示します。",
+  "robots": {
+   "index": false,
+   "follow": true
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ 渋谷本店 · Daily Report | めぐりび",
+   "description": "オリエンタルラウンジ 渋谷本店 の最新AI予測予報（18:00/21:30更新のうち最新）を表示します。",
+   "url": "http://localhost:3000/reports/daily/shibuya",
+   "type": "article",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ 渋谷本店 · Daily Report | めぐりび",
+   "description": "オリエンタルラウンジ 渋谷本店 の最新AI予測予報（18:00/21:30更新のうち最新）を表示します。"
+  }
+ },
+ "/reports/weekly/shibuya": {
+  "title": "オリエンタルラウンジ 渋谷本店 · Weekly Report",
+  "description": "オリエンタルラウンジ 渋谷本店 の最新AI週報（毎週水曜更新）を表示します。",
+  "alternates": {
+   "canonical": "http://localhost:3000/reports/weekly/shibuya"
+  },
+  "openGraph": {
+   "title": "オリエンタルラウンジ 渋谷本店 · Weekly Report | めぐりび",
+   "description": "オリエンタルラウンジ 渋谷本店 の最新AI週報（毎週水曜更新）を表示します。",
+   "url": "http://localhost:3000/reports/weekly/shibuya",
+   "type": "article",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "オリエンタルラウンジ 渋谷本店 · Weekly Report | めぐりび",
+   "description": "オリエンタルラウンジ 渋谷本店 の最新AI週報（毎週水曜更新）を表示します。"
+  }
+ },
+ "/reports/daily/ay_chiba": {
+  "title": "相席屋 千葉中央店 · Daily Report",
+  "description": "相席屋 千葉中央店 の最新AI予測予報（18:00/21:30更新のうち最新）を表示します。",
+  "robots": {
+   "index": false,
+   "follow": true
+  },
+  "openGraph": {
+   "title": "相席屋 千葉中央店 · Daily Report | めぐりび",
+   "description": "相席屋 千葉中央店 の最新AI予測予報（18:00/21:30更新のうち最新）を表示します。",
+   "url": "http://localhost:3000/reports/daily/ay_chiba",
+   "type": "article",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "相席屋 千葉中央店 · Daily Report | めぐりび",
+   "description": "相席屋 千葉中央店 の最新AI予測予報（18:00/21:30更新のうち最新）を表示します。"
+  }
+ },
+ "/reports/weekly/ay_chiba": {
+  "title": "相席屋 千葉中央店 · Weekly Report",
+  "description": "相席屋 千葉中央店 の最新AI週報（毎週水曜更新）を表示します。",
+  "alternates": {
+   "canonical": "http://localhost:3000/reports/weekly/ay_chiba"
+  },
+  "openGraph": {
+   "title": "相席屋 千葉中央店 · Weekly Report | めぐりび",
+   "description": "相席屋 千葉中央店 の最新AI週報（毎週水曜更新）を表示します。",
+   "url": "http://localhost:3000/reports/weekly/ay_chiba",
+   "type": "article",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "相席屋 千葉中央店 · Weekly Report | めぐりび",
+   "description": "相席屋 千葉中央店 の最新AI週報（毎週水曜更新）を表示します。"
+  }
+ },
+ "/blog/__editorial__": {
+  "title": "編集記事の見出し",
+  "description": "編集記事の最初の段落です。",
+  "alternates": {
+   "canonical": "http://localhost:3000/blog/__editorial__"
+  },
+  "openGraph": {
+   "title": "編集記事の見出し",
+   "description": "編集記事の最初の段落です。",
+   "url": "http://localhost:3000/blog/__editorial__",
+   "type": "article",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "編集記事の見出し",
+   "description": "編集記事の最初の段落です。"
+  }
+ },
+ "/blog/how-to-use-prediction": {
+  "title": "予測の賢い使い方：迷いを減らす3ステップ",
+  "description": "めぐりびの予測は「当てる」より「迷いを減らす」ために使うのがコツ。今日からできる3ステップ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/blog/how-to-use-prediction"
+  },
+  "openGraph": {
+   "title": "予測の賢い使い方：迷いを減らす3ステップ",
+   "description": "めぐりびの予測は「当てる」より「迷いを減らす」ために使うのがコツ。今日からできる3ステップ。",
+   "url": "http://localhost:3000/blog/how-to-use-prediction",
+   "type": "article",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "予測の賢い使い方：迷いを減らす3ステップ",
+   "description": "めぐりびの予測は「当てる」より「迷いを減らす」ために使うのがコツ。今日からできる3ステップ。"
+  }
+ },
+ "/blog/beginner-complete-guide": {
+  "title": "初心者必見！相席ラウンジ完全ガイド",
+  "description": "入店から退店までの流れ、料金、マナー、やりがちな失敗まで。最初の一夜で迷わないまとめ。",
+  "alternates": {
+   "canonical": "http://localhost:3000/blog/beginner-complete-guide"
+  },
+  "openGraph": {
+   "title": "初心者必見！相席ラウンジ完全ガイド",
+   "description": "入店から退店までの流れ、料金、マナー、やりがちな失敗まで。最初の一夜で迷わないまとめ。",
+   "url": "http://localhost:3000/blog/beginner-complete-guide",
+   "type": "article",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "初心者必見！相席ラウンジ完全ガイド",
+   "description": "入店から退店までの流れ、料金、マナー、やりがちな失敗まで。最初の一夜で迷わないまとめ。"
+  }
+ },
+ "/blog/prediction-how-it-works": {
+  "title": "予測の仕組み：どんなデータを見ているの？",
+  "description": "めぐりびの予測は、過去の推移と当日の勢いを組み合わせて読みます。できること/できないこと。",
+  "alternates": {
+   "canonical": "http://localhost:3000/blog/prediction-how-it-works"
+  },
+  "openGraph": {
+   "title": "予測の仕組み：どんなデータを見ているの？",
+   "description": "めぐりびの予測は、過去の推移と当日の勢いを組み合わせて読みます。できること/できないこと。",
+   "url": "http://localhost:3000/blog/prediction-how-it-works",
+   "type": "article",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "予測の仕組み：どんなデータを見ているの？",
+   "description": "めぐりびの予測は、過去の推移と当日の勢いを組み合わせて読みます。できること/できないこと。"
+  }
+ },
+ "/blog/manager-interview": {
+  "title": "インタビュー：人気ラウンジ店長が語る裏側",
+  "description": "相席が成立しやすい条件、混む日の特徴、初見がやりがちなミス。現場目線の話。",
+  "alternates": {
+   "canonical": "http://localhost:3000/blog/manager-interview"
+  },
+  "openGraph": {
+   "title": "インタビュー：人気ラウンジ店長が語る裏側",
+   "description": "相席が成立しやすい条件、混む日の特徴、初見がやりがちなミス。現場目線の話。",
+   "url": "http://localhost:3000/blog/manager-interview",
+   "type": "article",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "インタビュー：人気ラウンジ店長が語る裏側",
+   "description": "相席が成立しやすい条件、混む日の特徴、初見がやりがちなミス。現場目線の話。"
+  }
+ },
+ "/blog/conversation-tips-men": {
+  "title": "男性向け：好印象を与える会話のテンポ",
+  "description": "盛り上げるより「話しやすい空気」を作る。質問・共感・深掘りのテンポ例。",
+  "alternates": {
+   "canonical": "http://localhost:3000/blog/conversation-tips-men"
+  },
+  "openGraph": {
+   "title": "男性向け：好印象を与える会話のテンポ",
+   "description": "盛り上げるより「話しやすい空気」を作る。質問・共感・深掘りのテンポ例。",
+   "url": "http://localhost:3000/blog/conversation-tips-men",
+   "type": "article",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "男性向け：好印象を与える会話のテンポ",
+   "description": "盛り上げるより「話しやすい空気」を作る。質問・共感・深掘りのテンポ例。"
+  }
+ }
+}

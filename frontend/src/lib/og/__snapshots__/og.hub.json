@@ -1,0 +1,294 @@
+{
+ "/": {
+  "alt": "めぐりび MEGRIBI — オリエンタルラウンジの混雑マップ",
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "edge",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "height": "100%",
+     "width": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "alignItems": "flex-start",
+     "justifyContent": "center",
+     "background": "linear-gradient(135deg, #050508 0%, #1e1b4b 45%, #0f172a 100%)",
+     "padding": 72
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "fontSize": 26,
+        "color": "#a5b4fc",
+        "letterSpacing": "0.35em",
+        "textTransform": "uppercase",
+        "fontWeight": 600
+       },
+       "children": "Oriental Lounge"
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": 20,
+        "fontSize": 80,
+        "fontWeight": 800,
+        "color": "#ffffff",
+        "letterSpacing": "-0.03em"
+       },
+       "children": "めぐりび"
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": 20,
+        "fontSize": 30,
+        "color": "rgba(255,255,255,0.78)",
+        "maxWidth": 920,
+        "lineHeight": 1.35
+       },
+       "children": "混雑・男女比・予測で、今夜の一軒を選びやすく"
+      }
+     }
+    ]
+   }
+  }
+ },
+ "/stores": {
+  "alt": "めぐりび MEGRIBI — 店舗一覧・リアルタイム混雑比較",
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "edge",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "height": "100%",
+     "width": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "alignItems": "flex-start",
+     "justifyContent": "center",
+     "background": "linear-gradient(135deg, #050508 0%, #1e1b4b 45%, #0f172a 100%)",
+     "padding": 72
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "fontSize": 26,
+        "color": "#a5b4fc",
+        "letterSpacing": "0.35em",
+        "textTransform": "uppercase",
+        "fontWeight": 600
+       },
+       "children": "Oriental Lounge"
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": 20,
+        "fontSize": 80,
+        "fontWeight": 800,
+        "color": "#ffffff",
+        "letterSpacing": "-0.03em"
+       },
+       "children": "めぐりび"
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": 20,
+        "fontSize": 30,
+        "color": "rgba(255,255,255,0.78)",
+        "maxWidth": 920,
+        "lineHeight": 1.35
+       },
+       "children": "全店舗のリアルタイム混雑・男女比を一覧で比較"
+      }
+     }
+    ]
+   }
+  }
+ },
+ "/reports": {
+  "alt": "めぐりび MEGRIBI — ML予測レポート一覧（Daily / Weekly）",
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "edge",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "height": "100%",
+     "width": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "alignItems": "flex-start",
+     "justifyContent": "center",
+     "background": "linear-gradient(135deg, #050508 0%, #1e1b4b 45%, #0f172a 100%)",
+     "padding": 72
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "fontSize": 26,
+        "color": "#a5b4fc",
+        "letterSpacing": "0.35em",
+        "textTransform": "uppercase",
+        "fontWeight": 600
+       },
+       "children": "Oriental Lounge"
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": 20,
+        "fontSize": 80,
+        "fontWeight": 800,
+        "color": "#ffffff",
+        "letterSpacing": "-0.03em"
+       },
+       "children": "めぐりび"
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": 20,
+        "fontSize": 30,
+        "color": "rgba(255,255,255,0.78)",
+        "maxWidth": 920,
+        "lineHeight": 1.35
+       },
+       "children": "全店舗のML予測レポートをDaily/Weeklyで一覧確認"
+      }
+     }
+    ]
+   }
+  }
+ },
+ "/blog": {
+  "alt": "めぐりび MEGRIBI — ブログ",
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "edge",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "height": "100%",
+     "width": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "alignItems": "flex-start",
+     "justifyContent": "center",
+     "background": "linear-gradient(135deg, #050508 0%, #1e1b4b 45%, #0f172a 100%)",
+     "padding": 72
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "fontSize": 26,
+        "color": "#a5b4fc",
+        "letterSpacing": "0.35em",
+        "textTransform": "uppercase",
+        "fontWeight": 600
+       },
+       "children": "Oriental Lounge"
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": 20,
+        "fontSize": 80,
+        "fontWeight": 800,
+        "color": "#ffffff",
+        "letterSpacing": "-0.03em"
+       },
+       "children": "めぐりび"
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": 20,
+        "fontSize": 30,
+        "color": "rgba(255,255,255,0.78)",
+        "maxWidth": 920,
+        "lineHeight": 1.35
+       },
+       "children": "相席系ラウンジ・バーの攻略と混雑傾向の読み方"
+      }
+     }
+    ]
+   }
+  }
+ }
+}

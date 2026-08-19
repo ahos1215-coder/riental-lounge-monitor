@@ -9,16 +9,19 @@ MEGRIBI の開発補助 AI（Codex）向けのガイドライン。既存の決�
 このリポジトリはファイル数が多いため、初見のAIは探索で迷子になりがちです。
 まず以下の順で読むことで、無駄な探索時間を最小化できます。
 
-1) plan/README.md（**plan フォルダの目次・各ファイルの役割**。迷ったら最優先）
+0) ../CLAUDE.md（**リポジトリ全体の3分マップ。最初に読む**。plan/ と食い違ったらこちらが新しい）
+1) plan/README.md（**plan フォルダの目次・各ファイルの役割**）
 2) plan/VISION_AND_FUTURE.md（構想・今後の実装フェーズ・備忘。展望の質問はここ優先）
-3) plan/STATUS.md（現状の稼働状況 / 今動いている機能）
-4) plan/DECISIONS.md（重要な意思決定の履歴）
-5) plan/API_CONTRACT.md（API契約。壊してはいけないもの）
-6) plan/ARCHITECTURE.md（全体アーキテクチャ）
-7) plan/RUNBOOK.md（起動・定期ジョブ・オンボーディング・検証）
-8) plan/ENV.md（環境変数）
-9) plan/SECOND_VENUES.md（二次会スポット方針）
-10) plan/GLOSSARY.md（用語）
+3) plan/DECISIONS.md（重要な意思決定の履歴）
+4) plan/API_CONTRACT.md（API契約。壊してはいけないもの）
+5) plan/ARCHITECTURE.md（全体アーキテクチャ・データフロー）
+6) plan/RUNBOOK.md（起動・定期ジョブ・オンボーディング・検証）
+7) plan/ENV.md（環境変数）
+8) plan/SECOND_VENUES.md（二次会スポット方針）
+9) plan/GLOSSARY.md（用語）
+
+※ plan/STATUS.md は 2026-05-05 で更新が止まったスナップショット（38店舗・schema v6 等は古い）ため
+　 読了順から外した。稼働実態は ../CLAUDE.md が正本。
 
 補助：plan/INDEX.md（主要パス・Constraints のクイック参照）
 

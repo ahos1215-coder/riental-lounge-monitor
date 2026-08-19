@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { formatYmdToSlash, getAllPostMetas } from "@/lib/blog/content";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { buildPageMetadata } from "@/lib/seo/pageMetadata";
 import { fetchBackendSnapshot } from "@/lib/serverSnapshot";
 import { buildBreadcrumbList, serializeJsonLd } from "@/lib/jsonLd";
 import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
@@ -17,25 +18,20 @@ type MegribiScoreResponse = {
   data?: HomeMegribiScoreItem[];
 };
 
-export const metadata: Metadata = {
+export const metadata: Metadata = buildPageMetadata({
   title: "めぐりび | 相席ラウンジの混雑予測・リアルタイム人数",
   description:
     "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測し、ベストな来店タイミングの参考をお届けします。国内41・海外1の計42店舗対応。",
-  alternates: { canonical: new URL("/", base).href },
-  openGraph: {
-    title: "めぐりび | 相席ラウンジの混雑予測・リアルタイム人数",
-    description:
-      "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測し、ベストな来店タイミングの参考をお届けします。",
-    url: new URL("/", base),
-    type: "website",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "めぐりび | 相席ラウンジの混雑予測",
-    description:
-      "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測。国内41・海外1の計42店舗対応。",
-  },
-};
+  path: "/",
+  // トップの <title> は既に「めぐりび」で始まるため、OG/Twitter に接尾辞は付けない。
+  socialTitle: "めぐりび | 相席ラウンジの混雑予測・リアルタイム人数",
+  ogDescription:
+    "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測し、ベストな来店タイミングの参考をお届けします。",
+  ogLocale: null,
+  twitterTitle: "めぐりび | 相席ラウンジの混雑予測",
+  twitterDescription:
+    "相席ラウンジの混雑状況をリアルタイムで確認。AIが今夜のピーク時間を予測。国内41・海外1の計42店舗対応。",
+});
 
 /**
  * トップの「今夜のおすすめ TOP5」用スコアをサーバー側で先取り取得する。

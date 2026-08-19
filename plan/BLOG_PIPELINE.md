@@ -154,4 +154,4 @@ npm run drafts:export -- --latest --force
 
 - **n8n** による LINE 受付 / Actions 起動 / 各種通知。**採用しない**。
 - **`/blog/auto-[store]-[slot]`** URL。`/reports/daily/[store_slug]` に移行済み。
-- **`fetchLatestAutoBlogDrafts`** 関数の UI 使用（`blog/page.tsx` から削除済み）。関数自体は下位互換のため残存。
+- **`fetchLatestAutoBlogDrafts`** 関数（`blog/page.tsx` の UI 使用を廃止したあと下位互換として残していたが、読み手ゼロ・`source=github_actions_*` 前提が現行のローカル Ollama 経路と食い違うため 2026-08-19 に削除済み）。

@@ -15,7 +15,8 @@ Target commit: (see git)
 0. **`../CLAUDE.md`**（リポジトリ直下）— システム全体の3分マップ（最初に読む）
 1. **`README.md`**（本ファイル）— どのファイルを見るか
 2. **`CODEx_PROMPTS.md`** — 編集時のルール（API 契約・禁止事項）
-3. **`STATUS.md`** — **いま動いている機能**（事実の正）
+3. **`ARCHITECTURE.md`** — データフロー全量・Key Files
+   （旧3位の `STATUS.md` は 2026-05-05 で更新停止したスナップショット。稼働実態は `../CLAUDE.md` が正本）
 4. **`DECISIONS.md`** — 壊してはいけない判断
 5. **`API_CONTRACT.md`** — Flask + Next `/api/line` の契約
 6. **`API_CURRENT.md`** — `/api/current` の位置づけ（補足）
@@ -42,7 +43,7 @@ Target commit: (see git)
 | `INDEX.md` | 主要パス・**Constraints** のクイック参照 |
 | `GLOSSARY.md` | 用語（夜窓、`avoid_time` 等） |
 | `CODEx_PROMPTS.md` | AI 作業ルール |
-| `STATUS.md` | 稼働中機能の一覧 |
+| `STATUS.md` | 稼働中機能の一覧（**2026-05-05 のスナップショット。38店舗・v6 等は古い**。正本は `../CLAUDE.md`） |
 | `DECISIONS.md` | 不変の意思決定 |
 | `API_CONTRACT.md` | API 契約 |
 | `API_CURRENT.md` | `/api/current` の位置づけ・当面方針 |
@@ -50,7 +51,7 @@ Target commit: (see git)
 | `RUNBOOK.md` | 起動・運用・**GitHub Actions / 外部 cron**・トラブルシュート |
 | `BLOG_CRON_GHA.md` | 定時ブログの **GitHub Actions 緊急時手順**（`workflow_dispatch`）・Secrets 一覧。**通常運用の正本ではない** — 通常運用（ローカル Ollama 主経路）の正本は `../docs/LOCAL_LLM_SETUP.md` |
 | `BLOG_CRON_ASYNC_FUTURE.md` | 定時ブログの **非同期化・キュー**（将来案メモ。未実装） |
-| （リポジトリ直下）`../STATUS.md` | 定時ブログの **監視・成功の定義・失敗店舗の再実行**（運用要約） |
+| （リポジトリ直下）`../STATUS.md` | 定時ブログの **監視・成功の定義・失敗店舗の再実行**（運用要約。**GHA が主経路だった頃のメモ**で、現行の主経路はローカル Ollama） |
 | `ENV.md` | 環境変数 |
 | `BLOG_PIPELINE.md` | LINE / Gemini / `blog_drafts` パイプライン |
 | `BLOG_CONTENT.md` | ブログ・Facts の編集方針 |
@@ -59,6 +60,12 @@ Target commit: (see git)
 | `VISION_AND_FUTURE.md` | 展望・実装フェーズ |
 | `ROADMAP.md` | P0/P1・やらないこと |
 | `WEEKLY_INSIGHTS_TUNING.md` | 週次 Insights の閾値・GHA 環境変数・調整タイミング |
+| `FORECAST_V2.md` | v2 shadow パイプライン（snapshot → score → templates）の設計 |
+| `FORECAST_ACCURACY.md` | 予測の答え合わせ運用・精度指標の読み方 |
+| `CDN_WARMING_LOCAL.md` | CDN warming をローカル Task Scheduler へ移した経緯・登録手順 |
+| `LOGS_BACKUP.md` | Supabase `logs` のバックアップ運用メモ |
+| `BLOG_REDESIGN_2026_04.md` | （履歴）ブログ改修の記録 |
+| `WEEKLY_REPORT_REDESIGN_2026_05.md` | （履歴）週報 v2 改修の記録 |
 | `CHECKLISTS.md` | チェックリスト |
 | `BRIEFING_FOR_ADVISOR.md` | 外部 AI 向け要約（相談用） |
 | `ADVISORY_SYNTHESIS.md` | 外部アドバイス（Gemini 等）の整理・要約 |

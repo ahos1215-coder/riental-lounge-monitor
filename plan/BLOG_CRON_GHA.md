@@ -19,9 +19,9 @@ Last updated: 2026-07-11（Batch B3: 2026-07 のローカル Ollama 移行を反
 
 ## 方針
 
-- **Vercel Cron（`vercel.json`）は使わない**（二重実行防止のため削除済み）。
-- **Daily Report**: 通常運用は **ローカル Ollama**（毎日 JST 18:00 / 21:30、全43店舗）。`.github/workflows/trigger-blog-cron.yml` の `schedule:` はコメントアウト済みで、**緊急時の `workflow_dispatch` のみ**有効（matrix はオリエンタル38店舗のみ、相席屋5店舗は対象外）。
-- **Weekly Report**: 通常運用は **ローカル Ollama**（毎週水曜 06:30 JST、全43店舗、単一プロセス）。`.github/workflows/generate-weekly-insights.yml` の `schedule:` はコメントアウト済みで、**緊急時の `workflow_dispatch` のみ**有効（Fan-in Matrix、オリエンタル38店舗のみ）。
+- **Vercel Cron は使わない**（二重実行防止）。`frontend/vercel.json` は実在するが中身は `ignoreCommand`（main 以外のブランチでプレビュービルドを止める）だけで、**`crons` は置かない**。
+- **Daily Report**: 通常運用は **ローカル Ollama**（毎日 JST 18:00 / 21:30、全42店舗）。`.github/workflows/trigger-blog-cron.yml` の `schedule:` はコメントアウト済みで、**緊急時の `workflow_dispatch` のみ**有効（matrix はオリエンタル37店舗のみ、相席屋5店舗は対象外）。
+- **Weekly Report**: 通常運用は **ローカル Ollama**（毎週水曜 06:30 JST、全42店舗、単一プロセス）。`.github/workflows/generate-weekly-insights.yml` の `schedule:` はコメントアウト済みで、**緊急時の `workflow_dispatch` のみ**有効（Fan-in Matrix、オリエンタル37店舗のみ）。
 
 ---
 
@@ -142,7 +142,7 @@ collect-and-commit（Fan-in）
 
 ## 4. Vercel 側の確認（任意）
 
-過去に Vercel Cron を有効にしていた場合、ダッシュボード **Settings → Cron Jobs** に古いジョブが残っていれば**無効化または削除**してください（コード側の `vercel.json` は既に削除済み）。
+過去に Vercel Cron を有効にしていた場合、ダッシュボード **Settings → Cron Jobs** に古いジョブが残っていれば**無効化または削除**してください（コード側の `frontend/vercel.json` に `crons` は無く、`ignoreCommand` のみ）。
 
 ---
 

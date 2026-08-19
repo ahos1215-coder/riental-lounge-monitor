@@ -6,6 +6,7 @@ import { STORES, buildStoreFullName } from "@/app/config/stores";
 import { AREAS } from "@/app/config/areas";
 import { fetchBackendSnapshot } from "@/lib/serverSnapshot";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { buildPageMetadata } from "@/lib/seo/pageMetadata";
 import { buildBreadcrumbList, serializeJsonLd } from "@/lib/jsonLd";
 import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
 import {
@@ -28,29 +29,18 @@ const base = getMetadataBaseUrl();
 // 継承していたこと。ここでは「全店舗を横並びで比較する一覧ページ」という本来の性格を明示し、
 // 特定の地名クエリの受け皿としては /area/[area] や店舗ページに寄せる（cross-brand併記が許される
 // サイト横断ページなので両ブランド名を出してよい）。
+// なお /stores のメタはここが唯一の定義。stores/layout.tsx にも旧文言の metadata が残っていたが、
+// Next はトップレベルキー単位で page が layout を丸ごと上書きするため一切出力されておらず削除した。
 const orientalStoreCount = STORES.filter((s) => s.brand === "oriental").length;
 const aisekiyaStoreCount = STORES.filter((s) => s.brand === "aisekiya").length;
 const storesPageTitle = `全${STORES.length}店舗の混雑状況を一覧比較`;
 const storesPageDescription = `オリエンタルラウンジ${orientalStoreCount}店舗・相席屋${aisekiyaStoreCount}店舗、全${STORES.length}店舗の現在の混雑状況・男女比を一覧で比較できます。エリアやブランドで絞り込んで、今夜行くお店を選べます。`;
-const storesPageUrl = new URL("/stores", base).href;
 
-export const metadata: Metadata = {
+export const metadata: Metadata = buildPageMetadata({
   title: storesPageTitle,
   description: storesPageDescription,
-  alternates: { canonical: storesPageUrl },
-  openGraph: {
-    title: `${storesPageTitle} | めぐりび`,
-    description: storesPageDescription,
-    url: storesPageUrl,
-    type: "website",
-    locale: "ja_JP",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: `${storesPageTitle} | めぐりび`,
-    description: storesPageDescription,
-  },
-};
+  path: "/stores",
+});
 
 /** デフォルト表示（フィルタ無し・1ページ目）の店舗数と一致させる。 */
 const INITIAL_PAGE_SIZE = 12;

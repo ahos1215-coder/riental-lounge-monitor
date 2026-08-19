@@ -1,4 +1,10 @@
 import { test, expect, type Page } from "./fixtures";
+import {
+  jstNightBaseYmd,
+  nightActualRows,
+  stubEmptyForecastToday,
+  stubNonCriticalApis,
+} from "./helpers/storePageStubs";
 
 /**
  * 「昨日」タブでグラフが空になるリグレッションの再発防止 e2e。
@@ -11,32 +17,6 @@ import { test, expect, type Page } from "./fixtures";
 
 const STORE = "nagasaki";
 
-// JST 夜日付（YYYY-MM-DD, 19:00 始まり）を N 日前で得る。フロントの
-// computeNightBaseDate と同じ「19時未満なら前日」ロジックを近似する。
-function jstNightBaseYmd(daysAgo: number): string {
-  const now = new Date();
-  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  // 19時未満なら夜日付は前日
-  if (jst.getUTCHours() < 19) {
-    jst.setUTCDate(jst.getUTCDate() - 1);
-  }
-  jst.setUTCDate(jst.getUTCDate() - daysAgo);
-  const y = jst.getUTCFullYear();
-  const m = String(jst.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(jst.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
-}
-
-function nightRows(baseYmd: string) {
-  const rows: { ts: string; men: number; women: number; total: number }[] = [];
-  const start = new Date(`${baseYmd}T19:00:00+09:00`);
-  for (let i = 0; i <= 40; i += 1) {
-    const t = new Date(start.getTime() + i * 15 * 60 * 1000);
-    rows.push({ ts: t.toISOString(), men: 10 + i, women: 20 + i, total: 30 + 2 * i });
-  }
-  return rows;
-}
-
 async function stubApis(page: Page) {
   // /api/range?...&from=YYYY-MM-DD... の from 値に対応する夜のデータを返す。
   await page.route("**/api/range?**", async (route) => {
@@ -46,27 +26,13 @@ async function stubApis(page: Page) {
       status: 200,
       contentType: "application/json",
       headers: { "cache-control": "public, s-maxage=240" },
-      body: JSON.stringify({ ok: true, rows: nightRows(from) }),
+      body: JSON.stringify({ ok: true, rows: nightActualRows(from) }),
     });
   });
   // forecast は today モードのみ叩かれるが、念のため空でも壊れないダミーを返す。
-  await page.route("**/api/forecast_today?**", async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ ok: true, data: [] }),
-    });
-  });
+  await stubEmptyForecastToday(page);
   // その他の非クリティカル API はテスト対象外なので空で満たす。
-  await page.route("**/api/reports/store-summary?**", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, weekly: null }) }),
-  );
-  await page.route("**/api/range_multi?**", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, by_slug: {} }) }),
-  );
-  await page.route("**/api/forecast_accuracy?**", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) }),
-  );
+  await stubNonCriticalApis(page);
 }
 
 // チャート内の実測ラインが実際に描画されている（path の d が空でない）本数を数える。
@@ -120,7 +86,7 @@ test.describe("Yesterday-mode timeline", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ ok: true, rows: nightRows(from) }),
+        body: JSON.stringify({ ok: true, rows: nightActualRows(from) }),
       });
     });
 

@@ -33,9 +33,9 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Build Next.js
-        run: npm run build
-
+      # 本番ビルドは blog-ci.yml（同じ frontend/src/** で発火）が type-check/test と一緒に行う。
+      # ここで build しても playwright.config.ts の webServer は `npm run dev` を起動するため
+      # 成果物は使われない（＝二重ビルドで CI 時間を捨てるだけ）ので、build ステップは持たない。
       - name: Run E2E tests
         run: npx playwright test
         env:

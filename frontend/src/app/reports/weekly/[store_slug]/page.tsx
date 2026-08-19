@@ -15,7 +15,9 @@ import type { DayHourHeatmap, HeatmapCell } from "@/components/WeeklyHeatmap";
 import WeeklySummary from "@/components/WeeklySummary";
 import type { DailySummaryEntry } from "@/components/WeeklySummary";
 import { fetchLatestPublishedReportByStore, type PublishedReportRow } from "@/lib/supabase/blogDrafts";
+import { stripFrontmatter } from "@/lib/blog/mdx";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { buildPageMetadata } from "@/lib/seo/pageMetadata";
 import { serializeJsonLd } from "@/lib/jsonLd";
 import { formatJstTimestamp, formatWindowTime } from "@/lib/dateFormat";
 import { buildCrowdBaselineDisplay } from "./crowdBaseline";
@@ -26,13 +28,6 @@ export const revalidate = 300;
 type Props = {
   params: Promise<{ store_slug: string }>;
 };
-
-function stripFrontmatter(raw: string): string {
-  if (!raw.startsWith("---\n")) return raw;
-  const end = raw.indexOf("\n---\n", 4);
-  if (end < 0) return raw;
-  return raw.slice(end + 5).trimStart();
-}
 
 /** 自動生成 MDX に含まれるメタデータ行（generated_at, source 等）を除去 */
 function stripMetadataLines(body: string): string {
@@ -75,25 +70,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const label = buildStoreFullName(meta);
   const title = `${label} · Weekly Report`;
   const description = `${label} の最新AI週報（毎週水曜更新）を表示します。`;
-  const base = getMetadataBaseUrl();
-  const url = new URL(`/reports/weekly/${encodeURIComponent(store_slug)}`, base);
-  return {
+  return buildPageMetadata({
     title,
     description,
-    alternates: { canonical: url.href },
-    openGraph: {
-      title: `${title} | めぐりび`,
-      description,
-      url,
-      type: "article",
-      locale: "ja_JP",
-    },
-    twitter: {
-      card: "summary_large_image",
-      title: `${title} | めぐりび`,
-      description,
-    },
-  };
+    path: `/reports/weekly/${encodeURIComponent(store_slug)}`,
+    ogType: "article",
+  });
 }
 
 export default async function WeeklyReportStorePage({ params }: Props) {

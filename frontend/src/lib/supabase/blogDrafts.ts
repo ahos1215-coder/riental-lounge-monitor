@@ -19,16 +19,6 @@ export type BlogDraftRow = {
   error_message?: string | null;
 };
 
-export type AutoBlogDraftView = {
-  facts_id: string;
-  store_slug: string;
-  target_date: string;
-  mdx_content: string;
-  source: string;
-  updated_at?: string;
-  created_at?: string;
-};
-
 export type PublishedReportType = "daily" | "weekly";
 
 export type PublishedReportRow = {
@@ -76,6 +66,43 @@ function endpointUrl(): { endpoint: string; key: string } | null {
   return { endpoint: `${url.replace(/\/+$/, "")}/rest/v1/blog_drafts`, key };
 }
 
+/** Supabase REST の共通ヘッダ。read は取得系、write は PATCH/POST（返り値に行を要求する）用。 */
+function restHeaders(key: string, kind: "read" | "write"): Record<string, string> {
+  const base = { apikey: key, Authorization: `Bearer ${key}` };
+  return kind === "read"
+    ? { ...base, Accept: "application/json" }
+    : { ...base, "Content-Type": "application/json", Prefer: "return=representation" };
+}
+
+/**
+ * Supabase REST の GET を1箇所に集約する。URL の組み立て（＝クエリ契約）は各関数に残す。
+ *
+ * 返り値は「オブジェクトの行だけを残した配列」。取得できなかった場合（HTTP エラー・
+ * JSON が配列でない・ネットワーク例外）は null を返し、呼び出し側が null / [] に倒す。
+ * 既定は cache:"no-store"（読み手が常に最新を要求する）。一覧系だけ revalidateSeconds を渡す。
+ */
+async function restGetRows(
+  url: string,
+  key: string,
+  { revalidateSeconds }: { revalidateSeconds?: number } = {},
+): Promise<Record<string, unknown>[] | null> {
+  try {
+    const res = await fetch(url, {
+      method: "GET",
+      ...(revalidateSeconds === undefined
+        ? { cache: "no-store" as const }
+        : { next: { revalidate: revalidateSeconds } }),
+      headers: restHeaders(key, "read"),
+    });
+    if (!res.ok) return null;
+    const parsed = (await res.json()) as unknown;
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter((v): v is Record<string, unknown> => Boolean(v && typeof v === "object"));
+  } catch {
+    return null;
+  }
+}
+
 async function upsertByFactsId(row: BlogDraftRow): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   const conf = endpointUrl();
   if (!conf) {
@@ -104,12 +131,7 @@ async function upsertByFactsId(row: BlogDraftRow): Promise<{ ok: true; id: strin
     const patchUrl = `${endpoint}?facts_id=eq.${encodeURIComponent(row.facts_id)}`;
     const patchRes = await fetch(patchUrl, {
       method: "PATCH",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-        Prefer: "return=representation",
-      },
+      headers: restHeaders(key, "write"),
       body: JSON.stringify(body),
     });
 
@@ -132,12 +154,7 @@ async function upsertByFactsId(row: BlogDraftRow): Promise<{ ok: true; id: strin
     // 未作成なら insert
     const insertRes = await fetch(endpoint, {
       method: "POST",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-        Prefer: "return=representation",
-      },
+      headers: restHeaders(key, "write"),
       body: JSON.stringify(body),
     });
 
@@ -165,119 +182,6 @@ async function upsertByFactsId(row: BlogDraftRow): Promise<{ ok: true; id: strin
 
 export async function insertBlogDraft(row: BlogDraftRow): Promise<{ ok: true; id: string } | { ok: false; error: string }> {
   return upsertByFactsId(row);
-}
-
-export async function fetchLatestAutoBlogDrafts(limit = 12): Promise<AutoBlogDraftView[]> {
-  const conf = endpointUrl();
-  if (!conf) return [];
-  const { endpoint, key } = conf;
-  const capped = Math.max(1, Math.min(limit, 40));
-  // 定時 cron と GHA 手動再試行は同一の自動下書きとして扱う
-  const url =
-    `${endpoint}?select=facts_id,store_slug,target_date,mdx_content,source,created_at,error_message` +
-    `&source=in.(github_actions_cron,github_actions_retry)&error_message=is.null&mdx_content=not.eq.` +
-    `&order=created_at.desc&limit=${capped}`;
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      cache: "no-store",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        Accept: "application/json",
-      },
-    });
-    if (!res.ok) return [];
-    const parsed = (await res.json()) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((v): v is Record<string, unknown> => Boolean(v && typeof v === "object"))
-      .map((v) => ({
-        facts_id: typeof v.facts_id === "string" ? v.facts_id : "",
-        store_slug: typeof v.store_slug === "string" ? v.store_slug : "",
-        target_date: typeof v.target_date === "string" ? v.target_date : "",
-        mdx_content: typeof v.mdx_content === "string" ? v.mdx_content : "",
-        source: typeof v.source === "string" ? v.source : "",
-        created_at: typeof v.created_at === "string" ? v.created_at : undefined,
-      }))
-      .filter((v) => v.facts_id && v.store_slug && v.mdx_content);
-  } catch {
-    return [];
-  }
-}
-
-export async function fetchLatestAutoBlogDraftByStoreSlug(storeSlug: string): Promise<AutoBlogDraftView | null> {
-  const conf = endpointUrl();
-  const slug = storeSlug.trim().toLowerCase();
-  if (!conf || !slug) return null;
-  const { endpoint, key } = conf;
-  const url =
-    `${endpoint}?select=facts_id,store_slug,target_date,mdx_content,source,created_at,error_message` +
-    `&store_slug=eq.${encodeURIComponent(slug)}` +
-    `&source=in.(github_actions_cron,github_actions_retry)` +
-    `&error_message=is.null&mdx_content=not.eq.` +
-    `&order=created_at.desc&limit=1`;
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      cache: "no-store",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        Accept: "application/json",
-      },
-    });
-    if (!res.ok) return null;
-    const parsed = (await res.json()) as unknown;
-    if (!Array.isArray(parsed) || !parsed[0] || typeof parsed[0] !== "object") return null;
-    const v = parsed[0] as Record<string, unknown>;
-    const row: AutoBlogDraftView = {
-      facts_id: typeof v.facts_id === "string" ? v.facts_id : "",
-      store_slug: typeof v.store_slug === "string" ? v.store_slug : "",
-      target_date: typeof v.target_date === "string" ? v.target_date : "",
-      mdx_content: typeof v.mdx_content === "string" ? v.mdx_content : "",
-      source: typeof v.source === "string" ? v.source : "",
-      created_at: typeof v.created_at === "string" ? v.created_at : undefined,
-    };
-    return row.facts_id && row.store_slug && row.mdx_content ? row : null;
-  } catch {
-    return null;
-  }
-}
-
-export async function fetchAutoBlogDraftByFactsId(factsId: string): Promise<AutoBlogDraftView | null> {
-  const conf = endpointUrl();
-  if (!conf || !factsId.trim()) return null;
-  const { endpoint, key } = conf;
-  const url =
-    `${endpoint}?select=facts_id,store_slug,target_date,mdx_content,source,created_at,error_message` +
-    `&facts_id=eq.${encodeURIComponent(factsId)}&error_message=is.null&limit=1`;
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      cache: "no-store",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        Accept: "application/json",
-      },
-    });
-    if (!res.ok) return null;
-    const parsed = (await res.json()) as unknown;
-    if (!Array.isArray(parsed) || !parsed[0] || typeof parsed[0] !== "object") return null;
-    const v = parsed[0] as Record<string, unknown>;
-    const row: AutoBlogDraftView = {
-      facts_id: typeof v.facts_id === "string" ? v.facts_id : "",
-      store_slug: typeof v.store_slug === "string" ? v.store_slug : "",
-      target_date: typeof v.target_date === "string" ? v.target_date : "",
-      mdx_content: typeof v.mdx_content === "string" ? v.mdx_content : "",
-      source: typeof v.source === "string" ? v.source : "",
-      created_at: typeof v.created_at === "string" ? v.created_at : undefined,
-    };
-    return row.facts_id && row.store_slug && row.mdx_content ? row : null;
-  } catch {
-    return null;
-  }
 }
 
 function toRecord(value: unknown): Record<string, unknown> {
@@ -312,39 +216,25 @@ export async function fetchLatestPublishedReportByStore(
     // updated_at だけが今になる。updated_at だけで並べると、今日成功した片方の edition より
     // 昨日分の carry-over 行が勝ってしまう。日付が新しい行を先に見る。
     `&order=target_date.desc,updated_at.desc.nullslast,created_at.desc&limit=1`;
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      cache: "no-store",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        Accept: "application/json",
-      },
-    });
-    if (!res.ok) return null;
-    const parsed = (await res.json()) as unknown;
-    if (!Array.isArray(parsed) || !parsed[0] || typeof parsed[0] !== "object") return null;
-    const v = parsed[0] as Record<string, unknown>;
-    const ct = typeof v.content_type === "string" ? v.content_type : "";
-    if (ct !== "daily" && ct !== "weekly") return null;
-    const row: PublishedReportRow = {
-      facts_id: typeof v.facts_id === "string" ? v.facts_id : "",
-      store_slug: typeof v.store_slug === "string" ? v.store_slug : "",
-      target_date: typeof v.target_date === "string" ? v.target_date : "",
-      mdx_content: typeof v.mdx_content === "string" ? v.mdx_content : "",
-      insight_json: toRecord(v.insight_json),
-      source: typeof v.source === "string" ? v.source : "",
-      content_type: ct,
-      edition: typeof v.edition === "string" ? v.edition : undefined,
-      public_slug: typeof v.public_slug === "string" ? v.public_slug : undefined,
-      created_at: typeof v.created_at === "string" ? v.created_at : undefined,
-      updated_at: typeof v.updated_at === "string" ? v.updated_at : undefined,
-    };
-    return row.facts_id && row.store_slug ? row : null;
-  } catch {
-    return null;
-  }
+  const rows = await restGetRows(url, key);
+  const v = rows?.[0];
+  if (!v) return null;
+  const ct = typeof v.content_type === "string" ? v.content_type : "";
+  if (ct !== "daily" && ct !== "weekly") return null;
+  const row: PublishedReportRow = {
+    facts_id: typeof v.facts_id === "string" ? v.facts_id : "",
+    store_slug: typeof v.store_slug === "string" ? v.store_slug : "",
+    target_date: typeof v.target_date === "string" ? v.target_date : "",
+    mdx_content: typeof v.mdx_content === "string" ? v.mdx_content : "",
+    insight_json: toRecord(v.insight_json),
+    source: typeof v.source === "string" ? v.source : "",
+    content_type: ct,
+    edition: typeof v.edition === "string" ? v.edition : undefined,
+    public_slug: typeof v.public_slug === "string" ? v.public_slug : undefined,
+    created_at: typeof v.created_at === "string" ? v.created_at : undefined,
+    updated_at: typeof v.updated_at === "string" ? v.updated_at : undefined,
+  };
+  return row.facts_id && row.store_slug ? row : null;
 }
 
 export async function fetchPublishedEditorialBySlug(slug: string): Promise<PublishedEditorialRow | null> {
@@ -356,34 +246,20 @@ export async function fetchPublishedEditorialBySlug(slug: string): Promise<Publi
     `${endpoint}?select=facts_id,public_slug,store_slug,target_date,mdx_content,insight_json,source,created_at` +
     `&public_slug=eq.${encodeURIComponent(normalized)}` +
     `&content_type=eq.editorial&is_published=eq.true&error_message=is.null&limit=1`;
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      cache: "no-store",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        Accept: "application/json",
-      },
-    });
-    if (!res.ok) return null;
-    const parsed = (await res.json()) as unknown;
-    if (!Array.isArray(parsed) || !parsed[0] || typeof parsed[0] !== "object") return null;
-    const v = parsed[0] as Record<string, unknown>;
-    const row: PublishedEditorialRow = {
-      facts_id: typeof v.facts_id === "string" ? v.facts_id : "",
-      public_slug: typeof v.public_slug === "string" ? v.public_slug : "",
-      store_slug: typeof v.store_slug === "string" ? v.store_slug : "",
-      target_date: typeof v.target_date === "string" ? v.target_date : "",
-      mdx_content: typeof v.mdx_content === "string" ? v.mdx_content : "",
-      insight_json: toRecord(v.insight_json),
-      source: typeof v.source === "string" ? v.source : "",
-      created_at: typeof v.created_at === "string" ? v.created_at : undefined,
-    };
-    return row.public_slug && row.mdx_content ? row : null;
-  } catch {
-    return null;
-  }
+  const rows = await restGetRows(url, key);
+  const v = rows?.[0];
+  if (!v) return null;
+  const row: PublishedEditorialRow = {
+    facts_id: typeof v.facts_id === "string" ? v.facts_id : "",
+    public_slug: typeof v.public_slug === "string" ? v.public_slug : "",
+    store_slug: typeof v.store_slug === "string" ? v.store_slug : "",
+    target_date: typeof v.target_date === "string" ? v.target_date : "",
+    mdx_content: typeof v.mdx_content === "string" ? v.mdx_content : "",
+    insight_json: toRecord(v.insight_json),
+    source: typeof v.source === "string" ? v.source : "",
+    created_at: typeof v.created_at === "string" ? v.created_at : undefined,
+  };
+  return row.public_slug && row.mdx_content ? row : null;
 }
 
 export type PublishedEditorialListItem = {
@@ -404,29 +280,14 @@ export async function fetchAllPublishedEditorialSlugs(limit = 200): Promise<Publ
     `&content_type=eq.editorial&is_published=eq.true&error_message=is.null` +
     `&public_slug=not.is.null` +
     `&order=created_at.desc&limit=${Math.min(limit, 500)}`;
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      cache: "no-store",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        Accept: "application/json",
-      },
-    });
-    if (!res.ok) return [];
-    const parsed = (await res.json()) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((v): v is Record<string, unknown> => Boolean(v && typeof v === "object"))
-      .map((v) => ({
-        public_slug: typeof v.public_slug === "string" ? v.public_slug : "",
-        target_date: typeof v.target_date === "string" ? v.target_date : "",
-      }))
-      .filter((v) => v.public_slug);
-  } catch {
-    return [];
-  }
+  const rows = await restGetRows(url, key);
+  if (!rows) return [];
+  return rows
+    .map((v) => ({
+      public_slug: typeof v.public_slug === "string" ? v.public_slug : "",
+      target_date: typeof v.target_date === "string" ? v.target_date : "",
+    }))
+    .filter((v) => v.public_slug);
 }
 
 /**
@@ -444,12 +305,7 @@ export async function publishEditorialByFactsId(
   try {
     const res = await fetch(patchUrl, {
       method: "PATCH",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-        Prefer: "return=representation",
-      },
+      headers: restHeaders(key, "write"),
       body: JSON.stringify({ is_published: true }),
     });
     const txt = await res.text();
@@ -485,12 +341,7 @@ export async function publishEditorialBySlug(
   try {
     const res = await fetch(patchUrl, {
       method: "PATCH",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-        Prefer: "return=representation",
-      },
+      headers: restHeaders(key, "write"),
       body: JSON.stringify({ is_published: true }),
     });
     const txt = await res.text();
@@ -501,10 +352,6 @@ export async function publishEditorialBySlug(
   }
 }
 
-/**
- * LINE 承認フロー: 特定 LINE ユーザーの最新 editorial 未公開下書きを取得する。
- * "公開" メッセージ受信時に、どの下書きを承認するか特定するために使う。
- */
 export type ReportListItem = {
   store_slug: string;
   target_date: string;
@@ -529,48 +376,36 @@ export async function fetchAllLatestPublishedReports(
     `&content_type=eq.${encodeURIComponent(contentType)}` +
     `&is_published=eq.true&error_message=is.null&mdx_content=not.eq.` +
     `&order=created_at.desc&limit=${Math.min(limit, 200)}`;
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      next: { revalidate: 300 },
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        Accept: "application/json",
-      },
-    });
-    if (!res.ok) return [];
-    const parsed = (await res.json()) as unknown;
-    if (!Array.isArray(parsed)) return [];
-
-    const seen = new Set<string>();
-    const items: ReportListItem[] = [];
-    for (const raw of parsed) {
-      if (!raw || typeof raw !== "object") continue;
-      const v = raw as Record<string, unknown>;
-      const slug = typeof v.store_slug === "string" ? v.store_slug : "";
-      if (!slug || seen.has(slug)) continue;
-      seen.add(slug);
-      const mdx = typeof v.mdx_content === "string" ? v.mdx_content : "";
-      let heading: string | null = null;
-      for (const line of mdx.split("\n")) {
-        const m = line.match(/^#{1,3}\s+(.+)/);
-        if (m) { heading = m[1].trim(); break; }
-      }
-      items.push({
-        store_slug: slug,
-        target_date: typeof v.target_date === "string" ? v.target_date : "",
-        edition: typeof v.edition === "string" ? v.edition : undefined,
-        created_at: typeof v.created_at === "string" ? v.created_at : undefined,
-        heading,
-      });
+  // 一覧ページは 300 秒キャッシュ（他の GET は no-store）。
+  const rows = await restGetRows(url, key, { revalidateSeconds: 300 });
+  if (!rows) return [];
+  const seen = new Set<string>();
+  const items: ReportListItem[] = [];
+  for (const v of rows) {
+    const slug = typeof v.store_slug === "string" ? v.store_slug : "";
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    const mdx = typeof v.mdx_content === "string" ? v.mdx_content : "";
+    let heading: string | null = null;
+    for (const line of mdx.split("\n")) {
+      const m = line.match(/^#{1,3}\s+(.+)/);
+      if (m) { heading = m[1].trim(); break; }
     }
-    return items;
-  } catch {
-    return [];
+    items.push({
+      store_slug: slug,
+      target_date: typeof v.target_date === "string" ? v.target_date : "",
+      edition: typeof v.edition === "string" ? v.edition : undefined,
+      created_at: typeof v.created_at === "string" ? v.created_at : undefined,
+      heading,
+    });
   }
+  return items;
 }
 
+/**
+ * LINE 承認フロー: 特定 LINE ユーザーの最新 editorial 未公開下書きを取得する。
+ * "公開" メッセージ受信時に、どの下書きを承認するか特定するために使う。
+ */
 export async function fetchLatestUnpublishedEditorialByLineUser(
   lineUserId: string,
 ): Promise<{ facts_id: string; public_slug: string | null; store_slug: string; target_date: string } | null> {
@@ -583,27 +418,13 @@ export async function fetchLatestUnpublishedEditorialByLineUser(
     `&content_type=eq.editorial&is_published=eq.false` +
     `&error_message=is.null&mdx_content=not.eq.` +
     `&order=created_at.desc&limit=1`;
-  try {
-    const res = await fetch(url, {
-      method: "GET",
-      cache: "no-store",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        Accept: "application/json",
-      },
-    });
-    if (!res.ok) return null;
-    const parsed = (await res.json()) as unknown;
-    if (!Array.isArray(parsed) || !parsed[0] || typeof parsed[0] !== "object") return null;
-    const v = parsed[0] as Record<string, unknown>;
-    return {
-      facts_id: typeof v.facts_id === "string" ? v.facts_id : "",
-      public_slug: typeof v.public_slug === "string" ? v.public_slug : null,
-      store_slug: typeof v.store_slug === "string" ? v.store_slug : "",
-      target_date: typeof v.target_date === "string" ? v.target_date : "",
-    };
-  } catch {
-    return null;
-  }
+  const rows = await restGetRows(url, key);
+  const v = rows?.[0];
+  if (!v) return null;
+  return {
+    facts_id: typeof v.facts_id === "string" ? v.facts_id : "",
+    public_slug: typeof v.public_slug === "string" ? v.public_slug : null,
+    store_slug: typeof v.store_slug === "string" ? v.store_slug : "",
+    target_date: typeof v.target_date === "string" ? v.target_date : "",
+  };
 }

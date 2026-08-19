@@ -1,4 +1,9 @@
 # STATUS
+> **【重要・2026-08-19 追記】このファイルは 2026-05-05 時点のスナップショットで、更新が止まっている。**
+> 明らかに古い記述: 「全38店舗」（現行は **42**＝オリエンタル37＋相席屋5。sapporo_ag は 2026-07-11 閉店）／
+> 「schema_version v6」（現行 **v7**・24特徴量）／`trigger-blog-cron.yml` と `generate-weekly-insights.yml` の
+> 「schedule で自動起動」（どちらも **`workflow_dispatch` のみ**。主経路はローカル Ollama）。
+> **稼働実態の正本は `../CLAUDE.md` §1-2**。以下は当時の記録として読むこと。
 Last updated: 2026-05-05 (Round 13: ML schema v6 本番反映完了 + Daily Report フォールバック自然文化 (Phase 4) + cold-start 緩和の UptimeRobot 5 monitor 導入 + 技術的負債 6 件解消 + 関連ドキュメント整合)
 Target commit: (see git)
 

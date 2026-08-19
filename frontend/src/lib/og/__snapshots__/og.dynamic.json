@@ -1,0 +1,2203 @@
+{
+ "/store/shibuya": {
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "edge",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "width": "100%",
+     "height": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "background": "linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0f0a1e 100%)",
+     "fontFamily": "sans-serif",
+     "padding": "60px 80px",
+     "position": "relative"
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "position": "absolute",
+        "top": 0,
+        "left": 0,
+        "right": 0,
+        "bottom": 0,
+        "background": "radial-gradient(ellipse 80% 60% at 80% 20%, rgba(99,102,241,0.12) 0%, transparent 70%)"
+       }
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "12px",
+        "marginBottom": "auto"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "width": "40px",
+           "height": "40px",
+           "borderRadius": "10px",
+           "background": "linear-gradient(135deg, #6366f1, #8b5cf6)",
+           "display": "flex",
+           "alignItems": "center",
+           "justifyContent": "center",
+           "fontSize": "20px"
+          },
+          "children": "✦"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.5)",
+           "fontSize": "22px",
+           "letterSpacing": "0.05em"
+          },
+          "children": "めぐりび · MEGRIBI"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "flexDirection": "column",
+        "marginTop": "32px"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "display": "flex",
+           "alignItems": "center",
+           "gap": "12px",
+           "marginBottom": "16px"
+          },
+          "children": {
+           "type": "span",
+           "key": null,
+           "props": {
+            "style": {
+             "background": "rgba(16,185,129,0.15)",
+             "border": "1px solid rgba(16,185,129,0.3)",
+             "color": "#6ee7b7",
+             "fontSize": "16px",
+             "padding": "4px 16px",
+             "borderRadius": "100px"
+            },
+            "children": "リアルタイム混雑情報"
+           }
+          }
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "white",
+           "fontSize": "64px",
+           "fontWeight": 700,
+           "lineHeight": 1.1,
+           "letterSpacing": "-0.02em"
+          },
+          "children": "ORIENTAL LOUNGE"
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "white",
+           "fontSize": "72px",
+           "fontWeight": 700,
+           "lineHeight": 1.1,
+           "letterSpacing": "-0.02em",
+           "marginTop": "8px"
+          },
+          "children": "渋谷本店"
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.45)",
+           "fontSize": "26px",
+           "marginTop": "12px"
+          },
+          "children": "東京・渋谷"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": "auto",
+        "paddingTop": "32px",
+        "borderTop": "1px solid rgba(255,255,255,0.07)",
+        "display": "flex",
+        "justifyContent": "space-between",
+        "alignItems": "center"
+       },
+       "children": [
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.3)",
+           "fontSize": "18px"
+          },
+          "children": "混雑傾向・男女比・ML 予測をまとめてチェック"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(99,102,241,0.7)",
+           "fontSize": "18px"
+          },
+          "children": "meguribi.jp"
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ },
+ "/reports/daily/shibuya": {
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "edge",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "width": "100%",
+     "height": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "background": "linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0f0a1e 100%)",
+     "fontFamily": "sans-serif",
+     "padding": "60px 80px",
+     "position": "relative"
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "position": "absolute",
+        "top": 0,
+        "left": 0,
+        "right": 0,
+        "bottom": 0,
+        "background": "radial-gradient(ellipse 80% 60% at 20% 120%, rgba(99,102,241,0.15) 0%, transparent 70%)"
+       }
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "12px",
+        "marginBottom": "auto"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "width": "40px",
+           "height": "40px",
+           "borderRadius": "10px",
+           "background": "linear-gradient(135deg, #6366f1, #8b5cf6)",
+           "display": "flex",
+           "alignItems": "center",
+           "justifyContent": "center",
+           "fontSize": "20px"
+          },
+          "children": "✦"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.5)",
+           "fontSize": "22px",
+           "letterSpacing": "0.05em"
+          },
+          "children": "めぐりび · MEGRIBI"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "flexDirection": "column",
+        "marginTop": "32px"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "display": "flex",
+           "alignItems": "center",
+           "gap": "12px",
+           "marginBottom": "16px"
+          },
+          "children": [
+           {
+            "type": "span",
+            "key": null,
+            "props": {
+             "style": {
+              "background": "rgba(99,102,241,0.15)",
+              "border": "1px solid rgba(99,102,241,0.3)",
+              "color": "#a5b4fc",
+              "fontSize": "16px",
+              "padding": "4px 16px",
+              "borderRadius": "100px"
+             },
+             "children": "ML 予測 Daily Report"
+            }
+           },
+           {
+            "type": "span",
+            "key": null,
+            "props": {
+             "style": {
+              "color": "rgba(255,255,255,0.3)",
+              "fontSize": "16px"
+             },
+             "children": "2026年8月19日"
+            }
+           }
+          ]
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "white",
+           "fontSize": "64px",
+           "fontWeight": 700,
+           "lineHeight": 1.1,
+           "letterSpacing": "-0.02em"
+          },
+          "children": "渋谷本店"
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.45)",
+           "fontSize": "26px",
+           "marginTop": "12px"
+          },
+          "children": "東京・渋谷"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": "auto",
+        "paddingTop": "32px",
+        "borderTop": "1px solid rgba(255,255,255,0.07)",
+        "display": "flex",
+        "justifyContent": "space-between",
+        "alignItems": "center"
+       },
+       "children": [
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.3)",
+           "fontSize": "18px"
+          },
+          "children": "混雑傾向・男女比・ML 予測をまとめてチェック"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(99,102,241,0.7)",
+           "fontSize": "18px"
+          },
+          "children": "meguribi.jp"
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ },
+ "/reports/weekly/shibuya": {
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "edge",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "width": "100%",
+     "height": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "background": "linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0a0f1e 100%)",
+     "fontFamily": "sans-serif",
+     "padding": "60px 80px",
+     "position": "relative"
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "position": "absolute",
+        "top": 0,
+        "left": 0,
+        "right": 0,
+        "bottom": 0,
+        "background": "radial-gradient(ellipse 80% 60% at 80% 120%, rgba(139,92,246,0.15) 0%, transparent 70%)"
+       }
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "12px",
+        "marginBottom": "auto"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "width": "40px",
+           "height": "40px",
+           "borderRadius": "10px",
+           "background": "linear-gradient(135deg, #8b5cf6, #6366f1)",
+           "display": "flex",
+           "alignItems": "center",
+           "justifyContent": "center",
+           "fontSize": "20px"
+          },
+          "children": "✦"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.5)",
+           "fontSize": "22px"
+          },
+          "children": "めぐりび · MEGRIBI"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "flexDirection": "column",
+        "marginTop": "32px"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "display": "flex",
+           "alignItems": "center",
+           "gap": "12px",
+           "marginBottom": "16px"
+          },
+          "children": [
+           {
+            "type": "span",
+            "key": null,
+            "props": {
+             "style": {
+              "background": "rgba(139,92,246,0.15)",
+              "border": "1px solid rgba(139,92,246,0.3)",
+              "color": "#c4b5fd",
+              "fontSize": "16px",
+              "padding": "4px 16px",
+              "borderRadius": "100px"
+             },
+             "children": "ML 予測 Weekly Report"
+            }
+           },
+           {
+            "type": "span",
+            "key": null,
+            "props": {
+             "style": {
+              "color": "rgba(255,255,255,0.3)",
+              "fontSize": "16px"
+             },
+             "children": "2026年8月17日週"
+            }
+           }
+          ]
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "white",
+           "fontSize": "64px",
+           "fontWeight": 700,
+           "lineHeight": 1.1
+          },
+          "children": "渋谷本店"
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.45)",
+           "fontSize": "26px",
+           "marginTop": "12px"
+          },
+          "children": "東京・渋谷"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": "auto",
+        "paddingTop": "32px",
+        "borderTop": "1px solid rgba(255,255,255,0.07)",
+        "display": "flex",
+        "justifyContent": "space-between"
+       },
+       "children": [
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.3)",
+           "fontSize": "18px"
+          },
+          "children": "週次の混雑傾向・ML 予測まとめ"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(139,92,246,0.7)",
+           "fontSize": "18px"
+          },
+          "children": "meguribi.jp"
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ },
+ "/store/ay_chiba": {
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "edge",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "width": "100%",
+     "height": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "background": "linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0f0a1e 100%)",
+     "fontFamily": "sans-serif",
+     "padding": "60px 80px",
+     "position": "relative"
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "position": "absolute",
+        "top": 0,
+        "left": 0,
+        "right": 0,
+        "bottom": 0,
+        "background": "radial-gradient(ellipse 80% 60% at 80% 20%, rgba(99,102,241,0.12) 0%, transparent 70%)"
+       }
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "12px",
+        "marginBottom": "auto"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "width": "40px",
+           "height": "40px",
+           "borderRadius": "10px",
+           "background": "linear-gradient(135deg, #6366f1, #8b5cf6)",
+           "display": "flex",
+           "alignItems": "center",
+           "justifyContent": "center",
+           "fontSize": "20px"
+          },
+          "children": "✦"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.5)",
+           "fontSize": "22px",
+           "letterSpacing": "0.05em"
+          },
+          "children": "めぐりび · MEGRIBI"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "flexDirection": "column",
+        "marginTop": "32px"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "display": "flex",
+           "alignItems": "center",
+           "gap": "12px",
+           "marginBottom": "16px"
+          },
+          "children": {
+           "type": "span",
+           "key": null,
+           "props": {
+            "style": {
+             "background": "rgba(16,185,129,0.15)",
+             "border": "1px solid rgba(16,185,129,0.3)",
+             "color": "#6ee7b7",
+             "fontSize": "16px",
+             "padding": "4px 16px",
+             "borderRadius": "100px"
+            },
+            "children": "リアルタイム混雑情報"
+           }
+          }
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "white",
+           "fontSize": "64px",
+           "fontWeight": 700,
+           "lineHeight": 1.1,
+           "letterSpacing": "-0.02em"
+          },
+          "children": "相席屋"
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "white",
+           "fontSize": "72px",
+           "fontWeight": 700,
+           "lineHeight": 1.1,
+           "letterSpacing": "-0.02em",
+           "marginTop": "8px"
+          },
+          "children": "千葉中央店"
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.45)",
+           "fontSize": "26px",
+           "marginTop": "12px"
+          },
+          "children": "千葉・中央"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": "auto",
+        "paddingTop": "32px",
+        "borderTop": "1px solid rgba(255,255,255,0.07)",
+        "display": "flex",
+        "justifyContent": "space-between",
+        "alignItems": "center"
+       },
+       "children": [
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.3)",
+           "fontSize": "18px"
+          },
+          "children": "混雑傾向・男女比・ML 予測をまとめてチェック"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(99,102,241,0.7)",
+           "fontSize": "18px"
+          },
+          "children": "meguribi.jp"
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ },
+ "/reports/daily/ay_chiba": {
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "edge",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "width": "100%",
+     "height": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "background": "linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0f0a1e 100%)",
+     "fontFamily": "sans-serif",
+     "padding": "60px 80px",
+     "position": "relative"
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "position": "absolute",
+        "top": 0,
+        "left": 0,
+        "right": 0,
+        "bottom": 0,
+        "background": "radial-gradient(ellipse 80% 60% at 20% 120%, rgba(99,102,241,0.15) 0%, transparent 70%)"
+       }
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "12px",
+        "marginBottom": "auto"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "width": "40px",
+           "height": "40px",
+           "borderRadius": "10px",
+           "background": "linear-gradient(135deg, #6366f1, #8b5cf6)",
+           "display": "flex",
+           "alignItems": "center",
+           "justifyContent": "center",
+           "fontSize": "20px"
+          },
+          "children": "✦"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.5)",
+           "fontSize": "22px",
+           "letterSpacing": "0.05em"
+          },
+          "children": "めぐりび · MEGRIBI"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "flexDirection": "column",
+        "marginTop": "32px"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "display": "flex",
+           "alignItems": "center",
+           "gap": "12px",
+           "marginBottom": "16px"
+          },
+          "children": [
+           {
+            "type": "span",
+            "key": null,
+            "props": {
+             "style": {
+              "background": "rgba(99,102,241,0.15)",
+              "border": "1px solid rgba(99,102,241,0.3)",
+              "color": "#a5b4fc",
+              "fontSize": "16px",
+              "padding": "4px 16px",
+              "borderRadius": "100px"
+             },
+             "children": "ML 予測 Daily Report"
+            }
+           },
+           {
+            "type": "span",
+            "key": null,
+            "props": {
+             "style": {
+              "color": "rgba(255,255,255,0.3)",
+              "fontSize": "16px"
+             },
+             "children": "2026年8月19日"
+            }
+           }
+          ]
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "white",
+           "fontSize": "64px",
+           "fontWeight": 700,
+           "lineHeight": 1.1,
+           "letterSpacing": "-0.02em"
+          },
+          "children": "千葉中央店"
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.45)",
+           "fontSize": "26px",
+           "marginTop": "12px"
+          },
+          "children": "千葉・中央"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": "auto",
+        "paddingTop": "32px",
+        "borderTop": "1px solid rgba(255,255,255,0.07)",
+        "display": "flex",
+        "justifyContent": "space-between",
+        "alignItems": "center"
+       },
+       "children": [
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.3)",
+           "fontSize": "18px"
+          },
+          "children": "混雑傾向・男女比・ML 予測をまとめてチェック"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(99,102,241,0.7)",
+           "fontSize": "18px"
+          },
+          "children": "meguribi.jp"
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ },
+ "/reports/weekly/ay_chiba": {
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "edge",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "width": "100%",
+     "height": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "background": "linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0a0f1e 100%)",
+     "fontFamily": "sans-serif",
+     "padding": "60px 80px",
+     "position": "relative"
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "position": "absolute",
+        "top": 0,
+        "left": 0,
+        "right": 0,
+        "bottom": 0,
+        "background": "radial-gradient(ellipse 80% 60% at 80% 120%, rgba(139,92,246,0.15) 0%, transparent 70%)"
+       }
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "12px",
+        "marginBottom": "auto"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "width": "40px",
+           "height": "40px",
+           "borderRadius": "10px",
+           "background": "linear-gradient(135deg, #8b5cf6, #6366f1)",
+           "display": "flex",
+           "alignItems": "center",
+           "justifyContent": "center",
+           "fontSize": "20px"
+          },
+          "children": "✦"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.5)",
+           "fontSize": "22px"
+          },
+          "children": "めぐりび · MEGRIBI"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "flexDirection": "column",
+        "marginTop": "32px"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "display": "flex",
+           "alignItems": "center",
+           "gap": "12px",
+           "marginBottom": "16px"
+          },
+          "children": [
+           {
+            "type": "span",
+            "key": null,
+            "props": {
+             "style": {
+              "background": "rgba(139,92,246,0.15)",
+              "border": "1px solid rgba(139,92,246,0.3)",
+              "color": "#c4b5fd",
+              "fontSize": "16px",
+              "padding": "4px 16px",
+              "borderRadius": "100px"
+             },
+             "children": "ML 予測 Weekly Report"
+            }
+           },
+           {
+            "type": "span",
+            "key": null,
+            "props": {
+             "style": {
+              "color": "rgba(255,255,255,0.3)",
+              "fontSize": "16px"
+             },
+             "children": "2026年8月17日週"
+            }
+           }
+          ]
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "white",
+           "fontSize": "64px",
+           "fontWeight": 700,
+           "lineHeight": 1.1
+          },
+          "children": "千葉中央店"
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.45)",
+           "fontSize": "26px",
+           "marginTop": "12px"
+          },
+          "children": "千葉・中央"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": "auto",
+        "paddingTop": "32px",
+        "borderTop": "1px solid rgba(255,255,255,0.07)",
+        "display": "flex",
+        "justifyContent": "space-between"
+       },
+       "children": [
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.3)",
+           "fontSize": "18px"
+          },
+          "children": "週次の混雑傾向・ML 予測まとめ"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(139,92,246,0.7)",
+           "fontSize": "18px"
+          },
+          "children": "meguribi.jp"
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ },
+ "/store/__unknown__": {
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "edge",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "width": "100%",
+     "height": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "background": "linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0f0a1e 100%)",
+     "fontFamily": "sans-serif",
+     "padding": "60px 80px",
+     "position": "relative"
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "position": "absolute",
+        "top": 0,
+        "left": 0,
+        "right": 0,
+        "bottom": 0,
+        "background": "radial-gradient(ellipse 80% 60% at 80% 20%, rgba(99,102,241,0.12) 0%, transparent 70%)"
+       }
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "12px",
+        "marginBottom": "auto"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "width": "40px",
+           "height": "40px",
+           "borderRadius": "10px",
+           "background": "linear-gradient(135deg, #6366f1, #8b5cf6)",
+           "display": "flex",
+           "alignItems": "center",
+           "justifyContent": "center",
+           "fontSize": "20px"
+          },
+          "children": "✦"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.5)",
+           "fontSize": "22px",
+           "letterSpacing": "0.05em"
+          },
+          "children": "めぐりび · MEGRIBI"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "flexDirection": "column",
+        "marginTop": "32px"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "display": "flex",
+           "alignItems": "center",
+           "gap": "12px",
+           "marginBottom": "16px"
+          },
+          "children": {
+           "type": "span",
+           "key": null,
+           "props": {
+            "style": {
+             "background": "rgba(16,185,129,0.15)",
+             "border": "1px solid rgba(16,185,129,0.3)",
+             "color": "#6ee7b7",
+             "fontSize": "16px",
+             "padding": "4px 16px",
+             "borderRadius": "100px"
+            },
+            "children": "リアルタイム混雑情報"
+           }
+          }
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "white",
+           "fontSize": "64px",
+           "fontWeight": 700,
+           "lineHeight": 1.1,
+           "letterSpacing": "-0.02em"
+          },
+          "children": "オリエンタルラウンジ"
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "white",
+           "fontSize": "72px",
+           "fontWeight": 700,
+           "lineHeight": 1.1,
+           "letterSpacing": "-0.02em",
+           "marginTop": "8px"
+          },
+          "children": "__unknown__"
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.45)",
+           "fontSize": "26px",
+           "marginTop": "12px"
+          },
+          "children": ""
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": "auto",
+        "paddingTop": "32px",
+        "borderTop": "1px solid rgba(255,255,255,0.07)",
+        "display": "flex",
+        "justifyContent": "space-between",
+        "alignItems": "center"
+       },
+       "children": [
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.3)",
+           "fontSize": "18px"
+          },
+          "children": "混雑傾向・男女比・ML 予測をまとめてチェック"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(99,102,241,0.7)",
+           "fontSize": "18px"
+          },
+          "children": "meguribi.jp"
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ },
+ "/reports/daily/__unknown__": {
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "edge",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "width": "100%",
+     "height": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "background": "linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0f0a1e 100%)",
+     "fontFamily": "sans-serif",
+     "padding": "60px 80px",
+     "position": "relative"
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "position": "absolute",
+        "top": 0,
+        "left": 0,
+        "right": 0,
+        "bottom": 0,
+        "background": "radial-gradient(ellipse 80% 60% at 20% 120%, rgba(99,102,241,0.15) 0%, transparent 70%)"
+       }
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "12px",
+        "marginBottom": "auto"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "width": "40px",
+           "height": "40px",
+           "borderRadius": "10px",
+           "background": "linear-gradient(135deg, #6366f1, #8b5cf6)",
+           "display": "flex",
+           "alignItems": "center",
+           "justifyContent": "center",
+           "fontSize": "20px"
+          },
+          "children": "✦"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.5)",
+           "fontSize": "22px",
+           "letterSpacing": "0.05em"
+          },
+          "children": "めぐりび · MEGRIBI"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "flexDirection": "column",
+        "marginTop": "32px"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "display": "flex",
+           "alignItems": "center",
+           "gap": "12px",
+           "marginBottom": "16px"
+          },
+          "children": [
+           {
+            "type": "span",
+            "key": null,
+            "props": {
+             "style": {
+              "background": "rgba(99,102,241,0.15)",
+              "border": "1px solid rgba(99,102,241,0.3)",
+              "color": "#a5b4fc",
+              "fontSize": "16px",
+              "padding": "4px 16px",
+              "borderRadius": "100px"
+             },
+             "children": "ML 予測 Daily Report"
+            }
+           },
+           {
+            "type": "span",
+            "key": null,
+            "props": {
+             "style": {
+              "color": "rgba(255,255,255,0.3)",
+              "fontSize": "16px"
+             },
+             "children": "2026年8月19日"
+            }
+           }
+          ]
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "white",
+           "fontSize": "64px",
+           "fontWeight": 700,
+           "lineHeight": 1.1,
+           "letterSpacing": "-0.02em"
+          },
+          "children": "__unknown__"
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.45)",
+           "fontSize": "26px",
+           "marginTop": "12px"
+          },
+          "children": ""
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": "auto",
+        "paddingTop": "32px",
+        "borderTop": "1px solid rgba(255,255,255,0.07)",
+        "display": "flex",
+        "justifyContent": "space-between",
+        "alignItems": "center"
+       },
+       "children": [
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.3)",
+           "fontSize": "18px"
+          },
+          "children": "混雑傾向・男女比・ML 予測をまとめてチェック"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(99,102,241,0.7)",
+           "fontSize": "18px"
+          },
+          "children": "meguribi.jp"
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ },
+ "/reports/weekly/__unknown__": {
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "edge",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "width": "100%",
+     "height": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "background": "linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0a0f1e 100%)",
+     "fontFamily": "sans-serif",
+     "padding": "60px 80px",
+     "position": "relative"
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "position": "absolute",
+        "top": 0,
+        "left": 0,
+        "right": 0,
+        "bottom": 0,
+        "background": "radial-gradient(ellipse 80% 60% at 80% 120%, rgba(139,92,246,0.15) 0%, transparent 70%)"
+       }
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "12px",
+        "marginBottom": "auto"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "width": "40px",
+           "height": "40px",
+           "borderRadius": "10px",
+           "background": "linear-gradient(135deg, #8b5cf6, #6366f1)",
+           "display": "flex",
+           "alignItems": "center",
+           "justifyContent": "center",
+           "fontSize": "20px"
+          },
+          "children": "✦"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.5)",
+           "fontSize": "22px"
+          },
+          "children": "めぐりび · MEGRIBI"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "flexDirection": "column",
+        "marginTop": "32px"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "display": "flex",
+           "alignItems": "center",
+           "gap": "12px",
+           "marginBottom": "16px"
+          },
+          "children": [
+           {
+            "type": "span",
+            "key": null,
+            "props": {
+             "style": {
+              "background": "rgba(139,92,246,0.15)",
+              "border": "1px solid rgba(139,92,246,0.3)",
+              "color": "#c4b5fd",
+              "fontSize": "16px",
+              "padding": "4px 16px",
+              "borderRadius": "100px"
+             },
+             "children": "ML 予測 Weekly Report"
+            }
+           },
+           {
+            "type": "span",
+            "key": null,
+            "props": {
+             "style": {
+              "color": "rgba(255,255,255,0.3)",
+              "fontSize": "16px"
+             },
+             "children": "2026年8月17日週"
+            }
+           }
+          ]
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "white",
+           "fontSize": "64px",
+           "fontWeight": 700,
+           "lineHeight": 1.1
+          },
+          "children": "__unknown__"
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.45)",
+           "fontSize": "26px",
+           "marginTop": "12px"
+          },
+          "children": ""
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": "auto",
+        "paddingTop": "32px",
+        "borderTop": "1px solid rgba(255,255,255,0.07)",
+        "display": "flex",
+        "justifyContent": "space-between"
+       },
+       "children": [
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.3)",
+           "fontSize": "18px"
+          },
+          "children": "週次の混雑傾向・ML 予測まとめ"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(139,92,246,0.7)",
+           "fontSize": "18px"
+          },
+          "children": "meguribi.jp"
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ },
+ "/blog/beginner-complete-guide": {
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "nodejs",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "width": "100%",
+     "height": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "background": "linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0f0a1e 100%)",
+     "fontFamily": "sans-serif",
+     "padding": "60px 80px",
+     "position": "relative"
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "position": "absolute",
+        "top": 0,
+        "left": 0,
+        "right": 0,
+        "bottom": 0,
+        "background": "radial-gradient(ellipse 80% 60% at 50% 80%, rgba(139,92,246,0.12) 0%, transparent 70%)"
+       }
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "12px",
+        "marginBottom": "auto"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "width": "40px",
+           "height": "40px",
+           "borderRadius": "10px",
+           "background": "linear-gradient(135deg, #6366f1, #8b5cf6)",
+           "display": "flex",
+           "alignItems": "center",
+           "justifyContent": "center",
+           "fontSize": "20px"
+          },
+          "children": "✦"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.5)",
+           "fontSize": "22px",
+           "letterSpacing": "0.05em"
+          },
+          "children": "めぐりび · MEGRIBI"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "flexDirection": "column",
+        "marginTop": "32px"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "display": "flex",
+           "alignItems": "center",
+           "gap": "12px",
+           "marginBottom": "16px"
+          },
+          "children": {
+           "type": "span",
+           "key": null,
+           "props": {
+            "style": {
+             "background": "rgba(139,92,246,0.15)",
+             "border": "1px solid rgba(139,92,246,0.3)",
+             "color": "#c4b5fd",
+             "fontSize": "16px",
+             "padding": "4px 16px",
+             "borderRadius": "100px"
+            },
+            "children": "Blog"
+           }
+          }
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "display": "-webkit-box",
+           "color": "white",
+           "fontSize": "52px",
+           "fontWeight": 700,
+           "lineHeight": 1.25,
+           "letterSpacing": "-0.02em",
+           "maxWidth": "900px",
+           "WebkitBoxOrient": "vertical",
+           "WebkitLineClamp": 3,
+           "overflow": "hidden"
+          },
+          "children": "初心者必見！相席ラウンジ完全ガイド"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": "auto",
+        "paddingTop": "32px",
+        "borderTop": "1px solid rgba(255,255,255,0.07)",
+        "display": "flex",
+        "justifyContent": "space-between",
+        "alignItems": "center"
+       },
+       "children": [
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.3)",
+           "fontSize": "18px"
+          },
+          "children": "ML 予測レポート"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(99,102,241,0.7)",
+           "fontSize": "18px"
+          },
+          "children": "meguribi.jp"
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ },
+ "/blog/__missing__": {
+  "size": {
+   "width": 1200,
+   "height": 630
+  },
+  "contentType": "image/png",
+  "runtime": "nodejs",
+  "options": {
+   "width": 1200,
+   "height": 630
+  },
+  "element": {
+   "type": "div",
+   "key": null,
+   "props": {
+    "style": {
+     "width": "100%",
+     "height": "100%",
+     "display": "flex",
+     "flexDirection": "column",
+     "background": "linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0f0a1e 100%)",
+     "fontFamily": "sans-serif",
+     "padding": "60px 80px",
+     "position": "relative"
+    },
+    "children": [
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "position": "absolute",
+        "top": 0,
+        "left": 0,
+        "right": 0,
+        "bottom": 0,
+        "background": "radial-gradient(ellipse 80% 60% at 50% 80%, rgba(139,92,246,0.12) 0%, transparent 70%)"
+       }
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "alignItems": "center",
+        "gap": "12px",
+        "marginBottom": "auto"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "width": "40px",
+           "height": "40px",
+           "borderRadius": "10px",
+           "background": "linear-gradient(135deg, #6366f1, #8b5cf6)",
+           "display": "flex",
+           "alignItems": "center",
+           "justifyContent": "center",
+           "fontSize": "20px"
+          },
+          "children": "✦"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.5)",
+           "fontSize": "22px",
+           "letterSpacing": "0.05em"
+          },
+          "children": "めぐりび · MEGRIBI"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "display": "flex",
+        "flexDirection": "column",
+        "marginTop": "32px"
+       },
+       "children": [
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "display": "flex",
+           "alignItems": "center",
+           "gap": "12px",
+           "marginBottom": "16px"
+          },
+          "children": {
+           "type": "span",
+           "key": null,
+           "props": {
+            "style": {
+             "background": "rgba(139,92,246,0.15)",
+             "border": "1px solid rgba(139,92,246,0.3)",
+             "color": "#c4b5fd",
+             "fontSize": "16px",
+             "padding": "4px 16px",
+             "borderRadius": "100px"
+            },
+            "children": "Blog"
+           }
+          }
+         }
+        },
+        {
+         "type": "div",
+         "key": null,
+         "props": {
+          "style": {
+           "display": "-webkit-box",
+           "color": "white",
+           "fontSize": "52px",
+           "fontWeight": 700,
+           "lineHeight": 1.25,
+           "letterSpacing": "-0.02em",
+           "maxWidth": "900px",
+           "WebkitBoxOrient": "vertical",
+           "WebkitLineClamp": 3,
+           "overflow": "hidden"
+          },
+          "children": "めぐりび｜相席ラウンジ攻略ブログ"
+         }
+        }
+       ]
+      }
+     },
+     {
+      "type": "div",
+      "key": null,
+      "props": {
+       "style": {
+        "marginTop": "auto",
+        "paddingTop": "32px",
+        "borderTop": "1px solid rgba(255,255,255,0.07)",
+        "display": "flex",
+        "justifyContent": "space-between",
+        "alignItems": "center"
+       },
+       "children": [
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(255,255,255,0.3)",
+           "fontSize": "18px"
+          },
+          "children": "ML 予測レポート"
+         }
+        },
+        {
+         "type": "span",
+         "key": null,
+         "props": {
+          "style": {
+           "color": "rgba(99,102,241,0.7)",
+           "fontSize": "18px"
+          },
+          "children": "meguribi.jp"
+         }
+        }
+       ]
+      }
+     }
+    ]
+   }
+  }
+ }
+}

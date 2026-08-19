@@ -1,4 +1,5 @@
 import { test, expect } from "./fixtures";
+import { stubEmptyForecastToday } from "./helpers/storePageStubs";
 
 // ────────────────────────────────────────────
 // 料金シミュレーター（オリエンタルラウンジ37店舗 + 相席屋5店舗）の描画確認
@@ -44,9 +45,7 @@ test.describe("Cost simulator card - oriental stores", () => {
     // （目安時刻が実際の予測有無に依存し、実行タイミングでノートの有無が変わるため存在確認だけで
     // 逃げていた）。forecast_today/forecast_snapshot を「予測なし」に固定して hasForecast=false の
     // フォールバック（22:00入店の例示アンカー）を強制すれば、決定論的に検証できる。
-    await page.route("**/api/forecast_today?**", (route) =>
-      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, data: [] }) }),
-    );
+    await stubEmptyForecastToday(page);
     await page.route("**/api/forecast_snapshot?**", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: false }) }),
     );

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { jstWeekLabel } from "./opengraph-image";
+import { jstWeekLabel } from "./weekLabel";
 
 describe("jstWeekLabel", () => {
   it("月曜早朝 JST（旧 UTC バグ帯）でも当週の月曜を返す", () => {

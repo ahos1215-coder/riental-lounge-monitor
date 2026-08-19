@@ -2,26 +2,22 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
 
-import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { buildPageMetadata } from "@/lib/seo/pageMetadata";
 import { STORES, buildStoreFullName } from "@/app/config/stores";
 import { ReportsPageClient } from "./reports-client";
 import ReportsLoading from "./loading";
 
-const base = getMetadataBaseUrl();
-
-export const metadata: Metadata = {
+export const metadata: Metadata = buildPageMetadata({
   title: "AI予測レポート（Daily / Weekly）",
   description:
     "オリエンタルラウンジ全店舗のAI予測レポートを一覧で確認。毎日自動更新のDaily Reportと毎週水曜のWeekly Reportを、エリア・店舗名で素早く探せます。",
-  alternates: { canonical: new URL("/reports", base).href },
-  openGraph: {
-    title: "AI予測レポート | めぐりび",
-    description:
-      "全店舗のAI予測レポートをDaily/Weeklyで一覧確認。",
-    url: new URL("/reports", base),
-    type: "website",
-  },
-};
+  path: "/reports",
+  // OG だけは短縮した見出し・説明を使う（<title> はSERP向けに種別を明示した長い方を保つ）。
+  socialTitle: "AI予測レポート | めぐりび",
+  ogDescription: "全店舗のAI予測レポートをDaily/Weeklyで一覧確認。",
+  ogLocale: null,
+  twitter: false,
+});
 
 /**
  * ReportsPageClient はレポート一覧をクライアント側 fetch (/api/reports/list) で描画するため、

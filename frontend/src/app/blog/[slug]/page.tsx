@@ -7,7 +7,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { getPostBySlug } from "@/lib/blog/content";
-import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import {
+  extractFirstHeading,
+  extractFirstParagraph,
+  stripFrontmatter,
+} from "@/lib/blog/mdx";
+import { buildPageMetadata } from "@/lib/seo/pageMetadata";
 import { fetchPublishedEditorialBySlug, type PublishedEditorialRow } from "@/lib/supabase/blogDrafts";
 import { getStoreMetaBySlugStrict, buildStoreFullName } from "@/app/config/stores";
 
@@ -21,41 +26,6 @@ type ResolvedPost =
   | { kind: "editorial"; row: PublishedEditorialRow }
   | { kind: "filesystem"; post: NonNullable<ReturnType<typeof getPostBySlug>> }
   | { kind: "none" };
-
-function stripFrontmatter(raw: string): string {
-  if (!raw.startsWith("---\n")) return raw;
-  const end = raw.indexOf("\n---\n", 4);
-  if (end < 0) return raw;
-  return raw.slice(end + 5).trimStart();
-}
-
-/** mdx_content 先頭付近の見出し行（# / ## / ###）をタイトル候補として抽出する */
-function extractFirstHeading(mdx: string): string | null {
-  for (const line of mdx.split("\n")) {
-    const m = line.match(/^#{1,3}\s+(.+)/);
-    if (m) {
-      const text = m[1].trim();
-      if (text) return text;
-    }
-  }
-  return null;
-}
-
-/** 見出し以外の最初の段落を description フォールバックとして抽出する（約120文字に切り詰め） */
-function extractFirstParagraph(mdx: string): string | null {
-  for (const rawLine of mdx.split("\n")) {
-    const line = rawLine.trim();
-    if (!line) continue;
-    if (/^#{1,6}\s+/.test(line)) continue;
-    if (/^[-*+]\s+/.test(line)) continue;
-    if (/^\d+\.\s+/.test(line)) continue;
-    if (line.startsWith(">")) continue;
-    if (line.startsWith("```")) continue;
-    const truncated = line.length > 120 ? `${line.slice(0, 120)}…` : line;
-    return truncated;
-  }
-  return null;
-}
 
 /**
  * Supabase 編集記事 → ファイルシステム記事の順で解決する。
@@ -82,8 +52,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     notFound();
   }
 
-  const base = getMetadataBaseUrl();
-  const url = new URL(`/blog/${encodeURIComponent(slug)}`, base);
+  // 記事タイトルは既に固有名詞なので、OG/Twitter でもサイト名の接尾辞は付けない
+  // （他ページは `${title} | めぐりび`。揃えるかどうかはオーナー判断で、現状維持）。
+  const path = `/blog/${encodeURIComponent(slug)}`;
 
   if (resolved.kind === "editorial") {
     const { row } = resolved;
@@ -96,23 +67,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     const title = heading || `${storeName} 分析レポート`;
     const description = paragraph || `${storeName} の編集記事（承認済み）です。`;
 
-    return {
-      title,
-      description,
-      alternates: { canonical: url.href },
-      openGraph: {
-        title,
-        description,
-        url,
-        type: "article",
-        locale: "ja_JP",
-      },
-      twitter: {
-        card: "summary_large_image",
-        title,
-        description,
-      },
-    };
+    return buildPageMetadata({ title, description, path, ogType: "article", socialTitle: title });
   }
 
   // filesystem
@@ -120,23 +75,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const title = post.title;
   const description = post.description || `${post.title}について解説します。`;
 
-  return {
-    title,
-    description,
-    alternates: { canonical: url.href },
-    openGraph: {
-      title,
-      description,
-      url,
-      type: "article",
-      locale: "ja_JP",
-    },
-    twitter: {
-      card: "summary_large_image",
-      title,
-      description,
-    },
-  };
+  return buildPageMetadata({ title, description, path, ogType: "article", socialTitle: title });
 }
 
 export default async function BlogPostPage({ params }: Props) {

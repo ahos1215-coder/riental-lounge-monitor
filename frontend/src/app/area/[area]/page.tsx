@@ -14,6 +14,7 @@ import {
   type StoreMeta,
 } from "@/app/config/stores";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { buildPageMetadata } from "@/lib/seo/pageMetadata";
 import { fetchBackendSnapshot } from "@/lib/serverSnapshot";
 import { parseRangeResponse } from "@/lib/storeCardRangeSparkline";
 import { buildAreaLiveSummary, type AreaLiveSummary } from "@/lib/area/areaLiveSummary";
@@ -50,29 +51,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!config) notFound();
 
   const stores = getAreaStores(config);
-  const base = getMetadataBaseUrl();
-  const url = new URL(`/area/${encodeURIComponent(config.id)}`, base);
 
   const title = `${config.displayName}の相席ラウンジ 混雑状況・今夜の予測`;
   const description = `${config.displayName}エリアの相席ラウンジ${stores.length}店舗（${listBrandNames(stores)}）の混雑状況・今夜の予測をまとめて確認。実測データと機械学習の予測で、各店の今の混み具合や男女比を来店前にチェックできます。`;
 
-  return {
+  return buildPageMetadata({
     title,
     description,
-    alternates: { canonical: url.href },
-    openGraph: {
-      title: `${title} | めぐりび`,
-      description,
-      url,
-      type: "website",
-      locale: "ja_JP",
-    },
-    twitter: {
-      card: "summary_large_image",
-      title: `${title} | めぐりび`,
-      description,
-    },
-  };
+    path: `/area/${encodeURIComponent(config.id)}`,
+  });
 }
 
 /** エリア内に実在するブランド名を出現順・重複なしで「オリエンタルラウンジ・相席屋」のように並べる。 */
