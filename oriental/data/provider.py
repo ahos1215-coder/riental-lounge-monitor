@@ -12,6 +12,26 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 
+def mount_fallback_retries(session: requests.Session) -> None:
+    """自前で作った Session にだけ再試行ポリシーを付ける。
+
+    【2026-08-19 修正】呼び出し側から渡された Session（Flask の共有
+    ``app.config["HTTP_SESSION"]`` = ``oriental.clients.http.ConfiguredSession``）には
+    絶対に mount し直さないこと。共有セッションには 2026-08-18 の全停止対応で
+    「500 はリトライしない」ポリシーが設定済みで、ここで mount すると
+    アプリ全体のポリシーを黙って上書きしてしまう（= その対応が無効化される）。
+
+    500 は Supabase の statement timeout(57014) が返す恒久エラーで、
+    再試行しても必ず失敗し、1リクエストにつき 4回×timeout 12s ≒ 50秒
+    スレッドを占有して受け口を埋め尽くす。そのため fallback 側の
+    forcelist からも 500 は外してある（429 と 502/503/504 のみ再試行）。
+    """
+    retry = Retry(total=3, backoff_factor=0.6, status_forcelist=(429, 502, 503, 504))
+    adapter = HTTPAdapter(max_retries=retry)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+
+
 class DataProvider:
     def get_records(self, store_id: str, **kwargs: Any) -> list[dict]:
         raise NotImplementedError
@@ -73,12 +93,14 @@ class SupabaseLogsProvider(DataProvider):
         self.base_url = base_url.rstrip("/") if base_url else ""
         self.api_key = api_key
         self.endpoint = f"{self.base_url}/rest/v1/logs" if self.base_url else ""
-        self.session = session or requests.Session()
         self.logger = logger or logging.getLogger(__name__)
-        retry = Retry(total=3, backoff_factor=0.6, status_forcelist=(429, 500, 502, 503, 504))
-        adapter = HTTPAdapter(max_retries=retry)
-        self.session.mount("http://", adapter)
-        self.session.mount("https://", adapter)
+        # 渡された session は呼び出し側のポリシー（共有 ConfiguredSession）を尊重して
+        # 一切 mount しない。詳細は mount_fallback_retries() の docstring 参照。
+        if session is not None:
+            self.session = session
+        else:
+            self.session = requests.Session()
+            mount_fallback_retries(self.session)
 
     def fetch_range(
         self,

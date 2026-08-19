@@ -88,11 +88,17 @@ class GooglePlacesClient:
         logger: logging.Logger | None = None,
     ) -> None:
         self.api_key = api_key
-        self.session = session or requests.Session()
         self.logger = logger or logging.getLogger(__name__)
-        retry = Retry(total=3, backoff_factor=0.6, status_forcelist=(429, 500, 502, 503, 504))
-        adapter = HTTPAdapter(max_retries=retry)
-        if hasattr(self.session, "mount"):
+        # 渡された session（Flask の共有 ConfiguredSession）には mount し直さない。
+        # mount すると 2026-08-18 の「500 をリトライ対象から外す」全停止対応を
+        # アプリ全体で黙って無効化してしまうため。詳細は
+        # oriental/data/provider.py の mount_fallback_retries() の docstring 参照。
+        if session is not None:
+            self.session = session
+        else:
+            self.session = requests.Session()
+            retry = Retry(total=3, backoff_factor=0.6, status_forcelist=(429, 502, 503, 504))
+            adapter = HTTPAdapter(max_retries=retry)
             self.session.mount("http://", adapter)
             self.session.mount("https://", adapter)
 

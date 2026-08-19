@@ -6,10 +6,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
-from .provider import SupabaseError
+from .provider import SupabaseError, mount_fallback_retries
 
 
 @dataclass(slots=True)
@@ -37,13 +35,14 @@ class SecondVenuesRepository:
         self.base_url = base_url.rstrip("/") if base_url else ""
         self.api_key = api_key
         self.endpoint = f"{self.base_url}/rest/v1/second_venues" if self.base_url else ""
-        self.session = session or requests.Session()
         self.logger = logger or logging.getLogger(__name__)
-        retry = Retry(total=3, backoff_factor=0.6, status_forcelist=(429, 500, 502, 503, 504))
-        adapter = HTTPAdapter(max_retries=retry)
-        if hasattr(self.session, "mount"):
-            self.session.mount("http://", adapter)
-            self.session.mount("https://", adapter)
+        # 渡された session は呼び出し側のポリシー（共有 ConfiguredSession）を尊重して
+        # 一切 mount しない。詳細は mount_fallback_retries() の docstring 参照。
+        if session is not None:
+            self.session = session
+        else:
+            self.session = requests.Session()
+            mount_fallback_retries(self.session)
 
     def get_by_store(self, store_id: str) -> list[SecondVenue]:
         self._ensure_configured()
