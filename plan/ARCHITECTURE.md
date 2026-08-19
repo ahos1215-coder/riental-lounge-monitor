@@ -64,7 +64,7 @@ Target commit: (see git)
 
 #### `/stores` ページのリクエスト順序（単一 worker 対策）
 
-Render Starter プラン（$7/月、2025-12 移行済み）の gunicorn は `--workers ${WEB_CONCURRENCY:-2} --threads ${GUNICORN_THREADS:-2}`。スリープなし・永続ディスク対応。ただし同一ワーカーに複数リクエストが入るとシリアル処理になる。重い forecast_today_multi（~7s）が先に処理されると range_multi（~1s）がブロックされ、ユーザーは何も見えない状態が長く続く。
+Render Starter プラン（$7/月、2025-12 移行済み）の gunicorn は `--workers ${WEB_CONCURRENCY:-1} --threads ${GUNICORN_THREADS:-8}`（2026-07-17 メモリ事件#2で 2→1 / 4→8。0.5 vCPU なので2プロセス目はメモリ床だけ倍になる純コスト）。スリープなし・永続ディスク対応。ただし同一ワーカーに複数リクエストが入るとシリアル処理になる。重い forecast_today_multi（~7s）が先に処理されると range_multi（~1s）がブロックされ、ユーザーは何も見えない状態が長く続く。
 
 **解決**: フロントエンドのリクエスト発火順を制御:
 1. `range_multi` を **最優先で await** — 部分カード（人数・チャート）を即表示
@@ -123,7 +123,7 @@ ML Model Training（毎日 05:30 JST・毎週月曜 07:00 JST — GHA schedule�
      └─ Feature Importance + HPO best params を metadata.json に永続化（schema_version=v7）
 
 Forecast v2 shadow pipeline（答え合わせ・GHA schedule。本番配信には影響しない）:
-  forecast-accuracy-track.yml: snapshot 18:10 JST（今夜の予測を保存）/ score 06:10 JST（前夜の実測と採点）
+  forecast-accuracy-track.yml: score 06:10 JST（前夜の実測と採点）のみ。snapshot 18:10 JST はローカル Task Scheduler `MEGRIBI-snapshot` が主経路（GHA cron は 2026-07-18 削除）
   build-templates.yml: 07:30 JST（スコアリング後）で forecast/templates_v2.json を再生成
   → いずれも Supabase Storage の `<bucket>/accuracy/*` 配下に読み書き。詳細は `plan/FORECAST_V2.md` / `plan/FORECAST_ACCURACY.md`
 
@@ -252,7 +252,7 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `.github/workflows/trigger-blog-cron.yml`（Daily Report。**schedule はコメントアウト済み、`workflow_dispatch`（緊急用）のみ**。matrix max-parallel: 5、オリエンタル37店舗のみ）
 - `.github/workflows/generate-weekly-insights.yml`（Weekly Report。**schedule はコメントアウト済み、`workflow_dispatch`（緊急用）のみ**。Fan-in Matrix、オリエンタル37店舗のみ）
 - `.github/workflows/train-ml-model.yml`（ML学習。日次05:30 JST(Optunaなし) + 週次月曜07:00 JST(Optuna HPOあり)。これは引き続き GHA が本流）
-- `.github/workflows/forecast-accuracy-track.yml`（v2 shadow 答え合わせ。18:10 snapshot / 06:10 score）
+- `.github/workflows/forecast-accuracy-track.yml`（v2 shadow 答え合わせ。06:10 score。18:10 snapshot はローカル `MEGRIBI-snapshot` が主経路）
 - `.github/workflows/build-templates.yml`（v2 shadow テンプレ再生成。07:30 JST）
 - `.github/workflows/warm-cdn.yml`（CDN warming バックアップ。プライマリはローカル `MEGRIBI-warm-cdn`）
 - `.github/workflows/x-auto-post.yml`（X 自動投稿, workflow_run + dispatch）

@@ -32,9 +32,10 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
   `/compare`, `/area/[area]`, `/reports`, `/reports/daily|weekly/[store_slug]`, `/blog`,
   `/blog/[slug]`, `/mypage` 等。
 - **バックエンド**: `oriental/`（Flask アプリファクトリ）。`wsgi.py` が `oriental.create_app()` を
-  呼ぶだけの薄いエントリポイント。`Procfile`: `gunicorn wsgi:app --timeout 300 --graceful-timeout 30
-  --workers ${WEB_CONCURRENCY:-2} --threads ${GUNICORN_THREADS:-4}`（`--preload` は意図的に
-  未使用。fork-after-thread hazard を避けるため）。
+  呼ぶだけの薄いエントリポイント。`Procfile`: `env MALLOC_ARENA_MAX=2 gunicorn wsgi:app --timeout 300
+  --graceful-timeout 30 --workers ${WEB_CONCURRENCY:-1} --threads ${GUNICORN_THREADS:-8}
+  --max-requests 1500 --max-requests-jitter 200`（2026-07-17 メモリ事件#2で workers 2→1 / threads 4→8。
+  `--preload` は意図的に未使用。fork-after-thread hazard を避けるため）。
 - **収集スクリプト**: リポジトリ直下の `multi_collect.py`（`STORES` / `AISEKIYA_STORES` /
   `PREF_COORDS` を定義。`oriental/routes/tasks.py` が import して使う）。
 - **バッチスクリプト**: `scripts/` 配下（ML学習・ローカルレポート生成・CDN warming・v2 shadow評価
@@ -55,9 +56,11 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
 
 `daily`/`weekly`は同一`store_slug`に対し**最新行を上書き**（固定URL、Freshness優先）。`editorial`のみ
 ユニークURL。失敗時の状態は**carry-over方式**（2026-07-18・Fable監査B2で日次も週次に合わせた）:
-①成功＝本文+`is_published=true`。②失敗かつ**過去に公開済みの良品がある**＝前回の本文/公開フラグを
-**保持**し`error_message`のみ追記（一度の不調で最新の良品を空で破壊しない）。③失敗かつ良品が一度も
-無い新規店＝本文空・`is_published=false`・`error_message`あり。`editorial`は最初false→LINE承認でtrue。
+①成功＝本文+`is_published=true`。②失敗かつ**過去に公開済みの良品がある**＝前回の本文/公開フラグ/
+**`target_date`を保持**し、`error_message`は**null のまま**（フロントは`is_published=true`かつ
+`error_message is null`で表示行を絞るため、ここに理由を書くと読者に届かなくなる。失敗理由は
+`insight_json.last_error`とログへ。2026-08-19・所見1）。③失敗かつ良品が一度も無い新規店＝本文空・
+`is_published=false`・`error_message`あり。`editorial`は最初false→LINE承認でtrue。
 
 ### 環境変数（迷ったときに真っ先に見るもの）
 
@@ -75,7 +78,7 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
 |---|---|---|
 | 5分毎 | 混雑データ収集 | cron-job.org → `/tasks/multi_collect`（`CRON_SECRET`認証）→ `collect_all_once()` → Supabase `logs`。オリエンタル・相席屋それぞれのトップページSSRから2リクエストで全42店舗分を取得 |
 | 18:00 / 21:30 | **Daily Report生成** | 【主】Task Scheduler `MEGRIBI-daily-evening`/`-late` → `scripts/local_report_job.py --stores all --edition <evening_preview\|late_update> --mode publish` → ローカル Ollama（`gemma4:e4b`、`localhost:11434`）→ Supabase `blog_drafts` upsert。【緊急時のみ】`.github/workflows/trigger-blog-cron.yml` は `schedule:` コメントアウト済み、`workflow_dispatch`のみ（matrixはオリエンタル37店舗、相席屋5店舗は対象外、Gemini使用） |
-| 18:10 | v2 shadow: 予測スナップショット保存 | GHA `forecast-accuracy-track.yml`（mode=snapshot）→ `scripts/snapshot_forecasts.py` → Storage `ml-models/accuracy/snapshots/<date>.json` |
+| 18:10 | v2 shadow: 予測スナップショット保存 | 【主】Task Scheduler `MEGRIBI-snapshot` → `scripts/snapshot_forecasts.py` → Storage `ml-models/accuracy/snapshots/<date>.json`。GHA `forecast-accuracy-track.yml` の snapshot cron は 2026-07-18 に削除済み（GHA schedule の遅延で開店後に撮れて汚染したため。`workflow_dispatch` は残る） |
 | 19:00〜23:50・10分毎 | CDN warming（`/api/range`等の温め） | 【主】Task Scheduler `MEGRIBI-warm-cdn` → `scripts/warm_cdn_local.py`。【バックアップ】GHA `warm-cdn.yml`（実測発火率8.3%と低いため保険止まり） |
 | 水曜 06:30 | **Weekly Report生成** | 【主】Task Scheduler `MEGRIBI-weekly` → `run_weekly_local.ps1 -Stores all` → `generate_weekly_insights.py --stores all`（`INSIGHTS_LLM_BACKEND=ollama`）が全42店舗を単一プロセスで処理 → Supabase upsert + `frontend/content/insights/weekly/*.json`。**`index.json` の直接更新は廃止**（読み手が存在しない死蔵ファイルと判明し別バッチ〔weekly-cleanup〕で廃止中）。【緊急時のみ】`generate-weekly-insights.yml`（`workflow_dispatch`, Fan-in Matrix, オリエンタル37店舗のみ, Gemini使用） |
 | 05:30 毎日 | ML再学習（固定パラメータ） | GHA `train-ml-model.yml` → `scripts/train_ml_model.py`。`ALL_STORE_IDS`（42店舗）allow-listでLightGBM学習 → Storage `ml-models/forecast/latest/` |

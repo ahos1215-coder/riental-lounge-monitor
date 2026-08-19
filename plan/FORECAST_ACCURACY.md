@@ -34,6 +34,7 @@ score (06:10 JST, 夜が終わった後):
 ## 使い方 / 確認
 
 - 手動実行：Actions → **Forecast accuracy tracking** → Run workflow → `mode` に `snapshot` か `score`。
+- 定時の snapshot（18:10 JST）は 2026-07-18 以降ローカル PC の Task Scheduler `MEGRIBI-snapshot` が主経路（GHA schedule は遅延で開店後に撮れて汚染したため cron 削除）。
 - 結果はジョブログに店舗別 live MAE が表示される。推移は Storage の `accuracy/scores/summary.json`。
 - snapshot は **18:10**（純粋な事前予測）を採点対象にする。21:30 便の実測ベース表示や (b) の
   tonight-anchoring とは独立。

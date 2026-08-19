@@ -122,7 +122,7 @@ npm run dev
 | Weekly Report（**緊急時のみ**、`workflow_dispatch`） | schedule はコメントアウト済み（旧: 火 `30 21` UTC = JST 水 06:30） | `generate-weekly-insights.yml` |
 | **ML モデル学習・日次**（Optunaなし） | `30 20 * * *` UTC = JST 05:30 | `train-ml-model.yml` |
 | **ML モデル学習・週次**（Optuna HPOあり） | `0 22 * * 0` UTC（日曜22:00） = JST 月曜 07:00 | `train-ml-model.yml`（同一ファイル、cron条件分岐） |
-| Forecast v2 shadow: snapshot | `10 9 * * *` UTC = JST 18:10 | `forecast-accuracy-track.yml` |
+| Forecast v2 shadow: snapshot | JST 18:10 | 【主】ローカル Task Scheduler `MEGRIBI-snapshot`（GHA `forecast-accuracy-track.yml` の snapshot cron は 2026-07-18 に削除。`workflow_dispatch` のみ） |
 | Forecast v2 shadow: score | `10 21 * * *` UTC = JST 06:10 | `forecast-accuracy-track.yml` |
 | Forecast v2 templates 再生成 | `30 22 * * *` UTC = JST 07:30 | `build-templates.yml` |
 | CDN warming（**バックアップ**。主はローカル） | `*/10 10-14 * * *` UTC = JST 19:00-23:50・10分毎 | `warm-cdn.yml` |

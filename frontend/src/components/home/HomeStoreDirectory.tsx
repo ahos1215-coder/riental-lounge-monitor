@@ -4,6 +4,7 @@ import Link from "next/link";
 import { MapPin } from "lucide-react";
 import { FadeIn } from "@/components/ui/FadeIn";
 import { STORES } from "@/app/config/stores";
+import { AREAS } from "@/app/config/areas";
 import type { HomeRepresentativeStore } from "./homeTypes";
 
 export function HomeStoreDirectory({
@@ -41,6 +42,26 @@ export function HomeStoreDirectory({
                     </li>
                   ))}
                 </ul>
+              )}
+              {/* エリアから探す: 「大阪 相席ラウンジ」「相席 静岡」等の地名検索で来た人と
+                  クローラの両方に、エリアハブ（/area/{id}）への実アンカーをトップから張る
+                  （SEO Phase3-D。エリアの実体は config/areas.ts の AREAS。件数はハードコードしない）。 */}
+              {AREAS.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-[12px] font-medium text-slate-300">エリアから探す</p>
+                  <ul className="mt-2 flex flex-wrap gap-2">
+                    {AREAS.map((area) => (
+                      <li key={area.id}>
+                        <Link
+                          href={`/area/${area.id}`}
+                          className="inline-flex items-center rounded-full border border-slate-700 bg-slate-900/60 px-3 py-1 text-[11px] text-slate-300 transition hover:border-indigo-400/60 hover:text-indigo-200"
+                        >
+                          {area.displayName}
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
               <div className="mt-4">
                 <Link

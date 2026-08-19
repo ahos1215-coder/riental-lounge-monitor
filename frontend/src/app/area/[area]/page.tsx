@@ -15,8 +15,10 @@ import {
 } from "@/app/config/stores";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { fetchBackendSnapshot } from "@/lib/serverSnapshot";
-import { STORE_CARD_RANGE_LIMIT, parseRangeResponse } from "@/lib/storeCardRangeSparkline";
+import { parseRangeResponse } from "@/lib/storeCardRangeSparkline";
 import { buildAreaLiveSummary, type AreaLiveSummary } from "@/lib/area/areaLiveSummary";
+import { RANGE_LIMIT_BY_MODE } from "@/app/hooks/storePreviewSnapshot";
+import { addDays, computeNightBaseDate, formatYMD } from "@/lib/date/nightWindow";
 import {
   buildAreaCollectionPageJsonLd,
   buildBreadcrumbList,
@@ -116,24 +118,56 @@ function buildAisekiyaSeekerNote(config: AreaConfig, stores: StoreMeta[]): strin
 }
 
 /**
- * エリア内の各店の実測（直近の人数/％・時間帯別・最終計測時刻）を /api/range_multi から取り、
- * 静的HTMLのテキストとして載せる。一覧ページと同じ limit（per-store キャッシュ共有）なので
- * バックエンドへの追加負荷はほぼ無い。失敗・タイムアウト・データ無しは null（セクションごと省く）。
+ * エリア内の各店の実測（その夜のピーク・時間帯別・進行中なら直近値・最終計測時刻）を取り、
+ * 静的HTMLのテキストとして載せる。
+ *
+ * URL は店舗ページ（store/[id]/page.tsx の fetchInitialSnapshotOnce）と同じ
+ * 「夜窓で区切った /api/range（from/to + limit=RANGE_LIMIT_BY_MODE.today）」に揃えている。
+ * 同一URLなので Next の fetch キャッシュとバックエンドの per-store キャッシュを店舗ページと共有し、
+ * バックエンドへの追加負荷はほぼ無い（旧版の limit=48 は直近4時間しか見えず、昼間は 1〜4時台だけが
+ * “その夜の推移”になっていた）。失敗・タイムアウト・データ無しは null（セクションごと省く）。
  */
 async function fetchAreaLive(stores: StoreMeta[]): Promise<AreaLiveSummary | null> {
   if (stores.length === 0) return null;
-  const slugsCsv = stores.map((s) => s.slug).join(",");
-  const json = await fetchBackendSnapshot<{
-    ok?: boolean;
-    by_slug?: Record<string, { rows?: unknown[] }>;
-  }>(`/api/range_multi?stores=${encodeURIComponent(slugsCsv)}&limit=${STORE_CARD_RANGE_LIMIT}`, 60);
-  if (!json?.ok || !json.by_slug) return null;
+  const now = new Date();
+  const baseDate = computeNightBaseDate(now);
+  const fromYmd = formatYMD(baseDate);
+  const toYmd = formatYMD(addDays(baseDate, 1));
+  const limit = RANGE_LIMIT_BY_MODE.today;
+
+  const urlFor = (slug: string) =>
+    `/api/range?store=${encodeURIComponent(slug)}` +
+    `&from=${encodeURIComponent(fromYmd)}&to=${encodeURIComponent(toYmd)}&limit=${limit}`;
+
   const bySlug: Record<string, ReturnType<typeof parseRangeResponse>> = {};
-  for (const store of stores) {
-    const rows = json.by_slug[store.slug]?.rows;
-    if (Array.isArray(rows)) bySlug[store.slug] = parseRangeResponse({ rows });
+  const collect = async (targets: StoreMeta[]): Promise<StoreMeta[]> => {
+    const results = await Promise.all(
+      targets.map((store) =>
+        fetchBackendSnapshot<unknown>(urlFor(store.slug), 60).then(
+          (json) => [store, json] as const,
+        ),
+      ),
+    );
+    const missing: StoreMeta[] = [];
+    for (const [store, json] of results) {
+      if (!json) {
+        missing.push(store);
+        continue;
+      }
+      if ((json as { ok?: boolean }).ok === false) continue;
+      bySlug[store.slug] = parseRangeResponse(json);
+    }
+    return missing;
+  };
+
+  // ビルド時（42店舗+14エリアが同時に叩く）やISR再生成の瞬間的な詰まりで null になった店だけ、
+  // 店舗ページ（SERVER_SNAPSHOT_RETRY_DELAY_MS=400）と同じく短い待機を挟んで一度だけ再試行する。
+  const missing = await collect(stores);
+  if (missing.length > 0) {
+    await new Promise((r) => setTimeout(r, 400));
+    await collect(missing);
   }
-  return buildAreaLiveSummary(stores, bySlug, new Date());
+  return buildAreaLiveSummary(stores, bySlug, now);
 }
 
 /** 店舗カード1件の補足テキスト。相席屋(ay_*)は人数を約束せず％表示のみの案内にする。 */
@@ -280,9 +314,17 @@ export default async function AreaPage({ params }: Props) {
                   {line.updatedText && (
                     <span className="ml-2 text-[11px] text-slate-500">{line.updatedText}</span>
                   )}
-                  <p className="mt-1">
-                    <span className="text-slate-300">{line.nowText}</span>
-                  </p>
+                  {line.nowText && (
+                    <p className="mt-1">
+                      いま <span className="text-slate-300">{line.nowText}</span>
+                    </p>
+                  )}
+                  {line.peakText && (
+                    <p className="mt-0.5 text-[12px]">
+                      {live.completed ? "この夜のピーク" : "ここまでのピーク"}{" "}
+                      <span className="text-slate-300">{line.peakText}</span>
+                    </p>
+                  )}
                   {line.hourlyText && (
                     <p className="mt-0.5 text-[12px]">
                       時間帯別の混雑（実測） <span className="text-slate-300">{line.hourlyText}</span>
@@ -292,7 +334,9 @@ export default async function AreaPage({ params }: Props) {
               ))}
             </ul>
             <p className="mt-3 text-[11px] text-slate-500">
-              数値は営業時間中に数分おきに更新されます。時刻はいずれも日本時間です。
+              {live.completed
+                ? "現在は営業時間外の可能性があります。営業中は数分おきに更新されます。時刻はいずれも日本時間です。"
+                : "数値は営業時間中に数分おきに更新されます。時刻はいずれも日本時間です。"}
             </p>
           </section>
         )}
