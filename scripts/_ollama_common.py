@@ -26,6 +26,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
 
 # ---- 設定 -----------------------------------------------------------------
 OLLAMA_URL = "http://localhost:11434"
@@ -78,6 +79,31 @@ FACTS_FETCH_TIMEOUT_SEC = 45
 FACTS_FETCH_RETRIES = 3
 
 
+JST = timezone(timedelta(hours=9))
+
+
+def hm_jst(ts: str | None) -> str | None:
+    """ISO 8601 文字列を JST の "HH:MM" にする。
+
+    /api/megribi_score の ts は UTC（"+00:00"）、/api/forecast_today の ts は JST（"+09:00"）で
+    返ってくるため、文字列を [11:16] で切るだけだと UTC 側が 9 時間ずれる
+    （2026-08-19 の日報で「現在（12時半頃）」と出た原因）。オフセット無しは UTC とみなす。
+    解釈できなければ None。
+    """
+    if not isinstance(ts, str) or len(ts) < 16:
+        return None
+    raw = ts.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        d = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=timezone.utc)
+    return d.astimezone(JST).strftime("%H:%M")
+
+
 def fetch_store_facts(slug: str) -> dict:
     """megribi_score(最新の混雑/男女比) + forecast_today(今夜のピーク予測) から
     レポート用の facts を組み立てる。失敗時はサンプルにフォールバック。
@@ -101,10 +127,10 @@ def fetch_store_facts(slug: str) -> dict:
             facts["men_seat_pct"] = row.get("men_seat_pct")
             facts["women_seat_pct"] = row.get("women_seat_pct")
             # 「いつの実測か」を本文で言えるようにするための時刻（同一レスポンス内の値なので
-            # 追加のAPI呼び出しは発生しない）。ISO文字列から HH:MM だけを取り出す。
-            ts = row.get("ts") or ""
-            if isinstance(ts, str) and len(ts) >= 16:
-                facts["latest_ts"] = ts[11:16]
+            # 追加のAPI呼び出しは発生しない）。ts は UTC で返るので必ず JST に直す（hm_jst）。
+            latest_hm = hm_jst(row.get("ts"))
+            if latest_hm:
+                facts["latest_ts"] = latest_hm
     except Exception as e:  # noqa: BLE001
         facts["megribi_error"] = str(e)
     try:
@@ -118,7 +144,7 @@ def fetch_store_facts(slug: str) -> dict:
         if pts:
             peak_ts, peak_val = max(pts, key=lambda x: x[1])
             facts["forecast_peak_total"] = round(peak_val, 1)
-            facts["forecast_peak_time"] = peak_ts[11:16] if len(peak_ts) >= 16 else peak_ts
+            facts["forecast_peak_time"] = hm_jst(peak_ts) or peak_ts
             facts["forecast_points"] = len(pts)
     except Exception as e:  # noqa: BLE001
         facts["forecast_error"] = str(e)

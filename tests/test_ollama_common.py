@@ -168,3 +168,39 @@ def test_モデル名は日次週次実験で同じ定数を見る() -> None:
     assert gwi.OLLAMA_MODEL == oc.MODEL
     assert lrj.spk.MODEL == oc.MODEL
     assert oc.MODEL == "gemma4:e4b"
+
+
+# ---- 2026-08-19 夜の日報で「現在（12時半頃）」と出た回帰（UTC の ts を JST に直していなかった） ----
+import pytest
+
+from scripts import _ollama_common as oc
+
+
+@pytest.mark.parametrize(
+    "ts, expected",
+    [
+        ("2026-08-19T12:55:19.703711+00:00", "21:55"),  # /api/megribi_score の形（UTC）
+        ("2026-08-19T12:55:19Z", "21:55"),
+        ("2026-08-19T19:00:00+09:00", "19:00"),  # /api/forecast_today の形（JST）
+        ("2026-08-19T12:55:19", "21:55"),  # オフセット無しは UTC とみなす
+        ("", None),
+        (None, None),
+        ("not-a-date-at-all", None),
+    ],
+)
+def test_hm_jst_は_UTC_も_JST_も_日本時間のHHMMにする(ts, expected):
+    assert oc.hm_jst(ts) == expected
+
+
+def test_fetch_store_facts_の_latest_ts_は_JST(monkeypatch):
+    def fake_get_json(url, timeout=0, retries=0):
+        if "megribi_score" in url:
+            return {"data": [{"slug": "shibuya", "score": 0.5, "total": 36, "ts": "2026-08-19T12:35:00+00:00"}]}
+        if "forecast_today" in url:
+            return {"data": [{"ts": "2026-08-19T23:30:00+09:00", "men_pred": 20, "women_pred": 25}]}
+        return {}
+
+    monkeypatch.setattr(oc, "_get_json", fake_get_json)
+    facts = oc.fetch_store_facts("shibuya")
+    assert facts["latest_ts"] == "21:35"
+    assert facts["forecast_peak_time"] == "23:30"
