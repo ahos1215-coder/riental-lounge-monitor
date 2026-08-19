@@ -176,6 +176,7 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
               sparkline: actualTotals,
               sparklineMen: genderSparks.men,
               sparklineWomen: genderSparks.women,
+              latestActualTs: typeof current.ts === "string" ? current.ts : null,
             };
           } catch {
             // 個別店舗の処理失敗は無視して続行

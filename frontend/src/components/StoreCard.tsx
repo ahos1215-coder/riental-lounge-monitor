@@ -13,6 +13,7 @@ import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
 import { SimpleLineChart } from "@/components/store-card/SimpleLineChart";
 import { GenderTrendMiniChart } from "@/components/store-card/GenderTrendMiniChart";
 import { MegribiScoreBadge } from "@/components/store-card/MegribiScoreBadge";
+import { computeFreshness } from "@/lib/forecast/seriesAnalysis";
 
 type StoreCardProps = {
   slug: string;
@@ -45,6 +46,12 @@ type StoreCardProps = {
   /** 一覧などで /api/range だけ先に反映し、予測を後追いするとき */
   forecastPending?: boolean;
   isLoading?: boolean;
+  /**
+   * 表示中の人数/%（stats）の元になった最新実測行の ts（ISO文字列）。
+   * 閉店中などで実測が古い（既定20分以上前）場合に「閉店中・最終 HH:MM 時点」の
+   * 鮮度ラベルを出すために使う。未指定ならラベルは出さない（従来どおり数値のみ表示）。
+   */
+  latestActualTs?: string | null;
   /** めぐりびスコア 0.0〜1.0。≥0.65 → 緑 狙い目 / ≥0.40 → 黄 様子見 / <0.40 → 赤 他店へ */
   megribiScore?: number | null;
   /** カード（リンク）クリック時の任意フック。計測などに使う（既定の遷移挙動は変えない）。 */
@@ -58,6 +65,21 @@ type StoreCardProps = {
  * データが後から届けば forecastPending が false になり通常表示へ自動的に戻る。
  */
 const FORECAST_PENDING_TIMEOUT_MS = 8_000;
+
+/**
+ * hasStats のときだけ意味を持つ「閉店中・最終 HH:MM 時点」ラベル。stale でなければ
+ * null（StoreRealtimeStatusCard.tsx と同じ文言・しきい値。ここで新しい閾値や文言は作らない）。
+ * DOM 非依存の純粋関数として切り出し、単体テスト可能にしている。
+ */
+export function staleFreshnessLabel(
+  latestActualTs: string | null | undefined,
+  hasStats: boolean,
+  now?: Date,
+): string | null {
+  if (!hasStats) return null;
+  const freshness = computeFreshness(latestActualTs ?? null, now);
+  return freshness.state === "stale" ? `閉店中・${freshness.label}` : null;
+}
 
 function StoreCardImpl({
   slug,
@@ -77,6 +99,7 @@ function StoreCardImpl({
   forecastPending = false,
   isLoading = false,
   megribiScore,
+  latestActualTs,
   onNavigate,
 }: StoreCardProps) {
   const resolvedHref = useMemo(
@@ -133,6 +156,8 @@ function StoreCardImpl({
       : "text-white";
   const crowdIcon = crowd === "混雑" ? "▲" : crowd === "ほどよい" ? "●" : crowd === "空いている" ? "○" : "・";
 
+  const freshnessLabel = staleFreshnessLabel(latestActualTs, hasStats);
+
   const hasGenderTrend =
     Array.isArray(sparklineMen) &&
     Array.isArray(sparklineWomen) &&
@@ -176,6 +201,14 @@ function StoreCardImpl({
             {label}
           </h2>
           <p className="mt-0.5 text-[11px] text-white/50">{areaLabel}</p>
+          {freshnessLabel && (
+            <p
+              className="mt-0.5 text-[10px] text-amber-200/80"
+              suppressHydrationWarning
+            >
+              {freshnessLabel}
+            </p>
+          )}
           {hasStats && (
             <div className="mt-2 space-y-2">
               <div className="flex items-center gap-2 text-[11px]">
@@ -326,6 +359,7 @@ export const StoreCard = memo(StoreCardImpl, (prev, next) => {
     prev.forecastPending === next.forecastPending &&
     prev.isLoading === next.isLoading &&
     prev.megribiScore === next.megribiScore &&
+    prev.latestActualTs === next.latestActualTs &&
     statsEqual(prev.stats, next.stats) &&
     numArrayEqual(prev.sparklinePoints, next.sparklinePoints) &&
     numArrayEqual(prev.sparklineTimes, next.sparklineTimes) &&

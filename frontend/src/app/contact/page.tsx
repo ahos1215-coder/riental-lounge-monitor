@@ -6,6 +6,12 @@ export const metadata: Metadata = {
   description: "めぐりび（MEGRIBI）へのお問い合わせページです。",
 };
 
+/**
+ * お問い合わせフォームの実URL。オーナーがGoogleフォームを用意でき次第、
+ * ここへ https://forms.gle/... を入れればリンクが復活する（空文字の間は「準備中」表示）。
+ */
+const CONTACT_FORM_URL = "";
+
 export default function ContactPage() {
   return (
     <main className="mx-auto w-full max-w-3xl px-4 py-10">
@@ -27,19 +33,35 @@ export default function ContactPage() {
 
         <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/10 p-6">
           <p className="text-base font-bold text-white">Google フォームからお問い合わせ</p>
-          <p className="mt-2 text-white/60">
-            以下のリンクからお問い合わせフォームを開いてください。
-            通常 3 営業日以内にご返信いたします。
-          </p>
-          <a
-            href="https://forms.gle/PLACEHOLDER"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-indigo-500 px-5 py-2.5 font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:bg-indigo-400"
-          >
-            お問い合わせフォームを開く
-            <span aria-hidden>↗</span>
-          </a>
+          {CONTACT_FORM_URL ? (
+            <>
+              <p className="mt-2 text-white/60">
+                以下のリンクからお問い合わせフォームを開いてください。
+                通常 3 営業日以内にご返信いたします。
+              </p>
+              <a
+                href={CONTACT_FORM_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-indigo-500 px-5 py-2.5 font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:bg-indigo-400"
+              >
+                お問い合わせフォームを開く
+                <span aria-hidden>↗</span>
+              </a>
+            </>
+          ) : (
+            <>
+              <p className="mt-2 text-white/60">
+                お問い合わせフォームは現在準備中です。しばらくお待ちください。
+              </p>
+              <span
+                aria-disabled="true"
+                className="mt-4 inline-flex cursor-not-allowed items-center gap-2 rounded-lg bg-white/10 px-5 py-2.5 font-semibold text-white/40"
+              >
+                準備中
+              </span>
+            </>
+          )}
         </div>
 
         <div className="space-y-3">

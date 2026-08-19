@@ -51,6 +51,8 @@ export type StoreRealtimeCard = {
   sparklineGenderTimes?: number[];
   forecastPending?: boolean;
   megribiScore?: number | null;
+  /** 表示中の人数の元になった最新実測行の ts。StoreCard の鮮度ラベルに使う。 */
+  latestActualTs?: string | null;
 };
 
 export type StoresListClientProps = {
@@ -295,6 +297,7 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
         let menNow = 0;
         let womenNow = 0;
         let nowTotal = 0;
+        let latestActualTs: string | null = null;
         let actualSparkline: number[] = [];
         let sparklineTimes: number[] = [];
         let sparklineMen: number[] = [];
@@ -337,6 +340,7 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
           menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
           womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
           nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
+          latestActualTs = typeof current.ts === "string" ? current.ts : null;
 
           const partialCard: StoreRealtimeCard = {
             slug: store.slug,
@@ -355,6 +359,7 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
             sparklineWomen,
             sparklineGenderTimes,
             forecastPending: true,
+            latestActualTs,
           };
           setStoreRealtime((prev) => ({ ...prev, [store.slug]: partialCard }));
         } catch (err) {
@@ -415,6 +420,7 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
             sparklineWomen,
             sparklineGenderTimes,
             forecastPending: false,
+            latestActualTs,
           };
           if (signal.aborted) return;
           setStoreRealtime((prev) => ({ ...prev, [store.slug]: fullCard }));
@@ -535,6 +541,7 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
                       forecastPending={storeRealtime[store.slug]?.forecastPending}
                       isLoading={realtimeLoading && !storeRealtime[store.slug]}
                       megribiScore={storeRealtime[store.slug]?.megribiScore}
+                      latestActualTs={storeRealtime[store.slug]?.latestActualTs}
                     />
                   ))}
                 </div>

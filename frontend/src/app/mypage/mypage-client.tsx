@@ -18,6 +18,7 @@ import {
   parseRangeResponse,
   pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
+import { staleFreshnessLabel } from "@/components/StoreCard";
 
 type MegribiScoreItem = {
   slug: string;
@@ -41,6 +42,8 @@ type FavCardData = {
   forecastPeak: string;
   forecastCalm: string;
   forecastMaxPred: number;
+  /** 表示中の人数の元になった最新実測行の ts。閉店中の鮮度ラベルに使う。 */
+  latestActualTs: string | null;
 };
 
 function GenderTrendMini({ men, women }: { men: number[]; women: number[] }) {
@@ -130,6 +133,7 @@ export default function MyPageClient() {
             sparklineMen: [], sparklineWomen: [],
             megribiScore: megribiMap[slug]?.score ?? null,
             forecastPeak: "--:--", forecastCalm: "--:--", forecastMaxPred: 0,
+            latestActualTs: null,
           };
 
           const [rangeResult, forecastResult] = await Promise.allSettled([
@@ -148,6 +152,7 @@ export default function MyPageClient() {
               base.women = womenNow;
               base.total = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
               base.genderRatio = `${menNow}:${womenNow}`;
+              base.latestActualTs = typeof current.ts === "string" ? current.ts : null;
               const gs = buildGenderSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
               base.sparklineMen = gs.men;
               base.sparklineWomen = gs.women;
@@ -286,6 +291,14 @@ export default function MyPageClient() {
                         {card.meta.label}
                       </Link>
                       <p className="text-[11px] text-white/40">{card.meta.areaLabel}</p>
+                      {(() => {
+                        const label = staleFreshnessLabel(card.latestActualTs, true);
+                        return label ? (
+                          <p className="mt-0.5 text-[10px] text-amber-200/80" suppressHydrationWarning>
+                            {label}
+                          </p>
+                        ) : null;
+                      })()}
                     </div>
                     {/* 判定バッジは featureFlags.ts の理由により一旦非表示 */}
                     {SHOW_MEGRIBI_JUDGMENTS && <ScoreBadge score={card.megribiScore} />}

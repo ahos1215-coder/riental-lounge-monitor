@@ -26,6 +26,8 @@ export type RelatedRealtimeEntry = {
   sparkline: number[];
   sparklineMen: number[];
   sparklineWomen: number[];
+  /** 表示中の人数の元になった最新実測行の ts。StoreCard の鮮度ラベル（閉店中・最終 HH:MM 時点）に使う。 */
+  latestActualTs?: string | null;
 };
 
 export type RelatedRealtimeMap = Record<string, RelatedRealtimeEntry>;
