@@ -1,5 +1,5 @@
 # MEGRIBI weekly report - local runner (called by Task Scheduler task MEGRIBI-weekly).
-# Loads .env.local, then runs the weekly generator with the Ollama (gemma4:12b) backend
+# Loads .env.local, then runs the weekly generator with the Ollama (gemma4:e4b) backend
 # and syncs to Supabase. Uses $PSScriptRoot so the (Japanese) repo path is never a source
 # literal (PowerShell 5.1 mis-decodes UTF-8-without-BOM source, which would corrupt paths).
 #

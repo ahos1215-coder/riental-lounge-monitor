@@ -140,10 +140,12 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
    Task Schedulerへ移す」という判断の直接的な根拠になった。ワークフローのコメントに
    「動くはず」と書いてあっても、実際にどちらが主経路かは `docs/LOCAL_LLM_SETUP.md` /
    `plan/CDN_WARMING_LOCAL.md` で確認すること。
-6. **`docs/LOCAL_LLM_SETUP.md` 本文はまだ `gemma4:12b` と書いているが、実際の本番モデルは
-   2026-07-08に `gemma4:e4b` へ変更済み**（`scripts/local_report_job.py` の `MODEL` 定数、
-   `scripts/experiments/local_llm_spike.py` 参照）。ドキュメント自体が古いことがあるので、
-   モデル名などピンポイントな値は最終的にコードで確認すること。
+6. **ドキュメントのピンポイントな値（モデル名等）は最終的にコードで確認すること。**
+   実例: 本番モデルは2026-07-08に `gemma4:12b`→`gemma4:e4b` へ変更されたが、
+   `docs/LOCAL_LLM_SETUP.md` 本文は2026-07-11まで旧名のままだった（修正済み。正本は
+   `scripts/local_report_job.py` の `MODEL` 定数）。なお `scripts/tune_local_llm.py` の既定モデルと
+   `scripts/experiments/local_llm_spike.py` の `MODELS` に残る `gemma4:12b` はベンチ比較用の
+   意図的な残置であり、本番モデルの参照ではない。
 7. **`schema_version` は3箇所同期が必要**: `oriental/config.py` の既定値 / GHA Repository Variable
    `FORECAST_MODEL_SCHEMA_VERSION` / Render 環境変数。ズレると `model_registry.py` が
    `schema_version mismatch` で予測を停止する（現行値は `v7`、24特徴量）。

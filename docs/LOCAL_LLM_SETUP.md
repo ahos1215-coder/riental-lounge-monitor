@@ -3,7 +3,7 @@
 > 全体像は `../CLAUDE.md`（システム3分マップ）と `../plan/BLOG_CRON_GHA.md`（GHA緊急時手順）も参照。
 
 このノートPC（Windows・24時間常時起動）は、日次・週次レポートの文章を**ローカルの
-gemma4:12b（Ollama）で無料生成**して Supabase `blog_drafts` に upsert する。
+gemma4:e4b（Ollama）で無料生成**して Supabase `blog_drafts` に upsert する。
 Gemini API へのコスト移行の代替として 2026-07 に構築。GPU (RTX 4060 8GB) は音楽
 プロジェクトと共有するため `gpu_lock` で排他する。
 
@@ -28,7 +28,9 @@ Gemini API へのコスト移行の代替として 2026-07 に構築。GPU (RTX 
 ## 依存関係
 
 - **Python**: `C:\Users\ahos1\AppData\Local\Programs\Python\Python314\python.exe`
-- **Ollama**: `http://localhost:11434`、モデル `gemma4:12b`（`ollama pull gemma4:12b`）
+- **Ollama**: `http://localhost:11434`、モデル `gemma4:e4b`（`ollama pull gemma4:e4b`）。
+  2026-07-08 に旧 `gemma4:12b` から変更。モデル名の正本は `scripts/local_report_job.py` の
+  `MODEL` 定数（週次は `generate_weekly_insights.py` 内にハードコード。2箇所同期）。
 - **gpu_lock**: 正本 `C:\Users\Public\共有データ系\gpu_lock.py`（音楽プロジェクトと共有・単一ソース）。
   リポジトリ内 `scripts/gpu_lock.py` は復旧用ミラー。
 - **.env.local**（リポジトリ直下、git管理外）に必要なキー（値は載せない）:
@@ -44,14 +46,30 @@ Gemini API へのコスト移行の代替として 2026-07 に構築。GPU (RTX 
 
 ## 速度チューニング（自己改善ループ）
 
-`gemma4:12b`(8.9GB) は 8GB VRAM に収まらず既定では約30%がCPUに退避し ~14 tok/s に律速される。
-`tune_local_llm.py` が設定を実測し、品質ゲート合格のうち最速を `local_llm_spike_out/tuning_results.json`
-に書き出す。`local_report_job.py` は起動時にこの推奨 options を自動で読む（無ければ従来既定）。
+現行モデル `gemma4:e4b`（Gemma 4 の Effective-4B。2026-07-08 に `gemma4:12b` から変更）は
+PLE (Per-Layer Embeddings) の省メモリ設計で、ディスク 9.6GB でも実行時 VRAM は約 3.3GB。
+RTX 4060 (8GB) に全層が載り（100% GPU）、`num_ctx=8192` のままで日次・週次とも余裕がある。
+本番の既定設定（正本: `scripts/local_report_job.py` / `generate_weekly_insights.py`）:
 
-- 2026-07-03 実測の推奨: `num_ctx=2048` + `num_gpu=999`（全層GPU・7.94GB）で **13.7→24.8 tok/s（×1.8）**。
-  daily のプロンプトは ~1000 tokens なので 2048 で切り捨てなし（品質同じ）。
-- 週次は指示文が長く（最大 ~4000 tokens）2048 では頭が切れるため、この高速化は日次のみ適用。
-- 再計測: `python scripts/tune_local_llm.py`（GPUを使うので他ジョブと競合しない時間に）。
+- `num_gpu=999`（全層GPUを明示。`tuning_results.json` が無くても常に適用。他プロセスが VRAM を
+  部分占有していてロード失敗した場合は、Ollama 自動配分で1回だけ再試行）
+- `think=False`（gemma4 は既定で reasoning ON だが、短いレポートに推論は不要。ONだと思考で
+  数千トークン消費し遅く・発熱増。実測: weekly 29.4s→13.7s）
+- `keep_alive="10m"`（ジョブ中はモデル常駐にして毎店の再ロード 8-11s を無くす。週次はラン終了時に
+  明示アンロードして GPU を音楽プロジェクトへ返す）
+
+`tune_local_llm.py` は設定を実測し、品質ゲート合格のうち最速を `local_llm_spike_out/tuning_results.json`
+に書き出す。`local_report_job.py` は起動時にこの推奨 options を読むが、**結果の `model` が現行の
+`gemma4:e4b` と一致する場合のみ**採用する（不一致なら無視して既定にフォールバック）。ハーネスの
+既定モデルは旧 `gemma4:12b` のままなので、再計測は `python scripts/tune_local_llm.py --models gemma4:e4b`
+のようにモデルを明示すること（GPUを使うので他ジョブと競合しない時間に）。
+
+過去の知見（旧 `gemma4:12b` 時代。2026-07-08 の e4b 移行で制約自体が解消）:
+- 12b(8.9GB) は 8GB VRAM に収まらず約30%がCPUに退避し ~14 tok/s に律速されていた。
+  2026-07-03 実測の推奨 `num_ctx=2048` + `num_gpu=999` で 13.7→24.8 tok/s（×1.8）だったが、
+  週次の長い指示文（最大 ~4000 tokens）が入らないため日次のみ適用という制約付きだった。
+
+本機固有の知見（モデルに依らず有効）:
 - 既知の逆効果（再試行しない）: `OLLAMA_FLASH_ATTENTION=1` + KV q8 は本機で 14→3.4 tok/s に悪化。
 - 掃除: `ollama` を強制killすると `llama-server` 子プロセスがVRAMを掴んだまま残る →
   `Get-Process llama-server | Stop-Process` で解放。
@@ -61,7 +79,7 @@ Gemini API へのコスト移行の代替として 2026-07 に構築。GPU (RTX 
 ## ゼロから再構築する手順
 
 1. リポジトリを clone、`.env.local` を作成（上記キーを設定）。
-2. Python 3.14 と Ollama をインストール、`ollama pull gemma4:12b`。
+2. Python 3.14 と Ollama をインストール、`ollama pull gemma4:e4b`。
 3. `gpu_lock.py` を `C:\Users\Public\共有データ系\`（または `SHARED_GPU_LOCK` 環境変数で任意パス）に配置。
    リポジトリの `scripts/gpu_lock.py` をコピーすればよい。
 4. 動作確認: `python scripts/local_report_job.py --stores shibuya --edition evening_preview --mode dry-run`。

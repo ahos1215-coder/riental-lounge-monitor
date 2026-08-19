@@ -113,17 +113,21 @@ export default function MyPageClient() {
         } catch { return "--:--"; }
       };
 
+      // 判定表示OFF中は各カードの判定バッジ(ScoreBadge)自体が非表示のため megribi_score の取得をスキップする
+      // （featureFlags.ts の SHOW_MEGRIBI_JUDGMENTS を true に戻せば fetch は自動的に復活する）。
       let megribiMap: Record<string, MegribiScoreItem> = {};
-      try {
-        const slugsCsv = targets.join(",");
-        const mRes = await fetch(`/api/megribi_score?stores=${encodeURIComponent(slugsCsv)}`);
-        if (mRes.ok) {
-          const mJson = (await mRes.json()) as { ok: boolean; data?: MegribiScoreItem[] };
-          if (mJson.ok && Array.isArray(mJson.data)) {
-            for (const item of mJson.data) megribiMap[item.slug] = item;
+      if (SHOW_MEGRIBI_JUDGMENTS) {
+        try {
+          const slugsCsv = targets.join(",");
+          const mRes = await fetch(`/api/megribi_score?stores=${encodeURIComponent(slugsCsv)}`);
+          if (mRes.ok) {
+            const mJson = (await mRes.json()) as { ok: boolean; data?: MegribiScoreItem[] };
+            if (mJson.ok && Array.isArray(mJson.data)) {
+              for (const item of mJson.data) megribiMap[item.slug] = item;
+            }
           }
-        }
-      } catch { /* ignore */ }
+        } catch { /* ignore */ }
+      }
 
       const cards = await Promise.all(
         targets.map(async (slug): Promise<FavCardData> => {
