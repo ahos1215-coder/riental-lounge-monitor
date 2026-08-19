@@ -1,6 +1,7 @@
 "use client";
 
 import type { LegendProps, TooltipProps } from "recharts";
+import { jstHm } from "@/lib/date/jst";
 
 type TimelinePayloadEntry = {
   name?: string;
@@ -96,7 +97,10 @@ export function TimelineTooltip({ active, payload, label = "", unit = "" }: Time
         padding: "6px 8px",
       }}
     >
-      <p style={{ marginBottom: 4, color: "#e5e7eb" }}>{label}</p>
+      {/* X 軸が数値時刻(epoch ms)になったため、label が数値なら HH:MM(JST) に整形する */}
+      <p style={{ marginBottom: 4, color: "#e5e7eb" }}>
+        {typeof label === "number" ? jstHm(new Date(label)) : label}
+      </p>
 
       {filtered.map((entry, idx) => {
         const name = entry.name ?? "";

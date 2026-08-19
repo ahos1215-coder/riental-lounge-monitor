@@ -16,6 +16,41 @@ import {
 
 import { TimelineLegend, TimelineTooltip } from "./TimelineChartParts";
 import type { StoreSnapshot } from "../app/hooks/useStorePreviewData";
+import { jstHm } from "@/lib/date/jst";
+
+/** チャートの1点。`t` は ts の epoch ms（X軸を「時刻に比例した数値軸」にするためのキー）。 */
+type ChartPoint = StoreSnapshot["series"][number] & { t: number };
+
+/**
+ * 系列に数値時刻 `t` を付与し、解釈できない ts の点は落とす。
+ *
+ * 背景（2026-08-20）: 以前は X 軸が「ラベル(HH:MM)のカテゴリ軸」だったため、実測（5分間隔）の
+ * 区間は密、予測（15分グリッド）の区間は疎に描かれ、時間が等間隔に見えなかった
+ * （例: 23:20 の実測の直後に 00:15 の予測が隣接して「ずれて見える」）。時刻に比例した数値軸に
+ * することで、同じ時刻の実測と予測が横位置で一致し、未来区間も実時間どおりの幅で描かれる。
+ */
+function withTime(series: StoreSnapshot["series"]): ChartPoint[] {
+  const out: ChartPoint[] = [];
+  for (const p of series) {
+    const t = p.ts ? Date.parse(p.ts) : NaN;
+    if (!Number.isFinite(t)) continue;
+    out.push({ ...p, t });
+  }
+  return out.sort((a, b) => a.t - b.t);
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/** 1時間刻みの目盛り（最初の「ちょうどの時」から最後まで）。 */
+function hourlyTicks(minT: number, maxT: number): number[] {
+  if (!Number.isFinite(minT) || !Number.isFinite(maxT) || maxT <= minT) return [];
+  const first = Math.ceil(minT / HOUR_MS) * HOUR_MS;
+  const ticks: number[] = [];
+  for (let t = first; t <= maxT; t += HOUR_MS) ticks.push(t);
+  return ticks;
+}
+
+const formatTick = (t: number): string => jstHm(new Date(t));
 
 type TimelineChartProps = {
   percentMode: boolean;
@@ -34,6 +69,25 @@ export default function TimelineChart({
   currentLabel,
   showChartLoading,
 }: TimelineChartProps) {
+  const data = withTime(chartData);
+  const minT = data.length > 0 ? data[0].t : NaN;
+  const maxT = data.length > 0 ? data[data.length - 1].t : NaN;
+  const ticks = hourlyTicks(minT, maxT);
+  // 予測帯の開始（実測が無く予測だけの最初の点）・終了（最後の点）・現在（最後の実測点）を
+  // 数値時刻で取る。ラベル（HH:MM）は同じ時刻の実測/予測で重複し得るので数値で扱う。
+  const tOf = (label: string | null, pick: "first" | "last", pred: (p: ChartPoint) => boolean) => {
+    if (!label) return null;
+    const arr = pick === "first" ? data : [...data].reverse();
+    const hit = arr.find((p) => p.label === label && pred(p));
+    return hit ? hit.t : null;
+  };
+  const forecastStartT = tOf(
+    forecastStartLabel,
+    "first",
+    (p) => (p.menForecast !== null || p.womenForecast !== null) && p.menActual === null && p.womenActual === null,
+  );
+  const forecastEndT = forecastEndLabel ? (data.length > 0 ? maxT : null) : null;
+  const currentT = tOf(currentLabel, "last", (p) => p.menActual !== null || p.womenActual !== null);
   return (
     <div className="rounded-3xl border border-slate-800 bg-black p-3 shadow-[0_18px_60px_rgba(0,0,0,0.85)]">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -72,16 +126,20 @@ export default function TimelineChart({
             以前あった isClient ゲートは冗長で、マウント後1フレーム余計にチャート描画を遅らせていた。 */}
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart
-            data={chartData}
+            data={data}
             margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
             <XAxis
-              dataKey="label"
+              dataKey="t"
+              type="number"
+              scale="time"
+              domain={["dataMin", "dataMax"]}
+              ticks={ticks}
+              tickFormatter={formatTick}
               tick={{ fontSize: 10, fill: "#9ca3af" }}
               stroke="#4b5563"
               minTickGap={22}
-              interval="preserveStartEnd"
             />
             <YAxis
               tick={{ fontSize: 10, fill: "#9ca3af" }}
@@ -93,18 +151,18 @@ export default function TimelineChart({
             <Tooltip content={<TimelineTooltip unit={percentMode ? "%" : "人"} />} />
             <Legend content={<TimelineLegend />} />
 
-            {forecastStartLabel && forecastEndLabel && (
+            {forecastStartT !== null && forecastEndT !== null && (
               <ReferenceArea
-                x1={forecastStartLabel}
-                x2={forecastEndLabel}
+                x1={forecastStartT}
+                x2={forecastEndT}
                 fill="#334155"
                 fillOpacity={0.14}
                 ifOverflow="extendDomain"
               />
             )}
-            {currentLabel && (
+            {currentT !== null && (
               <ReferenceLine
-                x={currentLabel}
+                x={currentT}
                 stroke="#94a3b8"
                 strokeDasharray="3 3"
                 strokeOpacity={0.8}
