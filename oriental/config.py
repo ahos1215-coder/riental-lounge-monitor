@@ -106,12 +106,10 @@ class AppConfig:
             enable_forecast=enable_forecast,
         )
 
-    def health_summary(self) -> dict[str, object]:
+    def _shared_summary(self) -> dict[str, object]:
+        """/healthz と /api/meta が共通で返すブロック（両者で必ず同じ値にする）。"""
         return {
             "store": self.store_name,
-            "target": bool(self.target_url),
-            "gs_webhook": bool(self.gs_webhook_url),
-            "gs_read": bool(self.gs_read_url),
             "timezone": self.timezone,
             "window": {"start": self.window_start, "end": self.window_end},
             "data_backend": self.data_backend,
@@ -132,29 +130,20 @@ class AppConfig:
             "forecast_enabled": self.enable_forecast,
         }
 
+    def health_summary(self) -> dict[str, object]:
+        """Summarise runtime config for /healthz（外形監視用に収集設定の有無も返す）。"""
+        return {
+            **self._shared_summary(),
+            "target": bool(self.target_url),
+            "gs_webhook": bool(self.gs_webhook_url),
+            "gs_read": bool(self.gs_read_url),
+        }
+
     def summary(self) -> dict[str, object]:
         """Summarise runtime config for /api/meta."""
         return {
-            "store": self.store_name,
+            **self._shared_summary(),
             "store_id": self.store_id,
-            "data_backend": self.data_backend,
-            "supabase": {
-                "url": bool(self.supabase_url),
-                "service_role": bool(self.supabase_service_role_key),
-                "store_id": self.store_id,
-            },
-            "timezone": self.timezone,
-            "window": {"start": self.window_start, "end": self.window_end},
-            "http_timeout": self.http_timeout,
-            "http_retry": self.http_retry,
-            "max_range_limit": self.max_range_limit,
-            "forecast_model": {
-                "bucket": self.forecast_model_bucket,
-                "prefix": self.forecast_model_prefix,
-                "refresh_sec": self.forecast_model_refresh_sec,
-                "schema_version": self.forecast_model_schema_version,
-            },
-            "forecast_enabled": self.enable_forecast,
         }
 
 

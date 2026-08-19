@@ -10,6 +10,7 @@ from typing import Any
 
 import requests
 
+from ..clients.supabase import auth_headers, storage_object_url
 from .model_xgb import ForecastModel
 from .preprocess import FEATURE_COLUMNS
 
@@ -455,15 +456,13 @@ class ForecastModelRegistry:
             raise ModelRegistryError("FORECAST_MODEL_PREFIX is not set")
 
     def _object_url(self, object_name: str) -> str:
-        path = f"{self.model_prefix}/{object_name}".strip("/")
-        return f"{self.supabase_url}/storage/v1/object/{self.bucket}/{path}"
+        return storage_object_url(
+            self.supabase_url, self.bucket, f"{self.model_prefix}/{object_name}"
+        )
 
     def _download_to_cache(self, object_name: str, dst: Path) -> None:
         url = self._object_url(object_name)
-        headers = {
-            "apikey": self.service_role_key,
-            "Authorization": f"Bearer {self.service_role_key}",
-        }
+        headers = auth_headers(self.service_role_key)
         last_exc: Exception | None = None
         last_status: int | None = None
         for attempt in range(1, self.download_retry + 1):

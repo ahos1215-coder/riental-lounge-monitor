@@ -11,6 +11,7 @@ from flask import current_app, jsonify, request
 from ..data.second_venues_repository import SecondVenuesRepository
 from ..utils import timeutil
 from ..utils.log import format_payload
+from .common import forecast_model_status as _forecast_model_status
 from .common import get_config as _config, resolve_store_id
 from .data import bp
 
@@ -110,17 +111,3 @@ def api_second_venues():
         return jsonify({"ok": False, "error": str(exc), "rows": []})
 
     return jsonify({"ok": True, "rows": rows})
-
-
-def _forecast_model_status() -> dict:
-    service = current_app.config.get("FORECAST_SERVICE")
-    if service is None or getattr(service, "model_registry", None) is None:
-        return {
-            "loaded": False,
-            "schema_version": None,
-            "trained_at": None,
-            "loaded_at_unix": None,
-            "age_sec": None,
-            "note": "forecast_service_not_initialized",
-        }
-    return service.model_registry.current_status()

@@ -13,7 +13,9 @@ import re
 
 from flask import current_app, jsonify, request
 
+from ..clients.supabase import storage_get_bytes
 from ..config import AppConfig
+from ..ml._num import is_finite_number
 from ..utils.stores import SLUG_TO_ID
 from .common import get_config as _config
 from .forecast import bp
@@ -29,39 +31,21 @@ def _storage_get(cfg: AppConfig, path: str) -> bytes | None:
     （/api/forecast_snapshot）の両方から使う。オブジェクトが存在しない場合
     （404、または Supabase が返す 400 の "not found" 系エラー）は None を返し、
     それ以外の HTTP エラーは呼び出し側に伝播させる（呼び出し側で握りつぶす）。
+    Storage 未設定（URL / キーが無い）のときも None（＝実測精度なし）。
     """
-    import urllib.error
-    import urllib.request
-
-    supabase_url = (cfg.supabase_url or "").rstrip("/")
+    supabase_url = cfg.supabase_url or ""
     key = cfg.supabase_service_role_key or ""
     bucket = cfg.forecast_model_bucket or "ml-models"
     if not supabase_url or not key:
         return None
 
-    endpoint = f"{supabase_url}/storage/v1/object/{bucket}/{path}"
-    req = urllib.request.Request(
-        endpoint, headers={"apikey": key, "Authorization": f"Bearer {key}"}
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            return resp.read()
-    except urllib.error.HTTPError as exc:
-        if exc.code == 404:
-            return None
-        if exc.code == 400:
-            try:
-                body = exc.read().decode("utf-8", "replace").lower()
-            except Exception:  # noqa: BLE001
-                body = ""
-            if "not_found" in body or "not found" in body or "object not found" in body:
-                return None
-        raise
+    return storage_get_bytes(supabase_url, key, bucket, path, timeout=10)
 
 
-def _is_num(v: object) -> bool:
-    """bool を除いた実数か（JSON 由来の int/float を想定）。"""
-    return isinstance(v, (int, float)) and not isinstance(v, bool)
+# 数値判定は oriental/ml/_num.py が単一の定義（bool も NaN/inf も除外）。
+# 旧実装は NaN を数値として通しており、relative_mae / night_avg が NaN のまま
+# JSON に載ることがあった（統一で欠損＝キーなしになる）。
+_is_num = is_finite_number
 
 
 def _night_avg_by_store(snapshot: dict | None) -> dict[str, float]:

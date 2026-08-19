@@ -31,6 +31,25 @@ def get_supabase_provider(cfg: AppConfig) -> SupabaseLogsProvider | None:
     return current_app.config["SUPABASE_PROVIDER"]
 
 
+def forecast_model_status() -> dict:
+    """予測モデルの読み込み状況（/healthz と /api/meta が同じ形で返す）。
+
+    まだ ForecastService が初期化されていない（= 予測を1度も呼んでいない、または
+    ENABLE_FORECAST=0）ときは note 付きの「未ロード」を返す。
+    """
+    service = current_app.config.get("FORECAST_SERVICE")
+    if service is None or getattr(service, "model_registry", None) is None:
+        return {
+            "loaded": False,
+            "schema_version": None,
+            "trained_at": None,
+            "loaded_at_unix": None,
+            "age_sec": None,
+            "note": "forecast_service_not_initialized",
+        }
+    return service.model_registry.current_status()
+
+
 def resolve_store_id(cfg: AppConfig) -> str:
     """Resolve `store` / `store_id` query param to an internal store identifier.
 

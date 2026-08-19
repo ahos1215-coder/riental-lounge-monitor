@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from ..data.provider import GoogleSheetProvider, SupabaseError, SupabaseLogsProvider
+from ._num import as_ts, env_float
 from .model_registry import ModelRegistryError, ModelSchemaMismatchError
 from .preprocess import FEATURE_COLUMNS, add_time_features, prepare_dataframe
 
@@ -191,37 +192,18 @@ class ForecastService:
             return result
         except SupabaseError as exc:
             self.logger.error("forecast.service.supabase_error store=%s", store_id, exc_info=exc)
-            result = {"ok": False, "error": "supabase_error", "detail": str(exc), "store": store_id, "freq_min": freq_min, "data": []}
-            if extra_meta:
-                result.update(extra_meta)
-            return result
+            return _error_result("supabase_error", exc, store_id, freq_min, extra_meta)
         except ModelSchemaMismatchError as exc:
             self.logger.error("forecast.service.model_schema_mismatch store=%s", store_id, exc_info=exc)
-            result = {"ok": False, "error": "model_schema_mismatch", "detail": str(exc), "store": store_id, "freq_min": freq_min, "data": []}
-            if extra_meta:
-                result.update(extra_meta)
-            return result
+            return _error_result("model_schema_mismatch", exc, store_id, freq_min, extra_meta)
         except ModelRegistryError as exc:
             self.logger.error("forecast.service.model_unavailable store=%s", store_id, exc_info=exc)
-            result = {"ok": False, "error": "model_unavailable", "detail": str(exc), "store": store_id, "freq_min": freq_min, "data": []}
-            if extra_meta:
-                result.update(extra_meta)
-            return result
+            return _error_result("model_unavailable", exc, store_id, freq_min, extra_meta)
         except Exception as exc:  # noqa: BLE001
             self.logger.error("forecast.service.error store=%s", store_id, exc_info=exc)
             # 予期せぬ内部エラーを ok:true（成功）で隠すと、予測グラフが空のまま
             # 5xx もアラートも出ず、障害に何日も気づけない。ok:false で明示する。
-            result = {
-                "ok": False,
-                "error": "forecast_internal_error",
-                "detail": str(exc),
-                "store": store_id,
-                "freq_min": freq_min,
-                "data": [],
-            }
-            if extra_meta:
-                result.update(extra_meta)
-            return result
+            return _error_result("forecast_internal_error", exc, store_id, freq_min, extra_meta)
 
     def _fetch_history(self, store_id: str) -> list[dict]:
         try:
@@ -242,11 +224,7 @@ class ForecastService:
         """
         import time as _time
 
-        ttl = 3600.0
-        try:
-            ttl = float(os.getenv("FORECAST_BLEND_WEIGHTS_TTL", "3600"))
-        except (TypeError, ValueError):
-            ttl = 3600.0
+        ttl = env_float("FORECAST_BLEND_WEIGHTS_TTL", 3600.0)
         now = _time.time()
         if self._blend_weights is not None and (now - self._blend_weights_at) < ttl:
             return self._blend_weights
@@ -254,20 +232,28 @@ class ForecastService:
         weights: dict[str, float] = {}
         if self._storage_url and self._storage_key:
             import json as _json
-            import urllib.error
-            import urllib.request
 
-            endpoint = (
-                f"{self._storage_url}/storage/v1/object/"
-                f"{self._storage_bucket}/accuracy/blend_weights.json"
-            )
-            req = urllib.request.Request(
-                endpoint,
-                headers={"apikey": self._storage_key, "Authorization": f"Bearer {self._storage_key}"},
-            )
+            from ..clients.supabase import storage_get_bytes
+
+            payload = None
+            fetch_error: str | None = None
             try:
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    payload = _json.loads(resp.read().decode())
+                raw_bytes = storage_get_bytes(
+                    self._storage_url,
+                    self._storage_key,
+                    self._storage_bucket,
+                    "accuracy/blend_weights.json",
+                    timeout=10,
+                )
+                if raw_bytes is None:
+                    # 未作成（404）も取得失敗と同じ扱い（純MLへフォールバック）にする。
+                    fetch_error = "blend_weights.json not found"
+                else:
+                    payload = _json.loads(raw_bytes.decode())
+            except Exception as exc:  # noqa: BLE001 — 重み取得失敗は純MLへフォールバック
+                fetch_error = str(exc)
+
+            if fetch_error is None:
                 raw = payload.get("weights") if isinstance(payload, dict) else None
                 if isinstance(raw, dict):
                     for k, v in raw.items():
@@ -278,8 +264,10 @@ class ForecastService:
                         if np.isfinite(fv):
                             weights[str(k)] = fv
                 self.logger.info("forecast.service.blend_weights_loaded count=%d", len(weights))
-            except Exception as exc:  # noqa: BLE001 — 重み取得失敗は純MLへフォールバック
-                self.logger.warning("forecast.service.blend_weights_fetch_failed detail=%s", exc)
+            else:
+                self.logger.warning(
+                    "forecast.service.blend_weights_fetch_failed detail=%s", fetch_error
+                )
                 # 直近に有効な重みがあれば陳腐化しても使い続ける（毎リクエストの再取得を避ける）。
                 if self._blend_weights:
                     return self._blend_weights
@@ -334,7 +322,7 @@ class ForecastService:
     ):
         """閑散/疎な店舗向けの縮退予測フォールバック。
 
-        ay_niigata のような客数の少ない店舗では、直近履歴が全体的にゼロに近いと
+        客数の少ない店舗（相席屋の平日など）では、直近履歴が全体的にゼロに近いと
         LightGBM の主要特徴量（total_slope_30min, same_dow_last_week_total 等）が
         ゼロに潰れ、実際は繁忙な夜もあるのにモデルが 19:00-05:00 の全時間帯で
         ほぼ横ばい・ほぼ0を予測してしまう「モデル崩壊」が起きる。
@@ -470,6 +458,31 @@ class ForecastService:
         return {"signals": signals, "notes": notes}
 
 
+def _error_result(
+    code: str,
+    exc: Exception,
+    store_id: str,
+    freq_min: int,
+    extra_meta: Dict[str, int] | None = None,
+) -> dict:
+    """予測失敗時のレスポンス（error コードだけが違う共通形）。
+
+    error の値は routes/forecast.py の `_error_status()` が HTTP ステータスへ
+    マッピングする唯一のキー（対応表はそちら側にある）。
+    """
+    result = {
+        "ok": False,
+        "error": code,
+        "detail": str(exc),
+        "store": store_id,
+        "freq_min": freq_min,
+        "data": [],
+    }
+    if extra_meta:
+        result.update(extra_meta)
+    return result
+
+
 def _future_range(start_dt, freq_min: int, periods: int, tz: str):
     ref = pd.Timestamp(start_dt) if start_dt is not None else pd.Timestamp.now(tz=tz)
     if ref.tzinfo is None:
@@ -528,15 +541,11 @@ def _anchor_to_tonight(history, points, freq_min, tz):
     except Exception:  # noqa: BLE001
         return points
 
-    def _as_ts(value):
-        ts = pd.Timestamp(value)
-        return ts.tz_localize(tz) if ts.tzinfo is None else ts
-
     sum_actual = 0.0
     sum_pred = 0.0
     matched = 0
     for p in points:
-        ts = _as_ts(p["ts"])
+        ts = as_ts(p["ts"], tz)
         if ts > now:
             continue
         actual = actual_by_slot.get(ts.floor(freq))
@@ -550,16 +559,13 @@ def _anchor_to_tonight(history, points, freq_min, tz):
     if matched < MIN_ELAPSED or sum_pred <= 0.0 or sum_actual <= 0.0:
         return points
     factor0 = max(0.5, min(2.0, sum_actual / sum_pred))
-    try:
-        decay = float(os.getenv("FORECAST_ANCHOR_DECAY", "0.85"))
-    except ValueError:
-        decay = 0.85
+    decay = env_float("FORECAST_ANCHOR_DECAY", 0.85)
     decay = min(max(decay, 0.0), 0.999)
 
     adjusted = []
     horizon = 0  # index among the FUTURE slots (0 = first not-yet-happened slot)
     for p in points:
-        ts = _as_ts(p["ts"])
+        ts = as_ts(p["ts"], tz)
         if ts > now:
             # The correction is strongest right after "now" and decays toward 1.0 (the
             # model's learned curve) further into the night, so a night that merely

@@ -54,6 +54,37 @@ def _error_status(raw: dict) -> int:
     return 200
 
 
+def _forecast_params() -> tuple[int, int, int]:
+    """予測の刻み幅と夜セッションの開始/終了時刻（env 由来）。
+
+    3ハンドラが同じ env を読むため1箇所にまとめる（片方だけ既定値がズレる事故を防ぐ）。
+    """
+    freq = max(1, int(os.getenv("FORECAST_FREQ_MIN", "15")))
+    start_h = int(os.getenv("NIGHT_START_H", "19"))
+    end_h = int(os.getenv("NIGHT_END_H", "5"))
+    return freq, start_h, end_h
+
+
+def _success_body(raw: dict, points: list[dict]) -> dict:
+    """成功時のレスポンス・エンベロープ（single/multi 共通）。
+
+    /api/forecast_next_hour・/api/forecast_today・/api/forecast_today_multi の
+    内部フェッチが同じキャッシュ形を共有するため、ここが唯一の定義。
+    blend_w_ml / blended_slots / clamped_slots は closed-loop 後処理
+    （ベースライン・ブレンド / 深夜帯クランプ）が効いたかを観測するため
+    service の raw 結果からそのまま透過する（後方互換の追加のみ）。
+    """
+    return {
+        "ok": True,
+        "data": points,
+        "reasoning": raw.get("reasoning", {}),
+        "insufficient_history": bool(raw.get("insufficient_history", False)),
+        "blend_w_ml": raw.get("blend_w_ml"),
+        "blended_slots": raw.get("blended_slots"),
+        "clamped_slots": raw.get("clamped_slots"),
+    }
+
+
 # ---------- in-process TTL キャッシュ + single-flight 合流 ----------
 #
 # キャッシュに入れる値は常に (body, http_status) のタプル。body はそのまま
@@ -124,7 +155,7 @@ def forecast_next_hour():
 
     cfg = _config()
     store = _resolve_store_id(cfg)
-    freq = max(1, int(os.getenv("FORECAST_FREQ_MIN", "15")))
+    freq, _start_h, _end_h = _forecast_params()
     logger = current_app.logger
 
     cache_key = f"next_hour:{store}"
@@ -138,18 +169,7 @@ def forecast_next_hour():
         points = _normalize_points(raw, logger)
         logger.info("api_forecast.success store=%s points=%d", store, len(points))
 
-        result = {
-            "ok": True,
-            "data": points,
-            "reasoning": raw.get("reasoning", {}),
-            "insufficient_history": bool(raw.get("insufficient_history", False)),
-            # closed-loop 後処理（ベースライン・ブレンド/深夜帯クランプ）が実際に効いたかを
-            # 観測できるよう、service の raw 結果からそのまま透過する（後方互換の追加のみ）。
-            "blend_w_ml": raw.get("blend_w_ml"),
-            "blended_slots": raw.get("blended_slots"),
-            "clamped_slots": raw.get("clamped_slots"),
-        }
-        return (result, 200), True
+        return (_success_body(raw, points), 200), True
 
     (body, http_status), cache_status = _forecast_cache().get_or_compute(cache_key, _compute)
     logger.info(
@@ -168,11 +188,8 @@ def forecast_today():
 
     cfg = _config()
     store = _resolve_store_id(cfg)
-    freq = max(1, int(os.getenv("FORECAST_FREQ_MIN", "15")))
+    freq, start_h, end_h = _forecast_params()
     logger = current_app.logger
-
-    start_h = int(os.getenv("NIGHT_START_H", "19"))
-    end_h = int(os.getenv("NIGHT_END_H", "5"))
 
     cache_key = f"today:{store}"
 
@@ -187,18 +204,7 @@ def forecast_today():
         points = _normalize_points(raw, logger)
         logger.info("api_forecast.success store=%s points=%d", store, len(points))
 
-        result = {
-            "ok": True,
-            "data": points,
-            "reasoning": raw.get("reasoning", {}),
-            "insufficient_history": bool(raw.get("insufficient_history", False)),
-            # closed-loop 後処理（ベースライン・ブレンド/深夜帯クランプ）が実際に効いたかを
-            # 観測できるよう、service の raw 結果からそのまま透過する（後方互換の追加のみ）。
-            "blend_w_ml": raw.get("blend_w_ml"),
-            "blended_slots": raw.get("blended_slots"),
-            "clamped_slots": raw.get("clamped_slots"),
-        }
-        return (result, 200), True
+        return (_success_body(raw, points), 200), True
 
     # このキャッシュキーは forecast_today_multi._fetch_one とも共有される
     # （同じ店舗の today 予測をどちらが先に計算しても合流できるようにするため）。
@@ -251,9 +257,7 @@ def forecast_today_multi():
     if not valid:
         return jsonify({"ok": False, "error": "no-valid-stores"}), 422
 
-    freq = max(1, int(os.getenv("FORECAST_FREQ_MIN", "15")))
-    start_h = int(os.getenv("NIGHT_START_H", "19"))
-    end_h = int(os.getenv("NIGHT_END_H", "5"))
+    freq, start_h, end_h = _forecast_params()
 
     # Flask コンテキスト外のスレッドで使えるよう、参照を先に取得
     # （current_app プロキシはワーカースレッドの中では使えないため、
@@ -281,17 +285,7 @@ def forecast_today_multi():
             # reasoning が欠落し、フロント(useStorePreviewData)が
             # 「データ準備中」ではなく再試行→unavailable に落ちるのを防ぐ。
             # multi 自身のレスポンスは _multi_entry() で従来どおりの形に絞る。
-            result = {
-                "ok": True,
-                "data": points,
-                "reasoning": raw.get("reasoning", {}),
-                "insufficient_history": bool(raw.get("insufficient_history", False)),
-                # forecast_today と同様、後処理の効き具合を店舗別に観測できるよう透過する。
-                "blend_w_ml": raw.get("blend_w_ml"),
-                "blended_slots": raw.get("blended_slots"),
-                "clamped_slots": raw.get("clamped_slots"),
-            }
-            return (result, 200), True
+            return (_success_body(raw, points), 200), True
 
         (body, _http_status), cache_status = cache.get_or_compute(cache_key, _compute)
         return slug, _multi_entry(body), cache_status
@@ -396,7 +390,8 @@ def api_megribi_score():
         if is_aisekiya:
             # 相席屋 (ay_*) は %表示のみが正式仕様。生の推定人数はフロントに渡さず、
             # 席の埋まり具合(%)をサーバー側で計算して渡す
-            # （home-client.tsx の seatFullnessPercent(count, perGenderCapacity) と同じ換算）。
+            # （frontend/src/app/config/stores.ts の
+            #   seatFullnessPercent(count, perGenderCapacity) と同じ換算）。
             per_gender_capacity = capacity / 2 if capacity > 0 else 0.0
             if per_gender_capacity > 0:
                 item["men_seat_pct"] = round(min(1.0, men / per_gender_capacity) * 100)

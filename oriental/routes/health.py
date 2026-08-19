@@ -5,7 +5,9 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, current_app, jsonify
 
+from ..clients.supabase import auth_headers
 from ..utils import timeutil
+from .common import forecast_model_status as _forecast_model_status
 from .common import get_config as _config
 
 bp = Blueprint("health", __name__)
@@ -115,20 +117,6 @@ def readyz():
     return jsonify(payload), 200 if ready else 503
 
 
-def _forecast_model_status() -> dict:
-    service = current_app.config.get("FORECAST_SERVICE")
-    if service is None or getattr(service, "model_registry", None) is None:
-        return {
-            "loaded": False,
-            "schema_version": None,
-            "trained_at": None,
-            "loaded_at_unix": None,
-            "age_sec": None,
-            "note": "forecast_service_not_initialized",
-        }
-    return service.model_registry.current_status()
-
-
 def _data_freshness(cfg: AppConfig) -> dict:
     """最新ログのタイムスタンプを Supabase から取得して鮮度情報を返す。
     外部監視ツールが data_freshness.stale=true を検知してアラートを上げられる。
@@ -141,11 +129,7 @@ def _data_freshness(cfg: AppConfig) -> dict:
         return {"available": False, "age_sec": None, "latest_ts": None, "stale": None}
 
     endpoint = cfg.supabase_url.rstrip("/") + "/rest/v1/logs"
-    headers = {
-        "apikey": cfg.supabase_service_role_key,
-        "Authorization": f"Bearer {cfg.supabase_service_role_key}",
-        "Accept": "application/json",
-    }
+    headers = auth_headers(cfg.supabase_service_role_key, accept_json=True)
     params = [("select", "ts"), ("order", "ts.desc"), ("limit", "1")]
 
     try:

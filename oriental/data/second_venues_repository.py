@@ -7,6 +7,7 @@ from typing import Any
 
 import requests
 
+from ..clients.supabase import auth_headers
 from .provider import SupabaseError, mount_fallback_retries
 
 
@@ -117,14 +118,7 @@ class SecondVenuesRepository:
         return len(payload)
 
     def _auth_headers(self, *, content_type: bool = False) -> dict[str, str]:
-        headers = {
-            "apikey": self.api_key,
-            "Authorization": f"Bearer {self.api_key}",
-            "Accept": "application/json",
-        }
-        if content_type:
-            headers["Content-Type"] = "application/json"
-        return headers
+        return auth_headers(self.api_key, accept_json=True, content_type=content_type)
 
     def _ensure_configured(self) -> None:
         if not self.endpoint or not self.api_key:

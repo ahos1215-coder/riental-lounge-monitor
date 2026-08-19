@@ -39,11 +39,11 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any
 
 import numpy as np
 import pandas as pd
 
+from oriental.ml._num import as_ts, env_float, is_finite_number
 from oriental.ml.night_type import NIGHT_SESSION_SHIFT_HOURS
 
 logger = logging.getLogger(__name__)
@@ -65,22 +65,12 @@ CLAMP_MIN_NIGHTS_WEEKEND = 2
 WEEKEND_SESSION_WEEKDAYS = {4, 5}  # 金・土発の夜 -> "weekend" バケット
 
 
-def _env_float(name: str, default: float) -> float:
-    try:
-        return float(os.getenv(name, str(default)))
-    except (TypeError, ValueError):
-        return default
-
-
-def _is_num(v: Any) -> bool:
-    return isinstance(v, (int, float)) and not (isinstance(v, float) and (np.isnan(v) or np.isinf(v)))
-
-
-def _as_ts(value: Any, tz: str) -> pd.Timestamp:
-    ts = pd.Timestamp(value)
-    if ts.tzinfo is None:
-        return ts.tz_localize(tz)
-    return ts.tz_convert(tz)
+# 数値判定・時刻正規化・env 読みは oriental/ml/_num.py が単一の定義
+# （同名関数が真理値表違いで散っていたため統一。旧 `_is_num` は bool を通していたが、
+#  統一後は bool も NaN/inf も除外する）。
+_env_float = env_float
+_is_num = is_finite_number
+_as_ts = as_ts
 
 
 def _is_late_night(ts: pd.Timestamp) -> bool:

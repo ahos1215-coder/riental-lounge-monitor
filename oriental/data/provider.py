@@ -11,6 +11,8 @@ from dateutil import parser
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from ..clients.supabase import auth_headers
+
 
 def mount_fallback_retries(session: requests.Session) -> None:
     """自前で作った Session にだけ再試行ポリシーを付ける。
@@ -126,13 +128,10 @@ class SupabaseLogsProvider(DataProvider):
             params.append(("ts", f"gte.{start_ts.isoformat()}"))
         if end_ts is not None:
             params.append(("ts", f"lte.{end_ts.isoformat()}"))
-        headers = {
-            "apikey": self.api_key,
-            "Authorization": f"Bearer {self.api_key}",
-            "Accept": "application/json",
-            "Range-Unit": "items",
-            "Range": f"0-{max(limit - 1, 0)}",
-        }
+        headers = auth_headers(self.api_key, accept_json=True)
+        # PostgREST の件数制限（limit パラメータと二重に効かせる）。
+        headers["Range-Unit"] = "items"
+        headers["Range"] = f"0-{max(limit - 1, 0)}"
 
         try:
             resp = self.session.get(self.endpoint, params=params, headers=headers, timeout=12)
