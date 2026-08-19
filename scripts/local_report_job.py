@@ -75,6 +75,7 @@ import local_llm_spike as spk  # noqa: E402  (経路追加後に import する�
 # scripts/_supabase_common.py（.env 読み込み・SUPABASE 設定解決の共有実装）を
 # シブリングとしてベアインポートする。generate_weekly_insights.py と同じ規約。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _stores_common import load_stores_json  # noqa: E402
 from _supabase_common import _load_env, _supabase_conf  # noqa: E402
 
 # 共有GPUロック（音楽PJと衝突しないための排他）。local_llm_spike と同じ取り込み方。
@@ -175,15 +176,11 @@ def _maybe_wait_for_degraded_backend() -> None:
 # ---------------------------------------------------------------------------
 
 def _load_store_map() -> dict[str, dict[str, Any]]:
+    """stores.json が無ければジョブを止める（誤った store_id で upsert しないため）。"""
     if not STORES_JSON_PATH.is_file():
         raise SystemExit(f"stores.json not found: {STORES_JSON_PATH}")
-    data = json.loads(STORES_JSON_PATH.read_text(encoding="utf-8"))
-    out: dict[str, dict[str, Any]] = {}
-    for row in data:
-        slug = row.get("slug")
-        if slug:
-            out[slug] = row
-    return out
+    rows = load_stores_json(STORES_JSON_PATH)
+    return {row["slug"]: row for row in rows if row.get("slug")}
 
 
 def _store_display_name(row: dict[str, Any]) -> str:

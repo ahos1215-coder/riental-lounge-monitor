@@ -211,6 +211,11 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STORES_JSON_PATH = REPO_ROOT / "frontend" / "src" / "data" / "stores.json"
 
+# scripts/_stores_common.py（stores.json の読み込みの共有実装、stdlib のみ）を
+# シブリングとしてベアインポートする。brand 正規化などの整形はこのファイル固有。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _stores_common import load_stores_json  # noqa: E402
+
 JST = timezone(timedelta(hours=9))
 DEFAULT_BASE_URL = "https://www.meguribi.jp"
 
@@ -280,8 +285,7 @@ def load_stores(path: Path = STORES_JSON_PATH) -> list[dict]:
     (raw pass-through, mirrors `StoreMeta.regionLabel`) so the brand-tab /
     region-filter warm URLs (`build_filter_page_urls`) can be derived
     without a second file read."""
-    with path.open("r", encoding="utf-8") as f:
-        raw = json.load(f)
+    raw = load_stores_json(path)
     out = []
     for s in raw:
         slug = s.get("slug")

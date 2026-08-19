@@ -32,10 +32,19 @@ if str(REPO_ROOT) not in sys.path:
 
 from oriental.ml.preprocess import FEATURE_COLUMNS, prepare_dataframe
 from oriental.utils.stores import ALL_STORE_IDS
+from scripts._retry_common import backoff_delay
 from scripts.cleanup_old_models import CleanupConfig, run_cleanup
 
 
 def _load_env() -> None:
+    """.env / .env.local を読む。
+
+    注意: **.env.local がプロセス環境変数より優先される**（override=True）。
+    scripts/ の他スクリプトが使う共有実装 scripts/_supabase_common.py の `_load_env`
+    （setdefault ＝ 実環境変数が勝つ）とは優先順位が逆なので、共通化していない。
+    2026-08-18 の「.env.local の BACKEND_URL 残骸が本番ジョブを毒した」事故と同根の
+    挙動なので、統一するかどうかはオーナー判断（挙動が変わるため今回は触らない）。
+    """
     root = Path(__file__).resolve().parents[1]
     env_base = root / ".env"
     env_local = root / ".env.local"
@@ -258,8 +267,8 @@ def _fetch_training_rows(cfg: TrainingConfig, session: requests.Session) -> list
                 if response.status_code < 500 and response.status_code != 429:
                     raise SystemExit(f"failed to fetch logs from supabase: {last_err}")
             if attempt < 5:
-                wait = min(2 ** attempt, 20)
-                print(f"[train-ml][fetch] transient error ({last_err}); retry {attempt}/5 in {wait}s")
+                wait = backoff_delay(attempt, cap=20)
+                print(f"[train-ml][fetch] transient error ({last_err}); retry {attempt}/5 in {wait:.0f}s")
                 time.sleep(wait)
         if payload is None:
             raise SystemExit(f"failed to fetch logs from supabase after retries: {last_err}")

@@ -34,16 +34,30 @@ Stdlib only. Requires SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
 
 from __future__ import annotations
 
+import functools
 import json
 import os
+import sys
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# scripts/_supabase_common.py（.env 読み込み・Storage GET/PUT の共有実装、stdlib のみ）を
+# シブリングとしてベアインポートする。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _ops_notify import notify_ops  # noqa: E402
+from _stores_common import slug_to_store_id  # noqa: E402
+from _supabase_common import _load_env, storage_get, storage_put  # noqa: E402
+
+# ログ接頭辞だけを固定した別名。既存テストの monkeypatch.setattr(sf, "_storage_get", ...)
+# がそのまま効くよう、モジュール変数名は従来どおり `_storage_get` / `_storage_put`。
+_storage_get = functools.partial(storage_get, log_prefix="[score]")
+_storage_put = functools.partial(storage_put, log_prefix="[score]")
+
 JST = timezone(timedelta(hours=9))
 SLOT_MIN = 15
 SUMMARY_KEEP = 60
@@ -55,19 +69,6 @@ FETCH_ABSURD_ROWS = 50_000  # 1店・1夜でこれを超えたら暴走クエリ
 CAPTURE_TARGET_HOUR = 18
 CAPTURE_TARGET_MIN = 10
 CAPTURE_GRACE_MIN = 30
-
-
-def _load_env() -> None:
-    for name in (".env", ".env.local"):
-        p = REPO_ROOT / name
-        if not p.is_file():
-            continue
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
 def _parse_iso(s: str) -> datetime | None:
@@ -86,55 +87,6 @@ def _slot_key(dt: datetime) -> str:
     j = dt.astimezone(JST)
     j = j.replace(minute=(j.minute // SLOT_MIN) * SLOT_MIN, second=0, microsecond=0)
     return j.strftime("%Y-%m-%dT%H:%M")
-
-
-def _storage_get(bucket: str, path: str, url: str, key: str, retries: int = 6) -> bytes | None:
-    """Storage GET。404/400(not_found) は None、飽和系(429/5xx)は再試行。
-
-    2026-08-18: Supabase Storage はオブジェクトのメタデータを同じ Postgres 上の
-    `storage.objects` に持つため、DB が混雑すると存在するオブジェクトに対しても
-    HTTP 544 (database_timeout) や 429 (too_many_connections) を返す。
-    旧実装は再試行が無く、この 544 がそのまま送出されて
-    「no snapshot for <date>（採点対象なし）」という本来の分かりやすい終了ではなく
-    生のトレースバックで落ちていた（2026-08-17 の実行例）。
-    """
-    endpoint = f"{url}/storage/v1/object/{bucket}/{path}"
-    req = urllib.request.Request(endpoint, headers={"apikey": key, "Authorization": f"Bearer {key}"})
-    last_err: Exception | None = None
-    for attempt in range(1, retries + 1):
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                return resp.read()
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                return None
-            # Supabase Storage は存在しないオブジェクトに対し HTTP 400 + body {"error":"not_found",...}
-            # を返すことがある（初回でスナップショット/サマリが未作成のケース）。これは「無い」扱いで None。
-            if exc.code == 400:
-                try:
-                    body = exc.read().decode("utf-8", "replace").lower()
-                except Exception:  # noqa: BLE001
-                    body = ""
-                if "not_found" in body or "not found" in body or "object not found" in body:
-                    return None
-            # 429 / 5xx（544 DatabaseTimeout を含む）は一時的な飽和 → 再試行
-            if exc.code != 429 and exc.code < 500:
-                raise
-            last_err = exc
-        except Exception as exc:  # noqa: BLE001 - transient network error
-            last_err = exc
-        if attempt < retries:
-            wait = min(2 ** attempt, 30)
-            print(f"[score] storage GET {path} transient error ({last_err}); retry {attempt}/{retries} in {wait}s")
-            time.sleep(wait)
-    raise last_err if last_err else RuntimeError(f"storage get failed: {path}")
-
-
-def _storage_put(bucket: str, path: str, payload: bytes, url: str, key: str) -> None:
-    endpoint = f"{url}/storage/v1/object/{bucket}/{path}"
-    headers = {"apikey": key, "Authorization": f"Bearer {key}", "x-upsert": "true", "Content-Type": "application/json"}
-    req = urllib.request.Request(endpoint, data=payload, method="POST", headers=headers)
-    urllib.request.urlopen(req, timeout=30)
 
 
 def _fetch_actuals(url: str, key: str, store_id: str, start_iso: str, end_iso: str) -> list[dict]:
@@ -224,25 +176,16 @@ def _slot_means(rows: list[dict]) -> dict[str, float]:
 def _alert(message: str) -> None:
     """Post to OPS_NOTIFY_WEBHOOK_URL (Slack/Discord); no-op if unset. This is the
     'Act' in the answer-check PDCA loop: when the live forecast degrades or stops
-    beating the naive baseline in production, ping a human to investigate/retrain."""
-    url = (os.environ.get("OPS_NOTIFY_WEBHOOK_URL") or "").strip()
-    if not url:
-        print("[score][alert] (OPS_NOTIFY_WEBHOOK_URL unset) " + message)
-        return
-    try:
-        req = urllib.request.Request(url, data=json.dumps({"text": message}).encode("utf-8"),
-                                     method="POST", headers={"Content-Type": "application/json"})
-        urllib.request.urlopen(req, timeout=15)
-        print("[score][alert] sent: " + message)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[score][alert] failed: {str(exc)[:150]}")
+    beating the naive baseline in production, ping a human to investigate/retrain.
+    送信形式(slack/discord)の切り替えは scripts/_ops_notify.py が持つ。"""
+    notify_ops(message, prefix="[score][alert]")
 
 
 def _store_id_for(slug: str) -> str:
     """score の per_store キー(slug)を serving が使う store_id に変換する。
-    相席屋は slug==store_id ("ay_*")、オリエンタルは短縮 slug に "ol_" を付与。
+    stores.json が正本（scripts/_stores_common.py）。snapshot_forecasts.py と同一規約。
     """
-    return slug if slug.startswith("ay_") else f"ol_{slug}"
+    return slug_to_store_id(slug)
 
 
 def _capture_lateness(

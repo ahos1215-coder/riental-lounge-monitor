@@ -35,34 +35,22 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STORES_JSON_PATH = REPO_ROOT / "frontend" / "src" / "data" / "stores.json"
 
-
-def _load_env() -> None:
-    """Same simple .env / .env.local parser pattern used elsewhere in scripts/
-    (see scripts/score_forecasts.py, scripts/snapshot_forecasts.py, scripts/backup_logs.py).
-    Never prints values; only sets os.environ if not already set."""
-    for name in (".env", ".env.local"):
-        p = REPO_ROOT / name
-        if not p.is_file():
-            continue
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+# scripts/_supabase_common.py（.env 読み込みの共有実装）と scripts/_stores_common.py
+# （stores.json の読み込み）をシブリングとしてベアインポートする。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _stores_common import load_stores_json  # noqa: E402
+from _supabase_common import _load_env  # noqa: E402
 
 
 def _load_slug_to_store_id_map() -> dict[str, str]:
+    """stores.json が無ければジョブを止める（誤った store_id で上書きしないため）。"""
     if not STORES_JSON_PATH.exists():
         raise SystemExit(f"stores.json not found: {STORES_JSON_PATH}")
-    data = json.loads(STORES_JSON_PATH.read_text(encoding="utf-8"))
-    mapping: dict[str, str] = {}
-    for row in data:
-        slug = row.get("slug")
-        store_id = row.get("store_id")
-        if slug and store_id:
-            mapping[slug] = store_id
-    return mapping
+    return {
+        row["slug"]: row["store_id"]
+        for row in load_stores_json(STORES_JSON_PATH)
+        if row.get("slug") and row.get("store_id")
+    }
 
 
 def _correct_store_id_for_slug(slug: str, mapping: dict[str, str]) -> str | None:

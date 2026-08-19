@@ -77,17 +77,52 @@ def test_snapshot_forecasts_still_importable_without_third_party_deps(
     monkeypatch なので、このテスト終了時に sys.modules / sys.meta_path は自動的に
     元の状態へ復元される（他テストへの影響なし）。
     """
+    reloaded = _import_under_ci_minimal(monkeypatch, "scripts.snapshot_forecasts")
+    assert reloaded.V2_SLOTS == OLD_SLOTS_LITERAL
+    # 実際に flask-free fallback 分岐 (importlib 直読み) を通ったことも確認する。
+    assert reloaded.classify_night.__module__ == "_night_type_standalone"
+
+
+def _import_under_ci_minimal(monkeypatch: pytest.MonkeyPatch, module_name: str):
+    """flask/pandas/numpy/lightgbm をブロックした状態で ``module_name`` を import し直す。"""
     blocked_roots = {"oriental", "flask", "pandas", "numpy", "lightgbm"}
-    reload_targets = {"scripts.snapshot_forecasts", "_night_slots"}
+    reload_targets = {
+        module_name,
+        "_night_slots",
+        "_standalone_import",
+        "_stores_common",
+        "_supabase_common",
+        "_retry_common",
+        "_ops_notify",
+    }
     for mod_name in list(sys.modules):
         root = mod_name.split(".")[0]
         if root in blocked_roots or mod_name in reload_targets:
             monkeypatch.delitem(sys.modules, mod_name, raising=False)
 
-    finder = _BlockThirdPartyImports()
-    monkeypatch.setattr(sys, "meta_path", [finder, *sys.meta_path])
+    monkeypatch.setattr(sys, "meta_path", [_BlockThirdPartyImports(), *sys.meta_path])
+    return importlib.import_module(module_name)
 
-    reloaded = importlib.import_module("scripts.snapshot_forecasts")
-    assert reloaded.V2_SLOTS == OLD_SLOTS_LITERAL
-    # 実際に flask-free fallback 分岐 (importlib 直読み) を通ったことも確認する。
+
+def test_build_templates_still_importable_without_third_party_deps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """build_templates.py も最小依存環境で import できること（B-13）。
+
+    numpy/pandas/lightgbm は「あれば使う」任意依存なので、無ければ v2.1 の
+    スケール ML を諦めて縮退する (_HAS_LGBM=False)。night_type / stores は
+    scripts/_standalone_import.py のファイル直読みローダで拾う。
+    """
+    reloaded = _import_under_ci_minimal(monkeypatch, "scripts.build_templates")
+    assert reloaded.SLOTS == OLD_SLOTS_LITERAL
+    assert reloaded._HAS_LGBM is False
     assert reloaded.classify_night.__module__ == "_night_type_standalone"
+    assert len(reloaded.ALL_STORE_IDS) == 42
+
+
+def test_generate_weekly_insights_still_importable_without_third_party_deps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """generate_weekly_insights.py も最小依存環境で import できること（B-13）。"""
+    reloaded = _import_under_ci_minimal(monkeypatch, "scripts.generate_weekly_insights")
+    assert reloaded.NIGHT_SESSION_SHIFT_HOURS == 6

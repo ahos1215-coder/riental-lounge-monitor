@@ -2,20 +2,31 @@
 
 scripts/generate_weekly_insights.py と scripts/local_report_job.py に verbatim で
 コピペされていた `_supabase_conf` を一本化した結果、両スクリプトが同じ結果を返す
-ことをロックする。`_load_env`（.env / .env.local の手動パーサ）は元々
-scripts/local_report_job.py 側にのみあった機能で、temp .env フィクスチャで
-挙動が変わっていないことを確認する。
+ことをロックする。`_load_env`（.env / .env.local の手動パーサ）は temp .env
+フィクスチャで挙動が変わっていないことを確認する。
+
+`_load_env` は元々8本のスクリプトに同一本文でコピーされていた（B-02）。再び
+verbatim コピーが生まれる事故を検知するため、移行済みスクリプトの `_load_env` が
+必ずこの共有ファイル由来であることも固定する。
 """
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
 
 import scripts._supabase_common as common
+import scripts.analytics_weekly_report as awr
+import scripts.backup_logs as bl
+import scripts.build_templates as bt
+import scripts.cleanup_old_models as com
 import scripts.generate_weekly_insights as gwi
 import scripts.local_report_job as lrj
+import scripts.patch_weekly_store_ids as patch
+import scripts.score_forecasts as sf
+import scripts.snapshot_forecasts as snap
 
 
 # --------------------------------------------------------------------------- #
@@ -125,3 +136,55 @@ class TestLoadEnv:
         monkeypatch.delenv("SOME_VAR_THAT_SHOULD_NOT_EXIST", raising=False)
         common._load_env()  # 例外を投げない
         assert "SOME_VAR_THAT_SHOULD_NOT_EXIST" not in __import__("os").environ
+
+
+# --------------------------------------------------------------------------- #
+# _load_env / storage_* を共有実装から取っていること（verbatim コピー再発の検知）
+# --------------------------------------------------------------------------- #
+_SHARED_SOURCE = Path(common.__file__).resolve()
+
+_LOAD_ENV_USERS = [
+    pytest.param(awr, id="analytics_weekly_report"),
+    pytest.param(bl, id="backup_logs"),
+    pytest.param(bt, id="build_templates"),
+    pytest.param(com, id="cleanup_old_models"),
+    pytest.param(lrj, id="local_report_job"),
+    pytest.param(patch, id="patch_weekly_store_ids"),
+    pytest.param(sf, id="score_forecasts"),
+    pytest.param(snap, id="snapshot_forecasts"),
+]
+
+
+@pytest.mark.parametrize("mod", _LOAD_ENV_USERS)
+def test_load_env_comes_from_shared_module(mod) -> None:
+    """各スクリプトの `_load_env` は共有実装そのもの（手書きコピーではない）。
+
+    ※ scripts/train_ml_model.py だけは load_dotenv(override=True) の別仕様なので
+    意図的に対象外（同ファイル内の docstring に理由を明記してある）。
+    """
+    assert Path(inspect.getsourcefile(mod._load_env)).resolve() == _SHARED_SOURCE
+
+
+@pytest.mark.parametrize(
+    "mod",
+    [
+        pytest.param(sf, id="score_forecasts"),
+        pytest.param(bt, id="build_templates"),
+        pytest.param(snap, id="snapshot_forecasts"),
+    ],
+)
+def test_storage_get_comes_from_shared_module(mod) -> None:
+    assert Path(inspect.getsourcefile(mod._storage_get.func)).resolve() == _SHARED_SOURCE
+
+
+@pytest.mark.parametrize(
+    "mod",
+    [
+        pytest.param(sf, id="score_forecasts"),
+        pytest.param(bt, id="build_templates"),
+        pytest.param(snap, id="snapshot_forecasts"),
+        pytest.param(awr, id="analytics_weekly_report"),
+    ],
+)
+def test_storage_put_comes_from_shared_module(mod) -> None:
+    assert Path(inspect.getsourcefile(mod._storage_put.func)).resolve() == _SHARED_SOURCE

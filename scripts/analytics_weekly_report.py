@@ -35,18 +35,25 @@ Supabase Storage の *private* バケット（`ml-models/analytics/weekly/<週�
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import os
 import sys
 import tempfile
-import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# scripts/_supabase_common.py（.env 読み込み・Storage PUT の共有実装、stdlib のみ）を
+# シブリングとしてベアインポートする。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _supabase_common import _load_env, storage_put  # noqa: E402
+
+# ログ接頭辞だけを固定した別名（モジュール変数名は従来どおり `_storage_put`）。
+_storage_put = functools.partial(storage_put, log_prefix="[analytics]")
 
 JST = timezone(timedelta(hours=9))
 
@@ -77,24 +84,6 @@ FRIENDLY_SETUP_HINT = (
     "  有効化の手順は docs/ANALYTICS_SETUP.md を参照してください。\n"
     "  必要なもの: GA4_PROPERTY_ID（.env.local）と secrets/ga-service-account.json（鍵ファイル）。"
 )
-
-
-# --------------------------------------------------------------------------
-# env 読み込み（snapshot_forecasts.py と同じ規約）
-# --------------------------------------------------------------------------
-
-
-def _load_env() -> None:
-    for name in (".env", ".env.local"):
-        p = REPO_ROOT / name
-        if not p.is_file():
-            continue
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
 # --------------------------------------------------------------------------
@@ -512,20 +501,8 @@ def _gsc_query(token: str, site_url: str, body: dict) -> dict:
 
 
 # --------------------------------------------------------------------------
-# 永続化（Supabase Storage：snapshot_forecasts.py の put 規約を踏襲）
+# 永続化（Supabase Storage：put は scripts/_supabase_common.py の共有実装）
 # --------------------------------------------------------------------------
-
-
-def _storage_put(bucket: str, path: str, payload: bytes, url: str, key: str) -> None:
-    endpoint = f"{url}/storage/v1/object/{bucket}/{path}"
-    headers = {
-        "apikey": key,
-        "Authorization": f"Bearer {key}",
-        "x-upsert": "true",
-        "Content-Type": "application/json",
-    }
-    req = urllib.request.Request(endpoint, data=payload, method="POST", headers=headers)
-    urllib.request.urlopen(req, timeout=30)
 
 
 def upload_metrics(metrics: dict, weeks: WeekWindows) -> str | None:

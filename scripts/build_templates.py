@@ -32,6 +32,7 @@ CI は GHA env）。秘匿値は絶対に出力しない。
 from __future__ import annotations
 
 import argparse
+import functools
 import json
 import math
 import os
@@ -54,31 +55,24 @@ if str(REPO_ROOT) not in sys.path:
 # commentary_quality_gate.py を import するのと同じ規約。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _night_slots import SLOTS, NIGHT_START_HOUR  # noqa: E402
+from _standalone_import import load_module_from_file  # noqa: E402
+from _supabase_common import _load_env, storage_get, storage_put  # noqa: E402
 
-
-def _load_module_from_file(name: str, relpath: str):
-    """パッケージ経由importが使えない最小依存環境(GHA)用のファイル直読みローダ。
-    oriental/__init__.py が flask、oriental/ml/__init__.py が pandas/lightgbm を
-    引き込むため、stdlib+jpholidayしか無いジョブでは対象ファイルだけを直接読む。"""
-    import importlib.util
-
-    p = REPO_ROOT / relpath
-    spec = importlib.util.spec_from_file_location(name, p)
-    m = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
-    spec.loader.exec_module(m)
-    return m
+# ログ接頭辞だけを固定した別名（モジュール変数名は従来どおり = 既存テストの
+# monkeypatch.setattr(bt, "_storage_get", ...) がそのまま効く）。
+_storage_get = functools.partial(storage_get, log_prefix="[templates]")
+_storage_put = functools.partial(storage_put, log_prefix="[templates]")
 
 
 try:
     from oriental.ml.night_type import classify_night, night_date_of, special_block
     from oriental.utils.stores import ALL_STORE_IDS
 except ModuleNotFoundError:
-    _nt = _load_module_from_file("_night_type_standalone", "oriental/ml/night_type.py")
+    _nt = load_module_from_file("_night_type_standalone", "oriental/ml/night_type.py")
     classify_night, night_date_of, special_block = (
         _nt.classify_night, _nt.night_date_of, _nt.special_block,
     )
-    _st = _load_module_from_file("_stores_standalone", "oriental/utils/stores.py")
+    _st = load_module_from_file("_stores_standalone", "oriental/utils/stores.py")
     ALL_STORE_IDS = _st.ALL_STORE_IDS
 
 # v2.1 のスケール ML(blend50)は pandas/numpy/lightgbm を使う。最小依存環境(snapshot ジョブ等)
@@ -570,72 +564,6 @@ def build_tonight_scales(
 # --------------------------------------------------------------------------- #
 # I/O（環境・Supabase）
 # --------------------------------------------------------------------------- #
-def _load_env() -> None:
-    for name in (".env", ".env.local"):
-        p = REPO_ROOT / name
-        if not p.is_file():
-            continue
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-
-
-def _storage_get(bucket: str, path: str, url: str, key: str, retries: int = 6) -> bytes | None:
-    """Storage GET。404/400(not_found) は None、飽和系(429/5xx)は再試行。
-
-    2026-08-18: Supabase Storage のメタデータは同じ Postgres 上の `storage.objects`
-    にあるため、DB が混雑すると実在するオブジェクトにも HTTP 544 (database_timeout)
-    / 429 (too_many_connections) が返る。このワークフローは main() の最初の
-    ネットワーク呼び出しがここ（templates_v2.json の取得）なので、旧実装では
-    再試行が無く約6秒で即死していた（2026-08-09 以降 9回連続失敗）。
-    """
-    endpoint = f"{url}/storage/v1/object/{bucket}/{path}"
-    req = urllib.request.Request(
-        endpoint, headers={"apikey": key, "Authorization": f"Bearer {key}"}
-    )
-    last_err: Exception | None = None
-    for attempt in range(1, retries + 1):
-        try:
-            with urllib.request.urlopen(req, timeout=60) as resp:
-                return resp.read()
-        except urllib.error.HTTPError as exc:
-            if exc.code == 404:
-                return None
-            if exc.code == 400:
-                try:
-                    body = exc.read().decode("utf-8", "replace").lower()
-                except Exception:  # noqa: BLE001
-                    body = ""
-                if "not_found" in body or "not found" in body:
-                    return None
-            # 429 / 5xx（544 DatabaseTimeout を含む）は一時的な飽和 → 再試行
-            if exc.code != 429 and exc.code < 500:
-                raise
-            last_err = exc
-        except Exception as exc:  # noqa: BLE001 - transient network error
-            last_err = exc
-        if attempt < retries:
-            wait = min(2 ** attempt, 30)
-            print(f"[templates] storage GET {path} transient error ({last_err}); retry {attempt}/{retries} in {wait}s")
-            time.sleep(wait)
-    raise last_err if last_err else RuntimeError(f"storage get failed: {path}")
-
-
-def _storage_put(bucket: str, path: str, payload: bytes, url: str, key: str) -> None:
-    endpoint = f"{url}/storage/v1/object/{bucket}/{path}"
-    headers = {
-        "apikey": key,
-        "Authorization": f"Bearer {key}",
-        "x-upsert": "true",
-        "Content-Type": "application/json",
-    }
-    req = urllib.request.Request(endpoint, data=payload, method="POST", headers=headers)
-    urllib.request.urlopen(req, timeout=30)
-
-
 def _recent_night_dates(bucket: str, url: str, key: str) -> list[str]:
     """accuracy/scores/summary.json の nights(新しい順) から夜次日付リストを返す。無ければ空。"""
     raw = _storage_get(bucket, "accuracy/scores/summary.json", url, key)

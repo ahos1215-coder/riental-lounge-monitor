@@ -37,11 +37,11 @@ Stdlib only. Requires SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY; BACKEND_URL opti
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import sys
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -56,20 +56,22 @@ if str(REPO_ROOT) not in sys.path:
 # tests/test_night_slots.py で担保する。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _night_slots import SLOTS as V2_SLOTS  # noqa: E402
+from _standalone_import import load_module_from_file  # noqa: E402
+from _stores_common import all_slugs, slug_to_store_id  # noqa: E402
+from _supabase_common import _load_env, storage_get, storage_put  # noqa: E402
+
+# ログ接頭辞だけを固定した別名（モジュール変数名は従来どおり = 既存テストの
+# monkeypatch.setattr(snap, "_storage_get", ...) がそのまま効く）。
+_storage_get = functools.partial(storage_get, log_prefix="[snapshot][warn]")
+_storage_put = functools.partial(storage_put, log_prefix="[snapshot][warn]")
 
 try:
     from oriental.ml.night_type import classify_night, special_block  # noqa: E402
 except ModuleNotFoundError:
     # 最小依存環境(GHA=stdlib+jpholidayのみ)ではパッケージ経由importが
     # oriental/__init__.py の flask 等を引き込んで失敗するため、ファイル直読みで代替。
-    import importlib.util as _ilu  # noqa: E402
-
-    _p = REPO_ROOT / "oriental" / "ml" / "night_type.py"
-    _spec = _ilu.spec_from_file_location("_night_type_standalone", _p)
-    _m = _ilu.module_from_spec(_spec)
-    assert _spec and _spec.loader
-    _spec.loader.exec_module(_m)
-    classify_night, special_block = _m.classify_night, _m.special_block
+    _nt = load_module_from_file("_night_type_standalone", "oriental/ml/night_type.py")
+    classify_night, special_block = _nt.classify_night, _nt.special_block
 
 JST = timezone(timedelta(hours=9))
 DEFAULT_BACKEND = "https://riental-lounge-monitor.onrender.com"
@@ -81,24 +83,9 @@ TEMPLATES_PATH = "forecast/templates_v2.json"
 V2_STALE_HOURS = 48  # テンプレがこれより古い/無い → v2=null（A は無傷）
 
 
-def _load_env() -> None:
-    for name in (".env", ".env.local"):
-        p = REPO_ROOT / name
-        if not p.is_file():
-            continue
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
-
-
 def _all_store_slugs() -> list[str]:
     # 全ブランド（oriental + aisekiya 等）を対象にする。相席屋も予測の答え合わせに載せる。
-    path = REPO_ROOT / "frontend" / "src" / "data" / "stores.json"
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return [s["slug"] for s in data if s.get("slug")]
+    return all_slugs()
 
 
 def _get_json(url: str, retries: int = 3):
@@ -116,50 +103,6 @@ def _get_json(url: str, retries: int = 3):
     return None
 
 
-def _storage_put(bucket: str, path: str, payload: bytes, url: str, key: str, retries: int = 3) -> None:
-    """Storage へ書き込む。429/5xx・ネットワーク断は指数バックオフで再試行する。
-
-    ここが1発で落ちるとその夜の A スナップショットを丸ごと失い、翌朝の
-    score_forecasts.py が答え合わせできない（= 精度追跡に穴が空く）ため、
-    _get_json() と同様に再試行する。401/403/404 のような恒久エラーは
-    再試行しても無駄なので即座に送出する。
-    """
-    endpoint = f"{url}/storage/v1/object/{bucket}/{path}"
-    headers = {
-        "apikey": key,
-        "Authorization": f"Bearer {key}",
-        "x-upsert": "true",
-        "Content-Type": "application/json",
-    }
-    for attempt in range(1, retries + 1):
-        req = urllib.request.Request(endpoint, data=payload, method="POST", headers=headers)
-        try:
-            urllib.request.urlopen(req, timeout=30)
-            return
-        except urllib.error.HTTPError as exc:
-            retryable = exc.code == 429 or exc.code >= 500
-            if not retryable or attempt >= retries:
-                raise
-            print(f"[snapshot][warn] PUT {path} failed (HTTP {exc.code}), retry {attempt}/{retries - 1}")
-        except Exception as exc:  # noqa: BLE001 - URLError/timeout など
-            if attempt >= retries:
-                raise
-            print(f"[snapshot][warn] PUT {path} failed ({str(exc)[:120]}), retry {attempt}/{retries - 1}")
-        time.sleep(3 * attempt)
-
-
-def _storage_get(bucket: str, path: str, url: str, key: str) -> bytes | None:
-    endpoint = f"{url}/storage/v1/object/{bucket}/{path}"
-    req = urllib.request.Request(endpoint, headers={"apikey": key, "Authorization": f"Bearer {key}"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return resp.read()
-    except urllib.error.HTTPError as exc:
-        if exc.code in (400, 404):
-            return None
-        raise
-
-
 def _parse_iso(s: str | None) -> datetime | None:
     if not isinstance(s, str) or not s.strip():
         return None
@@ -171,9 +114,9 @@ def _parse_iso(s: str | None) -> datetime | None:
 
 
 def _store_id_for(slug: str) -> str:
-    """フロント slug -> serving store_id（相席屋 ay_* はそのまま、オリエンタルは ol_ 付与）。
-    score_forecasts.py と同一規約。"""
-    return slug if slug.startswith("ay_") else f"ol_{slug}"
+    """フロント slug -> serving store_id。stores.json が正本
+    （scripts/_stores_common.py）。score_forecasts.py と同一規約。"""
+    return slug_to_store_id(slug)
 
 
 def _v2_points(t: dict, ts_list: list[datetime], scale_override: float | None = None) -> list[dict]:

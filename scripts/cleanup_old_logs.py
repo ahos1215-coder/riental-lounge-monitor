@@ -34,8 +34,14 @@ import sys
 import time
 import urllib.error
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+# scripts/_retry_common.py（バックオフ計算・再試行判定の共有実装、stdlib のみ）を
+# シブリングとしてベアインポートする。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _retry_common import backoff_delay, is_retryable_status  # noqa: E402
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
@@ -63,24 +69,6 @@ CLEANUP_RETRIES = int(os.getenv("LOGS_CLEANUP_RETRIES", "8"))
 CLEANUP_BACKOFF_MAX_SEC = float(os.getenv("LOGS_CLEANUP_BACKOFF_MAX_SEC", "45"))
 
 
-def backoff_delay(attempt: int, cap: float = CLEANUP_BACKOFF_MAX_SEC) -> float:
-    """Exponential backoff for retry ``attempt`` (1-based), capped at ``cap`` seconds.
-
-    Pure function (no I/O, no sleeping) so the retry policy is unit-testable.
-    """
-    return min(float(2 ** attempt), float(cap))
-
-
-def is_retryable_status(code: int) -> bool:
-    """True for Supabase saturation signals that deserve a retry.
-
-    429 = too_many_connections / SlowDown, 5xx = 500, 544 DatabaseTimeout,
-    502/503/504. Any other 4xx means a genuinely bad request (auth, malformed
-    filter) and retrying would just waste the budget.
-    """
-    return code == 429 or code >= 500
-
-
 def _rest_request(req: Request, *, what: str, timeout: float = 90.0):
     """Perform a Supabase REST request with retries on transient saturation errors.
 
@@ -99,7 +87,7 @@ def _rest_request(req: Request, *, what: str, timeout: float = 90.0):
         except Exception as exc:  # noqa: BLE001 - transient network error
             last = f"{type(exc).__name__}: {str(exc)[:100]}"
         if attempt < CLEANUP_RETRIES:
-            wait = backoff_delay(attempt)
+            wait = backoff_delay(attempt, cap=CLEANUP_BACKOFF_MAX_SEC)
             print(f"  [retry] {what}: transient error ({last}); attempt {attempt}/{CLEANUP_RETRIES}, waiting {wait:.0f}s")
             time.sleep(wait)
     raise SystemExit(f"[error] {what} failed after {CLEANUP_RETRIES} attempts: {last}")

@@ -27,6 +27,9 @@ from urllib.request import Request, urlopen
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from commentary_quality_gate import check_weekly_commentary  # noqa: E402
+from _ops_notify import notify_ops  # noqa: E402
+from _standalone_import import load_module_from_file  # noqa: E402
+from _stores_common import load_stores_json  # noqa: E402
 from _supabase_common import _supabase_conf  # noqa: E402
 
 if str(REPO_ROOT) not in sys.path:
@@ -36,12 +39,9 @@ try:
 except ModuleNotFoundError:
     # 最小依存環境(oriental/__init__.py 経由のimportがflask等を引き込めない場合)では
     # ファイル直読みで代替する。scripts/snapshot_forecasts.py / build_templates.py と同一パターン。
-    _night_type_spec = importlib.util.spec_from_file_location(
-        "_night_type_standalone", REPO_ROOT / "oriental" / "ml" / "night_type.py"
+    _night_type_mod = load_module_from_file(
+        "_night_type_standalone", "oriental/ml/night_type.py"
     )
-    _night_type_mod = importlib.util.module_from_spec(_night_type_spec)
-    assert _night_type_spec and _night_type_spec.loader
-    _night_type_spec.loader.exec_module(_night_type_mod)
     NIGHT_SESSION_SHIFT_HOURS = _night_type_mod.NIGHT_SESSION_SHIFT_HOURS
 
 MEGRIBI_SCORE_PATH = REPO_ROOT / "oriental" / "ml" / "megribi_score.py"
@@ -267,13 +267,7 @@ def _load_all_store_slugs() -> list[str]:
     """
     if not STORES_JSON_PATH.exists():
         raise SystemExit(f"stores.json not found: {STORES_JSON_PATH}")
-    data = json.loads(STORES_JSON_PATH.read_text(encoding="utf-8"))
-    slugs: list[str] = []
-    for row in data:
-        slug = row.get("slug")
-        if slug:
-            slugs.append(slug)
-    return slugs
+    return [row["slug"] for row in load_stores_json(STORES_JSON_PATH) if row.get("slug")]
 
 
 _SLUG_TO_STORE_ID_CACHE: dict[str, str] | None = None
@@ -293,8 +287,7 @@ def _load_slug_to_store_id_map() -> dict[str, str]:
     mapping: dict[str, str] = {}
     if STORES_JSON_PATH.exists():
         try:
-            data = json.loads(STORES_JSON_PATH.read_text(encoding="utf-8"))
-            for row in data:
+            for row in load_stores_json(STORES_JSON_PATH):
                 slug = row.get("slug")
                 store_id = row.get("store_id")
                 if slug and store_id:
@@ -345,7 +338,7 @@ def _load_store_active_map() -> dict[str, bool]:
     if not STORES_JSON_PATH.exists():
         return mapping
     try:
-        data = json.loads(STORES_JSON_PATH.read_text(encoding="utf-8"))
+        data = load_stores_json(STORES_JSON_PATH)
     except (json.JSONDecodeError, OSError) as exc:  # noqa: BLE001
         print(f"[weekly-insights] failed to load stores.json for active map: {exc}", file=sys.stderr)
         return mapping
@@ -487,24 +480,10 @@ def _notify_ops(message: str) -> None:
     """OPS_NOTIFY_WEBHOOK_URL (Slack/Discord) へ best-effort で POST する。
 
     未設定なら no-op。失敗しても例外は投げない (呼び出し元の処理を止めないため)。
-    scripts/score_forecasts.py の `_alert` と同じ規約 ({"text": message} を POST)。
+    送信形式(slack/discord)の切り替えは scripts/_ops_notify.py が持つ。
     """
-    url = (os.environ.get("OPS_NOTIFY_WEBHOOK_URL") or "").strip()
-    if not url:
-        print(f"[weekly-insights][alert] (OPS_NOTIFY_WEBHOOK_URL unset) {message}", file=sys.stderr)
-        return
-    try:
-        req = Request(
-            url,
-            data=json.dumps({"text": message}).encode("utf-8"),
-            method="POST",
-            headers={"Content-Type": "application/json"},
-        )
-        with urlopen(req, timeout=15):
-            pass
-        print(f"[weekly-insights][alert] sent: {message}", file=sys.stderr)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[weekly-insights][alert] failed to send: {str(exc)[:200]}", file=sys.stderr)
+    notify_ops(message, prefix="[weekly-insights][alert]", stream=sys.stderr,
+               fail_label="failed to send", detail_limit=200)
 
 
 def _upsert_weekly_report_to_supabase(

@@ -84,6 +84,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # scripts/_supabase_common.py（.env 読み込み・SUPABASE 設定解決の共有実装）を
 # ベアインポートする（モジュールのdocstringに書かれている規約に合わせる）。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _retry_common import backoff_delay, is_retryable_status  # noqa: E402
 from _supabase_common import _load_env, _supabase_conf  # noqa: E402
 
 # --- オブジェクト名の分類パターン ---------------------------------------------------
@@ -116,19 +117,11 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def is_retryable_status(code: int) -> bool:
-    """429(too_many_connections/SlowDown) と 5xx(544 DatabaseTimeoutを含む)を再試行対象と
-    する。scripts/cleanup_old_logs.py の同名関数と同じ判定（Storage list/delete は軽量な
-    メタデータ操作であり、`oriental/clients/http.py` の 2026-08-18 の「500除外」修正が
-    対象とした「巨大クエリのstatementタイムアウトがゴロブロッキングスレッドを占有する」
-    問題とはシナリオが異なる独立プロセスのバッチ処理のため、500 も再試行して問題ない）。
-    """
-    return code == 429 or code >= 500
-
-
-def backoff_delay(attempt: int, cap: float) -> float:
-    """指数バックオフ（`attempt` は1始まり）。純粋関数（I/Oなし）でテスト可能にする。"""
-    return min(float(2**attempt), float(cap))
+# is_retryable_status / backoff_delay は scripts/_retry_common.py の共有実装。
+# Storage の list/delete は軽量なメタデータ操作であり、`oriental/clients/http.py` の
+# 2026-08-18「500除外」修正が対象とした「巨大クエリの statement タイムアウトが
+# gunicorn スレッドを占有する」問題とはシナリオが異なる独立プロセスのバッチ処理なので、
+# ここでは 500 も再試行してよい。
 
 
 @dataclass(slots=True)

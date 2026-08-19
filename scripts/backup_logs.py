@@ -33,6 +33,7 @@ import argparse
 import gzip
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -40,6 +41,13 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+# scripts/_retry_common.py（バックオフ計算の共有実装、stdlib のみ）と
+# scripts/_supabase_common.py（.env 読み込み）をシブリングとしてベアインポートする。
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _retry_common import backoff_delay  # noqa: E402
+from _supabase_common import _load_env  # noqa: E402
+
 SELECT = "id,store_id,ts,men,women,total,weather_code,weather_label,temp_c,precip_mm,src_brand"
 # Row-count sanity check tolerance: allows for rows inserted by the live 5-min
 # collector during the dump window, without masking a real silent truncation
@@ -67,19 +75,9 @@ BACKOFF_MAX_SEC = float(os.environ.get("BACKUP_BACKOFF_MAX_SEC", "45"))
 REQUEST_TIMEOUT_SEC = float(os.environ.get("BACKUP_REQUEST_TIMEOUT_SEC", "90"))
 
 
-def backoff_delay(attempt: int, retry_after: float | None = None, cap: float = BACKOFF_MAX_SEC) -> float:
-    """Exponential backoff for retry ``attempt`` (1-based), capped at ``cap`` seconds.
-
-    Honours a server-supplied ``Retry-After`` (seconds) when present and larger than
-    the computed delay -- Supabase sends it with 429 ``too_many_connections`` and it
-    reflects when the pooler actually expects to have capacity again.
-
-    Pure function (no I/O, no sleeping) so the retry policy is unit-testable.
-    """
-    delay = min(float(2 ** attempt), float(cap))
-    if retry_after is not None and retry_after > delay:
-        delay = min(float(retry_after), float(cap))
-    return delay
+# backoff_delay は scripts/_retry_common.py の共有実装（上で import 済み）。
+# 呼び出し側は cap をキーワードで明示的に渡すこと（旧実装は第2位置引数が
+# retry_after だったので、位置引数のままだと retry_after が cap と解釈される）。
 
 
 def _retry_after_seconds(exc: urllib.error.HTTPError) -> float | None:
@@ -91,20 +89,6 @@ def _retry_after_seconds(exc: urllib.error.HTTPError) -> float | None:
         return float(str(raw).strip())
     except (TypeError, ValueError):
         return None
-
-
-def _load_env() -> None:
-    # Real environment (e.g. GitHub Actions secrets) wins over local files.
-    for name in (".env", ".env.local"):
-        p = REPO_ROOT / name
-        if not p.is_file():
-            continue
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
 def _get(endpoint: str, key: str, params: list[tuple[str, str]], retries: int = FETCH_RETRIES):
@@ -128,7 +112,7 @@ def _get(endpoint: str, key: str, params: list[tuple[str, str]], retries: int = 
         except Exception as exc:  # noqa: BLE001
             last = str(exc)[:120]
         if attempt < retries:
-            wait = backoff_delay(attempt, retry_after)
+            wait = backoff_delay(attempt, cap=BACKOFF_MAX_SEC, retry_after=retry_after)
             print(f"[backup] transient error ({last}); retry {attempt}/{retries} in {wait:.0f}s", flush=True)
             time.sleep(wait)
     raise SystemExit(f"backup fetch failed after {retries} attempts: {last}")
@@ -175,7 +159,7 @@ def _get_exact_row_count(endpoint: str, key: str, retries: int = FETCH_RETRIES) 
         except Exception as exc:  # noqa: BLE001
             last = str(exc)[:120]
         if attempt < retries:
-            wait = backoff_delay(attempt, retry_after)
+            wait = backoff_delay(attempt, cap=BACKOFF_MAX_SEC, retry_after=retry_after)
             print(f"[backup] row-count transient error ({last}); retry {attempt}/{retries} in {wait:.0f}s", flush=True)
             time.sleep(wait)
     raise SystemExit(f"row-count check failed after {retries} attempts: {last}")
