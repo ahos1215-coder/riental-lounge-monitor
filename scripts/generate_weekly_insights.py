@@ -34,8 +34,14 @@ from _ollama_common import MODEL as OLLAMA_MODEL  # noqa: E402
 from _ollama_common import run_ollama, unload_ollama  # noqa: E402
 from _ops_notify import notify_ops  # noqa: E402
 from _standalone_import import load_module_from_file  # noqa: E402
-from _stores_common import load_stores_json  # noqa: E402
-from _supabase_common import _supabase_conf  # noqa: E402
+from _stores_common import (  # noqa: E402
+    STORES_JSON_PATH,
+    all_slugs,
+    load_stores_json,
+    slug_to_store_id,
+    slug_to_store_id_map,
+)
+from _supabase_common import _supabase_conf, auth_headers  # noqa: E402
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -252,7 +258,7 @@ def _parse_store_list(value: str | None) -> list[str]:
     return [item.strip() for item in raw if item.strip()]
 
 
-STORES_JSON_PATH = REPO_ROOT / "frontend" / "src" / "data" / "stores.json"
+# STORES_JSON_PATH は scripts/_stores_common.py が正本（上の import）。
 
 
 def _load_all_store_slugs() -> list[str]:
@@ -260,10 +266,12 @@ def _load_all_store_slugs() -> list[str]:
 
     ローカル実行で 42 店舗を 1 回でカバーするための便宜機能
     （2026-07-11 sapporo_ag 閉店で 44→42 に変更。stores.json が単一ソース）。
+    読み込み自体は `_stores_common.all_slugs`。「無ければジョブを落とす」という
+    週次固有のエラー方針だけをここに残す。
     """
     if not STORES_JSON_PATH.exists():
         raise SystemExit(f"stores.json not found: {STORES_JSON_PATH}")
-    return [row["slug"] for row in load_stores_json(STORES_JSON_PATH) if row.get("slug")]
+    return all_slugs(STORES_JSON_PATH)
 
 
 _SLUG_TO_STORE_ID_CACHE: dict[str, str] | None = None
@@ -283,11 +291,7 @@ def _load_slug_to_store_id_map() -> dict[str, str]:
     mapping: dict[str, str] = {}
     if STORES_JSON_PATH.exists():
         try:
-            for row in load_stores_json(STORES_JSON_PATH):
-                slug = row.get("slug")
-                store_id = row.get("store_id")
-                if slug and store_id:
-                    mapping[slug] = store_id
+            mapping = slug_to_store_id_map(STORES_JSON_PATH)
         except (json.JSONDecodeError, OSError) as exc:  # noqa: BLE001
             print(f"[weekly-insights] failed to load stores.json for store_id mapping: {exc}", file=sys.stderr)
     else:
@@ -305,14 +309,19 @@ def _store_id_for_slug(slug: str) -> str:
     ブランド判定は slug の見た目 (`_ag` サフィックス等) からは行えない
     (`_ag` は oriental の AG サブブランドで store_id は `ol_*`、相席屋は `ay_`
     プレフィックスの slug で store_id もそのまま `ay_*`)。stores.json に slug が
-    見つからない場合は、ジョブを落とさないよう旧来の `ol_{slug}` にフォールバック
-    しつつ、大きく警告を出す。
+    見つからない場合は、ジョブを落とさないよう共通の変換規約
+    (`_stores_common.slug_to_store_id`) にフォールバックしつつ、大きく警告を出す。
+
+    2026-08-19: フォールバックを週次だけの `ol_{slug}` 固定から共通実装へ寄せた。
+    現行42店は全件 stores.json で解決できるので**挙動不変**。差が出るのは
+    「stores.json に無い未知の `ay_*` slug」のときだけで、旧 `ol_ay_x` から
+    正しい `ay_x` に変わる（改善方向）。
     """
     mapping = _load_slug_to_store_id_map()
     store_id = mapping.get(slug)
     if store_id:
         return store_id
-    fallback = f"ol_{slug}"
+    fallback = slug_to_store_id(slug)
     print(
         f"[weekly-insights] WARNING: slug={slug!r} not found in stores.json; "
         f"falling back to {fallback!r} (may be incorrect for non-oriental brands)",
@@ -424,14 +433,7 @@ def _fetch_existing_weekly_commentary(store: str) -> dict[str, Any]:
         f"?facts_id=eq.{facts_id}&select=insight_json,updated_at,created_at&limit=1"
     )
     try:
-        req = Request(
-            url,
-            headers={
-                "apikey": key,
-                "Authorization": f"Bearer {key}",
-                "Accept": "application/json",
-            },
-        )
+        req = Request(url, headers=auth_headers(key, accept_json=True))
         with urlopen(req, timeout=15) as resp:
             rows = json.loads(resp.read().decode("utf-8"))
         if not isinstance(rows, list) or not rows:
@@ -518,9 +520,7 @@ def _upsert_weekly_report_to_supabase(
         "error_message": None,
     }
     headers = {
-        "apikey": key,
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
+        **auth_headers(key, content_type=True),
         "Prefer": "return=representation",
         "User-Agent": DEFAULT_USER_AGENT,
     }
@@ -1503,18 +1503,18 @@ def main() -> int:
     # 窓の選定 (_build_busy_windows) には一切使われない。出力契約の後方互換のため残置。
     parser.add_argument("--ideal", type=float)
     parser.add_argument("--gender-weight", type=float)
+    # 廃止済み・no-op（2026-07-18 index.json retirement）。index.json 生成コード自体を
+    # 削除済み: frontend 側に読み手がゼロだったこと（weekly report ページは Supabase
+    # blog_drafts から直接取得、sitemap.ts は各店ディレクトリのファイル名一覧から
+    # lastModified を導出）を grep で確認した上で退役した。
+    # 古い手順書・手元のバッチ・GHA の手動実行がこのフラグを渡しても落ちないよう、
+    # 「受けるだけ」の互換引数として残す（**削除しないこと**）。--help には出さない
+    # （SUPPRESS）ので、新しく使われることはない。
     parser.add_argument(
         "--skip-index",
         action="store_true",
         default=False,
-        help=(
-            "廃止済み・no-op（2026-07-18 index.json retirement）。index.json 生成コード"
-            "自体を削除済み: frontend 側に読み手がゼロだったこと（weekly report ページは "
-            "Supabase blog_drafts から直接取得、sitemap.ts は各店ディレクトリのファイル名"
-            "一覧から lastModified を導出）をgrepで確認した上で退役した。"
-            "古い手順書や手元のバッチがこのフラグを渡しても落ちないよう、"
-            "引数としてのみ残している。"
-        ),
+        help=argparse.SUPPRESS,
     )
     args = parser.parse_args()
 

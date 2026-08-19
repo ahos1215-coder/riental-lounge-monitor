@@ -56,7 +56,8 @@ if str(REPO_ROOT) not in sys.path:
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _night_slots import SLOTS, NIGHT_START_HOUR  # noqa: E402
 from _standalone_import import load_module_from_file  # noqa: E402
-from _supabase_common import _load_env, storage_get, storage_put  # noqa: E402
+from _retry_common import backoff_delay, is_retryable_status  # noqa: E402
+from _supabase_common import _load_env, _supabase_conf, auth_headers, storage_get, storage_put  # noqa: E402
 
 # ログ接頭辞だけを固定した別名（モジュール変数名は従来どおり = 既存テストの
 # monkeypatch.setattr(bt, "_storage_get", ...) がそのまま効く）。
@@ -611,7 +612,7 @@ def _fetch_store_rows(url: str, key: str, store_id: str, start_iso: str) -> list
     一過性の 5xx/429/ネットワークエラーはリトライ。
     """
     endpoint = f"{url}/rest/v1/logs"
-    headers = {"apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json"}
+    headers = auth_headers(key, accept_json=True)
     rows: list[dict] = []
     cursor: str | None = None
     while True:
@@ -636,14 +637,15 @@ def _fetch_store_rows(url: str, key: str, store_id: str, start_iso: str) -> list
                 break
             except urllib.error.HTTPError as exc:
                 last_err = f"status={exc.code}"
-                if exc.code < 500 and exc.code != 429:
+                if not is_retryable_status(exc.code):
                     # 4xx(除く429)は恒久エラー。ここで打ち切り（呼び出し側で空扱い）。
                     print(f"[build-templates][fetch] {store_id} permanent error {last_err}")
                     return rows
             except Exception as exc:  # noqa: BLE001
                 last_err = str(exc)[:120]
             if attempt < 4:
-                time.sleep(min(2 ** attempt, 10))
+                # 指数バックオフ 2, 4, 8 秒（旧 `min(2**attempt, 10)` と同値）。
+                time.sleep(backoff_delay(attempt, cap=10))
         if not isinstance(payload, list):
             print(f"[build-templates][fetch] {store_id} gave up after retries ({last_err})")
             break
@@ -718,11 +720,11 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true", help="集計のみ・Storage へアップロードしない")
     args = parser.parse_args()
 
-    supabase_url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY") or ""
+    conf = _supabase_conf()
     bucket = (os.environ.get("FORECAST_MODEL_BUCKET") or "ml-models").strip()
-    if not supabase_url or not key:
+    if conf is None:
         raise SystemExit("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required")
+    supabase_url, key = conf
 
     now = datetime.now(JST)
     today = now.date()

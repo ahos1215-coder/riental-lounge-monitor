@@ -1,11 +1,22 @@
-"""Supabase の設定読み込みと Storage オブジェクト GET/PUT の共有ヘルパー。
+"""Supabase の設定読み込み・認証ヘッダ・Storage オブジェクト GET/PUT の共有ヘルパー。
 
-`_supabase_conf`（SUPABASE_URL / SERVICE_ROLE_KEY の環境変数解決）と
-`_load_env`（.env / .env.local の手動パーサ）は scripts/ 配下に verbatim で
+公開名は `load_env` / `supabase_conf` / `auth_headers` / `storage_get` / `storage_put`。
+`_load_env` / `_supabase_conf` / `_auth_headers` は同じ関数への旧別名（既存の import を
+壊さないために残しているだけ。新規に書くコードは `_` の付かない公開名を使う）。
+
+`supabase_conf`（SUPABASE_URL / SERVICE_ROLE_KEY の環境変数解決）と
+`load_env`（.env / .env.local の手動パーサ）は scripts/ 配下に verbatim で
 コピペされていたものの一本化。実環境変数（GitHub Actions secrets 等）が
 .env ファイルより優先される（setdefault）。
 ※ scripts/train_ml_model.py だけは `load_dotenv(..., override=True)` の別実装で、
    .env.local がプロセス環境変数に勝つ逆仕様（同ファイル内の注記を参照）。
+
+`auth_headers`（apikey + Authorization）は scripts/ 配下15箇所に手書きコピーされていた。
+「片方が欠けて 401」という事故を1箇所で防ぐため、Flask 側 `oriental/clients/supabase.py`
+の `auth_headers` と**同じシグネチャ**（`accept_json` / `content_type` の任意フラグ）で
+ここにも置く。2つのモジュールが存在するのは、scripts/ が oriental パッケージ（flask 等）を
+import できない最小依存環境でも動く必要があるため。挙動は
+tests/test_scripts_auth_headers_ssot.py が両者一致で固定する。
 
 `storage_get` / `storage_put`（Storage オブジェクトの読み書き）は
 score_forecasts.py / build_templates.py / snapshot_forecasts.py /
@@ -38,7 +49,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # このモジュール自体が `scripts._supabase_common` としてもベア `_supabase_common` としても
 # import されうるので、探索パスは自分で確実に通す。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _retry_common import backoff_delay  # noqa: E402
+from _retry_common import backoff_delay, is_retryable_status  # noqa: E402
 
 # Storage の既定値（旧実装の値をそのまま踏襲）。
 STORAGE_GET_RETRIES = 6      # score/build 版の再試行回数
@@ -47,8 +58,16 @@ STORAGE_GET_TIMEOUT = 60
 STORAGE_PUT_RETRIES = 3      # snapshot 版の再試行回数
 STORAGE_PUT_TIMEOUT = 30
 
+# Supabase Storage が「オブジェクトが無い」を HTTP 400 のボディで伝えてくるときの目印
+# （小文字化した本文に対する部分一致）。
+# ★鏡像注意★ oriental/clients/supabase.py の NOT_FOUND_BODY_MARKERS と同一。片方を
+# 変えたら必ず両方直すこと（片方だけ直すと「テンプレ/スナップショットが無い」の誤判定が
+# 片系統だけに残り、2026-08-18 の事故と同じ見えにくい壊れ方をする）。
+# 両者の一致は tests/test_storage_not_found_markers.py が固定する。
+NOT_FOUND_BODY_MARKERS = ("not_found", "not found", "object not found")
 
-def _load_env() -> None:
+
+def load_env() -> None:
     """.env / .env.local を読み込み os.environ に setdefault する。
 
     実環境変数（GitHub Actions secrets 等）が最優先。
@@ -67,7 +86,7 @@ def _load_env() -> None:
             os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
 
 
-def _supabase_conf() -> tuple[str, str] | None:
+def supabase_conf() -> tuple[str, str] | None:
     """SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY（フォールバック: SUPABASE_SERVICE_KEY）
     を解決する。どちらか欠けていれば None。
 
@@ -88,8 +107,34 @@ def _storage_endpoint(bucket: str, path: str, url: str) -> str:
     return f"{url}/storage/v1/object/{bucket}/{path}"
 
 
-def _auth_headers(key: str) -> dict[str, str]:
-    return {"apikey": key, "Authorization": f"Bearer {key}"}
+def auth_headers(
+    key: str, *, accept_json: bool = False, content_type: bool = False
+) -> dict[str, str]:
+    """Supabase REST / Storage 共通の認証ヘッダ。
+
+    service role key は `apikey` と `Authorization: Bearer` の両方に必要
+    （どちらか片方だけだと PostgREST / Storage が 401 を返す）。
+
+    Flask 側の `oriental/clients/supabase.py::auth_headers` と同シグネチャ・同結果。
+    scripts/ は oriental パッケージ（flask 等）を import できない最小依存環境でも
+    動く必要があるため、実装は意図的に2箇所ある（一致は
+    tests/test_scripts_auth_headers_ssot.py が固定）。
+    """
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+    }
+    if accept_json:
+        headers["Accept"] = "application/json"
+    if content_type:
+        headers["Content-Type"] = "application/json"
+    return headers
+
+
+# ---- 旧 private 名（既存 import の互換のために残す別名。新規コードは公開名を使う）----
+_load_env = load_env
+_supabase_conf = supabase_conf
+_auth_headers = auth_headers
 
 
 def storage_get(
@@ -111,8 +156,13 @@ def storage_get(
     ここなので、9回連続で即死していた）。
 
     401/403 のような恒久エラーは再試行せずそのまま送出する。
+
+    再試行の対象は `_retry_common.is_retryable_status`（429 と 5xx）。Flask 側
+    `oriental/clients/http.py` は同じ Supabase を叩きながら **500 を再試行しない**
+    （2026-08-18 決定）。方針が逆である理由は `_retry_common.is_retryable_status` の
+    docstring を参照。
     """
-    req = urllib.request.Request(_storage_endpoint(bucket, path, url), headers=_auth_headers(key))
+    req = urllib.request.Request(_storage_endpoint(bucket, path, url), headers=auth_headers(key))
     last_err: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
@@ -128,10 +178,11 @@ def storage_get(
                     body = exc.read().decode("utf-8", "replace").lower()
                 except Exception:  # noqa: BLE001
                     body = ""
-                if "not_found" in body or "not found" in body or "object not found" in body:
+                if any(marker in body for marker in NOT_FOUND_BODY_MARKERS):
                     return None
             # 429 / 5xx（544 DatabaseTimeout を含む）は一時的な飽和 → 再試行
-            if exc.code != 429 and exc.code < 500:
+            # （判定は _retry_common.is_retryable_status が単一ソース。真理値は従来と同一）
+            if not is_retryable_status(exc.code):
                 raise
             last_err = exc
         except Exception as exc:  # noqa: BLE001 - transient network error
@@ -164,7 +215,7 @@ def storage_put(
     待機式は線形 `3*attempt` 秒（snapshot_forecasts.py の既存実装をそのまま踏襲）。
     """
     headers = {
-        **_auth_headers(key),
+        **auth_headers(key),
         "x-upsert": "true",
         "Content-Type": "application/json",
     }
@@ -175,12 +226,14 @@ def storage_put(
             urllib.request.urlopen(req, timeout=STORAGE_PUT_TIMEOUT)
             return
         except urllib.error.HTTPError as exc:
-            retryable = exc.code == 429 or exc.code >= 500
-            if not retryable or attempt >= retries:
+            if not is_retryable_status(exc.code) or attempt >= retries:
                 raise
             print(f"{log_prefix} PUT {path} failed (HTTP {exc.code}), retry {attempt}/{retries - 1}")
         except Exception as exc:  # noqa: BLE001 - URLError/timeout など
             if attempt >= retries:
                 raise
             print(f"{log_prefix} PUT {path} failed ({str(exc)[:120]}), retry {attempt}/{retries - 1}")
+        # 意図的に線形（3, 6 秒）。GET 側の指数バックオフ（backoff_delay）と違い、PUT は
+        # 試行3回で終わるうえ「その回の成果物を落とさない」ことが目的なので、待ちを
+        # 短く保つ旧 snapshot_forecasts.py の式をそのまま維持する（待ち秒は変えない）。
         time.sleep(3 * attempt)

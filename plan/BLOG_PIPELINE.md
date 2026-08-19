@@ -64,14 +64,14 @@
 ### 定時実行（主経路: Task Scheduler `MEGRIBI-weekly`）
 1. 毎週水曜 JST 06:30 に発火
 2. `run_weekly_local.ps1 -Stores all` → `generate_weekly_insights.py --stores all`（`INSIGHTS_LLM_BACKEND=ollama`）が全42店舗を単一プロセスで順次処理
-3. `/api/range` から過去データ取得 → Good Window 分析 → `frontend/content/insights/weekly/<store>/<date>.json` に書き込み（Fan-in 不要）。**`index.json` の直接更新は廃止**——実際に読むフロントエンドが存在しない死蔵アウトプットと判明し、別バッチ（weekly-cleanup）で廃止中。消費側（`sitemap.ts` 等）はディレクトリ内の最新日付ファイルを直接列挙する方式で、そもそも `index.json` に依存していない
+3. `/api/range` から過去データ取得 → Good Window 分析 → `frontend/content/insights/weekly/<store>/<date>.json` に書き込み（Fan-in 不要）。**`index.json` の直接更新は 2026-07-18 に廃止済み**——実際に読むフロントエンドが存在しない死蔵アウトプットと判明したため。消費側（`sitemap.ts` 等）はディレクトリ内の最新日付ファイルを直接列挙する方式で、そもそも `index.json` に依存していない
 4. Supabase upsert（`content_type='weekly'`, `is_published=true`, `edition='weekly'`, `facts_id='weekly_<store>'`, `public_slug='weekly-report-<store>'`）
 
 ### 緊急時経路（`generate-weekly-insights.yml`, `workflow_dispatch` のみ）— Fan-in Matrix
 
 #### Fan-out（`generate-store` ジョブ）
 1. 手動起動時、matrix でオリエンタル 37 店舗を独立実行（`max-parallel: 10`。相席屋5店舗は対象外）
-2. `python scripts/generate_weekly_insights.py --stores <one_store> --skip-index`（`INSIGHTS_LLM_BACKEND=gemini`）
+2. `python scripts/generate_weekly_insights.py --stores <one_store>`（`INSIGHTS_LLM_BACKEND=gemini`）
 3. JSON を Artifact としてアップロード（retention: 1日）
 
 #### Fan-in（`collect-and-commit` ジョブ）
@@ -80,11 +80,11 @@
 3. `pytest` 実行
 4. `git commit && git push`（1回のみ）
 
-**`index.json` 廃止について**: 上記の `--skip-index` フラグと Fan-in の再構築ステップは、いずれも
-`index.json` を維持するためだけに存在する仕組み。`index.json` 自体を実際に読むフロントエンドが
-存在しないと判明したため別バッチ（weekly-cleanup）で廃止中で、これらも用途を失い次第整理される
-見込み（本ドキュメント執筆時点ではまだ `generate-weekly-insights.yml` に残っている＝過渡期の記述
-と理解すること）。
+**`index.json` 廃止について（2026-07-18 完了）**: 上記の `--skip-index` フラグと Fan-in の再構築
+ステップは、いずれも `index.json` を維持するためだけに存在する仕組みだった。`index.json` 自体を
+実際に読むフロントエンドが存在しないと判明したため廃止し、`generate-weekly-insights.yml` からは
+再構築ステップと `--skip-index` の受け渡しを削除済み。CLI 引数 `--skip-index` だけは古い手順書・
+手元のバッチとの互換のために no-op として残してある（`--help` には出ない）。
 
 `/reports/weekly/[store_slug]` は Supabase から最新行を表示。`/insights/weekly/[store]` という
 個別URLは存在しない（JSON ファイル自体は `frontend/content/insights/weekly/<store>/<date>.json`

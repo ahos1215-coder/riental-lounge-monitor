@@ -12,6 +12,13 @@
      snapshot cron("10 9 * * *")への到達不能分岐を持たないこと。
   5) 監視ワークフロー3本が Python 本文を YAML に埋め戻さないこと
      （判定ロジックは scripts/monitor/*.py にあり、テストで守れる状態を保つ）。
+  6) 監視ワークフローの env キー集合が、呼ぶスクリプトの読むキーを取りこぼさないこと
+     （取りこぼすと「監視が黙る」だけで気付けない）。
+  7) `OPS_NOTIFY_WEBHOOK_URL` を渡すワークフローは `OPS_NOTIFY_WEBHOOK_TYPE` も渡すこと
+     （Discord 運用のとき Slack 形式で POST して通知が静かに落ちるのを防ぐ）。
+  8) 正本ドキュメント（docs/LOCAL_LLM_SETUP.md / plan/ARCHITECTURE.md）が、退役した
+     「モデル名の正本＝local_report_job.py」「experiments/local_llm_spike を import」
+     という記述に戻らないこと。
 """
 
 from __future__ import annotations
@@ -98,3 +105,97 @@ def test_監視ワークフローはPythonを埋め込まずスクリプトを�
         assert "<<'PY'" not in text, f"{name} に Python ヒアドキュメントが復活している"
         assert f"python3 {script}" in text, f"{name} が {script} を呼んでいない"
         assert (REPO_ROOT / script).is_file()
+
+
+# --------------------------------------------------------------------------- #
+# 6) WF の env キー集合 ⊇ スクリプトが読む環境変数キー集合
+# --------------------------------------------------------------------------- #
+# スクリプト側で読むが WF が渡さなくてよいキー（GitHub Actions が自動で入れるもの・
+# ローカル実行専用のもの）。ここに足すときは「渡さなくても監視が黙らないか」を確認すること。
+_ENV_KEYS_NOT_FROM_WORKFLOW = {
+    "GITHUB_OUTPUT",   # runner が常に設定する
+    "GITHUB_ENV",
+    "GITHUB_STEP_SUMMARY",
+}
+
+
+def _env_keys_read_by(script_path: Path) -> set[str]:
+    """`os.environ.get("X")` / `os.getenv("X")` で読むキー名を集める。"""
+    text = script_path.read_text(encoding="utf-8")
+    return set(re.findall(r'os\.(?:environ\.get|getenv)\(\s*"([A-Z0-9_]+)"', text))
+
+
+def _env_keys_provided_by(workflow_path: Path) -> set[str]:
+    """WF 内の全 `env:` ブロックのキー名を集める（job/step どこにあっても拾う）。"""
+    doc = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    keys: set[str] = set()
+
+    def walk(node) -> None:
+        if isinstance(node, dict):
+            env = node.get("env")
+            if isinstance(env, dict):
+                keys.update(str(k) for k in env)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(doc)
+    return keys
+
+
+def test_監視ワークフローはスクリプトが読む環境変数を全部渡す() -> None:
+    """WF が env を1つ渡し忘れても監視は「静かに既定値で緑」になり気付けない。"""
+    missing: list[str] = []
+    for name, script in MONITOR_WORKFLOWS.items():
+        wanted = _env_keys_read_by(REPO_ROOT / script) - _ENV_KEYS_NOT_FROM_WORKFLOW
+        provided = _env_keys_provided_by(WORKFLOWS / name)
+        for key in sorted(wanted - provided):
+            missing.append(f"{name} が {script} の {key} を渡していない")
+    assert missing == [], missing
+
+
+# --------------------------------------------------------------------------- #
+# 7) OPS 通知は URL と TYPE をセットで渡す
+# --------------------------------------------------------------------------- #
+def test_OPS通知URLを渡すワークフローはTYPEも渡す() -> None:
+    """scripts/_ops_notify.py の既定は Slack 形式。Discord 運用のとき TYPE を渡さないと
+    `{"text":...}` を POST して拒否され、アラートが静かに消える（B-03 の穴）。"""
+    offenders: list[str] = []
+    for path in _workflow_files():
+        keys = _env_keys_provided_by(path)
+        # notify-on-failure.yml だけは WEBHOOK_URL / WEBHOOK_TYPE という別名で受ける。
+        has_url = "OPS_NOTIFY_WEBHOOK_URL" in keys or "WEBHOOK_URL" in keys
+        has_type = "OPS_NOTIFY_WEBHOOK_TYPE" in keys or "WEBHOOK_TYPE" in keys
+        if has_url and not has_type:
+            offenders.append(path.name)
+    assert offenders == [], f"OPS_NOTIFY_WEBHOOK_TYPE を渡していない: {offenders}"
+
+
+# --------------------------------------------------------------------------- #
+# 8) 正本ドキュメントが退役した記述に戻らない
+# --------------------------------------------------------------------------- #
+_MODEL_SOT_DOCS = [
+    Path("docs") / "LOCAL_LLM_SETUP.md",
+    Path("plan") / "ARCHITECTURE.md",
+]
+
+
+def test_正本ドキュメントがローカルLLMの旧構成を語らない() -> None:
+    """CLAUDE.md 罠#6 と正面衝突する記述を禁じる。
+
+    実態: モデル名の正本は scripts/_ollama_common.py の MODEL 定数、日次が import
+    するのも同ファイル（`experiments/local_llm_spike.py` ではない）。
+    """
+    offenders: list[str] = []
+    for rel in _MODEL_SOT_DOCS:
+        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        for line_no, line in enumerate(text.splitlines(), start=1):
+            # 「local_report_job.py の MODEL 定数が正本」と読める記述
+            if "モデル名の正本" in line and "_ollama_common" not in line:
+                offenders.append(f"{rel.as_posix()}:{line_no} モデル名の正本の記述が古い")
+            # 「local_llm_spike を import している」と読める記述
+            if "local_llm_spike" in line and "import" in line and "以前" not in line:
+                offenders.append(f"{rel.as_posix()}:{line_no} local_llm_spike を import と書いている")
+    assert offenders == [], offenders

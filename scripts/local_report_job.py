@@ -66,7 +66,7 @@ from typing import Any
 from urllib.request import Request, urlopen
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-STORES_JSON_PATH = REPO_ROOT / "frontend" / "src" / "data" / "stores.json"
+# STORES_JSON_PATH は scripts/_stores_common.py が正本（下の import で借りる）。
 
 # scripts/_supabase_common.py（.env 読み込み・SUPABASE 設定解決の共有実装）や
 # scripts/_ollama_common.py（Ollama 呼び出し・facts 取得の共有実装）を
@@ -75,8 +75,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # `spk` という別名は歴史的なもの（元は scripts/experiments/local_llm_spike.py を
 # 指していた）。tests/test_local_report_job.py が `lrj.spk.*` を monkeypatch するので維持する。
 import _ollama_common as spk  # noqa: E402  (経路追加後に import する必要がある)
-from _stores_common import load_stores_json  # noqa: E402
-from _supabase_common import _load_env, _supabase_conf  # noqa: E402
+from _stores_common import STORES_JSON_PATH, load_stores_json  # noqa: E402
+from _supabase_common import _load_env, _supabase_conf, auth_headers  # noqa: E402
 
 # 共有GPUロック（音楽PJと衝突しないための排他）。local_llm_spike と同じ取り込み方。
 try:
@@ -333,14 +333,7 @@ def _fetch_existing_daily_report(facts_id: str) -> dict[str, Any]:
         f"?facts_id=eq.{facts_id}&select=mdx_content,is_published,target_date&limit=1"
     )
     try:
-        req = Request(
-            url,
-            headers={
-                "apikey": key,
-                "Authorization": f"Bearer {key}",
-                "Accept": "application/json",
-            },
-        )
+        req = Request(url, headers=auth_headers(key, accept_json=True))
         with urlopen(req, timeout=15) as resp:
             rows = json.loads(resp.read().decode("utf-8"))
         if not isinstance(rows, list) or not rows:
@@ -534,9 +527,7 @@ def _upsert_daily_report_to_supabase(record: dict[str, Any]) -> None:
         "error_message": record["error_message"],
     }
     headers = {
-        "apikey": key,
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
+        **auth_headers(key, content_type=True),
         "Prefer": "return=representation",
         "User-Agent": DEFAULT_USER_AGENT,
     }

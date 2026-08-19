@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import urllib.error
 import urllib.parse
@@ -33,13 +32,13 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-STORES_JSON_PATH = REPO_ROOT / "frontend" / "src" / "data" / "stores.json"
+# STORES_JSON_PATH は scripts/_stores_common.py が正本（下の import で借りる）。
 
 # scripts/_supabase_common.py（.env 読み込みの共有実装）と scripts/_stores_common.py
 # （stores.json の読み込み）をシブリングとしてベアインポートする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _stores_common import load_stores_json  # noqa: E402
-from _supabase_common import _load_env  # noqa: E402
+from _stores_common import STORES_JSON_PATH, load_stores_json  # noqa: E402
+from _supabase_common import _load_env, _supabase_conf, auth_headers  # noqa: E402
 
 
 def _load_slug_to_store_id_map() -> dict[str, str]:
@@ -67,14 +66,7 @@ def _fetch_weekly_rows(base_url: str, key: str) -> list[dict[str, Any]]:
         "limit": "5000",
     }
     url = f"{base_url}/rest/v1/blog_drafts?{urllib.parse.urlencode(params)}"
-    req = urllib.request.Request(
-        url,
-        headers={
-            "apikey": key,
-            "Authorization": f"Bearer {key}",
-            "Accept": "application/json",
-        },
-    )
+    req = urllib.request.Request(url, headers=auth_headers(key, accept_json=True))
     with urllib.request.urlopen(req, timeout=30) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
     if not isinstance(payload, list):
@@ -86,9 +78,7 @@ def _patch_store_id(base_url: str, key: str, facts_id: str, new_store_id: str) -
     url = f"{base_url}/rest/v1/blog_drafts?facts_id=eq.{urllib.parse.quote(facts_id)}"
     body = json.dumps({"store_id": new_store_id}).encode("utf-8")
     headers = {
-        "apikey": key,
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
+        **auth_headers(key, content_type=True),
         "Prefer": "return=minimal",
     }
     req = urllib.request.Request(url, data=body, headers=headers, method="PATCH")
@@ -107,14 +97,10 @@ def main() -> int:
     args = parser.parse_args()
 
     _load_env()
-    base_url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
-    key = (
-        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        or os.environ.get("SUPABASE_SERVICE_KEY")
-        or ""
-    )
-    if not base_url or not key:
+    conf = _supabase_conf()
+    if conf is None:
         raise SystemExit("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required (set in .env.local)")
+    base_url, key = conf
 
     mapping = _load_slug_to_store_id_map()
     print(f"[patch-weekly-store-ids] loaded {len(mapping)} slug -> store_id mappings from stores.json")

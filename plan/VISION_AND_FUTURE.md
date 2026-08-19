@@ -17,7 +17,7 @@ Target commit: (see git)
 - **フロント**: Next.js（Vercel）。コンテンツは 3 分類運用:
   - **Daily/Weekly Report**: 完全自動。**2026-07〜、生成元はローカル Ollama（`gemma4:e4b`、オーナーPC Task Scheduler）が主経路。GHA + Gemini は `workflow_dispatch` の緊急時のみ**
   - **Editorial Blog**: AI 下書き＋LINE 承認の半自動運用
-- **ML**: LightGBM ベースの店舗別最適化モデル（**43 店舗**分＝オリエンタル38+相席屋5。実装ファイル名は歴史的経緯で `model_xgb.py` のまま）。日次自動学習
+- **ML**: LightGBM ベースの店舗別最適化モデル（**42 店舗**分＝オリエンタル37+相席屋5。実装ファイル名は歴史的経緯で `model_xgb.py` のまま）。日次自動学習
 
 ### 個人のビジョン（参考・plan の必須要件ではない）
 
@@ -36,7 +36,7 @@ Target commit: (see git)
 | Flask API | `/api/range` `/api/megribi_score` `/api/forecast_*` `/api/forecast_today_multi` `/api/forecast_accuracy` 等 13 エンドポイント稼働 |
 | Next.js 画面 | 14 ページルート実装済み（`/` `/stores` `/store/[id]` `/compare` `/reports` `/reports/*/[store_slug]` `/blog` `/mypage` 等）。`/insights/weekly` は `/reports/weekly` に 301 リダイレクト |
 | Next.js API | 14 API route 稼働（proxy + cron + LINE + SNS） |
-| AI 予測レポート | Daily: 43 店舗 × 2 回/日、Weekly: 43 店舗 × 1 回/週。全自動（2026-07〜ローカル Ollama 主経路、GHA は緊急時のみ） |
+| AI 予測レポート | Daily: 42 店舗 × 2 回/日、Weekly: 42 店舗 × 1 回/週。全自動（2026-07〜ローカル Ollama 主経路、GHA は緊急時のみ） |
 | Editorial Blog | LINE → Gemini → 承認 → 公開。半自動 |
 | ML 予測 | 店舗別 LightGBM モデル（ML 3.0。旧XGBoost、ファイル名 `model_xgb.py` は互換維持）。Optuna HPO（週次のみ）+ Early Stopping + Holdout Test 評価。日次自動学習（schema v7、24特徴量） |
 | megribi_score | Flask + Next.js proxy。トップ「今夜のおすすめ」+ マイページカード |
@@ -109,7 +109,7 @@ Target commit: (see git)
 ### フェーズ C — 予測・ML の「本番品質」 ✅ 大部分完了
 
 **現状の技術的事実**（店舗数・schema は 2026-07-11 Batch B3 で最新値に訂正）:
-- **ML 3.0 本番稼働**: 43 店舗別 LightGBM モデル（旧XGBoost、`model_xgb.py` は互換維持のためファイル名のみ据え置き）。Optuna HPO（週次のみ）+ Early Stopping。日次自動学習
+- **ML 3.0 本番稼働**: 42 店舗別 LightGBM モデル（旧XGBoost、`model_xgb.py` は互換維持のためファイル名のみ据え置き）。Optuna HPO（週次のみ）+ Early Stopping。日次自動学習
 - **特徴量**: 24 列（schema v7）。`same_dow_last_week_total` / `total_slope_30min` / `holiday_block_length` / `holiday_block_position` 等。時間減衰ウェイト + 日次精度トラッキング
 - **評価基盤**: 時系列 Train/Test Split（80/20）。Holdout Test で真の汎化精度を測定
 - **Feature Importance**: metadata.json に店舗別で永続化
@@ -195,15 +195,15 @@ Target commit: (see git)
 
 ### 9.1 ブログと SEO（同一 URL の上書き）
 
-- **想定負荷**: 最大 43 店舗 × 1 日 2 本の Daily Report
+- **想定負荷**: 最大 42 店舗 × 1 日 2 本の Daily Report
 - **方針**: 店舗・日付ごとに同一 `facts_id` に対応する公開 URL を維持し、上書き更新
 - **狙い**: カニバリゼーション回避、情報の鮮度（Freshness）優先
 
 ### 9.2 Cron とスケール
 
-- **2026-07〜の実態**: Daily/Weekly ともローカル Ollama が主経路（単一プロセスで全43店舗を順次処理、matrix 概念なし）。GHA の matrix 構成は `workflow_dispatch` 緊急時のみ使う。
-- **Daily（GHA 緊急時経路）**: matrix オリエンタル38店舗（`max-parallel: 5`。2026-04 に 15 → 5 へ削減、相席屋5店舗は対象外）
-- **Weekly（GHA 緊急時経路）**: Fan-in Matrix、matrix オリエンタル38店舗（`max-parallel: 10`。相席屋5店舗は対象外）
+- **2026-07〜の実態**: Daily/Weekly ともローカル Ollama が主経路（単一プロセスで全42店舗を順次処理、matrix 概念なし）。GHA の matrix 構成は `workflow_dispatch` 緊急時のみ使う。
+- **Daily（GHA 緊急時経路）**: matrix オリエンタル37店舗（`max-parallel: 5`。2026-04 に 15 → 5 へ削減、相席屋5店舗は対象外）
+- **Weekly（GHA 緊急時経路）**: Fan-in Matrix、matrix オリエンタル37店舗（`max-parallel: 10`。相席屋5店舗は対象外）
 - **課題**: 店舗数増加時は `max-parallel` 調整。非同期キューは `BLOG_CRON_ASYNC_FUTURE.md`
 
 ### 9.3 X（Twitter）自動投稿

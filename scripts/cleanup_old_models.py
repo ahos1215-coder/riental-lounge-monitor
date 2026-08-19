@@ -85,7 +85,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # ベアインポートする（モジュールのdocstringに書かれている規約に合わせる）。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _retry_common import backoff_delay, is_retryable_status  # noqa: E402
-from _supabase_common import _load_env, _supabase_conf  # noqa: E402
+from _supabase_common import _load_env, _supabase_conf, auth_headers  # noqa: E402
 
 # --- オブジェクト名の分類パターン ---------------------------------------------------
 # 日付入り世代ファイル。store 部分は greedy `.+` だが、店舗idに8桁連続数字は存在しない
@@ -182,7 +182,9 @@ class CleanupConfig:
 
 
 def _headers(cfg: CleanupConfig, *, content_type: str | None = None) -> dict[str, str]:
-    headers = {"apikey": cfg.supabase_key, "Authorization": f"Bearer {cfg.supabase_key}"}
+    # Content-Type は任意の MIME（Storage の DELETE/POST は application/json）なので、
+    # 共通ヘルパーの bool フラグではなく呼び出し側の文字列をそのまま載せる。
+    headers = auth_headers(cfg.supabase_key)
     if content_type:
         headers["Content-Type"] = content_type
     return headers

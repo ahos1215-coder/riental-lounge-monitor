@@ -60,6 +60,31 @@ class TestStoreIdForSlugAgainstRealStoresJson:
         assert "this_slug_does_not_exist_anywhere" in captured.err
 
 
+class TestDelegatesToSharedStoresCommon:
+    """2026-08-19: 週次固有だった変換規約を `_stores_common.slug_to_store_id` に委譲した。
+
+    現行42店では両者が完全一致する（＝挙動不変）ことと、未知 slug のときだけ
+    「`ol_ay_x` → `ay_x`」という**意図した改善**が起きることを固定する。
+    """
+
+    def test_全実店舗で共通実装と一致(self) -> None:
+        from scripts._stores_common import slug_to_store_id
+
+        mapping = _real_mapping()
+        assert len(mapping) == 42, "店舗数が変わったら stores.json を確認"
+        for slug, store_id in mapping.items():
+            assert _store_id_for_slug(slug) == store_id
+            assert slug_to_store_id(slug) == store_id
+
+    def test_未知のay_slugは共通規約でay_のまま(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        # 旧実装は `ol_ay_unknown_store` を返していた（週次だけ ol_ 固定だった）。
+        resolved = _store_id_for_slug("ay_unknown_store")
+        assert resolved == "ay_unknown_store"
+        assert "WARNING" in capsys.readouterr().err
+
+
 class TestLoadSlugToStoreIdMapCaching:
     def test_returns_same_dict_object_on_repeated_calls(self) -> None:
         first = _load_slug_to_store_id_map()

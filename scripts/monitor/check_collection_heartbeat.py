@@ -37,6 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _retry_common import backoff_delay  # noqa: E402
 from _stores_common import load_stores_json  # noqa: E402
+from _supabase_common import auth_headers as _auth_headers  # noqa: E402
 
 JST = timezone(timedelta(hours=9))
 
@@ -59,10 +60,6 @@ PER_STORE_TIMEOUT = 30
 
 # 昼間モードの合格条件: 昨夜の最終行が営業終了(05:00 JST)のこの分数以内まで来ていること。
 DAYTIME_MAX_GAP_MINUTES = 45
-
-
-def _auth_headers(key: str) -> dict[str, str]:
-    return {"apikey": key, "Authorization": f"Bearer {key}"}
 
 
 def fetch_newest_ts(url: str, key: str) -> list[dict]:

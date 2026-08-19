@@ -21,7 +21,12 @@ _FORECAST_CACHE_MAX_ENTRIES = int(os.getenv("FORECAST_CACHE_MAX_ENTRIES", "120")
 
 from ..ml.forecast_service import ForecastService
 from ..ml.megribi_score import megribi_score as calc_megribi_score
-from ..utils.stores import MAX_MULTI_STORES, parse_store_slugs
+from ..utils.stores import (
+    AISEKIYA_TOTAL_CAPACITY,
+    MAX_MULTI_STORES,
+    SLUG_TO_ID,
+    parse_store_slugs,
+)
 from ._cache import SingleFlightTTLCache
 from .common import get_config as _config, get_supabase_provider, resolve_store_id
 
@@ -329,8 +334,6 @@ def api_megribi_score():
     ?store=slug または ?stores=slug1,slug2 で対象指定。
     省略時は全店舗を返す。
     """
-    from ..utils.stores import AISEKIYA_TOTAL_CAPACITY, SLUG_TO_ID
-
     cfg = _config()
     logger = current_app.logger
 

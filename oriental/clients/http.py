@@ -20,6 +20,11 @@ class ConfiguredSession(Session):
         # スレッドを占有し、worker 1 × threads 8 の受け口を即座に埋め尽くして
         # DB を触らない 404 すら返せない完全停止(今夜の全停止)を招いた。
         # 429(レート制限)と 502/503/504(ゲートウェイ系の一過性)はリトライ継続。
+        #
+        # ★バッチ側（scripts/_retry_common.is_retryable_status）は逆に 500 も再試行する★
+        # 理由（Storage の 544/500 は待てば必ず成功する／バッチは人を待たせておらず1回の
+        # 失敗でその日の成果物が丸ごと欠ける）は同関数の docstring に書いてある。
+        # 意図的な非対称であり、揃えるかどうかはオーナー判断。
         retry = Retry(
             total=retries,
             backoff_factor=0.6,

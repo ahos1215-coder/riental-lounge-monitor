@@ -45,8 +45,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # scripts/_retry_common.py（バックオフ計算の共有実装、stdlib のみ）と
 # scripts/_supabase_common.py（.env 読み込み）をシブリングとしてベアインポートする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _retry_common import backoff_delay  # noqa: E402
-from _supabase_common import _load_env  # noqa: E402
+from _retry_common import backoff_delay, is_retryable_status  # noqa: E402
+from _supabase_common import _load_env, _supabase_conf, auth_headers  # noqa: E402
 
 SELECT = "id,store_id,ts,men,women,total,weather_code,weather_label,temp_c,precip_mm,src_brand"
 # Row-count sanity check tolerance: allows for rows inserted by the live 5-min
@@ -93,7 +93,7 @@ def _retry_after_seconds(exc: urllib.error.HTTPError) -> float | None:
 
 def _get(endpoint: str, key: str, params: list[tuple[str, str]], retries: int = FETCH_RETRIES):
     query = endpoint + "?" + urllib.parse.urlencode(params)
-    headers = {"apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json"}
+    headers = auth_headers(key, accept_json=True)
     last = ""
     for attempt in range(1, retries + 1):
         retry_after = None
@@ -106,7 +106,7 @@ def _get(endpoint: str, key: str, params: list[tuple[str, str]], retries: int = 
             # 4xx other than 429 is a real error (bad auth/query) -- not retryable.
             # 429 (too_many_connections / SlowDown) and 5xx (500, 544 DatabaseTimeout,
             # 502/503/504) are all transient Supabase saturation signals -- retry them.
-            if exc.code < 500 and exc.code != 429:
+            if not is_retryable_status(exc.code):
                 raise SystemExit(f"backup fetch failed: {last} {exc.read().decode()[:200]}")
             retry_after = _retry_after_seconds(exc)
         except Exception as exc:  # noqa: BLE001
@@ -128,9 +128,7 @@ def _get_exact_row_count(endpoint: str, key: str, retries: int = FETCH_RETRIES) 
     rows) out of ~1.07M and still exited 0.
     """
     headers = {
-        "apikey": key,
-        "Authorization": f"Bearer {key}",
-        "Accept": "application/json",
+        **auth_headers(key, accept_json=True),
         "Prefer": "count=exact",
         "Range-Unit": "items",
         "Range": "0-0",
@@ -153,7 +151,7 @@ def _get_exact_row_count(endpoint: str, key: str, retries: int = FETCH_RETRIES) 
                 )
         except urllib.error.HTTPError as exc:
             last = f"HTTP {exc.code}"
-            if exc.code < 500 and exc.code != 429:
+            if not is_retryable_status(exc.code):
                 raise SystemExit(f"row-count check failed: {last} {exc.read().decode()[:200]}")
             retry_after = _retry_after_seconds(exc)
         except Exception as exc:  # noqa: BLE001
@@ -187,14 +185,10 @@ def main() -> int:
     ap.add_argument("--page", type=int, default=1000, help="rows per request (default 1000)")
     args = ap.parse_args()
 
-    url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
-    key = (
-        os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
-        or os.environ.get("SUPABASE_SERVICE_KEY")
-        or ""
-    )
-    if not url or not key:
+    conf = _supabase_conf()
+    if conf is None:
         raise SystemExit("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required")
+    url, key = conf
     endpoint = f"{url}/rest/v1/logs"
 
     out = Path(args.out)

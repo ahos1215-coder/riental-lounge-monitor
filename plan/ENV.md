@@ -52,6 +52,11 @@ LINE Webhook（`frontend/src/app/api/line/route.ts`）:
 ### GitHub Actions（Repository — Vercel ではない）
 - `OPS_NOTIFY_WEBHOOK_URL`（任意。**Secret**。週次 Insights・定時ブログ・Public Facts・Blog Request の失敗時に Webhook POST。未設定なら通知ジョブのみスキップ）
 - `OPS_NOTIFY_WEBHOOK_TYPE`（任意。**Variables** 推奨。`slack` または `discord`。未設定・空なら Slack 形式 `{"text":"..."}`）
+  - **URL を渡すワークフローは TYPE も必ず渡す**（渡し忘れると Discord 運用のとき Slack 形式で POST して拒否され、
+    アラートが静かに消える）。現在渡しているのは `notify-on-failure.yml`（`WEBHOOK_URL`/`WEBHOOK_TYPE` という別名で受ける）と
+    `forecast-accuracy-track.yml`（score ステップ）。番犬は `tests/test_workflow_docs_consistency.py`。
+  - ローカル主経路（Task Scheduler の週次 `MEGRIBI-weekly` 等）は GHA の Variables を見ないので、
+    `.env.local` に同じ2キーを置く（`docs/LOCAL_LLM_SETUP.md` 参照）。
 - `SUPABASE_URL`（**Secret**。`train-ml-model.yml` 用）
 - `SUPABASE_SERVICE_ROLE_KEY`（**Secret**。`train-ml-model.yml` 用）
 - `FORECAST_MODEL_BUCKET`（**Variables** 推奨。学習済みモデルの Storage バケット）

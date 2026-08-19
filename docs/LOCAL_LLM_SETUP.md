@@ -29,15 +29,21 @@ Gemini API へのコスト移行の代替として 2026-07 に構築。GPU (RTX 
 
 - **Python**: `C:\Users\ahos1\AppData\Local\Programs\Python\Python314\python.exe`
 - **Ollama**: `http://localhost:11434`、モデル `gemma4:e4b`（`ollama pull gemma4:e4b`）。
-  2026-07-08 に旧 `gemma4:12b` から変更。モデル名の正本は `scripts/local_report_job.py` の
-  `MODEL` 定数（週次は `generate_weekly_insights.py` 内にハードコード。2箇所同期）。
+  2026-07-08 に旧 `gemma4:12b` から変更。**モデル名の正本は `scripts/_ollama_common.py` の
+  `MODEL` 定数の1箇所だけ**（2026-08-19 に `local_report_job.py` から移動。日次・週次とも
+  この定数を参照し、`local_report_job.MODEL` は互換のための再エクスポート）。
+  リテラルが1箇所であることは `tests/test_workflow_docs_consistency.py` が固定している。
 - **gpu_lock**: 正本 `C:\Users\Public\共有データ系\gpu_lock.py`（音楽プロジェクトと共有・単一ソース）。
   リポジトリ内 `scripts/gpu_lock.py` は復旧用ミラー。
 - **.env.local**（リポジトリ直下、git管理外）に必要なキー（値は載せない）:
-  `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `GEMINI_API_KEY`（週次の緊急フォールバック用）
+  `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `GEMINI_API_KEY`（週次の緊急フォールバック用）/
+  `OPS_NOTIFY_WEBHOOK_URL`（任意。週次の失敗・アラートを Slack/Discord へ）/
+  `OPS_NOTIFY_WEBHOOK_TYPE`（任意。`slack`（既定）または `discord`。**Discord を使うなら必須** —
+  未設定だと Slack 形式 `{"text":...}` で POST して Discord に拒否され、通知が静かに落ちる）
 - **本番スクリプト**（すべて `scripts/`）:
   - `local_report_job.py` — 日次生成本体
-  - `experiments/local_llm_spike.py` — `fetch_store_facts` / `run_ollama` / `SYSTEM` を提供（`local_report_job.py` が import）
+  - `_ollama_common.py` — `MODEL` / `fetch_store_facts` / `run_ollama` / `unload_ollama` / `SYSTEM` を提供（日次・週次の共通実装。
+    2026-08-19 以前は `experiments/local_llm_spike.py` にあり、本番が実験用ファイルを import する形だった）
   - `run_weekly_local.ps1` — 週次のラッパ（.env.local読込→`generate_weekly_insights.py`）
   - `generate_weekly_insights.py` — 週次生成本体（`INSIGHTS_LLM_BACKEND=ollama`）
   - `tune_local_llm.py` — 速度チューニングのハーネス（下記）
@@ -49,7 +55,8 @@ Gemini API へのコスト移行の代替として 2026-07 に構築。GPU (RTX 
 現行モデル `gemma4:e4b`（Gemma 4 の Effective-4B。2026-07-08 に `gemma4:12b` から変更）は
 PLE (Per-Layer Embeddings) の省メモリ設計で、ディスク 9.6GB でも実行時 VRAM は約 3.3GB。
 RTX 4060 (8GB) に全層が載り（100% GPU）、`num_ctx=8192` のままで日次・週次とも余裕がある。
-本番の既定設定（正本: `scripts/local_report_job.py` / `generate_weekly_insights.py`）:
+本番の既定設定（モデル名・Ollama 呼び出しの正本は `scripts/_ollama_common.py`。
+options のチューニング結果の読み込みは `scripts/local_report_job.py`）:
 
 - `num_gpu=999`（全層GPUを明示。`tuning_results.json` が無くても常に適用。他プロセスが VRAM を
   部分占有していてロード失敗した場合は、Ollama 自動配分で1回だけ再試行）

@@ -28,6 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _retry_common import backoff_delay  # noqa: E402
+from _supabase_common import auth_headers  # noqa: E402
 
 EDITIONS = ("evening_preview", "late_update")
 FETCH_ATTEMPTS = 3
@@ -63,7 +64,7 @@ def count_published(url: str, key: str, target: str, edition: str) -> int:
     })
     req = urllib.request.Request(
         f"{url}/rest/v1/blog_drafts?{q}",
-        headers={"apikey": key, "Authorization": f"Bearer {key}",
+        headers={**auth_headers(key),
                  "Prefer": "count=exact", "Range-Unit": "items", "Range": "0-0"},
     )
     last_err: Exception | None = None

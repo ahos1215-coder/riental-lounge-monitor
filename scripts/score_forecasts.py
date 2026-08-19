@@ -51,7 +51,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _ops_notify import notify_ops  # noqa: E402
 from _stores_common import slug_to_store_id  # noqa: E402
-from _supabase_common import _load_env, storage_get, storage_put  # noqa: E402
+from _supabase_common import _load_env, auth_headers, storage_get, storage_put  # noqa: E402
 
 # ログ接頭辞だけを固定した別名。既存テストの monkeypatch.setattr(sf, "_storage_get", ...)
 # がそのまま効くよう、モジュール変数名は従来どおり `_storage_get` / `_storage_put`。
@@ -99,7 +99,7 @@ def _fetch_actuals(url: str, key: str, store_id: str, start_iso: str, end_iso: s
     select/フィルタ(store_id・gte/lte の時間窓)/order は完全不変、完全性だけを直す。
     """
     endpoint = f"{url}/rest/v1/logs"
-    headers = {"apikey": key, "Authorization": f"Bearer {key}", "Accept": "application/json"}
+    headers = auth_headers(key, accept_json=True)
     rows: list[dict] = []
     cursor: str | None = None
     pages = 0
@@ -123,6 +123,8 @@ def _fetch_actuals(url: str, key: str, store_id: str, start_iso: str, end_iso: s
                 break
             except Exception:  # noqa: BLE001
                 if attempt < 3:
+                    # 意図的に線形（2, 4 秒）。1 夜ぶんを店舗×ページで直列に取り切る
+                    # ジョブなので、1ページの失敗で長く止めない旧実装を維持する。
                     time.sleep(2 * attempt)
         pages += 1
         if not isinstance(payload, list):

@@ -50,7 +50,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # scripts/_supabase_common.py（.env 読み込み・Storage PUT の共有実装、stdlib のみ）を
 # シブリングとしてベアインポートする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _supabase_common import _load_env, storage_put  # noqa: E402
+from _supabase_common import _load_env, _supabase_conf, storage_put  # noqa: E402
 
 # ログ接頭辞だけを固定した別名（モジュール変数名は従来どおり `_storage_put`）。
 _storage_put = functools.partial(storage_put, log_prefix="[analytics]")
@@ -507,12 +507,12 @@ def _gsc_query(token: str, site_url: str, body: dict) -> dict:
 
 def upload_metrics(metrics: dict, weeks: WeekWindows) -> str | None:
     """生 JSON を private バケットへ。SUPABASE 未設定なら None（警告のみ、失敗にしない）。"""
-    supabase_url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
-    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or os.environ.get("SUPABASE_SERVICE_KEY") or ""
+    conf = _supabase_conf()
     bucket = (os.environ.get("FORECAST_MODEL_BUCKET") or DEFAULT_BUCKET).strip()
-    if not supabase_url or not key:
+    if conf is None:
         print("[analytics] SUPABASE 未設定のため生JSONの保存をスキップしました。")
         return None
+    supabase_url, key = conf
     path = f"analytics/weekly/{weeks.cur_start.isoformat()}.json"
     _storage_put(bucket, path, json.dumps(metrics, ensure_ascii=False).encode("utf-8"), supabase_url, key)
     dest = f"{bucket}/{path}"

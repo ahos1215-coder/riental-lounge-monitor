@@ -32,7 +32,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from oriental.ml.preprocess import FEATURE_COLUMNS, prepare_dataframe
 from oriental.utils.stores import ALL_STORE_IDS
-from scripts._retry_common import backoff_delay
+from scripts._retry_common import backoff_delay, is_retryable_status
+from scripts._supabase_common import auth_headers
 from scripts.cleanup_old_models import CleanupConfig, run_cleanup
 
 
@@ -230,11 +231,7 @@ def _fetch_training_rows(cfg: TrainingConfig, session: requests.Session) -> list
     page_size = 1000
     rows: list[dict[str, Any]] = []
     cursor: Any = None  # keyset cursor: next page fetches rows with id < cursor
-    headers = {
-        "apikey": cfg.supabase_service_key,
-        "Authorization": f"Bearer {cfg.supabase_service_key}",
-        "Accept": "application/json",
-    }
+    headers = auth_headers(cfg.supabase_service_key, accept_json=True)
     while len(rows) < cfg.train_limit:
         want = min(page_size, cfg.train_limit - len(rows))
         params: list[tuple[str, str]] = [
@@ -264,7 +261,7 @@ def _fetch_training_rows(cfg: TrainingConfig, session: requests.Session) -> list
                     break
                 last_err = f"status={response.status_code}"
                 # 4xx (except 429 rate-limit) is a real error — do not retry.
-                if response.status_code < 500 and response.status_code != 429:
+                if not is_retryable_status(response.status_code):
                     raise SystemExit(f"failed to fetch logs from supabase: {last_err}")
             if attempt < 5:
                 wait = backoff_delay(attempt, cap=20)
@@ -872,8 +869,7 @@ def _upload_file(
     object_path = f"{cfg.prefix}/{remote_name}".strip("/")
     endpoint = f"{cfg.supabase_url}/storage/v1/object/{cfg.bucket}/{object_path}"
     headers = {
-        "apikey": cfg.supabase_service_key,
-        "Authorization": f"Bearer {cfg.supabase_service_key}",
+        **auth_headers(cfg.supabase_service_key),
         "x-upsert": "true",
         "Content-Type": content_type,
     }
@@ -890,14 +886,19 @@ def _upload_file(
             # を2回再試行したあと 429 を受け取り、この条件が 429 を「4xx だから再試行
             # しない」と判定して即 break → 学習完了後のアップロード段階で全体が失敗して
             # いた（84個のモデルのうち1個目で終了）。429 は必ず再試行する。
+            # ★ここだけ `_retry_common.is_retryable_status` に寄せていない★
+            # 共通判定は「429 と 5xx」だが、ここは Storage のアップロードなので
+            # **400 も再試行する**（真理値表が違うので機械的に置換してはいけない）。
             if response.status_code < 500 and response.status_code not in (400, 429):
                 break  # 4xx (400/429 以外) は再試行しない
         except Exception as exc:
             last_err = str(exc)[:200]
         if attempt < max_retries:
-            # 指数バックオフ（上限60s）。Supabase の pooler が空くのを待つには
-            # 旧実装の線形 5*attempt（最大15s）では短すぎた。
-            wait = min(5 * (2 ** (attempt - 1)), 60)
+            # 指数バックオフ（上限60s: 5, 10, 20, 40, 60...）。Supabase の pooler が
+            # 空くのを待つには旧実装の線形 5*attempt（最大15s）では短すぎた。
+            # `min(5 * 2**(attempt-1), 60)` と factor=2.5 は同値（待ち秒は不変。
+            # tests/test_retry_wait_schedules.py が列を固定）。
+            wait = backoff_delay(attempt, cap=60, factor=2.5)
             print(f"[train-ml] upload retry {attempt}/{max_retries} for {remote_name} (wait {wait}s): {last_err}")
             time.sleep(wait)
     raise SystemExit(f"upload failed after {max_retries} attempts: {remote_name} {last_err}")
@@ -910,7 +911,7 @@ def _download_existing_metadata(cfg: TrainingConfig, session: requests.Session) 
     touch (subset training, allow-list, stale-store guard, gate rejection)."""
     object_path = f"{cfg.prefix}/metadata.json".strip("/")
     endpoint = f"{cfg.supabase_url}/storage/v1/object/{cfg.bucket}/{object_path}"
-    headers = {"apikey": cfg.supabase_service_key, "Authorization": f"Bearer {cfg.supabase_service_key}"}
+    headers = auth_headers(cfg.supabase_service_key)
     try:
         resp = session.get(endpoint, headers=headers, timeout=30)
         if resp.ok:

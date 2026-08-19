@@ -89,6 +89,17 @@ def _all_store_slugs() -> list[str]:
 
 
 def _get_json(url: str, retries: int = 3):
+    """Flask `/api/*` を叩いて JSON を返す（失敗し続けたら警告して None）。
+
+    ★似た関数が scripts/_ollama_common.py にもある（`_get_json`、指数バックオフ・
+    retries 既定 1）★。統合していないのは意図的で、想定している失敗が違うため:
+      - こちら（snapshot）: 18:10 の一発勝負。Render の起き抜け 5xx を線形 3, 6 秒で
+        待ち、それでも駄目なら**その店だけ諦めて次へ進む**（None を返す＝例外を投げない）。
+      - _ollama_common 側: レポート本文の材料取得。呼び出し元が retries を明示した
+        ときだけ再試行し、全滅時は例外を送出して呼び出し元に判断させる。
+    このファイルは argparse を持たない（＝引数を付けても本番ジョブが丸ごと走る）ので
+    実行確認ができず、統合の risk/benefit が釣り合わない。片方を変えるときは両方読むこと。
+    """
     last = ""
     for attempt in range(1, retries + 1):
         try:

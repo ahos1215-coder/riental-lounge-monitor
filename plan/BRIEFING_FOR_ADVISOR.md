@@ -36,7 +36,7 @@ Last updated: 2026-03-26。**2026-07-11 Batch B3 で店舗数・ML実装名・Da
 | パス | 内容 |
 |------|------|
 | `/` | トップ。StoreCard＋ブログ新着＋Daily Report 誘導 |
-| `/stores` | 全店舗一覧（**43店舗**＝オリエンタル38+相席屋5、地域タブ・ページネーション） |
+| `/stores` | 全店舗一覧（**42店舗**＝オリエンタル37+相席屋5、地域タブ・ページネーション） |
 | `/store/[id]` | 店舗詳細（リアルタイム混雑・男女比・予測） |
 | **`/reports/daily/[store_slug]`** | **Daily Report**（毎日 18:00/21:30 に自動更新される最新AI予測。全**43**店舗。2026-07〜ローカル Ollama 主経路）|
 | **`/reports/weekly/[store_slug]`** | **Weekly Report**（毎週水曜 06:30 JST 更新のAI週報。全**43**店舗。2026-07〜ローカル Ollama 主経路）|
@@ -57,19 +57,20 @@ Last updated: 2026-03-26。**2026-07-11 Batch B3 で店舗数・ML実装名・Da
 
 ### 3c. 生成経路（2026-07 時点の実装）
 
-**通常運用（主経路）**: オーナーPCのローカル Ollama（`gemma4:e4b`）が Task Scheduler（`MEGRIBI-daily-evening`/`-late`/`-weekly`）で全43店舗を単一プロセスで順次生成。詳細は `docs/LOCAL_LLM_SETUP.md`。
+**通常運用（主経路）**: オーナーPCのローカル Ollama（`gemma4:e4b`）が Task Scheduler（`MEGRIBI-daily-evening`/`-late`/`-weekly`）で全42店舗を単一プロセスで順次生成。詳細は `docs/LOCAL_LLM_SETUP.md`。
 
-**緊急時のみ・GHA ワークフロー**（`workflow_dispatch`、Gemini 使用、オリエンタル38店舗のみ）:
+**緊急時のみ・GHA ワークフロー**（`workflow_dispatch`、Gemini 使用、オリエンタル37店舗のみ）:
 
 **Daily Report**（`trigger-blog-cron.yml`）:
-- 38 店舗 × 独立ジョブ（`max-parallel: 5`。相席屋5店舗は matrix 対象外）
+- 37 店舗 × 独立ジョブ（`max-parallel: 5`。相席屋5店舗は matrix 対象外）
 - `GET /api/cron/blog-draft?store=<slug>&edition=<edition>`
 - Supabase に `content_type='daily'`, `is_published=true` で保存
 - 失敗店舗は `retry-blog-draft-stores.yml` で再実行可能
 
 **Weekly Report**（`generate-weekly-insights.yml`）— **Fan-in Matrix 構成**:
-- **Fan-out**: 38 店舗 × 独立ジョブ（`max-parallel: 10`。相席屋5店舗は matrix 対象外）。各ジョブが `generate_weekly_insights.py --skip-index` 実行 → Supabase upsert → Artifact 保存
-- **Fan-in**: 全 Artifact を回収 → `index.json` をマージ再構築 → Git commit 1回
+- **Fan-out**: 37 店舗 × 独立ジョブ（`max-parallel: 10`。相席屋5店舗は matrix 対象外）。各ジョブが `generate_weekly_insights.py` を実行 → Supabase upsert → Artifact 保存
+  （`--skip-index` は 2026-07-18 の `index.json` 廃止に伴い WF から削除済み。CLI 引数だけは互換のため受け付ける no-op）
+- **Fan-in**: 全 Artifact を回収 → Git commit 1回（`index.json` の再構築は 2026-07-18 に廃止済み＝読み手が存在しない死蔵ファイルだった）
 
 ### 3d. Supabase `blog_drafts` スキーマ（2026-03-26 拡張）
 
@@ -131,7 +132,7 @@ public_slug UNIQUE (where not null)
 
 - **Daily/Weekly**: 固定 URL（`/reports/daily/[store_slug]`・`/reports/weekly/[store_slug]`）で上書き運用。Freshness を優先。旧 `/blog/auto-*` URL は廃止済み。
 - **Editorial**: `/blog/[public_slug]` でユニーク URL。深い分析記事でロングテール狙い。
-- `sitemap.ts` に Daily（priority 0.85, daily）+ Weekly（priority 0.8, weekly）を `STORES`（`config/stores.ts`、全43店舗）分登録済み。
+- `sitemap.ts` に Daily（priority 0.85, daily）+ Weekly（priority 0.8, weekly）を `STORES`（`config/stores.ts`、全42店舗）分登録済み。
 
 ---
 

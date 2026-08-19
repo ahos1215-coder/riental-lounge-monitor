@@ -1,6 +1,8 @@
 # multi_collect.py
-# 38店舗ぶんの店内人数をスクレイピングして
+# オリエンタルラウンジ全店 (`STORES` = len(STORES) 店) の店内人数をスクレイピングして
 # GAS(doPost) と Supabase(logs) に投げるスクリプト
+# ※ 店舗数を本文に書かない: 正本は同ファイルの `STORES` / `AISEKIYA_STORES` と
+#    frontend/src/data/stores.json（閉店・出店のたびに文書とズレるため）
 #
 # 追加: Open-Meteo から天気を1回だけ取得して
 #      全店舗のレコードに
@@ -804,7 +806,7 @@ def _scrape_top_page(
     トップページ (oriental-lounge.com/) を 1 回のリクエストで取得し、
     全店舗の男女別人数を一括抽出する。
 
-    38 店舗 × 個別リクエスト → 1 リクエストに最適化。
+    オリエンタル全店 × 個別リクエスト → 1 リクエストに最適化。
     失敗時は None を返し、呼び出し元が _parallel_scrape にフォールバックする。
     """
     try:
@@ -1312,14 +1314,14 @@ def _check_aisekiya_health(cards_found: int, pct_values: list[int]) -> None:
     print(f"[aisekiya-health] alert sent: {problems}")
 
 
-# ========= 38店舗ぶんを一気に送る =========
+# ========= 全店ぶんを一気に送る =========
 
 
 def collect_all_once(*, target_store_id: str | None = None) -> dict:
     """
     3-phase パイプライン:
       Phase 1 — 天気プリフェッチ (sequential, Open-Meteo rate-limit 遵守)
-      Phase 2 — 38 店舗並列スクレイピング (ThreadPoolExecutor)
+      Phase 2 — 全店並列スクレイピング (ThreadPoolExecutor)
       Phase 3 — GAS / Supabase 書き込み (sequential)
 
     Returns dict with keys: stores, success, fail, duration_sec

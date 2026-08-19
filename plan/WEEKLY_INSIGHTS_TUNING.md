@@ -9,13 +9,11 @@ Last updated: 2026-05-04 (v2 redesign のフィールド追加 + AI commentary �
 
 - **スクリプト**: `scripts/generate_weekly_insights.py`
   - `--stores <slug>`: 対象店舗（1店舗 or カンマ区切り）
-  - `--skip-index`: `index.json` の書き込みをスキップ（Fan-in Matrix の各 matrix ジョブで使用）
 - **GitHub Actions**: `.github/workflows/generate-weekly-insights.yml`（Fan-in Matrix 構成）
-  - **Fan-out** `generate-store`: 38 店舗を `max-parallel: 10` で並列実行（`--skip-index` あり）
-  - **Fan-in** `collect-and-commit`: Artifact を集約して `index.json` を再構築し Git commit 1回
+  - **Fan-out** `generate-store`: 37 店舗を `max-parallel: 10` で並列実行
+  - **Fan-in** `collect-and-commit`: Artifact を集約して Git commit 1回（`index.json` の再構築は 2026-07-18 廃止済み）
 - **出力**:
   - `frontend/content/insights/weekly/<store>/<date>.json`（各店舗 JSON）
-  - `frontend/content/insights/weekly/index.json`（Fan-in ジョブが再構築）
   - Supabase `blog_drafts`（`content_type='weekly'`, `is_published=true`）→ `/reports/weekly/[store_slug]` で表示
 
 ## JSON に含まれる可視化用フィールド
@@ -62,7 +60,7 @@ Last updated: 2026-05-04 (v2 redesign のフィールド追加 + AI commentary �
 | `SUPABASE_URL` | Supabase プロジェクト URL | — | Secret |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase Service Role Key | — | Secret |
 
-CLI 引数 `--threshold` / `--min-duration-minutes` / `--limit` / `--skip-index` は環境変数より優先されます。
+CLI 引数 `--threshold` / `--min-duration-minutes` / `--limit` は環境変数より優先されます（`--skip-index` は 2026-07-18 廃止済みの no-op）。
 
 ## 調整の観点（実データが溜まってから）
 
@@ -85,7 +83,7 @@ CLI 引数 `--threshold` / `--min-duration-minutes` / `--limit` / `--skip-index`
 4. **全失敗時**: 既存 Supabase レコードから前回の `last_week_summary` / `next_week_forecast` / `ai_commentary` を読み出して新 payload に merge → 上書き消失防止
 
 ### Gemini 無料枠との関係
-- 1 週次実行 = 38 店舗 × 1 コール = 38 コール (max-parallel=10 で 4 バッチ)
+- 1 週次実行 = オリエンタル37 店舗 × 1 コール = 37 コール (max-parallel=10 で 4 バッチ)
 - Daily Report が同じキーで 76 コール/日使うため、累計次第で 1 日のクォータ (~250-1500) を圧迫することあり
 - 失敗時はフォールバック保持機構が動作するため、サイト表示は壊れない
 

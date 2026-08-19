@@ -29,8 +29,9 @@ Target commit: (see git)
     - URL は `daily` → `/reports/daily/[store_slug]`、`weekly` → `/reports/weekly/[store_slug]`、`editorial` → `/blog/[public_slug]`。
     - **旧 `/blog/auto-[store]-[slot]` URL は廃止**（`sitemap.ts` からも除去済み）。
 17) **Weekly Report の Fan-in Matrix**:
-    - `generate-weekly-insights.yml` は Fan-out（38店舗並列、`max-parallel: 10`）＋ Fan-in（index.json 一元マージ、Git commit 1回）構成を維持する。
-    - 各 matrix ジョブは `--skip-index` で `index.json` 書き込みを行わない（競合防止）。
+    - `generate-weekly-insights.yml` は Fan-out（37店舗並列、`max-parallel: 10`）＋ Fan-in（Artifact 集約、Git commit 1回）構成を維持する。
+    - **2026-07-18 更新**: `index.json` は読み手が存在しない死蔵ファイルと判明したため廃止。Fan-in の再構築ステップと WF の `--skip-index` は削除済み
+      （CLI 引数 `--skip-index` だけは古い呼び出し互換のため no-op として残す）。
     - Supabase への upsert は各 matrix ジョブ内で完結させる（Fan-in ジョブは Git 操作のみ）。
 18) **Daily Report の matrix**: **`max-parallel: 5`** (`989637e`, 2026-04 で 15 → 5 に削減)。Gemini 無料枠の毎分リクエスト制限 (RPM) に抵触して 429 が頻発したため。Render 負荷ではなく Gemini クォータが律速。
 

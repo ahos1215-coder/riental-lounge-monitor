@@ -29,6 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from _retry_common import backoff_delay  # noqa: E402
+from _supabase_common import auth_headers  # noqa: E402
 
 FETCH_ATTEMPTS = 3
 FETCH_BACKOFF_CAP = 30.0
@@ -49,7 +50,7 @@ def fetch_rows(url: str, key: str) -> list[dict]:
     })
     req = urllib.request.Request(
         f"{url}/rest/v1/blog_drafts?{q}",
-        headers={"apikey": key, "Authorization": f"Bearer {key}"},
+        headers=auth_headers(key),
     )
     last_err: Exception | None = None
     for attempt in range(1, FETCH_ATTEMPTS + 1):

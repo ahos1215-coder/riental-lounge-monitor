@@ -38,13 +38,18 @@ from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-# scripts/_retry_common.py（バックオフ計算・再試行判定の共有実装、stdlib のみ）を
-# シブリングとしてベアインポートする。
+# scripts/_retry_common.py（バックオフ計算・再試行判定の共有実装、stdlib のみ）と
+# scripts/_supabase_common.py（設定解決・認証ヘッダ）をシブリングとしてベアインポートする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _retry_common import backoff_delay, is_retryable_status  # noqa: E402
+from _supabase_common import _supabase_conf, auth_headers  # noqa: E402
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
-SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+# 【2026-08-19 の統一】旧実装はここだけ `SUPABASE_SERVICE_KEY`（別名キー）を見ておらず、
+# 他のバッチが動く環境でもこのスクリプトだけ「キーが無い」で止まりうる状態だった。
+# `_supabase_conf()` に寄せて他スクリプトと同じ解決順（ROLE_KEY → SERVICE_KEY）にする。
+# 未設定時に空文字になる挙動（main() の明示チェックに委ねる）は従来どおり。
+_CONF = _supabase_conf()
+SUPABASE_URL, SUPABASE_KEY = _CONF if _CONF else ("", "")
 
 MAX_ROWS = int(os.getenv("LOGS_MAX_ROWS", "3000000"))
 DOWNSAMPLE_AFTER_DAYS = int(os.getenv("LOGS_DOWNSAMPLE_AFTER_DAYS", "365"))
@@ -95,9 +100,7 @@ def _rest_request(req: Request, *, what: str, timeout: float = 90.0):
 
 def _headers() -> dict[str, str]:
     return {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
+        **auth_headers(SUPABASE_KEY, content_type=True),
         "Prefer": "return=minimal",
     }
 

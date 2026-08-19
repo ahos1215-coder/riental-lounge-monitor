@@ -92,6 +92,11 @@ jobs:
           # _alert() が直接 Slack/Discord に通知するためのフック（Act 断線の修理）。
           # ジョブ失敗時の notify-on-failure(secrets: inherit) とは別経路の即時アラート。
           OPS_NOTIFY_WEBHOOK_URL: ${{ secrets.OPS_NOTIFY_WEBHOOK_URL }}
+          # URL と必ずセットで渡す。未設定だと scripts/_ops_notify.py は Slack 形式
+          # {"text":...} で POST するため、Webhook が Discord のときアラートが静かに
+          # 拒否される（通知が飛ばないので「異常が無い」と誤読する）。
+          # 番犬: tests/test_workflow_docs_consistency.py（URL を渡す WF は TYPE も渡す）。
+          OPS_NOTIFY_WEBHOOK_TYPE: ${{ vars.OPS_NOTIFY_WEBHOOK_TYPE }}
           TIMEZONE: Asia/Tokyo
           MODE: ${{ steps.decide.outputs.mode }}
         run: |

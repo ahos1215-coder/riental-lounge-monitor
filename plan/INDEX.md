@@ -63,7 +63,7 @@ Target commit: (see git)
 | `/mypage` | `mypage/page.tsx` | ダッシュボード型マイページ（リッチカード・ML予測・レポートリンク） |
 
 ### Content / Batch
-- Weekly insights: `scripts/generate_weekly_insights.py`（`--skip-index` フラグあり）→ `frontend/content/insights/weekly`（調整ガイド: `plan/WEEKLY_INSIGHTS_TUNING.md`）
+- Weekly insights: `scripts/generate_weekly_insights.py` → `frontend/content/insights/weekly`（調整ガイド: `plan/WEEKLY_INSIGHTS_TUNING.md`）
 - Public facts: `frontend/scripts/generate-public-facts.mjs` → `frontend/content/facts/public`
 - Blog MDX: `frontend/content/blog`
 

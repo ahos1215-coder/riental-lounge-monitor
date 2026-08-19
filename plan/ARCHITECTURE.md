@@ -104,11 +104,13 @@ Weekly Report（毎週水曜 06:30 JST）:
         ├─ v2: _derive_next_week_recommendations (Phase D ヒートマップ上位 3 セル)
         ├─ v2: _generate_ai_commentary (Phase C, Ollama。失敗時は既存 Supabase レコードの
         │        文章を保持して上書き消失防止)
-        └─ Supabase upsert (content_type='weekly', is_published=true) + index.json 直接更新
+        └─ Supabase upsert (content_type='weekly', is_published=true)
+           ※ index.json の直接更新は 2026-07-18 に廃止済み（読み手が存在しない死蔵ファイルだった）
   【緊急用のみ・通常は無効】generate-weekly-insights.yml（GHA, workflow_dispatch）[Fan-in Matrix 構成]
   ├─ generate-store: オリエンタル 37 store × 独立ジョブ (max-parallel: 10)。相席屋5店舗は対象外。
-  │   └─ generate_weekly_insights.py --stores <one_store> --skip-index（INSIGHTS_LLM_BACKEND=gemini）
-  └─ collect-and-commit: Fan-in（全 Artifact 回収 → index.json 再構築 → pytest → git commit & push）
+  │   └─ generate_weekly_insights.py --stores <one_store>（INSIGHTS_LLM_BACKEND=gemini）
+  └─ collect-and-commit: Fan-in（全 Artifact 回収 → pytest → git commit & push）
+      ※ index.json の再構築ステップと `--skip-index` は 2026-07-18 に WF から削除済み
 
 ML Model Training（毎日 05:30 JST・毎週月曜 07:00 JST — GHA schedule。これは移行対象外、引き続き GHA が本流）:
   train-ml-model.yml
@@ -182,9 +184,13 @@ trigger-blog-cron.yml (Daily Report) 完了
 - **通常運用（2026-07〜）**: ローカル Ollama が単一プロセスで全42店舗を順次処理するため matrix/並列度の概念は無い。速度は `scripts/tune_local_llm.py` の推奨 options（GPU 全層オフロード等）で調整する。
 - **緊急時 GHA 経路（`workflow_dispatch`、Gemini 使用・オリエンタル37店舗のみ）**:
   - **Daily**: `trigger-blog-cron.yml` が `matrix` で **`max-parallel: 5`** (`989637e`, 2026-04 で 15 → 5 に削減 — Gemini 無料枠 RPM 対策) で並列処理。504 が出た店舗は `continue-on-error` + `retry-blog-draft-stores.yml` で再実行
-  - **Weekly**: `generate-weekly-insights.yml` が Fan-in Matrix 構成。Fan-out（`max-parallel: 10`）→ Fan-in で `index.json` 一元マージ
+  - **Weekly**: `generate-weekly-insights.yml` が Fan-in Matrix 構成。Fan-out（`max-parallel: 10`）→ Fan-in で Artifact 集約 + git commit
+    （`index.json` は 2026-07-18 廃止済み: 読み手のフロントエンドが存在しない死蔵ファイルだった）
 
 ## Key Files
+
+> **共通モジュール（「同じ処理を手書きしない。ここを先に探す」の地図）の正本は `../CLAUDE.md` §7。**
+> ここに一覧を再掲すると二重管理になって必ず片方が老化するので、意図的に転記しない。
 
 ### Backend (Python / Flask)
 - `oriental/routes/common.py`（共通ヘルパー: `get_config` / `get_supabase_provider` / `resolve_store_id`）
@@ -235,9 +241,11 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `frontend/src/components/MeguribiHeader.tsx`（グローバルヘッダー）
 
 ### Content / Batch
-- `scripts/local_report_job.py`（**主経路** — Daily の本体。Ollama `gemma4:e4b` で生成。`experiments/local_llm_spike.py` の `fetch_store_facts`/`run_ollama` を import）
+- `scripts/local_report_job.py`（**主経路** — Daily の本体。`scripts/_ollama_common.py` の `fetch_store_facts` / `run_ollama` / `SYSTEM` / `MODEL` を import。
+  **モデル名の正本は `scripts/_ollama_common.py` の `MODEL` 定数**〔日次・週次で共有〕。ここに具体名は書かない）
 - `scripts/run_weekly_local.ps1`（**主経路** — Weekly のラッパ。`.env.local` 読込 → `generate_weekly_insights.py` 呼び出し）
-- `scripts/generate_weekly_insights.py`（`--skip-index` 対応。`--stores all` でローカル実行時に全42店舗を単一プロセス処理。`INSIGHTS_LLM_BACKEND=ollama|gemini`）
+- `scripts/generate_weekly_insights.py`（`--stores all` でローカル実行時に全42店舗を単一プロセス処理。`INSIGHTS_LLM_BACKEND=ollama|gemini`。
+  `--skip-index` は 2026-07-18 の `index.json` 廃止に伴う no-op で、古い呼び出し互換のためだけに受け付ける）
 - `scripts/tune_local_llm.py`（ローカル LLM 速度チューニング。結果は `local_llm_spike_out/tuning_results.json`）
 - `scripts/gpu_lock.py`（音楽プロジェクトと共有する GPU の排他ロック。正本は `C:\Users\Public\共有データ系\gpu_lock.py`、リポジトリ内は復旧用ミラー）
 - `scripts/warm_cdn_local.py`（**主経路** — CDN warming。stdlib のみ）
@@ -245,7 +253,7 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `scripts/snapshot_forecasts.py` / `scripts/score_forecasts.py`（v2 shadow の答え合わせ。18:10 snapshot / 06:10 score）
 - `scripts/build_templates.py`（v2 shadow のテンプレ再生成。07:30）
 - `frontend/scripts/generate-public-facts.mjs`
-- `frontend/content/insights/weekly`（JSON + index.json）
+- `frontend/content/insights/weekly`（店舗ごとの日付つき JSON。集約 `index.json` は 2026-07-18 廃止済み）
 - `frontend/content/facts/public`
 
 ### Workflows

@@ -75,8 +75,8 @@ npm run dev
 - `/api/range?store=...&limit=...` が `ts` 昇順で返ること
 - `/api/forecast_today?store=...`（`ENABLE_FORECAST=1` のとき）
 - `/reports/weekly/<store_slug>` が Supabase `blog_drafts`（`content_type='weekly'`）の最新行を
-  表示できること（`index.json` は読み手が存在しない死蔵ファイルと判明し別バッチ〔weekly-cleanup〕
-  で廃止中。そもそも `/insights/weekly` という個別URLは現行コードに存在しない）
+  表示できること（`index.json` は読み手が存在しない死蔵ファイルと判明し 2026-07-18 に廃止済み。
+  そもそも `/insights/weekly` という個別URLは現行コードに存在しない）
 - LINE 下書き試験: `GET http://localhost:3000/api/line` がヘルス相当。`POST /api/line` は **development** で `SKIP_LINE_SIGNATURE_VERIFY=1` 等によりローカル検証可能（`ENV.md`）
 - 定時ブログ試験: `GET /api/cron/blog-draft?edition=evening_preview&source=github_actions_cron`（要 `CRON_SECRET` または development で `SKIP_CRON_AUTH=1`）。本番の定時は **GitHub Actions**（**`plan/BLOG_CRON_GHA.md`**）
 - 一括: `cd frontend` → `npm run smoke:blog-apis -- --quick` / `npm run smoke:blog-apis`（`frontend/scripts/smoke-blog-apis.mjs`）
@@ -180,7 +180,7 @@ npm run dev
 - Forecast 503: `ENABLE_FORECAST=1`
 - DNS エラー: URL を安易に変えず、ログで確認
 - `/reports/weekly/[store_slug]` が読めない: Supabase `blog_drafts` の該当行・`error_message` を確認
-  （`index.json` は別バッチで廃止中の死蔵ファイルのため確認対象から除外）
+  （`index.json` は 2026-07-18 に廃止済みの死蔵ファイルのため確認対象から除外）
 - **ブラウザで `/api/range` が 502**: Flask（`BACKEND_URL`、通常 `http://127.0.0.1:5000`）が起動していない、または URL が間違い。Flask を起動してから再読み込み。
 - **予測が直近値に引きずられる（秘伝のタレ）**: ラグ/MAへの依存が強すぎる可能性。`archive/delta_target_nagasaki.py` と `archive/ablation_signal_extraction.py`（2026-03-24 の XGBoost 時代の実験。参考としてのみ）で Delta モデルの考え方を再確認し、AUC/Gain を見てから本番ハイパラ・重みを調整する。
 

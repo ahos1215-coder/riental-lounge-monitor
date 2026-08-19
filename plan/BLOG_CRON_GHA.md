@@ -88,7 +88,7 @@ generate-store（Fan-out）
 ├─ [各 store ジョブ]
 │   ├─ Python setup + requirements.txt
 │   ├─ Warm up API endpoint
-│   ├─ generate_weekly_insights.py --stores <store> --skip-index
+│   ├─ generate_weekly_insights.py --stores <store>
 │   │   ├─ /api/range から過去データ取得
 │   │   ├─ Good Window 分析
 │   │   ├─ JSON 出力（frontend/content/insights/weekly/<store>/）
@@ -97,18 +97,17 @@ generate-store（Fan-out）
 │
 collect-and-commit（Fan-in）
 ├─ download-artifact: pattern: weekly-*
-├─ Python: artifacts をマージし index.json 再構築
 ├─ pytest -q
 └─ git commit & push (1回のみ)
 ```
 
-### `--skip-index` フラグの目的
+### `--skip-index` フラグ（2026-07-18 に用途消滅）
 
-並列実行時に複数ジョブが同時に `index.json` を書き込むと競合が発生するため、各 matrix ジョブは `--skip-index` を付けて `index.json` 更新をスキップ。Fan-in ジョブが全 Artifact の情報を元に `index.json` を一元マージして 1回だけ書き込む。
+かつては並列ジョブが同時に `index.json` を書いて競合するのを防ぐためのフラグだった。**`index.json` 自体が 2026-07-18 に廃止**（読み手のフロントエンドが存在しない死蔵ファイルと判明）されたため、Fan-in の再構築ステップとワークフローの `--skip-index` は削除済み。CLI 引数だけは古い手順書・手元のバッチとの互換のために no-op として残してある（`--help` には出ない）。
 
 ### store フィルタ（`workflow_dispatch` 時）
 
-- `inputs.stores` が空 or `"all"` → matrix に列挙された 38 店舗（オリエンタルのみ。相席屋5店舗は matrix 対象外）を実行
+- `inputs.stores` が空 or `"all"` → matrix に列挙された 37 店舗（オリエンタルのみ。相席屋5店舗は matrix 対象外）を実行
 - 特定店舗を指定（例: `"shibuya,fukuoka"`）→ 該当店舗のみ実行（他はスキップ）
 
 ### 必要な Secrets

@@ -21,8 +21,8 @@ Last updated: 2026-07-11（店舗数・schema_version・LightGBM表記を実コ�
 | **Daily Report** | `content_type='daily'` のコンテンツ。**2026-07〜、毎日 18:00 / 21:30 にオーナーPCのローカル Ollama（`local_report_job.py`、Task Scheduler `MEGRIBI-daily-evening`/`-late`）が自動生成・即時公開**。GHA `trigger-blog-cron.yml` は同時刻の schedule をコメントアウト済みで `workflow_dispatch`（緊急用）のみ。URL は `/reports/daily/[store_slug]`（固定 URL 上書き）。詳細は `docs/LOCAL_LLM_SETUP.md`。 |
 | **Weekly Report** | `content_type='weekly'` のコンテンツ。**2026-07〜、毎週水曜 06:30 JST にオーナーPCのローカル Ollama（`generate_weekly_insights.py --stores all`、Task Scheduler `MEGRIBI-weekly`）が全42店舗を自動生成・即時公開**。GHA `generate-weekly-insights.yml` は schedule をコメントアウト済みで `workflow_dispatch`（緊急用、37店舗＝オリエンタルのみの matrix）のみ。URL は `/reports/weekly/[store_slug]`（固定 URL 上書き）。 |
 | **Editorial Blog** | `content_type='editorial'` のコンテンツ。LINE 指示 → AI 下書き → LINE 承認で公開。URL は `/blog/[public_slug]`。 |
-| **Fan-in Matrix** | Weekly Report の GHA 手動実行（緊急用）の構成。Fan-out（オリエンタル37店舗並列）→ Fan-in（Artifact 集約・Git commit 1回）。通常運用のローカル生成はこの構成を使わず単一プロセスで全42店舗を順次処理する。**Fan-in が再構築していた `index.json` は読み手（フロントエンド）が存在しない死蔵ファイルと判明し、別バッチ（weekly-cleanup）で廃止中**。 |
-| **`--skip-index`** | `generate_weekly_insights.py` のフラグ。Fan-in の各 matrix ジョブで `index.json` 書き込みを抑制するために使用。**`index.json` 自体の廃止（weekly-cleanup バッチ）に伴い、このフラグと Fan-in 側の再構築ステップも用途を失い順次整理される見込み**。 |
+| **Fan-in Matrix** | Weekly Report の GHA 手動実行（緊急用）の構成。Fan-out（オリエンタル37店舗並列）→ Fan-in（Artifact 集約・Git commit 1回）。通常運用のローカル生成はこの構成を使わず単一プロセスで全42店舗を順次処理する。**Fan-in が再構築していた `index.json` は読み手（フロントエンド）が存在しない死蔵ファイルと判明し、2026-07-18 に廃止済み**。 |
+| **`--skip-index`** | `generate_weekly_insights.py` の旧フラグ。**`index.json` 自体が 2026-07-18 に廃止された**ため用途消滅。Fan-in の再構築ステップとワークフローからの受け渡しは削除済みで、CLI 引数だけが古い呼び出し互換の no-op として残る（`--help` には出ない）。 |
 | **`RANGE_LIMIT`** | `LINE_RANGE_LIMIT`（LINE 経路、既定 500）/ `BLOG_CRON_RANGE_LIMIT`（定時 Cron、既定 500）。小さいとインサイトが偏る。 |
 | **n8n** | **ブログ/LINE 配管には使わない**（廃止方針）。 |
 | **正本（source of truth）** | 混雑ログは Supabase `logs`。コンテンツ（下書き）は Supabase `blog_drafts`。Weekly JSON ファイルは GitHub。 |

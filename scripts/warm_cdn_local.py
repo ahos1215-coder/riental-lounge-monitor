@@ -209,12 +209,12 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-STORES_JSON_PATH = REPO_ROOT / "frontend" / "src" / "data" / "stores.json"
+# STORES_JSON_PATH は scripts/_stores_common.py が正本（下の import で借りる）。
 
 # scripts/_stores_common.py（stores.json の読み込みの共有実装、stdlib のみ）を
 # シブリングとしてベアインポートする。brand 正規化などの整形はこのファイル固有。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _stores_common import load_stores_json  # noqa: E402
+from _stores_common import STORES_JSON_PATH, load_stores_json  # noqa: E402
 
 JST = timezone(timedelta(hours=9))
 DEFAULT_BASE_URL = "https://www.meguribi.jp"

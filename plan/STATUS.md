@@ -1,6 +1,7 @@
 # STATUS
 > **【重要・2026-08-19 追記】このファイルは 2026-05-05 時点のスナップショットで、更新が止まっている。**
-> 明らかに古い記述: 「全38店舗」（現行は **42**＝オリエンタル37＋相席屋5。sapporo_ag は 2026-07-11 閉店）／
+> 明らかに古い記述: 「全38店舗」「43店舗」「44店舗」といった店舗数（現行は **42**＝オリエンタル37＋相席屋5。
+> sapporo_ag は 2026-07-11 閉店。以下の本文に残る 38/43/44 はすべて当時の値として読むこと）／
 > 「schema_version v6」（現行 **v7**・24特徴量）／`trigger-blog-cron.yml` と `generate-weekly-insights.yml` の
 > 「schedule で自動起動」（どちらも **`workflow_dispatch` のみ**。主経路はローカル Ollama）。
 > **稼働実態の正本は `../CLAUDE.md` §1-2**。以下は当時の記録として読むこと。
@@ -160,9 +161,9 @@ Migration: `supabase/migrations/20260326000000_blog_drafts_content_split.sql`
 #### Weekly Report（`content_type='weekly'`, `is_published=true`）
 - **Workflow**: `.github/workflows/generate-weekly-insights.yml`（毎週水曜 06:30 JST = UTC 火曜 21:30）
 - **構成（Fan-in Matrix）**:
-  - **Fan-out** `generate-store`: 38 店舗 × 独立ジョブ、`max-parallel: 10`。`--skip-index` で `index.json` 更新を抑制。Supabase upsert は各ジョブ内で完結
-  - **Fan-in** `collect-and-commit`: 全 Artifact を回収 → `index.json` マージ再構築 → Git commit 1回
-- **出力先**: `frontend/content/insights/weekly/<store>/<date>.json` + `index.json`
+  - **Fan-out** `generate-store`: オリエンタル37 店舗 × 独立ジョブ、`max-parallel: 10`。Supabase upsert は各ジョブ内で完結
+  - **Fan-in** `collect-and-commit`: 全 Artifact を回収 → Git commit 1回（`index.json` マージは 2026-07-18 廃止済み）
+- **出力先**: `frontend/content/insights/weekly/<store>/<date>.json`（集約 `index.json` は 2026-07-18 廃止済み）
 - **v2 redesign (2026-05-03〜、`plan/WEEKLY_REPORT_REDESIGN_2026_05.md`)**:
   - **Phase A — `metric_interpretations`**: 既存メトリクスに「だから何?」のラベルを添える (例: "1 日平均 142 件・平常", "中規模店レベル")
   - **Phase B — `day_hour_heatmap`**: 7 曜日 × 10 時間 (19-04時) のヒートマップ。**0-4時のデータは前日の夜セッションとして集計** (例: 日曜 00:00 → 土曜行)。フロント `WeeklyHeatmap.tsx` が消費。多色グラデ (青→紫→桃赤、最大値正規化、ガンマ補正) で混雑度の差を強調。**軸は時間 (Y) × 曜日 (X)** (横方向に 1 時間を週全体でスキャンするため)

@@ -33,7 +33,7 @@ Last updated: 2026-03-28 (Round 4.5 完了後の包括レビュー)。**2026-07-
 | データ収集 | Python (BeautifulSoup) + cron-job.org（5分毎） | Render Starter |
 | DB | Supabase (PostgreSQL) — logs / blog_drafts / secondary_venues | Supabase Free |
 | Backend API | Flask + Gunicorn (2 workers × 2 threads, timeout 300s) | Render Starter ($7/月, 2025-12〜) |
-| ML | LightGBM（旧XGBoost、ファイル名 `model_xgb.py` は互換維持。43店舗別モデル、日次自動再学習） | GHA → Supabase Storage |
+| ML | LightGBM（旧XGBoost、ファイル名 `model_xgb.py` は互換維持。42店舗別モデル、日次自動再学習） | GHA → Supabase Storage |
 | Frontend | Next.js 16 + React 19 + Recharts + Tailwind (ダークテーマ) | Vercel Free |
 | コンテンツ生成 | ローカル Ollama（主, 2026-07〜）/ Gemini 2.5 Flash（GHA緊急時のみ）（Daily 最大86本/日 + Weekly 43本/週） | ローカル Task Scheduler + GHA緊急時 |
 | SNS | X (Twitter) OAuth 1.0a 自動投稿 | GHA workflow_run |
@@ -43,20 +43,20 @@ Last updated: 2026-03-28 (Round 4.5 完了後の包括レビュー)。**2026-07-
 ### 規模の詳細
 
 **データ収集**:
-- 43店舗（オリエンタル38 + 相席屋5。日本全国 + ソウル1）を 5分毎にスクレイピング → Supabase logs
+- 42店舗（オリエンタル37 + 相席屋5。日本全国 + ソウル1）を 5分毎にスクレイピング → Supabase logs
 - 天気データ統合（Open-Meteo API、都道府県単位でキャッシュ）
-- オリエンタル+相席屋それぞれのトップページ SSR から2リクエストで全43店舗を収集（旧: 38個別リクエストから97%削減）
+- オリエンタル+相席屋それぞれのトップページ SSR から2リクエストで全42店舗を収集（旧: 店舗ごとの個別リクエストから97%削減）
 
 **ML パイプライン**:
 - 24特徴量（`FEATURE_COLUMNS`、schema v7）: 時間帯・曜日・祝日・連休クラスタ・給料日サイクル・天気・降水・sin/cos 時刻エンコード 等
-- 店舗別 LightGBM モデル（旧XGBoost。men / women 2モデル × 43店舗 = 86モデル）
+- 店舗別 LightGBM モデル（旧XGBoost。men / women 2モデル × 42店舗 = 84モデル）
 - 日次自動学習（GHA train-ml-model.yml、日次は固定パラメータ、週次(月曜)のみ Optuna HPO）
 - Supabase Storage にアップロード → Flask ModelRegistry がダウンロード・キャッシュ
 - megribi_score: 女性比率 × 占有率（理想 70% のベルカーブ）× 安定性 → 0-1 スコア → GO/WAIT/SKIP
 
 **コンテンツ自動生成**:
-- Daily Report: 43店舗 × 2回/日（18:00 evening_preview / 21:30 late_update）= 最大86本/日。**2026-07〜ローカル Ollama（`gemma4:e4b`）が主経路**、GHA + Gemini は `workflow_dispatch` 緊急時のみ
-- Weekly Report: 43店舗 × 1回/週（水曜 06:30 JST）。**2026-07〜ローカル Ollama が主経路**（単一プロセス）、GHA Fan-in Matrix（オリエンタル38店舗のみ）は緊急時のみ
+- Daily Report: 42店舗 × 2回/日（18:00 evening_preview / 21:30 late_update）= 最大84本/日。**2026-07〜ローカル Ollama（`gemma4:e4b`）が主経路**、GHA + Gemini は `workflow_dispatch` 緊急時のみ
+- Weekly Report: 42店舗 × 1回/週（水曜 06:30 JST）。**2026-07〜ローカル Ollama が主経路**（単一プロセス）、GHA Fan-in Matrix（オリエンタル37店舗のみ）は緊急時のみ
 - Editorial Blog: LINE で分析指示 → Gemini 下書き → LINE で「公開」承認 → /blog/[slug]
 - X 自動投稿: Daily Report 生成後 workflow_run でトリガー（GHA経路使用時のみ発火。現在 dry_run）
 
@@ -123,7 +123,7 @@ Last updated: 2026-03-28 (Round 4.5 完了後の包括レビュー)。**2026-07-
 ### 2. 技術アーキテクチャの評価
 - Flask + Next.js + Supabase の構成に **技術的リスク** や **改善余地** はありますか？
 - 月額 $7 でこの規模のサービスを運用する構成として適切ですか？スケール時のボトルネックは？
-- ML パイプライン（LightGBM 43店舗 × 86モデル × 日次再学習 × 24特徴量）の設計は妥当ですか？もっと良い方法はありますか？
+- ML パイプライン（LightGBM 42店舗 × 84モデル × 日次再学習 × 24特徴量）の設計は妥当ですか？もっと良い方法はありますか？
 - ThreadPoolExecutor 並列化 + Request Ordering 戦略の評価。async (Uvicorn) への移行は必要ですか？
 - Gunicorn 2 workers × 2 threads は適切ですか？チューニングの余地は？
 
@@ -143,7 +143,7 @@ Last updated: 2026-03-28 (Round 4.5 完了後の包括レビュー)。**2026-07-
 - 「megribi_score → GO/WAIT/SKIP」の表現は直感的ですか？改善案は？
 - マイページ（localStorage ベース、ログインなし）の設計は妥当ですか？
 - モバイルファーストの観点で改善すべき点は？
-- 「43店舗 × 12件/ページ」のページネーションは最適ですか？もっと良い見せ方は？
+- 「42店舗 × 12件/ページ」のページネーションは最適ですか？もっと良い見せ方は？
 
 ### 6. 収益化の現実性
 - $7/月の運用コストに対して、アフィリエイト収益でペイできる見込みはありますか？

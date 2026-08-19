@@ -3,6 +3,10 @@ Last updated: 2026-03-30 (Round 8.5 完了)
 Target commit: (see git)
 
 > **構想・フェーズ順・備忘の全文**は **`plan/VISION_AND_FUTURE.md`**。本ファイルは短いタスク一覧と「当面やらないこと」に絞る。
+>
+> **店舗数について**: 「実装済み」欄に出てくる 38 店舗は当時（2026-03〜04）の値。現行は **42**
+> （オリエンタル37＋相席屋5。2026-07-11 sapporo_ag 閉店）。正本は `oriental/utils/stores.py::ALL_STORE_IDS`
+> と `frontend/src/data/stores.json`。
 
 ---
 
@@ -36,7 +40,7 @@ Target commit: (see git)
 
 **Step 5: GitHub Actions Matrix 最適化**
 - Daily: `max-parallel: 15`
-- Weekly: Fan-in Matrix 構成（Fan-out 38店舗 `max-parallel: 10` → Fan-in で index.json マージ）
+- Weekly: Fan-in Matrix 構成（Fan-out 37店舗 `max-parallel: 10` → Fan-in で Artifact 集約。`index.json` マージは 2026-07-18 に廃止）
 
 ### Round 1: パフォーマンス最適化 + セキュリティ + インフラ
 
@@ -147,7 +151,7 @@ Target commit: (see git)
 | ML: 時間減衰ウェイト | サンプル重み付けに指数減衰（90日半減期）追加。直近データをより重視 |
 | ML: 日次精度トラッキング | `metadata.json` の `daily_accuracy` に店舗別・日別 MAE を自動記録 |
 | SHAP 分析 | `scripts/shap_analysis.py` — TreeExplainer で特徴量寄与度を診断（**当時のもの。2026-04-12 の LightGBM 移行で動かなくなり `archive/shap_analysis.py` へ退避済み**） |
-| Flask モデルプリロード | 起動時にバックグラウンドスレッドで全 38 店舗のモデルをメモリに先読み |
+| Flask モデルプリロード | 起動時にバックグラウンドスレッドで全店舗（現行42）のモデルをメモリに先読み |
 | Recharts 遅延読み込み | `next/dynamic` で PreviewMainSection / CompareClient を lazy load |
 | 公開 API レート制限 | 全 proxy route に IP ベースのスライディングウィンドウ（60 req/min） |
 | Supabase 容量管理 | `cleanup-old-logs.yml` 週次 cron。1年超ダウンサンプリング + 300万行上限 |

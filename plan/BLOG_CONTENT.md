@@ -5,7 +5,8 @@ Target commit: (see git)
 ## コンテンツの分類（実装済み）
 
 ### 1. AI 予測予報（Daily Report）— 完全自動
-- **概要**: 毎日 JST 18:00 / 21:30 に GitHub Actions が全 38 店舗分を自動生成・即時公開
+- **概要**: 毎日 JST 18:00 / 21:30 に全 42 店舗分（オリエンタル37＋相席屋5）を自動生成・即時公開
+  （**主経路はローカル Ollama**。GHA + Gemini は `workflow_dispatch` の緊急時のみで、その matrix はオリエンタル37店舗）
 - **URL**: `/reports/daily/[store_slug]`（固定 URL 上書き。過去分は Supabase にのみ保存）
 - **SEO**: 店舗ごとに固定パスで鮮度（Freshness）を優先。カニバリゼーションなし
 - **`content_type`**: `daily`
@@ -13,7 +14,8 @@ Target commit: (see git)
 - **運用**: 完全自動。失敗店舗は GHA 再実行で対応
 
 ### 2. AI 週次レポート（Weekly Report）— 完全自動
-- **概要**: 毎週水曜 06:30 JST（UTC 火曜 21:30）に GitHub Actions が全 38 店舗分を自動生成・即時公開
+- **概要**: 毎週水曜 06:30 JST に全 42 店舗分（オリエンタル37＋相席屋5）を自動生成・即時公開
+  （**主経路はローカル Ollama**。GHA + Gemini は `workflow_dispatch` の緊急時のみで、その matrix はオリエンタル37店舗）
 - **URL**: `/reports/weekly/[store_slug]`（固定 URL 上書き）
 - **内容**: Good Window 分析 + 占有率・男女比の時系列（`series_compact`）。`/insights/weekly/[store]` の Recharts 可視化とも連動
 - **`content_type`**: `weekly`
