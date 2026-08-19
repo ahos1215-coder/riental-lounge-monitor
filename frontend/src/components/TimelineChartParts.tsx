@@ -74,49 +74,49 @@ export function TimelineLegend(props: TimelineLegendProps) {
 export function TimelineTooltip({ active, payload, label = "", unit = "" }: TimelineTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
 
+  // 短縮ラベル: スマホでグラフの上に重なる面積を最小にするため「男性（実測）」→「男・実」。
+  // 系列の色（実測/予測で同色・線種違い）と併せて判別できる。
   const labels: Record<string, string> = {
-    "男性：実測": "男性（実測）",
-    "女性：実測": "女性（実測）",
-    "男性：予測": "男性（予測）",
-    "女性：予測": "女性（予測）",
+    "男性：実測": "男・実",
+    "女性：実測": "女・実",
+    "男性：予測": "男・予",
+    "女性：予測": "女・予",
   };
 
   const filtered = payload.filter((entry) => {
     const name = entry.name ?? "";
-    return !!labels[name];
+    return !!labels[name] && typeof entry.value === "number";
   });
   if (!filtered.length) return null;
 
   return (
     <div
       style={{
-        backgroundColor: "#020617",
+        backgroundColor: "rgba(2,6,23,0.92)",
         border: "1px solid #1f2937",
         borderRadius: 8,
         fontSize: 11,
-        padding: "6px 8px",
+        lineHeight: 1.2,
+        padding: "4px 8px",
+        whiteSpace: "nowrap",
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
       }}
     >
-      {/* X 軸が数値時刻(epoch ms)になったため、label が数値なら HH:MM(JST) に整形する */}
-      <p style={{ marginBottom: 4, color: "#e5e7eb" }}>
+      <span style={{ color: "#e5e7eb", fontVariantNumeric: "tabular-nums" }}>
         {typeof label === "number" ? jstHm(new Date(label)) : label}
-      </p>
-
+      </span>
       {filtered.map((entry, idx) => {
         const name = entry.name ?? "";
         const raw = entry.value;
-
-        let valueText = "-";
-        if (typeof raw === "number") {
-          valueText = `${Math.round(raw)}${unit}`;
-        }
-
+        const valueText = typeof raw === "number" ? `${Math.round(raw)}${unit}` : "-";
         const color = entry.color ?? "#e5e7eb";
-
         return (
-          <p key={`${name}-${idx}`} style={{ color }}>
-            {labels[name] ?? name}: {valueText}
-          </p>
+          <span key={`${name}-${idx}`} style={{ color, fontVariantNumeric: "tabular-nums" }}>
+            {labels[name] ?? name} {valueText}
+          </span>
         );
       })}
     </div>

@@ -106,7 +106,9 @@ export default function TimelineChart({
         </div>
       </div>
 
-      <div className="relative mt-3 h-72 w-full min-w-0 rounded-2xl bg-gradient-to-b from-slate-950 via-black to-black p-3">
+      {/* pt-10: グラフ上端にツールチップ専用の帯を確保する（下の Tooltip position.y=-30 がここに出る）。
+          スマホで指の横にツールチップが出ると折れ線を覆って読めなかったため（2026-08-20 オーナー報告）。 */}
+      <div className="relative mt-3 h-72 w-full min-w-0 rounded-2xl bg-gradient-to-b from-slate-950 via-black to-black px-3 pb-3 pt-10">
         {/* 日付切替のフェッチ中（まだ実測/予測点が 1 つも無い）はチャート面にローディングを
             重ねる。空グラフと「読み込み中」を見た目で区別でき、コールド/低速回線で
             「昨日のグラフが出ない＝壊れている」という誤認を防ぐ（グラフ自体の描画は下の
@@ -127,7 +129,8 @@ export default function TimelineChart({
         <ResponsiveContainer width="100%" height="100%">
           <ComposedChart
             data={data}
-            margin={{ top: 5, right: 10, left: 0, bottom: 0 }}
+            /* top:14 — 「現在」ラベル（ReferenceLine label position=top）が上端で切れないための余白 */
+            margin={{ top: 14, right: 10, left: 0, bottom: 0 }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#1f2937" />
             <XAxis
@@ -148,7 +151,15 @@ export default function TimelineChart({
               domain={percentMode ? [0, 100] : undefined}
               unit={percentMode ? "%" : undefined}
             />
-            <Tooltip content={<TimelineTooltip unit={percentMode ? "%" : "人"} />} />
+            {/* ツールチップはグラフ枠の外（上に確保した帯）に固定し、x だけ指の位置に追従させる。
+                指の真横に出ると折れ線そのものを覆って読めなくなるため（2026-08-20 オーナー報告）。 */}
+            <Tooltip
+              content={<TimelineTooltip unit={percentMode ? "%" : "人"} />}
+              position={{ y: -32 }}
+              offset={16}
+              allowEscapeViewBox={{ x: false, y: true }}
+              wrapperStyle={{ pointerEvents: "none", zIndex: 20 }}
+            />
             <Legend content={<TimelineLegend />} />
 
             {forecastStartT !== null && forecastEndT !== null && (
