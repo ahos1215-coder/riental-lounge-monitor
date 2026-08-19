@@ -14,6 +14,23 @@ type Props = {
 };
 
 /**
+ * 「一番賑わった夜」を選ぶ。ピーク混雑度が最大の夜を選び、**同値のときは平均混雑度で
+ * タイブレーク**する。
+ *
+ * 相席屋（%表示ブランド）はピークが 100% で頭打ちになるため、同値タイが常態化し、
+ * 単純な先勝ちだと「週の最初の夜」が毎週固定で選ばれてしまっていた。平均で比べれば
+ * 「一晩を通して賑わっていた夜」が選ばれる。平均も同値なら従来どおり先勝ち（安定選択）。
+ */
+export function pickBusiestNight(summary: DailySummaryEntry[]): DailySummaryEntry | null {
+  if (summary.length === 0) return null;
+  return summary.reduce((acc, d) => {
+    if (d.peak_occupancy > acc.peak_occupancy) return d;
+    if (d.peak_occupancy === acc.peak_occupancy && d.avg_occupancy > acc.avg_occupancy) return d;
+    return acc;
+  }, summary[0]);
+}
+
+/**
  * 先週 7 夜分の日別サマリ。
  * 各「夜」は 19:00 〜 翌 04:59 を 1 つの単位として集計済み。
  *
@@ -26,11 +43,9 @@ export default function WeeklySummary({ summary }: Props) {
   // バー描画用の最大値 (0 で割らないようガード)
   const maxPeak = Math.max(0.001, ...summary.map((d) => d.peak_occupancy || 0));
 
-  // 一番混んだ日を特定して強調
-  const busiest = summary.reduce(
-    (acc, d) => (d.peak_occupancy > (acc?.peak_occupancy ?? 0) ? d : acc),
-    summary[0],
-  );
+  // 一番混んだ日を特定して強調（ピーク同値は平均でタイブレーク）
+  const busiest = pickBusiestNight(summary);
+  if (!busiest) return null;
 
   return (
     <section className="rounded-2xl border border-white/10 bg-black/40 p-4 md:p-6">

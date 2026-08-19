@@ -2,6 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { fetchLatestPublishedReportByStore, isBlogDraftsConfigured } from "@/lib/supabase/blogDrafts";
+import { buildLatestSummaryTitle } from "@/lib/blog/latestSummaryTitle";
 
 /** AIレポートは 1日2回更新 (18:00/21:30) — 10分 CDN + 30分 stale（reports/store-summary と同一方針） */
 const CACHE_HEADER = "public, s-maxage=600, stale-while-revalidate=1800";
@@ -97,7 +98,9 @@ export async function GET(req: Request) {
   }
 
   const href = `/reports/daily/${encodeURIComponent(row.store_slug)}`;
-  const title = `今日の傾向まとめ`;
+  // 最新行は「前夜のレポート」のこともある。翌日昼に前夜の記述を「今日」と名乗らせない
+  // （夜セッション日付とズレていれば「前回（M/D）の傾向まとめ」になる）。
+  const title = buildLatestSummaryTitle(row.target_date);
   const updatedLabel = formatUpdatedLabel(row.updated_at ?? row.created_at, row.target_date);
   const { bullets } = extractSummary(row.mdx_content);
 

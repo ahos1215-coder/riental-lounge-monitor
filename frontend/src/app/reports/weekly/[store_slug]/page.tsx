@@ -18,6 +18,7 @@ import { fetchLatestPublishedReportByStore, type PublishedReportRow } from "@/li
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { serializeJsonLd } from "@/lib/jsonLd";
 import { formatJstTimestamp, formatWindowTime } from "@/lib/dateFormat";
+import { buildCrowdBaselineDisplay } from "./crowdBaseline";
 
 /** 毎週水曜更新 — 5 分ごとに再検証 */
 export const revalidate = 300;
@@ -202,10 +203,8 @@ export default async function WeeklyReportStorePage({ params }: Props) {
 
   const hasInsightData = dailySummary.length > 0 || topWindows.length > 0 || heatmap !== null;
 
-  function formatNumber(value: unknown, digits = 2): string {
-    if (typeof value !== "number" || Number.isNaN(value)) return "-";
-    return value.toFixed(digits);
-  }
+  // 「混み具合の基準」は相席屋だけ席の埋まり具合(%)に換算する（人数は非公開）
+  const crowdBaseline = buildCrowdBaselineDisplay(store, metrics.baseline_p95_total);
 
   const storeName = buildStoreFullName(store);
   const base = getMetadataBaseUrl();
@@ -321,10 +320,11 @@ export default async function WeeklyReportStorePage({ params }: Props) {
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
                 <p className="text-xs font-medium text-white/70">混み具合の基準</p>
-                <p className="mt-2 text-2xl font-black">{formatNumber(metrics.baseline_p95_total, 0)}<span className="text-base font-medium text-white/50"> 人</span></p>
+                {/* 相席屋は人数非公開（%のみ）。crowdBaseline が席の埋まり具合(%)へ換算する。 */}
+                <p className="mt-2 text-2xl font-black">{crowdBaseline.value}<span className="text-base font-medium text-white/50">{crowdBaseline.unit}</span></p>
                 {/* v2: Phase A */}
                 <p className="mt-1 text-[11px] text-white/40">
-                  {interp?.baseline_label ?? "この人数以上なら「混んでいる」目安"}
+                  {interp?.baseline_label ?? crowdBaseline.fallbackHint}
                 </p>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-5">
@@ -426,7 +426,9 @@ export default async function WeeklyReportStorePage({ params }: Props) {
       )}
 
       <div className="mt-10 max-w-xs">
-        <ForecastAccuracyCard storeSlug={store.slug} />
+        {/* brand/capacity を渡すと相席屋は MAE を「％pt」表示に切替（店舗ページと同じ単位）。
+            渡さないと人数 MAE になり、相席屋で人数を出す＆店舗ページと数値が食い違う。 */}
+        <ForecastAccuracyCard storeSlug={store.slug} brand={store.brand} capacity={store.capacity} />
       </div>
 
       <div className="mt-10">

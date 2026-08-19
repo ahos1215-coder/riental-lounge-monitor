@@ -9,6 +9,61 @@ const JST = "Asia/Tokyo";
 const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"] as const;
 
 /**
+ * 夜セッションの日付境界（-6h シフト規約）。00:00-05:59 JST は「前夜」として扱う。
+ * Python 側の単一ソースは oriental/ml/night_type.py の NIGHT_SESSION_SHIFT_HOURS=6。
+ */
+const NIGHT_SESSION_SHIFT_HOURS = 6;
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+/**
+ * 「今の夜セッションの日付」(JST, YYYY-MM-DD)。00:00-05:59 は前夜扱い（-6h シフト）。
+ *
+ * 日次レポートの `target_date` は生成時刻（18:00 / 21:30 JST）の JST 日付＝その夜の日付なので、
+ * この値と突き合わせれば「その記事が今夜のものか、前回の夜のものか」を判定できる。
+ * 判定できないとき（Intl が想定外の値を返す等）は空文字を返し、呼び出し側で
+ * 「判定不能＝従来どおり」にフォールバックできるようにする。
+ */
+export function jstNightSessionDate(now: Date = new Date()): string {
+  if (Number.isNaN(now.getTime())) return "";
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: JST,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(now);
+    const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? NaN);
+    const year = get("year");
+    const month = get("month");
+    const day = get("day");
+    const hour = get("hour");
+    if ([year, month, day, hour].some((v) => !Number.isFinite(v))) return "";
+    // UTC 上で日付演算だけ行う（実行環境のタイムゾーンに影響されないため）
+    const base = Date.UTC(year, month - 1, day);
+    const shifted = new Date(hour < NIGHT_SESSION_SHIFT_HOURS ? base - 86_400_000 : base);
+    return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`;
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * 「2026-08-19」→「8/19」。日付文字列（YYYY-MM-DD）専用の軽量フォーマッタで、
+ * タイムゾーン変換は一切しない（target_date は既に JST の日付のため）。
+ * 形式が違えば空文字を返す。
+ */
+export function formatJstMonthDay(ymd: string | undefined | null): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec((ymd ?? "").trim());
+  if (!m) return "";
+  return `${Number(m[2])}/${Number(m[3])}`;
+}
+
+/**
  * ISO タイムスタンプ → 「4月11日 22:33」形式。
  * レポートヘッダーの「○○更新」表示用。
  */

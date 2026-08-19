@@ -155,8 +155,10 @@ export function LatestForecastSummaryCard({
     <section className="rounded-2xl border border-indigo-500/20 bg-indigo-950/10 p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
+          {/* 見出しは API 側で決める（前夜のレポートを翌日昼に「今日」と名乗らせないため）。
+              旧レスポンス互換で title が空なら従来文言にフォールバックする。 */}
           <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-indigo-200/80">
-            今日の傾向まとめ
+            {p.title?.trim() || "今日の傾向まとめ"}
           </p>
           <p className="mt-0.5 text-[11px] text-slate-500">更新: {p.updatedLabel}</p>
         </div>
