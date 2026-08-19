@@ -1,13 +1,5 @@
 import { STORES, type StoreMeta } from "@/app/config/stores";
-
-function todayYmdTokyo(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-}
+import { jstYmd } from "@/lib/date/jst";
 
 export type AnalysisScope = "single" | "monthly" | "area_compare";
 
@@ -111,7 +103,7 @@ export function parseLineIntent(text: string): ParsedLineIntent {
   }
 
   const dateMatch = trimmed.match(/\b(\d{4}-\d{2}-\d{2})\b/);
-  const dateYmd = dateMatch ? dateMatch[1] : todayYmdTokyo();
+  const dateYmd = dateMatch ? dateMatch[1] : jstYmd();
 
   let rest = trimmed.replace(/\b\d{4}-\d{2}-\d{2}\b/g, " ").trim();
   rest = rest

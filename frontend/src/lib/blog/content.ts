@@ -115,10 +115,6 @@ function blogDir(): string {
   return path.join(contentRoot(), "blog");
 }
 
-function factsDir(): string {
-  return path.join(contentRoot(), "facts");
-}
-
 function readAllBlogFiles(): string[] {
   const dir = blogDir();
   if (!fs.existsSync(dir)) return [];
@@ -301,16 +297,4 @@ export function getPostBySlug(slug: string, opts?: { includeDraft?: boolean }): 
   };
 
   return { ...post, ...categoryDecor(categoryId) };
-}
-
-export function getFactsById(factsId: string): any | null {
-  const fp = path.join(factsDir(), `${factsId}.json`);
-  if (!fs.existsSync(fp)) return null;
-  try {
-    // BOM耐性
-    const raw = fs.readFileSync(fp, "utf8").replace(/^\uFEFF/, "");
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
 }

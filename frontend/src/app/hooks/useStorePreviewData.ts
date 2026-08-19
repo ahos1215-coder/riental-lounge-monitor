@@ -62,47 +62,34 @@ export type StorePreviewControls = {
 
 /**
  * サーバー（page.tsx）で焼き込んだ initialSnapshot を、今のクライアント状態で
- * 初期シードとして採用してよいかを判定する純粋関数。
+ * 初期シードとして採用してよいかを判定する純粋関数。true のときだけシードを使う。
  *
- * 1. slug 一致に加えて、夜境界（19:00 / 翌05:00 JST）を跨いだケースを弾く:
- *    ISR で焼いた時点と、クライアントがマウントした時点で `completedNight` の判定が
- *    変わっている場合（例: 04:59 に焼いた「進行中」シードを 05:01 に描く／19:00 直後に
- *    「完了夜の回顧」シードを描く）、そのシードは前夜の回顧 or 逆に古い進行中表示に
- *    なってしまう。一致しなければ採用せず、baseSnapshot から即 run() で最新化して
- *    60-90s のシード遅延をスキップする。
+ * 採用しない条件:
+ * 1. slug 不一致、または `completedNight` の判定が焼いた時点と変わっている
+ *    （夜境界 19:00 / 翌05:00 JST をまたいだ）。そのまま使うと前夜の回顧、または
+ *    逆に古い進行中表示になる。
+ * 2. ライブ表示（clientCompletedNight===false）のときだけ、seed の `latestActualTs` が
+ *    既に "stale"（既定 20 分＝REALTIME_STALE_THRESHOLD_MIN）。ISR の
+ *    stale-while-revalidate で古い HTML が返ると、営業中なのに「閉店中・最終22:05時点」の
+ *    ような誤表示を最大90秒（遅延バックグラウンド再取得まで）出し続けるため。
+ *    完了済みの夜は回顧表示で古い実測が正しい値なので、この鮮度チェックはしない。
+ *    latestActualTs が null（実測ゼロ）は computeFreshness が "none" を返すので破棄しない。
  *
- * 2. BUG #9: ライブ表示（clientCompletedNight===false、＝「今日」進行中）のときだけ、
- *    seed の `latestActualTs` の鮮度も追加でチェックする。滅多に訪問されない店舗ページは
- *    ISR の stale-while-revalidate により古い HTML（例: 22:05 時点が最新実測のまま）が
- *    そのまま返ることがあり、slug/completedNight は一致していても、mount 時点で既に
- *    `computeFreshness` が "stale"（既定 20 分＝REALTIME_STALE_THRESHOLD_MIN）と判定するほど
- *    古い実測を初期シードとして採用すると、実際は営業中で人数が動いているのに
- *    「閉店中・最終22:05時点」のような誤表示を、60-90s の遅延バックグラウンド再取得が
- *    終わるまで（最大90秒）出し続けてしまう。この場合もシードを破棄し、baseSnapshot + 即
- *    run() に倒す（既存の slug/completedNight 不一致パスと同じ扱い）。
- *    完了済みの夜（clientCompletedNight===true）は回顧的表示であり、古い実測が仕様どおり
- *    正しい値なので、この鮮度チェックは行わない（古いというだけではシードを破棄しない）。
- *    latestActualTs が null（実測が1件も無い）の場合は computeFreshness が "none" を返し
- *    "stale" にはならない＝この鮮度チェックだけでは破棄されない（「データなし」の
- *    シード自体は誤りではないため、null を理由に破棄はしない）。
+ * 採用しない場合は baseSnapshot から即 run() して 60-90s のシード遅延をスキップする。
+ * 再現条件の詳細は useStorePreviewData.seedGuard.test.ts の各 it を参照。
  */
 /**
- * BUG B (rank4) 回帰防止用の純粋関数: 「鮮度が『1分前』→70秒後『13分前』へ逆行する」問題の
- * モノトニシティ・ガード。
+ * 鮮度表示の巻き戻り（「1分前」→70秒後に「13分前」）を防ぐモノトニシティ・ガード。
+ * true なら「取得結果の方が古い」＝上書き拒否。
  *
- * today（ライブ）モードの 60-90s 遅延バックグラウンド再取得や 15 分毎ポーリングは、
- * CDN → Next → backend のキャッシュ層を経由するため、既に表示中のスナップショットより
- * 古い実測（X-Vercel-Cache STALE で最大 13 分ほど古いデータが返る事例を観測）を
- * 返すことがある。これをそのまま上書きすると、鮮度表示が「1分前」→「13分前」のように
- * 時間が巻き戻って見える。
+ * today（ライブ）の遅延再取得やポーリングは CDN → Next → backend のキャッシュ層を通るため、
+ * 既に表示中より古い実測が返ることがある（X-Vercel-Cache STALE で最大 13 分の事例あり）。
  *
- * - candidateLatestActualTs が null/不正 → 新しい実測が無いだけなので古さは判定できず
- *   false（上書きは許可し、呼び出し側の既存フォールバックに委ねる）。
- * - currentLatestActualTs が null/不正 → 保護すべき既存表示が無い（初回ロード等）ので
- *   false（上書き許可）。これにより「今日」→「昨日」等のモード切替直後（effect 再実行時に
- *   loading へリセットされ latestActualTs が null に戻ってから新規フェッチが走る）は
- *   このガードの対象にならず、従来どおり反映される。
- * - どちらも有効な ISO 文字列で candidate < current のときだけ true（stale = 上書き拒否）。
+ * - どちらかが null/不正 → false（上書き許可）。特に current が null のモード切替直後
+ *   （loading リセットで null に戻る）はガード対象外にして従来どおり反映させる。
+ * - 両方が有効な ISO 文字列で candidate < current のときだけ true。
+ *
+ * 再現条件の詳細は useStorePreviewData.monotonicityGuard.test.ts の各 it を参照。
  */
 export function isStaleRefetch(
   candidateLatestActualTs: string | null | undefined,
@@ -251,7 +238,8 @@ export function useStorePreviewData(
         // - 「昨日」「先週」は実質的に常に true。カスタムで未来日を選んだ場合のみ false。
         const completedNight = isNightCompleted(baseDate, now);
 
-        const rangeLimit = RANGE_LIMIT_BY_MODE[rangeMode] ?? 400;
+        // RANGE_LIMIT_BY_MODE は Record<PreviewRangeMode, number> で全モード網羅（?? 不要）
+        const rangeLimit = RANGE_LIMIT_BY_MODE[rangeMode];
         const fromYmd = formatYMD(baseDate);
         const toYmd = formatYMD(addDays(baseDate, 1));
         const rangeUrl =
@@ -406,7 +394,8 @@ export function useStorePreviewData(
         // これは forecastUrl の有無（completedNight かどうか）とは独立に行う。
         if (rangeMode !== "today" && !hasData && forecastRetryAttempt < FORECAST_MAX_RETRIES) {
           if (cancelled) return;
-          const delay = FORECAST_RETRY_DELAYS_MS[forecastRetryAttempt] ?? 12_000;
+          // 直前で forecastRetryAttempt < FORECAST_MAX_RETRIES(=配列長) を確認済み（?? 不要）
+          const delay = FORECAST_RETRY_DELAYS_MS[forecastRetryAttempt];
           retryTimer = setTimeout(() => {
             if (!cancelled) {
               run(forecastRetryAttempt + 1);
@@ -472,7 +461,8 @@ export function useStorePreviewData(
               ...prev,
               snapshot: { ...prev.snapshot, forecastStatus: "retrying" },
             }));
-            const delay = FORECAST_RETRY_DELAYS_MS[forecastRetryAttempt] ?? 45_000;
+            // 直前で forecastRetryAttempt < FORECAST_MAX_RETRIES(=配列長) を確認済み（?? 不要）
+            const delay = FORECAST_RETRY_DELAYS_MS[forecastRetryAttempt];
             retryTimer = setTimeout(() => {
               if (!cancelled) {
                 run(forecastRetryAttempt + 1);

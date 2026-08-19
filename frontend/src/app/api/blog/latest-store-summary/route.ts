@@ -3,44 +3,17 @@
 import { NextResponse } from "next/server";
 import { fetchLatestPublishedReportByStore, isBlogDraftsConfigured } from "@/lib/supabase/blogDrafts";
 import { buildLatestSummaryTitle } from "@/lib/blog/latestSummaryTitle";
+import {
+  pickFirstNonEmptyLine,
+  pickSectionLines,
+  stripFrontmatter,
+} from "@/lib/blog/mdx";
 
 /** AIレポートは 1日2回更新 (18:00/21:30) — 10分 CDN + 30分 stale（reports/store-summary と同一方針） */
 const CACHE_HEADER = "public, s-maxage=600, stale-while-revalidate=1800";
 
 function normalizeStoreSlug(v: string | null): string {
   return (v ?? "").trim().toLowerCase();
-}
-
-function stripFrontmatter(raw: string): string {
-  if (!raw.startsWith("---\n")) return raw;
-  const end = raw.indexOf("\n---\n", 4);
-  if (end < 0) return raw;
-  return raw.slice(end + 5).trimStart();
-}
-
-function pickSectionLines(md: string, heading: string, max = 4): string[] {
-  const h = `## ${heading}`.trim();
-  const idx = md.indexOf(h);
-  if (idx < 0) return [];
-  const rest = md.slice(idx + h.length);
-  const next = rest.search(/\n##\s+/);
-  const block = (next >= 0 ? rest.slice(0, next) : rest).trim();
-  const lines = block
-    .split("\n")
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .filter((s) => s.startsWith("- "))
-    .map((s) => s.replace(/^-+\s+/, "").trim());
-  return lines.slice(0, Math.max(1, max));
-}
-
-function pickFirstNonEmptyLine(md: string, maxLen = 120): string | null {
-  const line = md
-    .split("\n")
-    .map((s) => s.trim())
-    .find((s) => s && !s.startsWith("#") && !s.startsWith("- "));
-  if (!line) return null;
-  return line.length > maxLen ? `${line.slice(0, maxLen - 1)}…` : line;
 }
 
 function extractSummary(mdx: string): { bullets: string[]; peakHint?: string } {

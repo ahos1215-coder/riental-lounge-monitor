@@ -3,38 +3,7 @@ import {
   fetchLatestPublishedReportByStore,
   isBlogDraftsConfigured,
 } from "@/lib/supabase/blogDrafts";
-
-function stripFrontmatter(raw: string): string {
-  if (!raw.startsWith("---\n")) return raw;
-  const end = raw.indexOf("\n---\n", 4);
-  if (end < 0) return raw;
-  return raw.slice(end + 5).trimStart();
-}
-
-/** MDX 本文から箇条書き（- で始まる行）を最大 max 件抽出 */
-function extractBullets(mdx: string, max = 3): string[] {
-  const body = stripFrontmatter(mdx);
-  const bullets: string[] = [];
-  for (const line of body.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
-      const text = trimmed.replace(/^[-*]\s+/, "").trim();
-      if (text.length > 0) bullets.push(text);
-    }
-    if (bullets.length >= max) break;
-  }
-  return bullets;
-}
-
-/** MDX 本文から最初の見出し（## or ###）を抽出 */
-function extractFirstHeading(mdx: string): string | null {
-  const body = stripFrontmatter(mdx);
-  for (const line of body.split("\n")) {
-    const m = line.match(/^#{1,3}\s+(.+)/);
-    if (m) return m[1].trim();
-  }
-  return null;
-}
+import { extractBullets, extractFirstHeading, stripFrontmatter } from "@/lib/blog/mdx";
 
 import { formatJstLabel as _fmtJst } from "@/lib/dateFormat";
 
@@ -73,7 +42,10 @@ export async function GET(req: Request) {
   const weekly = weeklyRow
     ? {
         bullets: extractBullets(weeklyRow.mdx_content, 3),
-        heading: extractFirstHeading(weeklyRow.mdx_content),
+        heading: extractFirstHeading(stripFrontmatter(weeklyRow.mdx_content), {
+          // 空白だけの見出しで "" を返す従来挙動（レスポンス値を変えないため false 固定）
+          skipBlank: false,
+        }),
         updatedAt: formatJstLabel(weeklyRow.updated_at ?? weeklyRow.created_at),
         targetDate: weeklyRow.target_date ?? "—",
       }

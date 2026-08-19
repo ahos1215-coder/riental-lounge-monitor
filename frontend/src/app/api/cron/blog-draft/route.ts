@@ -5,6 +5,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { getStoreMetaBySlugStrict } from "@/app/config/stores";
 import { buildFactsId } from "@/lib/line/parseLineIntent";
+import { getBackendBaseUrl } from "@/lib/backendUrl";
+import { jstYmd } from "@/lib/date/jst";
 import type { BlogEdition } from "@/lib/blog/insightFromRange";
 import {
   runBlogDraftPipeline,
@@ -17,25 +19,11 @@ import { insertBlogDraft, isBlogDraftsConfigured } from "@/lib/supabase/blogDraf
 loadEnvConfig(path.resolve(process.cwd(), ".."));
 loadEnvConfig(process.cwd());
 
-const BACKEND_URL =
-  process.env.BACKEND_URL ??
-  process.env["BACKEND-URL"] ??
-  "http://127.0.0.1:5000";
-
 function cronRangeLimit(): number {
   const raw = process.env.BLOG_CRON_RANGE_LIMIT?.trim();
   const n = raw ? Number.parseInt(raw, 10) : NaN;
   if (Number.isFinite(n) && n > 0) return Math.min(n, 50_000);
   return 500;
-}
-
-function todayYmdJst(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
 }
 
 /**
@@ -102,7 +90,7 @@ async function handleCron(req: NextRequest) {
 
   const url = new URL(req.url);
   const dateOverride = url.searchParams.get("date");
-  const dateYmd = dateOverride && /^\d{4}-\d{2}-\d{2}$/.test(dateOverride) ? dateOverride : todayYmdJst();
+  const dateYmd = dateOverride && /^\d{4}-\d{2}-\d{2}$/.test(dateOverride) ? dateOverride : jstYmd();
 
   const editionParam = url.searchParams.get("edition")?.trim().toLowerCase();
   let edition: BlogEdition | undefined;
@@ -191,7 +179,7 @@ async function handleCron(req: NextRequest) {
         });
         out = (await Promise.race([
           runBlogDraftPipeline({
-            backendUrl: BACKEND_URL,
+            backendUrl: getBackendBaseUrl(),
             rangeLimit,
             store,
             dateYmd,

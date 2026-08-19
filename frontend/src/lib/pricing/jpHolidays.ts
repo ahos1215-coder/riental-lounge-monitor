@@ -12,6 +12,7 @@
 // いないため、自動判定には含めない（UI側で「特別期間は手動で週末を選択」と案内する）。
 
 import type { DayType } from "@/data/pricing/types";
+import { nextDayUtcMs, nightSessionAnchorUtcMs, utcMsToYmd } from "@/lib/date/jst";
 
 export const JP_HOLIDAYS_2026_2027: ReadonlySet<string> = new Set<string>([
   // ---- 2026年 ----
@@ -69,34 +70,6 @@ export type DayTypeDetection = {
 
 const DOW_LABELS = ["日", "月", "火", "水", "木", "金", "土"] as const;
 
-function jstParts(d: Date): { year: number; month: number; day: number; hour: number } {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(d);
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "0";
-  return {
-    year: Number(get("year")),
-    month: Number(get("month")),
-    day: Number(get("day")),
-    hour: Number(get("hour")),
-  };
-}
-
-function formatUtcYmd(ms: number): string {
-  const d = new Date(ms);
-  const y = d.getUTCFullYear();
-  const m = (d.getUTCMonth() + 1).toString().padStart(2, "0");
-  const day = d.getUTCDate().toString().padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
 /**
  * 「今日は平日料金か週末料金か」をJST基準で自動判定する。
  *
@@ -112,14 +85,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * UI側で手動切り替えを案内する）。
  */
 export function detectDayTypeJst(now: Date): DayTypeDetection {
-  const p = jstParts(now);
-  let anchorMs = Date.UTC(p.year, p.month - 1, p.day);
-  if (p.hour < 6) {
-    anchorMs -= DAY_MS; // 深夜〜早朝は前日の夜営業として扱う
-  }
-  const anchor = new Date(anchorMs);
-  const dow = anchor.getUTCDay();
-  const anchorYmd = formatUtcYmd(anchorMs);
+  // 深夜〜早朝(00:00-05:59 JST)は前日の夜営業として扱う（-6h 規約）
+  const anchorMs = nightSessionAnchorUtcMs(now);
+  const dow = new Date(anchorMs).getUTCDay();
+  const anchorYmd = utcMsToYmd(anchorMs);
   const dowLabel = DOW_LABELS[dow];
 
   if (dow === 5) {
@@ -128,7 +97,7 @@ export function detectDayTypeJst(now: Date): DayTypeDetection {
   if (dow === 6) {
     return { dayType: "weekend", anchorYmd, dowLabel, reason: "土曜" };
   }
-  const nextYmd = formatUtcYmd(anchorMs + DAY_MS);
+  const nextYmd = utcMsToYmd(nextDayUtcMs(anchorMs));
   if (isJpHoliday(nextYmd)) {
     return { dayType: "weekend", anchorYmd, dowLabel, reason: "祝前日" };
   }
@@ -160,14 +129,10 @@ type AisekiyaDayTypeDetection = {
  * 基準日の考え方は detectDayTypeJst と同じ（深夜〜早朝は前日の夜営業の続きとみなす）。
  */
 export function detectAisekiyaDayTypeJst(now: Date): AisekiyaDayTypeDetection {
-  const p = jstParts(now);
-  let anchorMs = Date.UTC(p.year, p.month - 1, p.day);
-  if (p.hour < 6) {
-    anchorMs -= DAY_MS; // 深夜〜早朝は前日の夜営業として扱う
-  }
-  const anchor = new Date(anchorMs);
-  const dow = anchor.getUTCDay();
-  const anchorYmd = formatUtcYmd(anchorMs);
+  // 基準日の考え方は detectDayTypeJst と同じ（-6h 規約）
+  const anchorMs = nightSessionAnchorUtcMs(now);
+  const dow = new Date(anchorMs).getUTCDay();
+  const anchorYmd = utcMsToYmd(anchorMs);
   const dowLabel = DOW_LABELS[dow];
 
   if (dow === 5) {
@@ -182,7 +147,7 @@ export function detectAisekiyaDayTypeJst(now: Date): AisekiyaDayTypeDetection {
   if (isJpHoliday(anchorYmd)) {
     return { dayType: "weekend", anchorYmd, dowLabel, reason: "祝日" };
   }
-  const nextYmd = formatUtcYmd(anchorMs + DAY_MS);
+  const nextYmd = utcMsToYmd(nextDayUtcMs(anchorMs));
   if (isJpHoliday(nextYmd)) {
     return { dayType: "weekend", anchorYmd, dowLabel, reason: "祝前日" };
   }

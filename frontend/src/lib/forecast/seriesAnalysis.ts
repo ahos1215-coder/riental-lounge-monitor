@@ -10,6 +10,7 @@
 // ロジックを変更せず本モジュールへ機械的に移設する
 // （storePreviewSnapshot.ts は re-export バレルとしてこれらを再公開する）。
 import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
+import { jstHm } from "@/lib/date/jst";
 import { formatNowHmJst } from "@/lib/date/nightWindow";
 import type {
   ForecastPoint,
@@ -18,10 +19,11 @@ import type {
   TimeSeriesPoint,
 } from "@/app/hooks/storePreviewSnapshot";
 
+/** グラフ横軸の「HH:MM」。不正な ts はそのまま返す（ラベルを空にしない）。 */
 function formatLabel(ts: string): string {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return ts;
-  return d.toLocaleTimeString("ja-JP", { timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit" });
+  return jstHm(d);
 }
 
 export function buildSeries(

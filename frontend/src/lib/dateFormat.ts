@@ -5,18 +5,15 @@
  * フォーマット関数を 1 箇所に集約。
  */
 
-const JST = "Asia/Tokyo";
+import {
+  JST_TIME_ZONE,
+  NIGHT_SESSION_SHIFT_HOURS,
+  jstDatePartsOrNull,
+  utcMsToYmd,
+} from "@/lib/date/jst";
+
+const JST = JST_TIME_ZONE;
 const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"] as const;
-
-/**
- * 夜セッションの日付境界（-6h シフト規約）。00:00-05:59 JST は「前夜」として扱う。
- * Python 側の単一ソースは oriental/ml/night_type.py の NIGHT_SESSION_SHIFT_HOURS=6。
- */
-const NIGHT_SESSION_SHIFT_HOURS = 6;
-
-function pad2(n: number): string {
-  return String(n).padStart(2, "0");
-}
 
 /**
  * 「今の夜セッションの日付」(JST, YYYY-MM-DD)。00:00-05:59 は前夜扱い（-6h シフト）。
@@ -29,24 +26,11 @@ function pad2(n: number): string {
 export function jstNightSessionDate(now: Date = new Date()): string {
   if (Number.isNaN(now.getTime())) return "";
   try {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: JST,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      hourCycle: "h23",
-    }).formatToParts(now);
-    const get = (type: string) => Number(parts.find((p) => p.type === type)?.value ?? NaN);
-    const year = get("year");
-    const month = get("month");
-    const day = get("day");
-    const hour = get("hour");
-    if ([year, month, day, hour].some((v) => !Number.isFinite(v))) return "";
+    const p = jstDatePartsOrNull(now);
+    if (!p) return "";
     // UTC 上で日付演算だけ行う（実行環境のタイムゾーンに影響されないため）
-    const base = Date.UTC(year, month - 1, day);
-    const shifted = new Date(hour < NIGHT_SESSION_SHIFT_HOURS ? base - 86_400_000 : base);
-    return `${shifted.getUTCFullYear()}-${pad2(shifted.getUTCMonth() + 1)}-${pad2(shifted.getUTCDate())}`;
+    const base = Date.UTC(p.year, p.month - 1, p.day);
+    return utcMsToYmd(p.hour < NIGHT_SESSION_SHIFT_HOURS ? base - 86_400_000 : base);
   } catch {
     return "";
   }
@@ -130,30 +114,4 @@ export function formatWindowTime(iso: string | undefined | null): string {
   } catch {
     return (iso ?? "").slice(0, 16).replace("T", " ");
   }
-}
-
-/**
- * ISO タイムスタンプ → 「3/31」形式 (日付のみ)。
- * チャート X 軸のティックラベル用。
- */
-export function formatAxisDate(iso: string): string {
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "";
-    return new Intl.DateTimeFormat("ja-JP", {
-      timeZone: JST,
-      month: "numeric",
-      day: "numeric",
-    }).format(d);
-  } catch {
-    return "";
-  }
-}
-
-/**
- * ISO タイムスタンプ → 「4/3 20:35(木)」形式。
- * チャートのツールチップ用 (formatWindowTime と同等だがチャート専用)。
- */
-export function formatTooltipTime(iso: string): string {
-  return formatWindowTime(iso);
 }

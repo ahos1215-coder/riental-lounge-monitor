@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 
+import { getBackendBaseUrl, isBackendUrlFromEnv } from "@/lib/backendUrl";
 import { parseLineIntent } from "@/lib/line/parseLineIntent";
 import { runBlogDraftPipeline } from "@/lib/blog/runBlogDraftPipeline";
 import { limitLineUserDraft, limitLineWebhookGlobal } from "@/lib/rateLimit/lineWebhookLimits";
@@ -10,12 +11,6 @@ import {
   fetchLatestUnpublishedEditorialByLineUser,
 } from "@/lib/supabase/blogDrafts";
 
-/** Flask backend base URL (same as other Next API proxies). */
-// Vercel 側で `BACKEND-URL` として登録されてしまうケースがあるため、保険で別名も許容する。
-const BACKEND_URL =
-  process.env.BACKEND_URL ??
-  process.env["BACKEND-URL"] ??
-  "http://127.0.0.1:5000";
 
 /**
  * Range fetch limit（`/api/range` は `store` + `limit` のみ）。
@@ -202,7 +197,7 @@ async function handleDraftOrEditorialIntent(
 
     console.log("[line] Running pipeline", { kind: intent.kind, slug: intent.store.slug, scope: intent.scope });
     const result = await runBlogDraftPipeline({
-      backendUrl: BACKEND_URL,
+      backendUrl: getBackendBaseUrl(),
       rangeLimit: intent.scope === "monthly" ? Math.min(lineRangeLimit() * 4, 5000) : lineRangeLimit(),
       store: intent.store,
       dateYmd: intent.dateYmd,
@@ -321,7 +316,7 @@ export async function POST(req: NextRequest) {
       hasSUPABASE_SERVICE_ROLE_KEY: Boolean(
         process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() || process.env.SUPABASE_SERVICE_KEY?.trim()
       ),
-      backendUrlIsFallback: BACKEND_URL === "http://127.0.0.1:5000",
+      backendUrlIsFallback: !isBackendUrlFromEnv(),
     });
   }
   const forceSkip =

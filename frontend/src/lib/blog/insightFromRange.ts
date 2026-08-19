@@ -1,7 +1,10 @@
 /**
  * Night-window insight from /api/range and /api/forecast_today.
  * Ported from frontend/scripts/generate-public-facts.mjs (same behavior).
+ * 注: .mjs 側は node 単体実行のため TS ライブラリを import できず、日付ヘルパーの
+ * 集約対象外（同期漏れではない）。
  */
+import { jstHm, jstYmd } from "@/lib/date/jst";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -76,28 +79,10 @@ export type PointWithGender = {
   women: number | null;
 };
 
-function fmtYmdTokyo(d: Date): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(d);
-}
-
-function fmtHmTokyo(d: Date): string {
-  return new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(d);
-}
-
 function ymdPlusDays(ymd: string, days: number): string {
   const base = new Date(`${ymd}T00:00:00+09:00`);
   const d = new Date(base.getTime() + days * MS_PER_DAY);
-  return fmtYmdTokyo(d);
+  return jstYmd(d);
 }
 
 export function nightWindowIso(ymd: string): NightWindowIso {
@@ -295,7 +280,7 @@ function computeWeekComparison(
     const row = r as Record<string, unknown>;
     const dt = parseTimestamp(row);
     if (!dt) continue;
-    const ymd = fmtYmdTokyo(dt);
+    const ymd = jstYmd(dt);
     const total = computeTotal(row, opts.totalKeys, opts.menKeys, opts.womenKeys);
     if (total == null) continue;
     if (!byDate.has(ymd)) byDate.set(ymd, []);
@@ -450,8 +435,8 @@ export function computeInsight(points: Array<{ dt: Date; total: number }>): Insi
   else if (max >= 80) crowd_label = "ほどよい";
 
   return {
-    peak_time: fmtHmTokyo(peak.dt),
-    avoid_time: fmtHmTokyo(avoid.dt),
+    peak_time: jstHm(peak.dt),
+    avoid_time: jstHm(avoid.dt),
     crowd_label,
   };
 }

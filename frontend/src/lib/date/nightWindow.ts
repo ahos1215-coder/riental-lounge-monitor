@@ -10,6 +10,7 @@
 // 生んでいた。ロジックを変更せず本モジュールへ機械的に移設する
 // （storePreviewSnapshot.ts は re-export バレルとしてこれらを再公開する）。
 import type { PreviewRangeMode } from "@/app/hooks/storePreviewSnapshot";
+import { jstDateParts, jstHm } from "./jst";
 
 export type NightWindowRange = {
   start: Date;
@@ -53,31 +54,17 @@ export function parseYMD(value: string): Date | null {
   return date;
 }
 
-// The venues are in Japan and the night window is JST 19:00-05:00. Compute the base
-// date and window in Asia/Tokyo regardless of the viewer's device timezone, otherwise
-// a non-JST visitor filters/labels the wrong slice. JST is fixed +09:00 (no DST).
-function jstDateParts(d: Date): { year: number; month: number; day: number; hour: number } {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(d);
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "0";
-  return {
-    year: Number(get("year")),
-    month: Number(get("month")),
-    day: Number(get("day")),
-    hour: Number(get("hour")),
-  };
-}
-
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
 
+// The venues are in Japan and the night window is JST 19:00-05:00. Compute the base
+// date in Asia/Tokyo regardless of the viewer's device timezone, otherwise a non-JST
+// visitor filters/labels the wrong slice. JST is fixed +09:00 (no DST).
+//
+// 「19時境界」の規約はここだけ。00:00-05:59 を前夜とする -6h 規約（レポート/料金判定）
+// とは別物なので混同しないこと（対比は lib/date/jst.ts のヘッダ参照）。
+//
 // baseDate carries the JST night-date via its Y/M/D; it is only read through
 // getFullYear/getMonth/getDate for date arithmetic, never as an absolute instant.
 export function computeNightBaseDate(now: Date): Date {
@@ -160,11 +147,7 @@ export function isNightCompleted(baseDate: Date, now: Date): boolean {
   return now.getTime() >= window.end.getTime();
 }
 
+/** JST の「HH:MM」。実体は lib/date/jst の jstHm（import 互換のため名前を維持）。 */
 export function formatNowHmJst(date: Date): string {
-  return new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(date);
+  return jstHm(date);
 }

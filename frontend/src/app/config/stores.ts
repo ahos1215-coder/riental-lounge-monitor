@@ -1,7 +1,5 @@
 import rawStores from "@/data/stores.json";
 
-export type StoreOption = { value: string; label: string };
-
 export type BrandId = "oriental" | "aisekiya" | "jis";
 
 export type StoreMeta = {
@@ -142,11 +140,6 @@ export const STORE_REGION_BUTTON_LABEL: Partial<Record<string, string>> = {
   近畿: "関西・近畿",
 };
 
-export const STORE_OPTIONS: StoreOption[] = STORES.map((s) => ({
-  value: s.slug,
-  label: s.label,
-}));
-
 export const DEFAULT_STORE = STORES[0].slug;
 
 export function getStoreMetaBySlug(slug: string | null | undefined): StoreMeta {
@@ -164,9 +157,4 @@ export function getStoreMetaBySlugStrict(slug: string | null | undefined): Store
   if (!slug?.trim()) return null;
   const normalized = slug.trim().toLowerCase();
   return STORES.find((s) => s.slug === normalized) ?? null;
-}
-
-export function getStoreMetaById(storeId: string | null | undefined): StoreMeta {
-  if (!storeId) return STORES[0];
-  return STORES.find((s) => s.storeId === storeId) ?? STORES[0];
 }

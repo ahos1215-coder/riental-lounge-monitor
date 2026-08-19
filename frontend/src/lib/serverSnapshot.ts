@@ -1,5 +1,7 @@
 import "server-only";
 
+import { getBackendBaseUrl } from "@/lib/backendUrl";
+
 /**
  * トップ(TOP5)・店舗一覧の初期表示を「空スケルトン→JS+fetch後に描画」ではなく
  * サーバー側で1回分の実データを取得し、初期HTMLに焼き込むためのヘルパー。
@@ -10,8 +12,6 @@ import "server-only";
  * - 呼び出し側は null を「サーバー snapshot なし」として扱い、従来通り
  *   クライアント側 fetch のみで描画する（今までの挙動に完全フォールバック）。
  */
-
-const BACKEND_URL = process.env.BACKEND_URL ?? "http://localhost:5000";
 
 /** ここでのサーバー fetch はどれもトップ/一覧の初期表示用。重い予測(forecast)は含めないため短めでよい。 */
 const SNAPSHOT_TIMEOUT_MS = 2500;
@@ -24,7 +24,7 @@ export async function fetchBackendSnapshot<T>(
   path: string,
   revalidateSeconds: number,
 ): Promise<T | null> {
-  const base = BACKEND_URL.replace(/\/+$/, "");
+  const base = getBackendBaseUrl();
   const url = `${base}${path}`;
 
   try {
