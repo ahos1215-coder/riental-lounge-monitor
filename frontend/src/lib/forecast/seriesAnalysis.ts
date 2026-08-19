@@ -71,19 +71,14 @@ export function buildSeries(
   for (const p of sortedForecasts) {
     if (!p.ts) continue;
     const t = new Date(p.ts).getTime();
-    // 「過去の予測は残さない」判定は ts の値（絶対時刻）で行う。
+    // 予測点は基本的に夜全体で値を残す（過去区間も点線を描く）。
     //
-    // バグ修正: 以前はこの keepForecast を「同一 ts の実測が map に既に居る場合
-    // （existing）」にしか適用していなかった。しかし本番の ts は
-    //   実測 /api/range          : "2026-08-18T19:55:22.571678+00:00"（秒・マイクロ秒付き・UTC）
-    //   予測 /api/forecast_today : "2026-08-19T19:00:00+09:00"（15分グリッド・JST）
-    // と粒度もオフセット表記も異なり文字列キーが一度も一致しないため、過去区間の予測は
-    // 常に else 分岐に落ちて値付きのまま残っていた。結果、進行中の夜の
-    // pickPeak（menActual ?? menForecast）が「もう外れたと分かっている過去の予測」を
-    // ピークとして拾い、SSR 本文とチップに起きなかった数字が出ていた。
-    //
-    // 実測が 1 点も無い場合（開店前・収集停止中など）は lastActualTime が 0 になるが、
-    // その場合は「過去」の基準が無いので従来どおり全予測を残す（グラフを空にしない）。
+    // 経緯: 2026-08-19 に「最終実測より過去の予測を一律 null にする」修正を入れたが、オーナーから
+    // 「現在時刻より前の予測線も見たい（今夜これまでの予測と実測を並べて見る）」と要望があり、
+    // 表示は元の形（全区間の点線）に戻した。null にするのは従来どおり「同一 ts に実測が居る点」だけ
+    // （本番では実測 ts=秒粒度UTC・予測 ts=15分グリッドJST で一致しないため実質発動しない。
+    //  テストの契約として維持）。「もう外れたと分かっている過去の予測」をピーク目安が拾うバグは
+    // pickPeak 側で防ぐ（実測より過去の予測のみ点をピーク候補から外す）。
     const keepForecast =
       overlayAllForecast || lastActualTime === 0 || t > lastActualTime;
 
@@ -99,13 +94,14 @@ export function buildSeries(
         womenForecast: keepForecast ? womenForecast : null,
       });
     } else {
+      // 実測と同一 ts でない予測点は過去区間でも値を残す（点線を夜全体に描く）
       map.set(p.ts, {
         ts: p.ts,
         label: formatLabel(p.ts),
         menActual: null,
         womenActual: null,
-        menForecast: keepForecast ? menForecast : null,
-        womenForecast: keepForecast ? womenForecast : null,
+        menForecast,
+        womenForecast,
       });
     }
   }
@@ -149,6 +145,16 @@ export function pickPeak(
   options: { actualOnly?: boolean } = {},
 ) {
   const actualOnly = options.actualOnly ?? false;
+  // 進行中の夜（actualOnly=false）: 「最終実測より過去」の予測のみ点は、もう外れたと分かっている
+  // 予測なのでピーク候補から外す（グラフの点線としては残す。buildSeries 参照）。
+  // 実測 ts（秒粒度・UTC）と予測 ts（15分グリッド・JST）は文字列が一致しないため、絶対時刻で比較する。
+  let lastActualTime = 0;
+  for (const p of series) {
+    if (p.menActual !== null || p.womenActual !== null) {
+      const t = new Date(p.ts ?? 0).getTime();
+      if (Number.isFinite(t) && t > lastActualTime) lastActualTime = t;
+    }
+  }
   let bestLabel = "";
   let bestTs: string | null = null;
   let bestTotal = 0;
@@ -157,6 +163,15 @@ export function pickPeak(
   series.forEach((p) => {
     // 完了夜の答え合わせでは実測点のみを対象にする（予測点は無視）。
     if (actualOnly && p.menActual === null && p.womenActual === null) return;
+    if (
+      !actualOnly &&
+      p.menActual === null &&
+      p.womenActual === null &&
+      lastActualTime > 0 &&
+      new Date(p.ts ?? 0).getTime() <= lastActualTime
+    ) {
+      return; // 過去の予測のみ点（外れた予測）はピーク候補にしない
+    }
     // actual があればそちらを優先、なければ forecast（二重カウント防止）。
     // actualOnly の場合は forecast へフォールバックせず実測値だけで総数を出す。
     const men = actualOnly ? p.menActual ?? 0 : p.menActual ?? p.menForecast ?? 0;

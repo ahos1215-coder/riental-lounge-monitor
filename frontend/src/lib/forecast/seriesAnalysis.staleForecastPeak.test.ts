@@ -74,16 +74,17 @@ describe("buildSeries — 本番の ts 粒度差でも過去の予測を打ち�
     );
   });
 
-  it("最終実測より過去の予測点は、同一 ts の実測が無くても値が null になる", () => {
+  it("最終実測より過去の予測点も値として残る（点線を夜全体に描く。2026-08-19 オーナー要望で復活）", () => {
     const { actuals, forecasts } = makeInProgressNight();
     const series = buildSeries(actuals, forecasts);
 
     const past2100 = series.find((p) => p.ts === forecastTs(21, 0));
     const past2200 = series.find((p) => p.ts === forecastTs(22, 0));
-    expect(past2100?.menForecast).toBeNull();
-    expect(past2100?.womenForecast).toBeNull();
-    expect(past2200?.menForecast).toBeNull();
-    expect(past2200?.womenForecast).toBeNull();
+    expect(past2100?.menForecast).not.toBeNull();
+    expect(past2100?.womenForecast).not.toBeNull();
+    expect(past2200?.menForecast).not.toBeNull();
+    expect(past2200?.womenForecast).not.toBeNull();
+    // ただしピーク目安はそれらを拾わない（次の describe で固定）
   });
 
   it("最終実測より未来の予測点は従来どおり残る（点線が消えない）", () => {
