@@ -21,15 +21,15 @@ _FORECAST_CACHE_MAX_ENTRIES = int(os.getenv("FORECAST_CACHE_MAX_ENTRIES", "120")
 
 from ..ml.forecast_service import ForecastService
 from ..ml.megribi_score import megribi_score as calc_megribi_score
-from ..utils.stores import SLUG_TO_ID
+from ..utils.stores import MAX_MULTI_STORES, parse_store_slugs
 from ._cache import SingleFlightTTLCache
 from .common import get_config as _config, get_supabase_provider, resolve_store_id
 
 bp = Blueprint("forecast", __name__, url_prefix="/api")
 
-# マルチストア系エンドポイントの上限。既知の全店舗数（42店舗）を下回らないようにする。
-# DoS 対策は SLUG_TO_ID による既知 slug のみのフィルタリングとレート制限で担保する。
-MAX_MULTI_STORES = len(SLUG_TO_ID)
+# MAX_MULTI_STORES と多店舗 slug の解釈（既知フィルタ→重複除去→上限）は
+# utils/stores.py が単一ソース（上の import で従来どおり
+# `forecast.MAX_MULTI_STORES` として参照できる状態を保つ）。
 
 
 def _service() -> ForecastService:
@@ -251,8 +251,7 @@ def forecast_today_multi():
     logger = current_app.logger
 
     raw_stores = request.args.get("stores") or ""
-    slugs = [s.strip().lower() for s in raw_stores.split(",") if s.strip()]
-    valid = [(s, SLUG_TO_ID[s]) for s in slugs if s in SLUG_TO_ID][:MAX_MULTI_STORES]
+    valid = parse_store_slugs(raw_stores, max_stores=MAX_MULTI_STORES)
 
     if not valid:
         return jsonify({"ok": False, "error": "no-valid-stores"}), 422
@@ -339,11 +338,12 @@ def api_megribi_score():
     multi = request.args.get("stores")
 
     if single:
-        slugs = [single.strip().lower()]
+        # ?store= は1店舗ぶんのトークン（カンマ区切りとして解釈しない）ので list で渡す。
+        raw_slugs: str | list[str] = [single]
     elif multi:
-        slugs = [s.strip().lower() for s in multi.split(",") if s.strip()]
+        raw_slugs = multi
     else:
-        slugs = list(SLUG_TO_ID.keys())
+        raw_slugs = list(SLUG_TO_ID.keys())
 
     backend = (cfg.data_backend or "legacy").lower()
     if backend != "supabase" or not (cfg.supabase_url and cfg.supabase_service_role_key):
@@ -353,7 +353,7 @@ def api_megribi_score():
     if provider is None:
         return jsonify({"ok": False, "error": "supabase-unavailable"}), 502
 
-    valid_slugs = [(s, SLUG_TO_ID[s]) for s in slugs[:MAX_MULTI_STORES] if s in SLUG_TO_ID]
+    valid_slugs = parse_store_slugs(raw_slugs, max_stores=MAX_MULTI_STORES)
 
     def _fetch_one(slug: str, store_id: str):
         rows = provider.fetch_range(store_id=store_id, limit=1)

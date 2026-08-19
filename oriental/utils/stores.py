@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Tuple
+from typing import Iterable, Tuple
 
 # 全ブランドの store_id / capacity / lat・lon の単一ソース。oriental/ 内でこのファイルを
 # 読むのは下の load_stores_rows() だけ（読み手が増えると新店追加時の見落としが増えるため）。
@@ -86,8 +86,8 @@ _FALLBACK_AISEKIYA_STORE_IDS = [
 
 
 # stores.json から STORE_IDS / AISEKIYA_STORE_IDS を導出する。stores.json の並び順を
-# そのまま保持する（build_templates.py の ALL_STORE_IDS 走査や forecast.py の
-# `slugs[:MAX_MULTI_STORES]` 切り詰めなど、下流が反復順に依存しているため）。
+# そのまま保持する（build_templates.py の ALL_STORE_IDS 走査や parse_store_slugs()
+# の上限打ち切りなど、下流が反復順に依存しているため）。
 # 読み込み失敗・JSON 不正・どちらか一方でも空になった場合は上の _FALLBACK_* にフォールバック
 # する（新規追加漏れで static list が古いままでも、少なくとも起動時に落ちたり
 # 空リストで全店解決不能になったりしない）。
@@ -133,6 +133,52 @@ AISEKIYA_TOTAL_CAPACITY = _load_aisekiya_total_capacity()
 #  - 相席屋: slug == store_id ("ay_ueno") -> "ay_ueno"
 SLUG_TO_ID = {sid.split("ol_", 1)[-1]: sid for sid in STORE_IDS}
 SLUG_TO_ID.update({sid: sid for sid in AISEKIYA_STORE_IDS})
+
+# マルチ店舗系エンドポイント（?stores=slug1,slug2,...）が一度に受け付ける上限。
+# 既知の全店舗数（42店舗）を下回らないようにする（全店指定を切り捨てないため）。
+# DoS 対策は「既知 slug のみ通す」フィルタとレート制限で担保する。
+MAX_MULTI_STORES = len(SLUG_TO_ID)
+
+
+def parse_store_slugs(
+    raw: str | Iterable[str] | None,
+    *,
+    max_stores: int = MAX_MULTI_STORES,
+) -> list[Tuple[str, str]]:
+    """`stores=slug1,slug2,...` を (slug, store_id) の列へ正規化する。
+
+    マルチ店舗系エンドポイント（/api/range_multi, /api/forecast_today_multi,
+    /api/megribi_score）の共通入口。処理順は
+    「小文字化 → 既知 slug のみ残す → 重複除去 → 上限で打ち切り」で固定する:
+
+    - フィルタより先に上限を適用すると、不正 slug が大量に並んだときに末尾の
+      正当な slug が落ちる（旧 megribi_score の挙動）。
+    - 重複除去をしないと、同じ店舗を2回計算する／レスポンスに同じ店舗が2つ並ぶ
+      （旧 forecast_today_multi / megribi_score の挙動）。
+
+    入力順は保持する（下流のスレッド起動順・レスポンス順が入力順に依存するため）。
+    """
+    if raw is None:
+        tokens: list[str] = []
+    elif isinstance(raw, str):
+        tokens = raw.split(",")
+    else:
+        tokens = list(raw)
+
+    seen: set[str] = set()
+    out: list[Tuple[str, str]] = []
+    for part in tokens:
+        slug = part.strip().lower()
+        if not slug or slug in seen:
+            continue
+        store_id = SLUG_TO_ID.get(slug)
+        if store_id is None:
+            continue
+        seen.add(slug)
+        out.append((slug, store_id))
+        if len(out) >= max_stores:
+            break
+    return out
 
 
 def resolve_store_identifier_strict(raw: str | None) -> Tuple[str, str] | None:

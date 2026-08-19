@@ -19,7 +19,7 @@ from ..config import AppConfig
 from ..data.provider import SupabaseError, SupabaseLogsProvider
 from ..utils import storage, timeutil
 from ..utils.log import format_payload
-from ..utils.stores import SLUG_TO_ID
+from ..utils.stores import MAX_MULTI_STORES, SLUG_TO_ID, parse_store_slugs
 from ._cache import SingleFlightTTLCache
 from .common import (
     get_config as _config,
@@ -30,9 +30,9 @@ from .data import bp
 
 _supabase_provider = get_supabase_provider
 
-# マルチストア系エンドポイントの上限。既知の全店舗数（42店舗）を下回らないようにする。
-# DoS 対策は SLUG_TO_ID による既知 slug のみのフィルタリングとレート制限で担保する。
-MAX_MULTI_STORES = len(SLUG_TO_ID)
+# MAX_MULTI_STORES と多店舗 slug の解釈（既知フィルタ→重複除去→上限）は
+# utils/stores.py が単一ソース（上の import で従来どおり
+# `data_range.MAX_MULTI_STORES` として参照できる状態を保つ）。
 
 # /api/range, /api/range_multi の in-process キャッシュ TTL（秒）。
 # 実測データは5分おきにしか更新されないため、120秒は鮮度と負荷軽減のバランスが良い
@@ -257,22 +257,6 @@ def api_range():
     return jsonify(body)
 
 
-def _parse_multi_store_slugs(raw: str, *, max_stores: int) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for part in raw.split(","):
-        tok = part.strip().lower()
-        if not tok or tok not in SLUG_TO_ID:
-            continue
-        if tok in seen:
-            continue
-        seen.add(tok)
-        out.append(tok)
-        if len(out) >= max_stores:
-            break
-    return out
-
-
 @bp.get("/api/range_multi")
 def api_range_multi():
     """複数店舗の range を1リクエストで返す（Supabase backend のみ）。"""
@@ -310,7 +294,7 @@ def api_range_multi():
         return jsonify({"ok": False, "error": "supabase-unavailable"}), 502
 
     raw_stores = request.args.get("stores") or ""
-    slugs = _parse_multi_store_slugs(raw_stores, max_stores=MAX_MULTI_STORES)
+    slugs = [slug for slug, _ in parse_store_slugs(raw_stores, max_stores=MAX_MULTI_STORES)]
     if not slugs:
         return (
             jsonify(
