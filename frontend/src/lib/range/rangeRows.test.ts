@@ -5,6 +5,7 @@
 // **旧実装と同じ値**を返すことを固定する（0 と null の取り違えは表示に直結する）。
 import { describe, expect, it } from "vitest";
 import {
+  latestCountsOrZero,
   parseRangeEnvelope,
   pickLatestRow,
   rowTotalOrNull,
@@ -183,5 +184,56 @@ describe("rangeRows — 旧実装との値等価（番犬）", () => {
     // 【意図的な差分】旧 parseRangePoints は配列直返しを見ておらず常に [] を返していた。
     // /api/range は必ず {ok, rows} 封筒なので本番の応答形では差が出ない（空表示 → 表示可能になる方向）。
     expect(parseRangePoints([ROW_A, ROW_NO_TS])).toEqual([ROW_A]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 番犬（Wave3）: 「最新行 → menNow / womenNow / nowTotal」の 3 行は app 層 4 箇所
+// （mypage-client / store/[id]/StorePageClient / stores/page / stores-list-client）に
+// バイト同一でコピーされていた。latestCountsOrZero へ寄せる前に、旧 3 行と 1 ビットも
+// 違わないことを固定する。NaN も含めて同じであること（＝ toNonNegIntOrNull へは寄せない）。
+// ---------------------------------------------------------------------------
+
+/** 旧 app 層 4 箇所の 3 行（写経。整えないこと） */
+function legacyLatestCounts(current: RangeRow): { men: number; women: number; total: number } {
+  const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
+  const womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
+  const nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
+  return { men: menNow, women: womenNow, total: nowTotal };
+}
+
+describe("latestCountsOrZero は app 層 4 箇所の旧 3 行と同値", () => {
+  const cases: RangeRow[] = [
+    {},
+    { men: 3, women: 4, total: 7 },
+    // total が men+women と食い違う行（本番でも起こり得る）は total を優先＝旧実装と同じ
+    { men: 3, women: 4, total: 99 },
+    { men: 3, women: 4 },
+    { men: 3 },
+    { women: 4 },
+    { total: 5 },
+    { men: null, women: null, total: null },
+    { men: -2, women: 4, total: -1 },
+    { men: 2.4, women: 2.5, total: 4.9 },
+    { men: "3" as unknown as number, women: "4" as unknown as number },
+    { men: "x" as unknown as number },
+    { ts: "2026-08-19T20:00:00Z", men: 1, women: 2, total: 3 },
+  ];
+
+  it("欠損・null・小数・負値・数値文字列で旧実装と一致する", () => {
+    for (const row of cases) {
+      expect(latestCountsOrZero(row), JSON.stringify(row)).toEqual(legacyLatestCounts(row));
+    }
+  });
+
+  it("数値にならない値は旧実装どおり NaN のまま通す（0 に丸めない）", () => {
+    const bad = { men: "x" as unknown as number };
+    expect(Number.isNaN(latestCountsOrZero(bad).men)).toBe(true);
+    expect(Number.isNaN(legacyLatestCounts(bad).men)).toBe(true);
+  });
+
+  it("null/undefined 行は 4 箇所の `pickLatestRangeRow(rows) ?? {}` と同じ扱い（全部 0）", () => {
+    expect(latestCountsOrZero(null)).toEqual({ men: 0, women: 0, total: 0 });
+    expect(latestCountsOrZero(undefined)).toEqual(legacyLatestCounts({}));
   });
 });

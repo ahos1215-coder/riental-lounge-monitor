@@ -16,7 +16,6 @@ import {
   computeNightBaseDate,
   computeNightWindowFromBaseDate,
   computeSelectedNightBaseDate,
-  formatNowHmJst,
   formatYMD,
   hasSeriesData,
   isNightCompleted,
@@ -34,6 +33,7 @@ import {
   assembleStoreSnapshot,
   resolveLatestActualTs,
 } from "@/lib/forecast/assembleSnapshot";
+import { jstHm } from "@/lib/date/jst";
 
 // このフックの利用側（page.tsx を含む）は従来どおり "./useStorePreviewData" から
 // 型を import できるよう、純粋関数モジュールの型を re-export しておく
@@ -352,7 +352,7 @@ export function useStorePreviewData(
             level: baseSnapshotResolved.level,
             recommendation: baseSnapshotResolved.recommendation,
             // hook 側の「予測が合流できた」表示は無条件に現在時刻。page.tsx とは意図的に別物。
-            forecastUpdatedLabel: formatNowHmJst(new Date()),
+            forecastUpdatedLabel: jstHm(new Date()),
             hasData: hasSeriesData(mergedSeries) || baseSnapshotResolved.hasData,
             forecastStatus: "ok",
             latestActualTs: baseSnapshotResolved.latestActualTs,

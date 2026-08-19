@@ -10,8 +10,8 @@ import {
   STORE_CARD_SPARKLINE_POINTS,
   buildActualSparklineFromRange,
   buildGenderSparklineFromRange,
-  parseRangeResponse,
 } from "@/lib/storeCardRangeSparkline";
+import { parseRangeEnvelope, type RangeRow } from "@/lib/range/rangeRows";
 import {
   LastVisitChartSkeleton,
   LastVisitGenderTrendChart,
@@ -140,7 +140,7 @@ export default function HomePage({
         }
         const rangeBody: unknown = await rangeRes.json();
         if (ac.signal.aborted) return;
-        const rangeRows = parseRangeResponse(rangeBody);
+        const rangeRows = parseRangeEnvelope<RangeRow>(rangeBody);
         const genderSparks = buildGenderSparklineFromRange(
           rangeRows,
           STORE_CARD_SPARKLINE_POINTS,

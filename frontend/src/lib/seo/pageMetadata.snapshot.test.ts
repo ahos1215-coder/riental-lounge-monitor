@@ -67,6 +67,7 @@ async function dumpAll(): Promise<Record<string, Dumpable>> {
     ["/reports", "@/app/reports/page"],
     ["/mypage", "@/app/mypage/page"],
     ["/compare", "@/app/compare/page"],
+    ["/blog", "@/app/blog/page"],
   ];
   for (const [key, mod] of statics) {
     const m = (await import(/* @vite-ignore */ mod)) as { metadata: Metadata };

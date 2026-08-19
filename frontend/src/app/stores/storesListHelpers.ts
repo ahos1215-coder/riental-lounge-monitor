@@ -1,7 +1,13 @@
+import { jstHm } from "@/lib/date/jst";
 import { crowdTierFromPeakTotal } from "@/lib/store/crowdThresholds";
 
 export type BrandFilter = "all" | "oriental" | "jis" | "aisekiya";
-export type ForecastPoint = { ts: string; total_pred?: number };
+/**
+ * 一覧ページが /api/forecast_today(_multi) から読む「合計だけの予測行」。
+ * lib/forecast/types.ts の `ForecastPoint`（men_pred/women_pred 込み・ts 任意）とは
+ * 別物なので、同名にして「予測点の型は揃っている」と誤読されないよう名前を分けている。
+ */
+export type ForecastTotalRow = { ts: string; total_pred?: number };
 
 export const BRAND_TABS: { id: BrandFilter; label: string }[] = [
   { id: "all", label: "すべて" },
@@ -12,13 +18,8 @@ export const BRAND_TABS: { id: BrandFilter; label: string }[] = [
 
 export const STORES_PER_PAGE = 12;
 
-export const toHmJst = (iso: string): string =>
-  new Intl.DateTimeFormat("ja-JP", {
-    timeZone: "Asia/Tokyo",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date(iso));
+/** JST の「HH:MM」。実体は lib/date/jst の jstHm（Intl オプションの手書きコピーを増やさない）。 */
+export const toHmJst = (iso: string): string => jstHm(new Date(iso));
 
 // 閾値の数値は lib/store/crowdThresholds.ts（LINE 下書きの crowd_label と共有）。
 // 文言はこの一覧固有（LINE 側は 混み/ほどよい/空き）。

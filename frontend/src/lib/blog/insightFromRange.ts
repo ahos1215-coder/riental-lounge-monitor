@@ -4,7 +4,7 @@
  * 注: .mjs 側は node 単体実行のため TS ライブラリを import できず、日付ヘルパーの
  * 集約対象外（同期漏れではない）。
  */
-import { jstHm, jstYmd } from "@/lib/date/jst";
+import { jstDatePartsOrNull, jstHm, jstYmd } from "@/lib/date/jst";
 import { parseRangeEnvelope } from "@/lib/range/rangeRows";
 import { crowdTierFromPeakTotal } from "@/lib/store/crowdThresholds";
 
@@ -234,14 +234,13 @@ export function collectPointsWithGender(
   return points;
 }
 
+/**
+ * JST の「時」。取れなかったときの 12（＝昼）は LINE 下書きのエディション推定用の
+ * 現行フォールバックで、他所（エリアは null / lib/date/jst は 0）とは違う。
+ * 実装は lib/date/jst に一本化し、フォールバック値だけ各所の現行値を保つ。
+ */
 function hourJST(d: Date): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Tokyo",
-    hour: "numeric",
-    hour12: false,
-  }).formatToParts(d);
-  const h = parts.find((p) => p.type === "hour")?.value;
-  return h != null ? parseInt(h, 10) : 12;
+  return jstDatePartsOrNull(d)?.hour ?? 12;
 }
 
 /** JST の現在時刻からエディション推定（LINE 手動テスト時も利用） */

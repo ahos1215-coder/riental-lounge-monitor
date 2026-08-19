@@ -155,6 +155,9 @@ export function parseForecastPoints(raw: unknown): ForecastPoint[] {
 }
 
 // ---- re-export: 日付/JST/夜窓の純粋関数（frontend/src/lib/date/nightWindow.ts へ移設） ----
+// 既存 import パスの互換のためのバレル。**新規コードは lib 側から直接 import すること**
+// （ここを経由すると「app/hooks にロジックがある」と誤読され、components → app/hooks の
+// 逆転依存が再発する）。formatNowHmJst は jstHm の非推奨別名。
 export {
   formatYMD,
   addDays,

@@ -16,15 +16,19 @@ import {
   STORE_CARD_SPARKLINE_POINTS,
   buildActualSparklineSeriesFromRange,
   buildGenderSparklineSeriesFromRange,
-  parseRangeResponse,
-  pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
+import {
+  latestCountsOrZero,
+  parseRangeEnvelope,
+  pickLatestRow,
+  type RangeRow,
+} from "@/lib/range/rangeRows";
 import {
   STORES_PER_PAGE,
   crowdLabelFromPred,
   toHmJst,
   type BrandFilter,
-  type ForecastPoint,
+  type ForecastTotalRow,
 } from "./storesListHelpers";
 import { StoresFilterBar } from "./StoresFilterBar";
 import { StoresPagination } from "./StoresPagination";
@@ -212,10 +216,10 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
 
     void (async () => {
       const slugsCsv = targets.map((t) => t.slug).join(",");
-      type ForecastBatchBody = { ok?: boolean; by_slug?: Record<string, { data?: ForecastPoint[] }> };
+      type ForecastBatchBody = { ok?: boolean; by_slug?: Record<string, { data?: ForecastTotalRow[] }> };
       type RangeBatchResult = {
         ok: boolean;
-        bySlug: Map<string, ReturnType<typeof parseRangeResponse>>;
+        bySlug: Map<string, RangeRow[]>;
       };
 
       // ① range_multi・forecast_today_multi・megribi_score を完全並列で発火する。
@@ -237,10 +241,10 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
           if (!j?.ok || !j?.by_slug || typeof j.by_slug !== "object") {
             return { ok: false, bySlug: new Map() };
           }
-          const bySlug = new Map<string, ReturnType<typeof parseRangeResponse>>();
+          const bySlug = new Map<string, RangeRow[]>();
           for (const s of targets) {
             const rows = j.by_slug[s.slug]?.rows ?? [];
-            bySlug.set(s.slug, parseRangeResponse({ rows }));
+            bySlug.set(s.slug, parseRangeEnvelope<RangeRow>({ rows }));
           }
           return { ok: true, bySlug };
         })
@@ -307,7 +311,7 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
         try {
           const rangeMulti = await rangeMultiPromise;
           if (signal.aborted) return;
-          let rangeRows: ReturnType<typeof parseRangeResponse>;
+          let rangeRows: RangeRow[];
           if (rangeMulti.ok && rangeMulti.bySlug.has(store.slug)) {
             rangeRows = rangeMulti.bySlug.get(store.slug)!;
           } else {
@@ -320,7 +324,7 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
             if (!rangeRes.ok) return;
             const rangeBody: unknown = await rangeRes.json();
             if (signal.aborted) return;
-            rangeRows = parseRangeResponse(rangeBody);
+            rangeRows = parseRangeEnvelope<RangeRow>(rangeBody);
           }
 
           const actualSeries = buildActualSparklineSeriesFromRange(
@@ -336,10 +340,8 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
           sparklineMen = genderSparks.men;
           sparklineWomen = genderSparks.women;
           sparklineGenderTimes = genderSparks.times;
-          const current = pickLatestRangeRow(rangeRows) ?? {};
-          menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
-          womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
-          nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
+          const current = pickLatestRow(rangeRows) ?? {};
+          ({ men: menNow, women: womenNow, total: nowTotal } = latestCountsOrZero(current));
           latestActualTs = typeof current.ts === "string" ? current.ts : null;
 
           const partialCard: StoreRealtimeCard = {
@@ -369,7 +371,7 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
 
         try {
           // バッチ forecast（並列発火済み）を待って使う。バッチ失敗時のみ個別フォールバック。
-          let forecastRows: ForecastPoint[] = [];
+          let forecastRows: ForecastTotalRow[] = [];
           const batchBody = await forecastBatchPromise;
           if (signal.aborted) return;
           const batchData = batchBody?.by_slug?.[store.slug]?.data;
@@ -383,7 +385,7 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
             ).catch(() => null);
             if (signal.aborted) return;
             if (fallbackRes?.ok) {
-              const fb = (await fallbackRes.json().catch(() => ({}))) as { data?: ForecastPoint[] };
+              const fb = (await fallbackRes.json().catch(() => ({}))) as { data?: ForecastTotalRow[] };
               forecastRows = Array.isArray(fb?.data) ? fb.data : [];
             }
           }

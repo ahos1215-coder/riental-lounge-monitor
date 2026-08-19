@@ -17,13 +17,18 @@ import {
   type StoreMeta,
 } from "@/app/config/stores";
 import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
+import { jstHm } from "@/lib/date/jst";
 import {
   STORE_CARD_RANGE_LIMIT,
   STORE_CARD_SPARKLINE_POINTS,
   buildGenderSparklineFromRange,
-  parseRangeResponse,
-  pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
+import {
+  latestCountsOrZero,
+  parseRangeEnvelope,
+  pickLatestRow,
+  type RangeRow,
+} from "@/lib/range/rangeRows";
 import { staleFreshnessLabel } from "@/components/StoreCard";
 
 type MegribiScoreItem = {
@@ -113,9 +118,7 @@ export default function MyPageClient() {
     (async () => {
       const fmt = (iso: string) => {
         try {
-          return new Intl.DateTimeFormat("ja-JP", {
-            timeZone: "Asia/Tokyo", hour: "2-digit", minute: "2-digit", hour12: false,
-          }).format(new Date(iso));
+          return jstHm(new Date(iso));
         } catch { return "--:--"; }
       };
 
@@ -154,13 +157,12 @@ export default function MyPageClient() {
           if (rangeResult.status === "fulfilled" && rangeResult.value.ok) {
             try {
               const rangeBody: unknown = await rangeResult.value.json();
-              const rangeRows = parseRangeResponse(rangeBody);
-              const current = pickLatestRangeRow(rangeRows) ?? {};
-              const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
-              const womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
+              const rangeRows = parseRangeEnvelope<RangeRow>(rangeBody);
+              const current = pickLatestRow(rangeRows) ?? {};
+              const { men: menNow, women: womenNow, total: nowTotal } = latestCountsOrZero(current);
               base.men = menNow;
               base.women = womenNow;
-              base.total = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
+              base.total = nowTotal;
               base.genderRatio = `${menNow}:${womenNow}`;
               base.latestActualTs = typeof current.ts === "string" ? current.ts : null;
               const gs = buildGenderSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);

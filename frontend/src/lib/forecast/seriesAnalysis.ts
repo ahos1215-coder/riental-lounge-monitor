@@ -9,9 +9,8 @@
 // components からの参照が components → app/hooks という逆転依存を生んでいた。
 // ロジックを変更せず本モジュールへ機械的に移設する
 // （storePreviewSnapshot.ts は re-export バレルとしてこれらを再公開する）。
-import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
+import { isPercentCrowdBrand, seatFullnessPercentOfTotal } from "@/app/config/stores";
 import { jstHm } from "@/lib/date/jst";
-import { formatNowHmJst } from "@/lib/date/nightWindow";
 import type {
   ForecastPoint,
   RangePoint,
@@ -265,8 +264,8 @@ export function peakProgressChip(
 
   // 進行中でこれからピーク → 従来どおり残り目安を出す。
   if (percentMode) {
-    const peakPct = seatFullnessPercent(peak, cap * 2) ?? 0;
-    const nowPct = seatFullnessPercent(total, cap * 2) ?? 0;
+    const peakPct = seatFullnessPercentOfTotal(peak, cap) ?? 0;
+    const nowPct = seatFullnessPercentOfTotal(total, cap) ?? 0;
     const deltaPct = Math.max(0, peakPct - nowPct);
     if (deltaPct > 0) return `ピークまで あと約${deltaPct}%`;
     return recChip;
@@ -341,7 +340,7 @@ export function computeFreshness(
   // 未来の ts（端末時計のズレ）は 0 分前として扱う（負数を出さない）。
   const minutesAgo = Math.max(0, Math.floor((now.getTime() - t.getTime()) / 60_000));
   if (minutesAgo >= staleThresholdMin) {
-    const asOfLabel = formatNowHmJst(t);
+    const asOfLabel = jstHm(t);
     return { state: "stale", minutesAgo, asOfLabel, label: `最終 ${asOfLabel} 時点` };
   }
   const label = minutesAgo === 0 ? "たった今更新" : `${minutesAgo}分前更新`;

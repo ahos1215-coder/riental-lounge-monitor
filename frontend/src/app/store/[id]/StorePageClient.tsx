@@ -14,9 +14,13 @@ import {
   STORE_CARD_SPARKLINE_POINTS,
   buildActualSparklineFromRange,
   buildGenderSparklineFromRange,
-  parseRangeResponse,
-  pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
+import {
+  latestCountsOrZero,
+  parseRangeEnvelope,
+  pickLatestRow,
+  type RangeRow,
+} from "@/lib/range/rangeRows";
 import { ForecastAccuracyCard } from "@/components/ForecastAccuracyCard";
 import { DEFAULT_STORE, STORES, STORE_REGION_FILTER_ORDER, distanceKm, getStoreMetaBySlugOrDefault, getStoreMetaBySlugStrict } from "../../config/stores";
 import type { StoreSnapshot } from "../../hooks/useStorePreviewData";
@@ -156,11 +160,9 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
         for (const store of digestStores) {
           try {
             const rows = bySlug?.[store.slug]?.rows ?? [];
-            const rangeRows = parseRangeResponse({ rows });
-            const current = pickLatestRangeRow(rangeRows) ?? {};
-            const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
-            const womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
-            const nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
+            const rangeRows = parseRangeEnvelope<RangeRow>({ rows });
+            const current = pickLatestRow(rangeRows) ?? {};
+            const { men: menNow, women: womenNow, total: nowTotal } = latestCountsOrZero(current);
             const genderSparks = buildGenderSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
             const actualTotals = buildActualSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
             mapped[store.slug] = {

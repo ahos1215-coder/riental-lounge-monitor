@@ -5,7 +5,11 @@ import { useEffect, useState } from "react";
 
 import type { StoreSnapshot } from "@/app/hooks/useStorePreviewData";
 import { peakProgressChip } from "@/lib/forecast/seriesAnalysis";
-import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
+import {
+  isPercentCrowdBrand,
+  seatFullnessPercent,
+  seatFullnessPercentOfTotal,
+} from "@/app/config/stores";
 
 type Payload =
   | { ok: true; hasData: false }
@@ -28,7 +32,7 @@ function mlHighlightChips(snapshot: StoreSnapshot, now: Date = new Date()): stri
       const pw = snapshot.peakWomen != null ? seatFullnessPercent(Math.round(snapshot.peakWomen), cap) : null;
       const detail = pm != null || pw != null
         ? `男性${pm ?? 0}% / 女性${pw ?? 0}%`
-        : `最大 席埋まり 約${seatFullnessPercent(peak, cap * 2) ?? 0}%`;
+        : `最大 席埋まり 約${seatFullnessPercentOfTotal(peak, cap) ?? 0}%`;
       chips.push(`ピーク目安 ${peakTime}（${detail}）`);
     } else {
       const pm = snapshot.peakMen != null ? Math.round(snapshot.peakMen) : null;

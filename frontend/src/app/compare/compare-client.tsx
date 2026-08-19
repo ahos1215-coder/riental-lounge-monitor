@@ -5,6 +5,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
+import { jstHm } from "@/lib/date/jst";
+// /api/range 行の扱い（型・最新行・行合計）は lib/range が正本。
+// 比較ページだけ「最新行＝配列末尾」「合計＝men+women（total 列を無視）」という
+// 独自実装が残っており、順不同や total だけの行で他ページと違う値を出していた。
+import { pickLatestRow, rowTotalOrNull, type RangeRow } from "@/lib/range/rangeRows";
+import type { ForecastPoint } from "@/lib/forecast/types";
 import { track } from "@/lib/analytics";
 import {
   STORES,
@@ -33,18 +39,6 @@ const CompareChart = dynamic(() => import("./CompareChart"), {
 
 const MAX_COMPARE = 3;
 
-type RangeRow = {
-  ts?: string;
-  men?: number;
-  women?: number;
-  total?: number;
-};
-
-type ForecastRow = {
-  ts?: string;
-  total_pred?: number;
-};
-
 type StoreData = {
   slug: string;
   label: string;
@@ -65,14 +59,10 @@ const COLORS = ["#818cf8", "#f472b6", "#34d399"];
 
 function formatTime(ts: number): string {
   try {
-    const d = new Date(ts);
-    return d.toLocaleTimeString("ja-JP", {
-      timeZone: "Asia/Tokyo",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
+    return jstHm(new Date(ts));
   } catch {
+    // 旧実装（Date.toLocaleTimeString）は不正な時刻で "Invalid Date" を返していたが、
+    // Intl.DateTimeFormat は throw する。X 軸ラベルなので空文字に倒す。
     return "";
   }
 }
@@ -211,7 +201,7 @@ export default function CompareClient() {
           const rows: RangeRow[] = Array.isArray(rangeData?.by_slug?.[slug]?.rows)
             ? rangeData.by_slug[slug].rows
             : [];
-          const latest = rows[rows.length - 1];
+          const latest = pickLatestRow(rows);
           const men = latest?.men ?? 0;
           const women = latest?.women ?? 0;
 
@@ -224,16 +214,16 @@ export default function CompareClient() {
 
           const sparkline = rows
             .filter((r): r is RangeRow & { ts: string } => Boolean(r.ts))
-            .map((r) => ({ ts: new Date(r.ts!).getTime(), total: toSeries((r.men ?? 0) + (r.women ?? 0)) }));
+            .map((r) => ({ ts: new Date(r.ts).getTime(), total: toSeries(rowTotalOrNull(r) ?? 0) }));
 
-          const forecastRows: ForecastRow[] = Array.isArray(forecastData?.by_slug?.[slug]?.data)
+          const forecastRows: ForecastPoint[] = Array.isArray(forecastData?.by_slug?.[slug]?.data)
             ? forecastData.by_slug[slug].data
             : [];
           // total_pred が null の行（履歴データ不足で予測不能な店舗）は除外する。
           // 0 埋めすると「今夜ずっと0人」の平坦な予測ラインとして誤表示されるため。
           const forecastPoints = forecastRows
             .filter(
-              (r): r is ForecastRow & { ts: string; total_pred: number } =>
+              (r): r is ForecastPoint & { ts: string; total_pred: number } =>
                 Boolean(r.ts) && typeof r.total_pred === "number",
             )
             .map((r) => ({ ts: new Date(r.ts).getTime(), total: toSeries(r.total_pred) }));
@@ -248,7 +238,7 @@ export default function CompareClient() {
             capacity: meta?.capacity ?? null,
             menCount: men,
             womenCount: women,
-            total: men + women,
+            total: rowTotalOrNull(latest ?? {}) ?? 0,
             genderRatio: genderRatioLabel(men, women),
             sparkline,
             forecast: forecastPoints,

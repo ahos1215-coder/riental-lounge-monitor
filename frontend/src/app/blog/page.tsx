@@ -1,4 +1,3 @@
-import type { Metadata } from "next";
 import Link from "next/link";
 
 import {
@@ -8,30 +7,18 @@ import {
   isCategoryId,
   type BlogCategoryId,
 } from "@/lib/blog/content";
-import { getMetadataBaseUrl } from "@/lib/siteUrl";
+import { buildPageMetadata } from "@/lib/seo/pageMetadata";
 import { STORES } from "../config/stores";
 
-const blogBase = getMetadataBaseUrl();
-
-export const metadata: Metadata = {
+// canonical 無しは現状維持（付けるかはオーナー判断）。出力は
+// src/lib/seo/__snapshots__/pageMetadata.dump.json の "/blog" で固定している。
+export const metadata = buildPageMetadata({
   title: "ブログ",
   description:
     "相席系ラウンジ・バーの攻略や夜の楽しみ方、混雑傾向の読み方をわかりやすく解説します。",
-  openGraph: {
-    title: "ブログ | めぐりび",
-    description:
-      "相席系ラウンジ・バーの攻略や夜の楽しみ方、混雑傾向の読み方をわかりやすく解説します。",
-    url: new URL("/blog", blogBase),
-    type: "website",
-    locale: "ja_JP",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "ブログ | めぐりび",
-    description:
-      "相席系ラウンジ・バーの攻略や夜の楽しみ方、混雑傾向の読み方をわかりやすく解説します。",
-  },
-};
+  path: "/blog",
+  canonical: false,
+});
 
 type SearchParams = Record<string, string | string[] | undefined>;
 

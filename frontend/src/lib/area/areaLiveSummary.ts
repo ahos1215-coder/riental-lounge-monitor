@@ -31,12 +31,12 @@ import {
 import {
   computeNightBaseDate,
   computeNightWindowFromBaseDate,
-  formatNowHmJst,
   isNightCompleted,
   isWithinNight,
 } from "@/lib/date/nightWindow";
-import { orderedRangeRows, type StoreCardRangeRow } from "@/lib/storeCardRangeSparkline";
-import { rowTotalOrNull, toNonNegIntOrNull } from "@/lib/range/rangeRows";
+import { orderedRangeRows } from "@/lib/storeCardRangeSparkline";
+import { jstDatePartsOrNull, jstHm } from "@/lib/date/jst";
+import { rowTotalOrNull, toNonNegIntOrNull, type RangeRow } from "@/lib/range/rangeRows";
 import { MIN_HOURLY_BUCKETS, rollUpByNightHour } from "@/lib/store/nightHourlyRollup";
 
 // 時間帯別ロールアップと最小バケット数は lib/store/nightHourlyRollup.ts が正本
@@ -70,27 +70,25 @@ export type AreaLiveSummary = {
 const toInt = toNonNegIntOrNull;
 
 /** エリア集計は「値なしの行」も 0 人として足す（店舗カードは null のまま扱う＝既存の差）。 */
-function rowTotal(r: StoreCardRangeRow): number {
+function rowTotal(r: RangeRow): number {
   return rowTotalOrNull(r) ?? 0;
 }
 
+/**
+ * JST の「時」。取れなかったときの null（＝判定不能）はエリア表示の現行フォールバックで、
+ * 他所（LINE 下書きは 12 / lib/date/jst は 0）とは違う。実装は lib/date/jst に一本化し、
+ * フォールバック値だけ現行値を保つ。
+ */
 function jstHourOf(ts: string): number | null {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return null;
-  // en-CA: 「20時」のような接尾辞が付かず数字だけ得られる（ja-JP だと "20時" になり Number() が NaN）
-  const hh = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Tokyo",
-    hour: "2-digit",
-    hourCycle: "h23",
-  }).format(d);
-  const n = Number(hh);
-  return Number.isFinite(n) ? n : null;
+  return jstDatePartsOrNull(d)?.hour ?? null;
 }
 
 function hmJst(ts: string | undefined): string | null {
   if (!ts) return null;
   const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? null : formatNowHmJst(d);
+  return Number.isNaN(d.getTime()) ? null : jstHm(d);
 }
 
 /**
@@ -101,7 +99,7 @@ function hmJst(ts: string | undefined): string | null {
  */
 export function buildAreaStoreLiveLine(
   store: StoreMeta,
-  rows: readonly StoreCardRangeRow[],
+  rows: readonly RangeRow[],
   window: { start: Date; end: Date },
   completed: boolean,
 ): AreaStoreLiveLine | null {
@@ -202,7 +200,7 @@ function formatNightMd(baseDate: Date): string {
  */
 export function buildAreaLiveSummary(
   stores: readonly StoreMeta[],
-  bySlug: Readonly<Record<string, readonly StoreCardRangeRow[] | undefined>>,
+  bySlug: Readonly<Record<string, readonly RangeRow[] | undefined>>,
   now: Date,
 ): AreaLiveSummary | null {
   const baseDate = computeNightBaseDate(now);

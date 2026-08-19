@@ -82,7 +82,7 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
 | 18:00 / 21:30 | **Daily Report生成** | 【主】Task Scheduler `MEGRIBI-daily-evening`/`-late` → `scripts/local_report_job.py --stores all --edition <evening_preview\|late_update> --mode publish` → ローカル Ollama（`gemma4:e4b`、`localhost:11434`）→ Supabase `blog_drafts` upsert。【緊急時のみ】`.github/workflows/trigger-blog-cron.yml` は `schedule:` コメントアウト済み、`workflow_dispatch`のみ（matrixはオリエンタル37店舗、相席屋5店舗は対象外、Gemini使用） |
 | 18:10 | v2 shadow: 予測スナップショット保存 | 【主】Task Scheduler `MEGRIBI-snapshot` → `scripts/snapshot_forecasts.py` → Storage `ml-models/accuracy/snapshots/<date>.json`。GHA `forecast-accuracy-track.yml` の snapshot cron は 2026-07-18 に削除済み（GHA schedule の遅延で開店後に撮れて汚染したため。`workflow_dispatch` は残る） |
 | 19:00〜23:50・10分毎 | CDN warming（`/api/range`等の温め） | 【主】Task Scheduler `MEGRIBI-warm-cdn` → `scripts/warm_cdn_local.py`。【バックアップ】GHA `warm-cdn.yml`（実測発火率8.3%と低いため保険止まり） |
-| 水曜 06:30 | **Weekly Report生成** | 【主】Task Scheduler `MEGRIBI-weekly` → `run_weekly_local.ps1 -Stores all` → `generate_weekly_insights.py --stores all`（`INSIGHTS_LLM_BACKEND=ollama`）が全42店舗を単一プロセスで処理 → Supabase upsert + `frontend/content/insights/weekly/*.json`。**`index.json` の直接更新は廃止**（読み手が存在しない死蔵ファイルと判明し別バッチ〔weekly-cleanup〕で廃止中）。【緊急時のみ】`generate-weekly-insights.yml`（`workflow_dispatch`, Fan-in Matrix, オリエンタル37店舗のみ, Gemini使用） |
+| 水曜 06:30 | **Weekly Report生成** | 【主】Task Scheduler `MEGRIBI-weekly` → `run_weekly_local.ps1 -Stores all` → `generate_weekly_insights.py --stores all`（`INSIGHTS_LLM_BACKEND=ollama`）が全42店舗を単一プロセスで処理 → Supabase upsert + `frontend/content/insights/weekly/*.json`。**`index.json` は 2026-07-18 に廃止済み**（読み手が存在しない死蔵ファイルだった。`--skip-index` 引数は互換のため受けるだけの no-op）。【緊急時のみ】`generate-weekly-insights.yml`（`workflow_dispatch`, Fan-in Matrix, オリエンタル37店舗のみ, Gemini使用） |
 | 05:30 毎日 | ML再学習（固定パラメータ） | GHA `train-ml-model.yml` → `scripts/train_ml_model.py`。`ALL_STORE_IDS`（42店舗）allow-listでLightGBM学習 → Storage `ml-models/forecast/latest/` |
 | 07:00 月曜 | ML再学習 + Optuna HPO | 同じ `train-ml-model.yml`（cronパターンで分岐。日次はOptunaなし、週次のみHPOあり） |
 | 06:10 | v2 shadow: 前夜の答え合わせ | GHA `forecast-accuracy-track.yml`（mode=score）→ `scripts/score_forecasts.py` → Storage `ml-models/accuracy/scores/<date>.json` + `summary.json` |
@@ -213,13 +213,17 @@ python app.py                # Flask ローカル起動（.env に環境変数�
 | 店舗マスタ（ID/slug/capacity/座標）・`stores=` の解釈 | `oriental/utils/stores.py`（`ALL_STORE_IDS` / `load_stores_rows` / `parse_store_slugs`） |
 | 連休ブロック・夜セッション日付（-6h） | `oriental/ml/holiday_calendar.py`（`off_block_bounds`）/ `oriental/ml/night_type.py` |
 | forecast 応答の形・エラーコード | `routes/forecast.py::_success_body` / `ml/forecast_service.py::_error_result` |
-| バッチ scripts の .env 読み・Storage GET/PUT・REST | `scripts/_supabase_common.py` |
+| バッチ scripts の .env 読み・Supabase 認証ヘッダ/接続情報・Storage GET/PUT（REST 本体は各スクリプト） | `scripts/_supabase_common.py`（`auth_headers` / `supabase_conf` / `load_env` / `storage_get` / `storage_put`） |
+| 夜スロット定数（stdlib 専用・GHA 最小依存ジョブ向け） | `scripts/_night_slots.py` |
 | scripts の slug↔store_id・店舗一覧 | `scripts/_stores_common.py` |
-| scripts の再試行/バックオフ・運用通知(Slack/Discord) | `scripts/_retry_common.py` / `scripts/_ops_notify.py` |
+| scripts の再試行/バックオフ・運用通知(Slack/Discord) | `scripts/_retry_common.py` / `scripts/_ops_notify.py`（※再試行方針は Flask 側 `oriental/clients/http.py`＝500 を再試行しない と意図的に非対称。両 docstring に相互参照） |
 | scripts が oriental の純粋モジュールを最小依存で読む | `scripts/_standalone_import.py` |
 | ローカル LLM（Ollama）呼び出し・facts 取得・SYSTEM・MODEL | `scripts/_ollama_common.py`（daily/weekly 共通） |
 | GHA 監視ジョブの本体 | `scripts/monitor/*.py`（WF は1行で呼ぶだけ） |
-| JST の日付部品・YYYY-MM-DD/HH:MM・夜窓(19時境界)・夜セッション(6時境界) | `frontend/src/lib/date/jst.ts` / `nightWindow.ts` |
+| JST の日付部品・YYYY-MM-DD/HH:MM・夜窓(19時境界)・夜セッション(6時境界) | `frontend/src/lib/date/jst.ts` / `nightWindow.ts`（`storeCardRangeSparkline` 等の旧名は `@deprecated` 別名） |
+| サーバー側（SSR/ISR）からバックエンドを叩く | `frontend/src/lib/serverSnapshot.ts`（`fetchBackendSnapshot`、タイムアウト引数化） |
+| 混雑ラベルの絶対閾値(120/80。判定UIは非表示中だが LINE 下書きで使用) | `frontend/src/lib/store/crowdThresholds.ts` |
+| LINE/公開 facts 用の夜窓集計（TS と mjs の鏡像） | `frontend/src/lib/blog/insightFromRange.ts` ↔ `frontend/scripts/lib/insightCore.mjs`（crossCheck テストが一致を固定） |
 | BACKEND_URL の既定値・Next の /api 透過プロキシ | `frontend/src/lib/backendUrl.ts` / `frontend/src/lib/api/` |
 | ページ metadata（title/description/canonical/OG/Twitter）・OG画像 | `frontend/src/lib/seo/` / `frontend/src/lib/og/` |
 | MDX 前処理（frontmatter 除去・見出し抽出） | `frontend/src/lib/blog/mdx.ts` |

@@ -27,7 +27,7 @@ import {
 import type { StoreSnapshot, TimeSeriesPoint } from "@/lib/forecast/types";
 import { toNonNegIntOrNull } from "@/lib/range/rangeRows";
 import { MIN_HOURLY_BUCKETS, rollUpByNightHour } from "./nightHourlyRollup";
-import { formatNowHmJst } from "@/lib/date/nightWindow";
+import { jstHm } from "@/lib/date/jst";
 
 /** peakTimeLabel / forecastUpdatedLabel が「値なし」を表すときのプレースホルダ */
 const PLACEHOLDER_TIME_LABELS = new Set(["", "-", "—", "--:--", "–"]);
@@ -177,7 +177,7 @@ export function buildStoreSsrSummary(
   let updatedText: string | null = null;
   if (snapshot.latestActualTs) {
     const d = new Date(snapshot.latestActualTs);
-    if (!Number.isNaN(d.getTime())) updatedText = `${formatNowHmJst(d)} 時点`;
+    if (!Number.isNaN(d.getTime())) updatedText = `${jstHm(d)} 時点`;
   }
 
   const buckets = rollUpHourlyActuals(snapshot.series ?? []);

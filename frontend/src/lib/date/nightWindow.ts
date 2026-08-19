@@ -147,7 +147,11 @@ export function isNightCompleted(baseDate: Date, now: Date): boolean {
   return now.getTime() >= window.end.getTime();
 }
 
-/** JST の「HH:MM」。実体は lib/date/jst の jstHm（import 互換のため名前を維持）。 */
+/**
+ * JST の「HH:MM」。実体は lib/date/jst の jstHm。
+ * @deprecated 新規は `import { jstHm } from "@/lib/date/jst"` を使う
+ *   （この別名は import 互換のためだけに残している。同じ関数に2つの名前を増やさない）。
+ */
 export function formatNowHmJst(date: Date): string {
   return jstHm(date);
 }

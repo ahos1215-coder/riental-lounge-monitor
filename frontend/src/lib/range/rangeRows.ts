@@ -18,13 +18,17 @@ export type RangeRow = {
 /**
  * Flask の `{ ok, rows }`・`{ data }`・配列直返しのどれでも行配列を取り出す。
  * 行そのもののフィルタ（ts の有無など）はしない＝呼び出し側の責務。
+ *
+ * 型引数は「取り出した配列をどう見なすか」の宣言だけで、実行時の検証はしない
+ * （旧 storeCardRangeSparkline.parseRangeResponse の `as` と同じ扱い）。
+ * カード系は `parseRangeEnvelope<RangeRow>(body)` と書く。
  */
-export function parseRangeEnvelope(body: unknown): unknown[] {
-  if (Array.isArray(body)) return body;
+export function parseRangeEnvelope<T = unknown>(body: unknown): T[] {
+  if (Array.isArray(body)) return body as T[];
   if (body && typeof body === "object") {
     const o = body as { rows?: unknown; data?: unknown };
-    if (Array.isArray(o.rows)) return o.rows;
-    if (Array.isArray(o.data)) return o.data;
+    if (Array.isArray(o.rows)) return o.rows as T[];
+    if (Array.isArray(o.data)) return o.data as T[];
   }
   return [];
 }
@@ -55,6 +59,28 @@ export function rowTotalOrNull(r: RangeRow): number | null {
   const w = toNonNegIntOrNull(r.women);
   if (m === null && w === null) return null;
   return (m ?? 0) + (w ?? 0);
+}
+
+/**
+ * カードの「いまの人数」3点セット（男 / 女 / 合計）。
+ *
+ * `toNonNegIntOrNull` とは**意図的に別物**なので混同しないこと:
+ *   - こちらは欠損を 0 とみなす（`Number(x ?? 0)`）。カードは必ず数字を出すため。
+ *   - 数値にならない値（真偽値・数値でない文字列）は `Number()` の結果をそのまま通す
+ *     ＝ NaN になり得る。これは app 層 4 箇所（マイページ / 店舗詳細 / 一覧SSR /
+ *     一覧クライアント）に同じ 3 行がコピーされていた既存挙動をそのまま関数にしたもの。
+ *   - `total` が欠損している行だけ men+women で補う（`total` 優先は rowTotalOrNull と同じ）。
+ */
+export function latestCountsOrZero(r: RangeRow | null | undefined): {
+  men: number;
+  women: number;
+  total: number;
+} {
+  const row = r ?? {};
+  const men = Math.max(0, Math.round(Number(row.men ?? 0)));
+  const women = Math.max(0, Math.round(Number(row.women ?? 0)));
+  const total = Math.max(0, Math.round(Number(row.total ?? men + women)));
+  return { men, women, total };
 }
 
 /**

@@ -14,9 +14,13 @@ import {
   STORE_CARD_SPARKLINE_POINTS,
   buildActualSparklineFromRange,
   buildGenderSparklineFromRange,
-  parseRangeResponse,
-  pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
+import {
+  latestCountsOrZero,
+  parseRangeEnvelope,
+  pickLatestRow,
+  type RangeRow,
+} from "@/lib/range/rangeRows";
 
 /** /api/range_multi のCDN TTL(60s)に合わせる。一覧1ページ目の初期表示はこの粒度で十分。 */
 export const revalidate = 60;
@@ -116,16 +120,14 @@ async function fetchInitialStoreCards(): Promise<Record<string, StoreRealtimeCar
     const rows = rangeJson.by_slug[store.slug]?.rows;
     if (!Array.isArray(rows)) continue;
 
-    const rangeRows = parseRangeResponse({ rows });
+    const rangeRows = parseRangeEnvelope<RangeRow>({ rows });
     const actualSparkline = buildActualSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
     const { men: sparklineMen, women: sparklineWomen } = buildGenderSparklineFromRange(
       rangeRows,
       STORE_CARD_SPARKLINE_POINTS,
     );
-    const current = pickLatestRangeRow(rangeRows) ?? {};
-    const menNow = Math.max(0, Math.round(Number(current.men ?? 0)));
-    const womenNow = Math.max(0, Math.round(Number(current.women ?? 0)));
-    const nowTotal = Math.max(0, Math.round(Number(current.total ?? menNow + womenNow)));
+    const current = pickLatestRow(rangeRows) ?? {};
+    const { men: menNow, women: womenNow, total: nowTotal } = latestCountsOrZero(current);
 
     cards[store.slug] = {
       slug: store.slug,

@@ -7,8 +7,8 @@
 
 import {
   JST_TIME_ZONE,
-  NIGHT_SESSION_SHIFT_HOURS,
   jstDatePartsOrNull,
+  nightSessionAnchorUtcMs,
   utcMsToYmd,
 } from "@/lib/date/jst";
 
@@ -26,11 +26,10 @@ const DOW_JA = ["日", "月", "火", "水", "木", "金", "土"] as const;
 export function jstNightSessionDate(now: Date = new Date()): string {
   if (Number.isNaN(now.getTime())) return "";
   try {
-    const p = jstDatePartsOrNull(now);
-    if (!p) return "";
-    // UTC 上で日付演算だけ行う（実行環境のタイムゾーンに影響されないため）
-    const base = Date.UTC(p.year, p.month - 1, p.day);
-    return utcMsToYmd(p.hour < NIGHT_SESSION_SHIFT_HOURS ? base - 86_400_000 : base);
+    // -6h 規約の条件式は lib/date/jst の nightSessionAnchorUtcMs が単一ソース。
+    // ここは「部品が取れなかったら判定不能（空文字）」という呼び出し側の作法だけを持つ。
+    if (!jstDatePartsOrNull(now)) return "";
+    return utcMsToYmd(nightSessionAnchorUtcMs(now));
   } catch {
     return "";
   }

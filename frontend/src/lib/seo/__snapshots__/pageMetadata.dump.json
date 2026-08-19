@@ -76,6 +76,22 @@
    "locale": "ja_JP"
   }
  },
+ "/blog": {
+  "title": "ブログ",
+  "description": "相席系ラウンジ・バーの攻略や夜の楽しみ方、混雑傾向の読み方をわかりやすく解説します。",
+  "openGraph": {
+   "title": "ブログ | めぐりび",
+   "description": "相席系ラウンジ・バーの攻略や夜の楽しみ方、混雑傾向の読み方をわかりやすく解説します。",
+   "url": "http://localhost:3000/blog",
+   "type": "website",
+   "locale": "ja_JP"
+  },
+  "twitter": {
+   "card": "summary_large_image",
+   "title": "ブログ | めぐりび",
+   "description": "相席系ラウンジ・バーの攻略や夜の楽しみ方、混雑傾向の読み方をわかりやすく解説します。"
+  }
+ },
  "/store/nagasaki": {
   "title": "オリエンタルラウンジ長崎の混雑状況｜相席ラウンジの今夜の予測",
   "description": "長崎・浜んまちの相席ラウンジ「オリエンタルラウンジ 長崎」。現在の混雑人数・男女比をリアルタイム表示し、AIが今夜のピーク時間を予測。来店前の下見にどうぞ。",

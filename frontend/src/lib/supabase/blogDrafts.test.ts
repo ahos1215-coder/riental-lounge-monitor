@@ -196,3 +196,160 @@ describe("Supabase REST GET の呼び出し契約（URL・ヘッダ・キャッ�
     expect(await mod.fetchAllPublishedEditorialSlugs()).toEqual([]);
   });
 });
+
+/**
+ * 書き込み経路（PATCH / POST）の契約テスト。
+ *
+ * 背景（2026-08-19 取りこぼし監査）: ヘッダ組み立てを restHeaders(key, "write") に集約したが、
+ * テストは GET 側しか無かった。LINE の editorial 承認（publishEditorial*）と日次/週次の
+ * upsert は本番書き込みで、Prefer: return=representation が落ちると「更新できたのに
+ * public_slug が取れず承認が失敗する」という静かな事故になる。ここで固定する。
+ */
+describe("Supabase REST 書き込みの呼び出し契約（method・Prefer・Content-Type・URL フィルタ）", () => {
+  const originalEnv = { ...process.env };
+  let calls: Array<{ url: string; init: Record<string, unknown> }> = [];
+
+  const WRITE_HEADERS = {
+    apikey: "test-key",
+    Authorization: "Bearer test-key",
+    "Content-Type": "application/json",
+    Prefer: "return=representation",
+  };
+
+  function stubWriteFetch(responses: Array<{ ok: boolean; text: string }>) {
+    let i = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: Record<string, unknown>) => {
+        calls.push({ url, init });
+        const r = responses[Math.min(i, responses.length - 1)];
+        i += 1;
+        return { ok: r.ok, status: r.ok ? 200 : 500, text: async () => r.text } as unknown as Response;
+      }),
+    );
+  }
+
+  beforeEach(() => {
+    calls = [];
+    process.env.SUPABASE_URL = ENDPOINT_ENV.SUPABASE_URL;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = ENDPOINT_ENV.SUPABASE_SERVICE_ROLE_KEY;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("publishEditorialBySlug は public_slug + content_type=editorial で PATCH する", async () => {
+    stubWriteFetch([{ ok: true, text: JSON.stringify([{ public_slug: "my-post" }]) }]);
+    const mod = await import("./blogDrafts");
+    const res = await mod.publishEditorialBySlug("my-post");
+
+    expect(res).toEqual({ ok: true, publicSlug: "my-post" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe(
+      "https://proj.supabase.co/rest/v1/blog_drafts?public_slug=eq.my-post&content_type=eq.editorial",
+    );
+    expect(calls[0].init.method).toBe("PATCH");
+    expect(calls[0].init.headers).toEqual(WRITE_HEADERS);
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ is_published: true });
+  });
+
+  it("publishEditorialByFactsId は facts_id + content_type=editorial で PATCH し public_slug を返す", async () => {
+    stubWriteFetch([{ ok: true, text: JSON.stringify([{ public_slug: "from-row" }]) }]);
+    const mod = await import("./blogDrafts");
+    const res = await mod.publishEditorialByFactsId("2026-08-19_shibuya_editorial");
+
+    expect(res).toEqual({ ok: true, publicSlug: "from-row" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe(
+      "https://proj.supabase.co/rest/v1/blog_drafts?facts_id=eq.2026-08-19_shibuya_editorial&content_type=eq.editorial",
+    );
+    expect(calls[0].init.method).toBe("PATCH");
+    expect(calls[0].init.headers).toEqual(WRITE_HEADERS);
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({ is_published: true });
+  });
+
+  it("insertBlogDraft は facts_id で PATCH → 空配列なら POST にフォールバックする", async () => {
+    // 1回目(PATCH)は「該当行なし」の空配列、2回目(POST)で挿入される。
+    stubWriteFetch([
+      { ok: true, text: "[]" },
+      { ok: true, text: JSON.stringify([{ id: "new-row" }]) },
+    ]);
+    const mod = await import("./blogDrafts");
+    const res = await mod.insertBlogDraft({
+      store_id: "ol_shibuya",
+      store_slug: "shibuya",
+      target_date: "2026-08-19",
+      facts_id: "2026-08-19_shibuya_daily",
+      mdx_content: "# 本文",
+      insight_json: { a: 1 },
+      source: "local_ollama",
+      content_type: "daily",
+      is_published: true,
+    });
+
+    expect(res).toEqual({ ok: true, id: "new-row" });
+    expect(calls).toHaveLength(2);
+
+    // PATCH: facts_id フィルタ付き
+    expect(calls[0].url).toBe(
+      "https://proj.supabase.co/rest/v1/blog_drafts?facts_id=eq.2026-08-19_shibuya_daily",
+    );
+    expect(calls[0].init.method).toBe("PATCH");
+    expect(calls[0].init.headers).toEqual(WRITE_HEADERS);
+
+    // POST: フィルタ無しのエンドポイントそのもの
+    expect(calls[1].url).toBe("https://proj.supabase.co/rest/v1/blog_drafts");
+    expect(calls[1].init.method).toBe("POST");
+    expect(calls[1].init.headers).toEqual(WRITE_HEADERS);
+
+    // 本文は PATCH / POST とも同一で、未指定キーは既定値で埋まる。
+    const patchBody = JSON.parse(String(calls[0].init.body));
+    expect(JSON.parse(String(calls[1].init.body))).toEqual(patchBody);
+    expect(patchBody).toEqual({
+      store_id: "ol_shibuya",
+      store_slug: "shibuya",
+      target_date: "2026-08-19",
+      facts_id: "2026-08-19_shibuya_daily",
+      mdx_content: "# 本文",
+      insight_json: { a: 1 },
+      source: "local_ollama",
+      content_type: "daily",
+      is_published: true,
+      edition: null,
+      public_slug: null,
+      line_user_id: null,
+      error_message: null,
+    });
+  });
+
+  it("PATCH が既存行を返したら POST しない（固定 URL の上書き＝Freshness 優先）", async () => {
+    stubWriteFetch([{ ok: true, text: JSON.stringify([{ id: "row-1" }]) }]);
+    const mod = await import("./blogDrafts");
+    const res = await mod.insertBlogDraft({
+      store_id: "ol_shibuya",
+      store_slug: "shibuya",
+      target_date: "2026-08-19",
+      facts_id: "2026-08-19_shibuya_daily",
+      mdx_content: "# 本文",
+      insight_json: {},
+      source: "local_ollama",
+    });
+    expect(res).toEqual({ ok: true, id: "row-1" });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].init.method).toBe("PATCH");
+  });
+
+  it("Supabase 未設定なら書き込み系は fetch せずエラーを返す", async () => {
+    delete process.env.SUPABASE_URL;
+    delete process.env.SUPABASE_SERVICE_ROLE_KEY;
+    delete process.env.SUPABASE_SERVICE_KEY;
+    stubWriteFetch([{ ok: true, text: "[]" }]);
+    const mod = await import("./blogDrafts");
+    expect((await mod.publishEditorialBySlug("x")).ok).toBe(false);
+    expect((await mod.publishEditorialByFactsId("y")).ok).toBe(false);
+    expect(calls).toHaveLength(0);
+  });
+});

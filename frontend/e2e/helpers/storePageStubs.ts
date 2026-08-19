@@ -1,4 +1,5 @@
 import type { Page } from "../fixtures";
+import { addDays, computeNightBaseDate, formatYMD } from "@/lib/date/nightWindow";
 
 /**
  * 店舗ページ e2e の共通スタブ。
@@ -9,20 +10,11 @@ import type { Page } from "../fixtures";
 
 /**
  * JST 夜日付（YYYY-MM-DD, 19:00 始まり）を N 日前で得る。
- * フロントの computeNightBaseDate と同じ「19時未満なら前日」ロジックを近似する。
+ * 以前は「+9h して UTC の時/日を読む」近似実装だったが、境界時刻でアプリ本体と
+ * ずれ得たため、本体と同じ lib/date/nightWindow の関数をそのまま使う。
  */
 export function jstNightBaseYmd(daysAgo: number): string {
-  const now = new Date();
-  const jst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
-  // 19時未満なら夜日付は前日
-  if (jst.getUTCHours() < 19) {
-    jst.setUTCDate(jst.getUTCDate() - 1);
-  }
-  jst.setUTCDate(jst.getUTCDate() - daysAgo);
-  const y = jst.getUTCFullYear();
-  const m = String(jst.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(jst.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  return formatYMD(addDays(computeNightBaseDate(new Date()), -daysAgo));
 }
 
 /** 指定した夜（19:00 JST 始まり・15分刻み41点）の実測行。 */

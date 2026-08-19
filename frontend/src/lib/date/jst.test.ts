@@ -15,6 +15,7 @@ import {
   jstHm,
   jstYmd,
   nightSessionAnchorUtcMs,
+  utcMsToYmd,
 } from "./jst";
 import { formatNowHmJst } from "./nightWindow";
 import { jstNightSessionDate } from "@/lib/dateFormat";
@@ -211,6 +212,16 @@ describe("jstNightSessionDate（公開関数）は集約前の実装と同じ文
   it("不正な Date は空文字（判定不能フォールバック）", () => {
     expect(jstNightSessionDate(new Date("not-a-date"))).toBe("");
     expect(oldNightSessionDate(new Date("not-a-date"))).toBe("");
+  });
+
+  // Wave3: -6h 規約の条件式が dateFormat.ts にも独立に書かれていた（2箇所）。
+  // jst.ts の部品（nightSessionAnchorUtcMs + utcMsToYmd）で実装し直した後も同じ値であること
+  // ＝「NIGHT_SESSION_SHIFT_HOURS を変えるときに読む場所は1つ」を固定する。
+  it("nightSessionAnchorUtcMs + utcMsToYmd と同じ値（-6h 規約の単一ソース）", () => {
+    for (const iso of BOUNDARY_ISO) {
+      const d = new Date(iso);
+      expect(jstNightSessionDate(d), iso).toBe(utcMsToYmd(nightSessionAnchorUtcMs(d)));
+    }
   });
 });
 

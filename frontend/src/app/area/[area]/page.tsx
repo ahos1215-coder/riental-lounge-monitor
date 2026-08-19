@@ -16,7 +16,7 @@ import {
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { buildPageMetadata } from "@/lib/seo/pageMetadata";
 import { fetchBackendSnapshot } from "@/lib/serverSnapshot";
-import { parseRangeResponse } from "@/lib/storeCardRangeSparkline";
+import { parseRangeEnvelope, type RangeRow } from "@/lib/range/rangeRows";
 import { buildAreaLiveSummary, type AreaLiveSummary } from "@/lib/area/areaLiveSummary";
 import { RANGE_LIMIT_BY_MODE } from "@/app/hooks/storePreviewSnapshot";
 import { addDays, computeNightBaseDate, formatYMD } from "@/lib/date/nightWindow";
@@ -126,7 +126,7 @@ async function fetchAreaLive(stores: StoreMeta[]): Promise<AreaLiveSummary | nul
     `/api/range?store=${encodeURIComponent(slug)}` +
     `&from=${encodeURIComponent(fromYmd)}&to=${encodeURIComponent(toYmd)}&limit=${limit}`;
 
-  const bySlug: Record<string, ReturnType<typeof parseRangeResponse>> = {};
+  const bySlug: Record<string, RangeRow[]> = {};
   const collect = async (targets: StoreMeta[]): Promise<StoreMeta[]> => {
     const results = await Promise.all(
       targets.map((store) =>
@@ -142,7 +142,7 @@ async function fetchAreaLive(stores: StoreMeta[]): Promise<AreaLiveSummary | nul
         continue;
       }
       if ((json as { ok?: boolean }).ok === false) continue;
-      bySlug[store.slug] = parseRangeResponse(json);
+      bySlug[store.slug] = parseRangeEnvelope<RangeRow>(json);
     }
     return missing;
   };

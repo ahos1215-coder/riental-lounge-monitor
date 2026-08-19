@@ -1,5 +1,10 @@
 /**
  * 店舗カード用: /api/range の JSON から実測スパークラインを組み立てる。
+ *
+ * 注意: このファイルには lib/range/rangeRows.ts の関数・型の**旧名の別名**が
+ * 4 つ残っている（StoreCardRangeRow / rangeRowTotal / parseRangeResponse /
+ * pickLatestRangeRow）。同じ処理に 2 つの名前があると「別物」と誤読されるため、
+ * 新規コードは lib/range 側の実体名だけを使うこと（別名の追加も禁止）。
  * このカードは store + limit だけで呼ぶ（任意の from/to は使わない）。
  * plan/DECISIONS #3: サーバ側に**時刻粒度**のフィルタ（夜窓など）は入れない。
  * ここでも生データを時系列で並べるだけ。
@@ -13,7 +18,11 @@ import {
   type RangeRow,
 } from "@/lib/range/rangeRows";
 
-/** 行の形は lib/range/rangeRows.ts の RangeRow が正本（別名のまま re-export して import 互換を保つ）。 */
+/**
+ * 行の形は lib/range/rangeRows.ts の RangeRow が正本。
+ * @deprecated 新規は `import { type RangeRow } from "@/lib/range/rangeRows"` を使う
+ *   （このファイルの別名は import 互換のためだけに残している）。
+ */
 export type StoreCardRangeRow = RangeRow;
 
 /** 一覧・トップ・店舗詳細のカードで共通。API 負荷と描画のバランス */
@@ -29,12 +38,18 @@ export const SPARKLINE_GAP_BREAK_MEDIAN_MULT = 3;
 
 const finiteNonNeg = toNonNegIntOrNull;
 
-/** 行の合計（全欠損は null）。実体は lib/range/rangeRows.ts。 */
+/**
+ * 行の合計（全欠損は null）。実体は lib/range/rangeRows.ts。
+ * @deprecated 新規は lib/range の `rowTotalOrNull` を使う。
+ */
 export const rangeRowTotal = rowTotalOrNull;
 
-/** Flask `{ ok, rows }`・配列・`data` を吸収（実体は lib/range/rangeRows.ts） */
+/**
+ * Flask `{ ok, rows }`・配列・`data` を吸収（実体は lib/range/rangeRows.ts）。
+ * @deprecated 新規は lib/range の `parseRangeEnvelope<RangeRow>(body)` を使う。
+ */
 export function parseRangeResponse(body: unknown): StoreCardRangeRow[] {
-  return parseRangeEnvelope(body) as StoreCardRangeRow[];
+  return parseRangeEnvelope<StoreCardRangeRow>(body);
 }
 
 export function orderedRangeRows(rows: StoreCardRangeRow[]): StoreCardRangeRow[] {
@@ -49,7 +64,7 @@ export function orderedRangeRows(rows: StoreCardRangeRow[]): StoreCardRangeRow[]
 
 /** 行に total または男女のどちらかがあれば、その行の男女カウント（欠損は total から推定可能なら補う） */
 function rowMenWomenForSparkline(r: StoreCardRangeRow): { m: number; w: number } | null {
-  const total = rangeRowTotal(r);
+  const total = rowTotalOrNull(r);
   if (total === null) return null;
 
   let m = finiteNonNeg(r.men);
@@ -85,7 +100,7 @@ export function buildActualSparklineSeriesFromRange(
   const values: number[] = [];
   const times: number[] = [];
   for (const r of ordered) {
-    const v = rangeRowTotal(r);
+    const v = rowTotalOrNull(r);
     if (v === null) continue;
     values.push(v);
     times.push(rowTs(r));
@@ -191,7 +206,10 @@ export function segmentIndicesByTimeGaps(
   return segments;
 }
 
-/** 最新行（ts が最も新しい行。実体は lib/range/rangeRows.ts） */
+/**
+ * 最新行（ts が最も新しい行。実体は lib/range/rangeRows.ts）。
+ * @deprecated 新規は lib/range の `pickLatestRow` を使う。
+ */
 export function pickLatestRangeRow(rows: StoreCardRangeRow[]): StoreCardRangeRow | null {
   return pickLatestRow(rows);
 }
