@@ -1,7 +1,7 @@
 name: Generate Weekly Insights
 
 # 各店舗を独立した matrix ジョブで並列生成し、最後に Fan-in ジョブで
-# index.json を再構築して Git に 1 回だけコミットする。
+# 生成物を Git に 1 回だけコミットする。
 # Supabase への upsert は各 matrix ジョブ内で完結する。
 
 on:
@@ -19,7 +19,8 @@ on:
         description: "最小連続分数"
         required: false
         default: "60"
-  # 【2026-07 無効化】週次レポートのコメント生成をローカル gemma4:12b
+  # 【2026-07 無効化】週次レポートのコメント生成をローカル Ollama
+  # （モデル名は scripts/_ollama_common.py の MODEL が正）
   # (scripts/generate_weekly_insights.py --stores all, INSIGHTS_LLM_BACKEND=ollama,
   #  Windows タスクスケジューラ MEGRIBI-weekly) へ移行したため、Gemini を叩くこの
   # 定時トリガは停止する。両者が同じ blog_drafts (content_type=weekly) を書くため、
@@ -121,7 +122,7 @@ jobs:
           curl -fsSL --retry 3 --retry-all-errors --max-time 60 \
             "https://www.meguribi.jp/api/range?store=${{ matrix.store }}&limit=1" >/dev/null
 
-      - name: Generate weekly insights (single store, skip index)
+      - name: Generate weekly insights (single store)
         if: steps.filter.outputs.run == 'true'
         env:
           NEXT_PUBLIC_BASE_URL: https://www.meguribi.jp
@@ -132,7 +133,8 @@ jobs:
           INSIGHTS_SYNC_SUPABASE: "1"
           # AI 自然文解説 (last_week_summary / next_week_forecast) を生成する
           INSIGHTS_GENERATE_AI_COMMENTARY: "1"
-          # 通常はローカル gemma4:12b へ移行済み(既定 ollama)。GHA には Ollama が無いので、
+          # 通常はローカル Ollama へ移行済み(既定 ollama。モデル名は
+          # scripts/_ollama_common.py の MODEL が正)。GHA には Ollama が無いので、
           # 緊急の手動 workflow_dispatch 時のみ Gemini を使う。
           INSIGHTS_LLM_BACKEND: "gemini"
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -146,8 +148,7 @@ jobs:
           python scripts/generate_weekly_insights.py \
             --stores "${{ matrix.store }}" \
             --threshold "$INSIGHTS_THRESHOLD" \
-            --min-duration-minutes "$INSIGHTS_MIN_DURATION_MINUTES" \
-            --skip-index
+            --min-duration-minutes "$INSIGHTS_MIN_DURATION_MINUTES"
 
       # 生成した店舗 JSON を Artifact に保存（Fan-in ジョブで回収）
       - name: Upload store artifact
@@ -160,7 +161,7 @@ jobs:
           if-no-files-found: warn
 
   # ─────────────────────────────────────────────────────────────
-  # Fan-in: 全 Artifact を集約して index.json を再構築し Git コミット
+  # Fan-in: 全 Artifact を集約して Git コミット
   # ─────────────────────────────────────────────────────────────
   collect-and-commit:
     needs: generate-store
@@ -186,20 +187,20 @@ jobs:
           pattern: weekly-*
           path: /tmp/weekly-artifacts
 
-      - name: Merge artifacts and rebuild index.json
+      - name: Merge artifacts into frontend/content/insights/weekly
         run: |
           python - <<'PYEOF'
-          import json, os, shutil
+          import shutil
           from pathlib import Path
-          from datetime import datetime, timezone
 
+          # 集約インデックスファイルは 2026-07-18 に退役済み（フロントに読み手がゼロ
+          # だった）。ここで再生成すると死蔵ファイルが復活してしまうので、各店
+          # ディレクトリへのコピーだけを行う。詳細は CLAUDE.md の週次レポートの節。
           artifacts_root = Path("/tmp/weekly-artifacts")
           target_root = Path("frontend/content/insights/weekly")
           target_root.mkdir(parents=True, exist_ok=True)
 
-          stores_index: dict = {}
-          generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
+          copied = 0
           for store_artifact_dir in sorted(artifacts_root.iterdir()):
               # actions/download-artifact@v4 は "weekly-<store>/<files>" の構造で展開する
               store_slug = store_artifact_dir.name.replace("weekly-", "", 1)
@@ -207,34 +208,10 @@ jobs:
               target_store_dir.mkdir(parents=True, exist_ok=True)
 
               for json_file in sorted(store_artifact_dir.glob("*.json")):
-                  dest = target_store_dir / json_file.name
-                  shutil.copy2(json_file, dest)
-                  try:
-                      data = json.loads(json_file.read_text(encoding="utf-8"))
-                      stores_index[store_slug] = {
-                          "latest_file": json_file.name,
-                          "generated_at": data.get("generated_at", generated_at),
-                      }
-                  except json.JSONDecodeError:
-                      pass
+                  shutil.copy2(json_file, target_store_dir / json_file.name)
+                  copied += 1
 
-          index_path = target_root / "index.json"
-          index_payload: dict = {}
-          if index_path.exists():
-              try:
-                  index_payload = json.loads(index_path.read_text(encoding="utf-8"))
-              except json.JSONDecodeError:
-                  pass
-
-          merged_stores = {**index_payload.get("stores", {}), **stores_index}
-          index_payload["generated_at"] = generated_at
-          index_payload["stores"] = merged_stores
-
-          with index_path.open("w", encoding="utf-8", newline="\n") as fh:
-              json.dump(index_payload, fh, ensure_ascii=True, indent=2)
-              fh.write("\n")
-
-          print(f"index.json updated: {len(merged_stores)} stores total, {len(stores_index)} refreshed.")
+          print(f"weekly insights copied: {copied} file(s).")
           PYEOF
 
       - name: Run tests

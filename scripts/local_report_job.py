@@ -3,16 +3,17 @@
 """MEGRIBI 日次レポート生成ジョブ（ローカルLLM版）
 
 目的:
-  失敗している Gemini パイプラインを置き換え、ローカルの Ollama (gemma4:e4b) で
+  失敗している Gemini パイプラインを置き換え、ローカルの Ollama
+  （モデル名は scripts/_ollama_common.py の MODEL が正本）で
   日次レポート（今夜の見どころ）を生成し、Supabase の blog_drafts テーブルに書き込む。
 
 参照実装（このファイルはこれらを踏襲する）:
   - scripts/generate_weekly_insights.py の _upsert_weekly_report_to_supabase
     （SUPABASE エンドポイント・service_role ヘッダー・facts_id での
     PATCH→無ければ POST という idempotent upsert パターン）を厳密にミラーする。
-  - scripts/experiments/local_llm_spike.py の fetch_store_facts / facts_block /
-    run_ollama（Ollama /api/chat, keep_alive:0）/ SYSTEM プロンプト / gpu_lock
-    の取り込み方。
+  - scripts/_ollama_common.py の fetch_store_facts / facts_block /
+    run_ollama（Ollama /api/chat, keep_alive:0）/ SYSTEM プロンプト（このファイル内では
+    歴史的な別名 `spk` で参照する）と、gpu_lock の取り込み方。
   - scripts/generate_weekly_insights.py の _fetch_existing_weekly_commentary
     （新規生成が失敗した際に、直前の Supabase 行から本文を引き継ぐ carry-over 設計）
     を daily 用にミラーする（_fetch_existing_daily_report / _apply_carry_over_or_fail）。
@@ -47,7 +48,7 @@
   (_fetch_existing_daily_report)、is_published=True かつ本文が非空の行があれば
   その本文と target_date を維持する (_apply_carry_over_or_fail)。前回も公開済みでなければ (3) のまま
   （新規店舗・前回も失敗していた場合は引き継ぐものが無いため、これは仕様どおり）。
-  facts 取得自体もタイムアウト延長 + リトライ (local_llm_spike.FACTS_FETCH_RETRIES) で
+  facts 取得自体もタイムアウト延長 + リトライ (_ollama_common.FACTS_FETCH_RETRIES) で
   一時的な backend 劣化を吸収し、そもそも (2)/(3) に落ちる頻度を下げる。
 """
 
@@ -66,15 +67,14 @@ from urllib.request import Request, urlopen
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 STORES_JSON_PATH = REPO_ROOT / "frontend" / "src" / "data" / "stores.json"
-EXPERIMENTS_DIR = REPO_ROOT / "scripts" / "experiments"
 
-# scripts/experiments/local_llm_spike.py から facts 取得・Ollama 呼び出し・SYSTEM を再利用する。
-sys.path.insert(0, str(EXPERIMENTS_DIR))
-import local_llm_spike as spk  # noqa: E402  (経路追加後に import する必要がある)
-
-# scripts/_supabase_common.py（.env 読み込み・SUPABASE 設定解決の共有実装）を
+# scripts/_supabase_common.py（.env 読み込み・SUPABASE 設定解決の共有実装）や
+# scripts/_ollama_common.py（Ollama 呼び出し・facts 取得の共有実装）を
 # シブリングとしてベアインポートする。generate_weekly_insights.py と同じ規約。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# `spk` という別名は歴史的なもの（元は scripts/experiments/local_llm_spike.py を
+# 指していた）。tests/test_local_report_job.py が `lrj.spk.*` を monkeypatch するので維持する。
+import _ollama_common as spk  # noqa: E402  (経路追加後に import する必要がある)
 from _stores_common import load_stores_json  # noqa: E402
 from _supabase_common import _load_env, _supabase_conf  # noqa: E402
 
@@ -86,7 +86,8 @@ except Exception:  # noqa: BLE001
     gpu_lock = None
 
 JST = timezone(timedelta(hours=9))
-MODEL = "gemma4:e4b"
+# 使うモデル名の正本は scripts/_ollama_common.py（日次・週次・実験で共有）。
+MODEL = spk.MODEL
 DEFAULT_USER_AGENT = "MEGRIBI-local-report-job"
 VALID_EDITIONS = ("evening_preview", "late_update")
 VALID_MODES = ("dry-run", "shadow", "publish")

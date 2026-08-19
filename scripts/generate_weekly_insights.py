@@ -6,18 +6,21 @@ from __future__ import annotations
 v2 (2026-05): 4 Phase 改善
 - Phase A: metric_interpretations (数値の意味付け、e.g. "1日平均 142 件")
 - Phase B: day_hour_heatmap (曜日 × 時間帯の混雑ヒートマップ)
-- Phase C: ai_commentary (Gemini 2.5 Flash による自然文解説)
+- Phase C: 自然文解説 (last_week_summary / next_week_forecast)
 - Phase D: next_week_recommendations (来週の狙い目時間 TOP 3)
+
+自然文解説の主経路はオーナーPCのローカル Ollama (INSIGHTS_LLM_BACKEND の既定 "ollama"、
+モデル名は scripts/_ollama_common.py の MODEL が正)。Gemini は GHA での緊急手動実行用の
+バックアップ経路として残っている。
 """
 
 import argparse
-import importlib.util
-import inspect
 import json
 import os
 import sys
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -27,6 +30,8 @@ from urllib.request import Request, urlopen
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from commentary_quality_gate import check_weekly_commentary  # noqa: E402
+from _ollama_common import MODEL as OLLAMA_MODEL  # noqa: E402
+from _ollama_common import run_ollama, unload_ollama  # noqa: E402
 from _ops_notify import notify_ops  # noqa: E402
 from _standalone_import import load_module_from_file  # noqa: E402
 from _stores_common import load_stores_json  # noqa: E402
@@ -44,24 +49,15 @@ except ModuleNotFoundError:
     )
     NIGHT_SESSION_SHIFT_HOURS = _night_type_mod.NIGHT_SESSION_SHIFT_HOURS
 
-MEGRIBI_SCORE_PATH = REPO_ROOT / "oriental" / "ml" / "megribi_score.py"
-
-if not MEGRIBI_SCORE_PATH.exists():
-    raise SystemExit(f"megribi_score not found: {MEGRIBI_SCORE_PATH}")
-
-spec = importlib.util.spec_from_file_location("megribi_score", MEGRIBI_SCORE_PATH)
-if spec is None or spec.loader is None:
-    raise SystemExit("failed to load megribi_score module")
-
-megribi_score_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(megribi_score_module)
-
-find_good_windows = megribi_score_module.find_good_windows
-
+# 週報の「賑わいやすい時間帯」は素の occupancy で選ぶ (_build_busy_windows)。
+# 以前ここで oriental/ml/megribi_score.py を動的ロードして find_good_windows を
+# 使えるようにしていたが、呼び出し元が無くなって久しいため撤去した。
 
 DEFAULT_BASE_URL = "https://www.meguribi.jp"
 DEFAULT_LIMIT = 5000
-DEFAULT_SCORE_THRESHOLD = 0.40
+# 「賑わいやすい時間帯」を切り出すときの occupancy_rate の下限
+# (CLI の --threshold / 環境変数 INSIGHTS_THRESHOLD で上書き可)。
+DEFAULT_OCCUPANCY_THRESHOLD = 0.40
 DEFAULT_MIN_DURATION_MINUTES = 60
 DEFAULT_IDEAL = 0.7
 DEFAULT_GENDER_WEIGHT = 1.5
@@ -326,10 +322,10 @@ def _store_id_for_slug(slug: str) -> str:
 
 
 def _load_store_active_map() -> dict[str, bool]:
-    """stores.json の任意フィールド `active` を slug -> bool で読み込む (fix #5)。
+    """stores.json の任意フィールド `active` を slug -> bool で読み込む。
 
     明示的に `active=false` の店舗は週報生成を止めるための「手動オーバーライド」。
-    フィールドが無い店舗は既定で有効 (map に載らない = None 扱い)。fix #5 の第一義は
+    フィールドが無い店舗は既定で有効 (map に載らない = None 扱い)。第一義は
     データ駆動の鮮度チェック (収集が再開すれば自動回復する) で、この active フラグは
     それを上書きする明示スイッチという位置づけ。stores.json が壊れていても週報全体を
     止めないよう、失敗時は空 dict を返す (= 全店 active 扱い)。
@@ -358,7 +354,7 @@ def _weekly_skip_reason(
     now: datetime,
     stale_days: int,
 ) -> str | None:
-    """この店舗の週報生成をスキップすべき理由を返す。生成してよければ None (fix #5)。
+    """この店舗の週報生成をスキップすべき理由を返す。生成してよければ None。
 
     1) stores.json で `active=false` に設定されている (明示オーバーライド)
     2) 最新データ (period_end) が取得できない
@@ -567,14 +563,14 @@ HEATMAP_HOURS = [19, 20, 21, 22, 23, 0, 1, 2, 3, 4]
 
 # 夜セッションを跨ぐ間隙 (04:59→翌19:00 の ~14h) を「賑わい窓」の途切れとして扱う閾値。
 # 直近7夜へ切り詰めた points は日中サンプルを含まないため、隣接する夜が地続きに
-# 見えてしまう。観測間隔 (概ね 5-15 分) を大きく超える間隙で窓を分割する (fix #2)。
+# 見えてしまう。観測間隔 (概ね 5-15 分) を大きく超える間隙で窓を分割する。
 DEFAULT_BUSY_MAX_GAP_MINUTES = 30
 
 # 週報バッチが「収集停止済み店舗」の 2ヶ月前データを毎週「今日更新」で焼き直すのを防ぐ
-# 鮮度上限 (fix #5)。最新データがこの日数より古ければその店舗はスキップする。env override。
+# 鮮度上限。最新データがこの日数より古ければその店舗はスキップする。env override。
 DEFAULT_WEEKLY_STALE_DAYS = 10
 
-# 1 夜あたりの最小観測数 (fix #12)。これ未満の夜は low_sample フラグを立て、
+# 1 夜あたりの最小観測数。これ未満の夜は low_sample フラグを立て、
 # フロントの「一番賑わった夜」の断定 (WeeklySummary の busiest) から除外できるようにする。
 # 健全な夜は概ね ~120 件 (10 時間 × 5 分間隔)。その ~20% (=24) を下限の目安とする。env override。
 DEFAULT_WEEKLY_MIN_NIGHT_SAMPLES = 24
@@ -664,7 +660,7 @@ def _truncate_points_to_recent_nights(
     points: list[dict[str, Any]],
     max_nights: int = WEEKLY_DAILY_SUMMARY_MAX_NIGHTS,
 ) -> list[dict[str, Any]]:
-    """全 consumer が同一の「直近 N 夜」を見るよう、points を上流で 1 度だけ切り詰める (fix #6)。
+    """全 consumer が同一の「直近 N 夜」を見るよう、points を上流で 1 度だけ切り詰める。
 
     フェッチ元 API の `--limit` は 8〜10 夜分を返し得るが、レポートは「直近7夜」を謳う。
     従来は daily_summary だけが内部で 7 夜に切り詰め、ヒートマップ / 狙い目TOP3 /
@@ -719,7 +715,7 @@ def _build_daily_summary(
     ここで直近 (日付が新しい方から) WEEKLY_DAILY_SUMMARY_MAX_NIGHTS 夜だけを
     残すことで、docstring/フロント表記の「先週7夜」を実態と一致させる。
 
-    fix #12: 観測数が `min_night_samples` 未満の夜は `low_sample=True` を立てる。
+    観測数が `min_night_samples` 未満の夜は `low_sample=True` を立てる。
     ヒートマップは sample_count>=2 のセルだけを狙い目/AI入力に使うのに、日別サマリには
     足切りが無く、観測の薄い夜 (実例: kokura 07-01=6件, utsunomiya 07-06=17件) を
     「一番賑わった夜」と同じ確信度で断定し得た。フラグを持たせ、フロント側で
@@ -757,7 +753,7 @@ def _build_daily_summary(
                 "peak_occupancy": round(peak_occ, 4),
                 "avg_female_ratio": round(avg_fr, 4),
                 "sample_count": len(rows),
-                # fix #12: 観測が薄い夜は「一番賑わった夜」の断定から除外させるためのフラグ
+                # 観測が薄い夜は「一番賑わった夜」の断定から除外させるためのフラグ
                 "low_sample": len(rows) < int(min_night_samples),
             }
         )
@@ -770,7 +766,7 @@ def _build_busy_windows(
     min_duration_minutes: int,
     max_gap_minutes: float = DEFAULT_BUSY_MAX_GAP_MINUTES,
 ) -> list[dict[str, Any]]:
-    """「賑わいやすい時間帯」を素の混雑度 (occupancy_rate) だけで検出する (fix #2)。
+    """「賑わいやすい時間帯」を素の混雑度 (occupancy_rate) だけで検出する。
 
     従来は megribi_score (女性比重み付き × ideal=0.7 で頭打ちの合成スコア) で窓を
     選んでいたため、満席 (occ≈1.0) の時間帯は occ_score が 0 に落ちて脱落し、逆に
@@ -918,7 +914,8 @@ def _generate_ai_commentary(
     """週報の自然文解説を 2 セクション分生成する (Phase C v2)。
 
     バックエンドは `INSIGHTS_LLM_BACKEND` (既定 "ollama") で切り替える:
-      - "ollama": ローカル Ollama (gemma4:e4b) を使用。GEMINI_API_KEY 不要。コスト削減版。
+      - "ollama": ローカル Ollama を使用 (モデル名は scripts/_ollama_common.py の MODEL)。
+        GEMINI_API_KEY 不要。コスト削減版。
       - "gemini": 従来通り Gemini REST API (要 GEMINI_API_KEY)。
 
     system_instruction / user_prompt はモデル非依存のため共通で組み立て、
@@ -1117,9 +1114,24 @@ def _sanitize_commentary_text(text: str) -> str:
     return text.strip()
 
 
-def _ollama_commentary_call(system_instruction: str, user_prompt: str) -> str | None:
-    """ローカル Ollama (gemma4:e4b) を呼び出し、応答テキスト (JSON 文字列想定) を返す。
+# Gemini 側の responseSchema と同様、キー名を綴りごと強制するスキーマ。小型モデル(e4b)は
+# "json" 指定だけだとキーを稀に誤字る(例: last_week_summaary)ため、スキーマで固定する。
+# Ollama ではリクエストボディの**トップレベル** "format" に置く必要がある
+# (options に混ぜると黙って無視される)。
+COMMENTARY_RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "last_week_summary": {"type": "string"},
+        "next_week_forecast": {"type": "string"},
+    },
+    "required": ["last_week_summary", "next_week_forecast"],
+}
 
+
+def _ollama_commentary_call(system_instruction: str, user_prompt: str) -> str | None:
+    """ローカル Ollama を呼び出し、応答テキスト (JSON 文字列想定) を返す。
+
+    モデル名・呼び出し方の実体は scripts/_ollama_common.py（日次レポートと共有の正本）。
     共有 GPU ロック (gpu_lock) 配下で呼ぶ (local_report_job.py と同じ取り込み方)。
     gpu_lock が見つからない場合はロック無しで続行 (best-effort)。
     エラー・タイムアウト時は stderr にログして None を返す (例外は投げない)。
@@ -1132,61 +1144,39 @@ def _ollama_commentary_call(system_instruction: str, user_prompt: str) -> str | 
 
     from contextlib import nullcontext
 
-    body = {
-        "model": "gemma4:e4b",
-        "messages": [
-            {"role": "system", "content": system_instruction},
-            {"role": "user", "content": user_prompt},
-        ],
-        "stream": False,
-        # keep_alive="10m": 全店の間モデルのロードを維持し、1店ごとの再ロード(8-11s)を無くす。
-        # ラン終了時に main() 末尾で明示アンロードして GPU を音楽PJ等へ返す。
-        "keep_alive": "10m",
-        # gemma4 は既定で reasoning ON だが、週次要約に推論は不要。ON だと思考で数千トークン
-        # 消費し遅く・発熱増になるため OFF (実測 29.4s→13.7s)。
-        "think": False,
-        # Gemini 側の responseSchema と同様、キー名を綴りごと強制する。小型モデル(e4b)は
-        # "json" 指定だけだとキーを稀に誤字る(例: last_week_summaary)ため、スキーマで固定する。
-        "format": {
-            "type": "object",
-            "properties": {
-                "last_week_summary": {"type": "string"},
-                "next_week_forecast": {"type": "string"},
-            },
-            "required": ["last_week_summary", "next_week_forecast"],
-        },
-        # num_gpu=999 で全層 GPU を明示。e4b は VRAM 3.0GB なので ctx8192 でも 100% GPU。
-        "options": {"num_ctx": 8192, "num_gpu": 999, "temperature": 0.7},
-    }
-
     # タイムアウト等の一過性エラーで 1 店だけ本文が欠けるのを防ぐため 1 回だけ再試行する
     # (観測例 2026-07-03: ay_shibuya / hiroshima_ag が単発 timeout で欠報になった)。
     # ロックは試行ごとに取得し直し、待ち時間に音楽プロジェクトが割り込めるようにする。
     attempts = 2
     for attempt in range(1, attempts + 1):
         lock_cm = gpu_lock.acquire(owner="meguribi-weekly", timeout=900) if gpu_lock is not None else nullcontext()
-        try:
-            with lock_cm:
-                req = Request(
-                    "http://localhost:11434/api/chat",
-                    data=json.dumps(body).encode("utf-8"),
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                with urlopen(req, timeout=360) as resp:
-                    payload = json.loads(resp.read().decode("utf-8"))
-            text = (payload.get("message") or {}).get("content", "")
-            if not text or not text.strip():
-                print("[weekly-insights] ollama commentary: empty response content", file=sys.stderr)
-                return None
-            return text
-        except Exception as exc:  # noqa: BLE001
+        with lock_cm:
+            text, _elapsed, err = run_ollama(
+                OLLAMA_MODEL,
+                system_instruction,
+                user_prompt,
+                # num_gpu=999 で全層 GPU を明示。e4b は VRAM 3.0GB なので ctx8192 でも 100% GPU。
+                options={"num_ctx": 8192, "num_gpu": 999, "temperature": 0.7},
+                # gemma4 は既定で reasoning ON だが、週次要約に推論は不要。ON だと思考で数千
+                # トークン消費し遅く・発熱増になるため OFF (実測 29.4s→13.7s)。
+                think=False,
+                # keep_alive="10m": 全店の間モデルのロードを維持し、1店ごとの再ロード(8-11s)を
+                # 無くす。ラン終了時に main() 末尾で明示アンロードして GPU を音楽PJ等へ返す。
+                keep_alive="10m",
+                format=COMMENTARY_RESPONSE_SCHEMA,
+            )
+        if err:
             print(
-                f"[weekly-insights] ollama commentary call failed (attempt {attempt}/{attempts}): {exc}",
+                f"[weekly-insights] ollama commentary call failed (attempt {attempt}/{attempts}): {err}",
                 file=sys.stderr,
             )
             if attempt < attempts:
                 time.sleep(10)
+            continue
+        if not text or not text.strip():
+            print("[weekly-insights] ollama commentary: empty response content", file=sys.stderr)
+            return None
+        return text
     return None
 
 
@@ -1268,16 +1258,239 @@ def _extract_commentary_via_regex(raw: str) -> dict[str, str] | None:
     return out
 
 
-def _call_find_good_windows(points: list[dict[str, Any]], **kwargs: Any) -> list[dict[str, Any]]:
-    # fix #2 以降、週報の「賑わいやすい時間帯」はこの合成スコア窓ではなく素の occupancy を
-    # 使う _build_busy_windows に置き換わった。このヘルパー/ megribi_score import は将来の
-    # 参照・比較用に残しているが、現在レポート生成パイプラインからは呼ばれていない。
-    sig = inspect.signature(find_good_windows)
-    accepts_var_kw = any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
-    if accepts_var_kw:
-        return find_good_windows(points, **kwargs)
-    filtered = {key: value for key, value in kwargs.items() if key in sig.parameters}
-    return find_good_windows(points, **filtered)
+@dataclass(frozen=True)
+class WeeklyRunContext:
+    """1 ラン分の設定をまとめた入れ物（全店で共通・変更しない）。"""
+
+    base_url: str
+    base_dir: Path
+    limit: int
+    threshold: float
+    min_duration_minutes: int
+    ideal: float
+    gender_weight: float
+    timeout_seconds: int
+    retries: int
+    sync_to_supabase: bool
+    stale_days: int
+    min_night_samples: int
+    active_map: dict[str, bool]
+    now: datetime
+    date_label: str
+    generated_at: str
+
+
+def _process_store(store: str, ctx: WeeklyRunContext) -> None:
+    """1 店舗分の週報 JSON を組み立てて書き出す（必要なら Supabase へも upsert）。
+
+    スキップ条件（stores.json の active=false / データが陳腐化）に当たった場合は
+    何も書かずに戻る。例外はそのまま呼び出し元へ伝播させる（従来どおり）。
+    """
+    # 明示オーバーライド (active=false) は HTTP フェッチ前に弾く。
+    if ctx.active_map.get(store) is False:
+        print(
+            f"[weekly-insights] SKIP store={store}: stores.json で active=false "
+            f"(手動オーバーライド)",
+            file=sys.stderr,
+        )
+        return
+
+    rows = _load_rows(
+        ctx.base_url,
+        store,
+        ctx.limit,
+        timeout_seconds=ctx.timeout_seconds,
+        retries=ctx.retries,
+        user_agent=DEFAULT_USER_AGENT,
+    )
+    timestamps = [ts for ts in (_parse_timestamp(r) for r in rows) if ts is not None]
+    period_start = min(timestamps) if timestamps else None
+    period_end = max(timestamps) if timestamps else None
+
+    # 鮮度チェック。収集停止店 (最新データが stale_days 日より古い) は生成/公開
+    # しない。これが無いと sapporo_ag のような停止店が毎週「今日更新」で 2ヶ月前データを
+    # 焼き直し、AI が同じ古いデータに毎回新しいコメンタリーを書いてしまう
+    # (実例 2026-07-07: 最新 2026-05-11 のデータを generated_at=2026-07-07 で再生成)。
+    skip_reason = _weekly_skip_reason(
+        store=store,
+        active_map=ctx.active_map,
+        period_end=period_end,
+        now=ctx.now,
+        stale_days=ctx.stale_days,
+    )
+    if skip_reason is not None:
+        print(f"[weekly-insights] SKIP store={store}: {skip_reason}", file=sys.stderr)
+        return
+
+    totals = _collect_totals(rows)
+    baseline = _percentile(totals, 95.0) if totals else 0.0
+    baseline = baseline if baseline > 0 else 0.0
+
+    # 全 consumer が同一の「直近7夜」を見るよう、points を上流で 1 度だけ切り詰める。
+    # これ以降の heatmap / daily_summary / 賑わい窓 / 狙い目TOP3 / AI入力 / points_used は
+    # すべてこの truncated points から作られ、集計期間・件数が完全に一致する。
+    points = _truncate_points_to_recent_nights(_build_points(rows, baseline))
+
+    # 「賑わいやすい時間帯」は女性比重み付きの合成スコアではなく素の occupancy で
+    # ランク付けする (狙い目TOP3 と同じ指標)。満席時間帯が脱落する自己矛盾を解消。
+    windows = _build_busy_windows(points, ctx.threshold, ctx.min_duration_minutes)
+    serialized_windows = _serialize_windows(windows)
+    top_windows = sorted(
+        serialized_windows,
+        key=lambda w: w.get("avg_score") or 0,
+        reverse=True,
+    )[:3]
+
+    # v2: Phase A/B/D の追加データを構築 (すべて truncated points 基準)
+    heatmap = _build_day_hour_heatmap(points)
+    daily_summary = _build_daily_summary(points, min_night_samples=ctx.min_night_samples)
+    next_week_recs = _derive_next_week_recommendations(heatmap)
+
+    # _build_daily_summary は直近 WEEKLY_DAILY_SUMMARY_MAX_NIGHTS 夜だけに切り詰める
+    # (fukuoka 2026-07-03 実例: フェッチ元の rows に 9 夜分混入していた)。
+    # レポート上部の「集計期間」表示や metric_interpretations の period_days が
+    # 生の取得ウィンドウ (最大 9 日超) のままだと、"先週7夜" と謳いながら表示される
+    # 期間だけ数日分ズレて見える。daily_summary が実際に保持した夜の範囲・件数に
+    # period を合わせ、両者を一致させる。
+    if daily_summary:
+        kept_dates = [d["date"] for d in daily_summary]
+        report_period_start = datetime.fromisoformat(min(kept_dates)).replace(tzinfo=JST_OFFSET)
+        # 最終夜の営業終了 (翌 04:59 相当) を期間終端として表示する
+        report_period_end = datetime.fromisoformat(max(kept_dates)).replace(
+            tzinfo=JST_OFFSET
+        ) + timedelta(days=1, hours=4, minutes=59)
+        report_period_days = len(daily_summary)
+    else:
+        report_period_start = period_start
+        report_period_end = period_end
+        report_period_days = None
+
+    metrics_interp = _compute_metric_interpretations(
+        points_count=len(points),
+        period_start=report_period_start,
+        period_end=report_period_end,
+        baseline=baseline,
+        period_days_override=report_period_days,
+    )
+
+    payload = {
+        "analysis_id": f"weekly:{store}:{ctx.date_label}",
+        "type": "weekly",
+        "store": store,
+        "generated_at": ctx.generated_at,
+        "period": {"start": _iso(report_period_start), "end": _iso(report_period_end)},
+        # フェッチ元 API から返った生データの実際の範囲 (デバッグ・監査用。
+        # 上の period はレポート表示/daily_summary と一致させた「表示用」の期間)。
+        "raw_fetch_period": {"start": _iso(period_start), "end": _iso(period_end)},
+        "params": {
+            "threshold": ctx.threshold,
+            "min_duration_minutes": ctx.min_duration_minutes,
+            "ideal": ctx.ideal,
+            "gender_weight": ctx.gender_weight,
+            "occupancy_baseline": baseline,
+        },
+        "metrics": {
+            "points_used": len(points),
+            "baseline_p95_total": baseline,
+            "reliability_score": min(1.0, len(points) / 200.0),
+        },
+        # v2: Phase A
+        "metric_interpretations": metrics_interp,
+        "windows": serialized_windows,
+        "top_windows": top_windows,
+        # v2: Phase B
+        "day_hour_heatmap": heatmap,
+        # v2: Phase D
+        "next_week_recommendations": next_week_recs,
+        # v2 追補: 日別サマリ (先週何が起きたか の視覚化用)
+        "daily_summary": daily_summary,
+    }
+
+    # v2: Phase C — AI 自然文解説 (Gemini API key + フラグ ON のときのみ)
+    # v2.1: last_week_summary + next_week_forecast の 2 セクション分割
+    # v2.2: 失敗時は既存 Supabase レコードから前回文を引き継ぎ、上書き消失を防ぐ
+    commentary = _generate_ai_commentary(
+        store_label=store,
+        metrics_interp=metrics_interp,
+        heatmap=heatmap,
+        daily_summary=daily_summary,
+        top_windows=top_windows,
+        next_week_recs=next_week_recs,
+    )
+    if commentary:
+        # v2.3: 公開前の数値グラウンディング検証 (2026-07-03 全44店監査で発見した
+        # shinsaibashi 級の数値誤りを block する)。LLM を追加で呼ばない決定的チェック。
+        # 詳細: scripts/commentary_quality_gate.py
+        gate_ok, gate_reasons = check_weekly_commentary(commentary, daily_summary)
+        if not gate_ok:
+            print(
+                f"[weekly-insights] commentary quality gate failed for store={store}: "
+                f"{'; '.join(gate_reasons)}",
+                file=sys.stderr,
+            )
+            commentary = None
+    if commentary:
+        if commentary.get("last_week_summary"):
+            payload["last_week_summary"] = commentary["last_week_summary"]
+        if commentary.get("next_week_forecast"):
+            payload["next_week_forecast"] = commentary["next_week_forecast"]
+        # 後方互換: 旧 ai_commentary 参照箇所のために連結も保持
+        joined_parts = [v for v in (commentary.get("last_week_summary"), commentary.get("next_week_forecast")) if v]
+        if joined_parts:
+            payload["ai_commentary"] = "\n\n".join(joined_parts)
+    else:
+        # 新規生成失敗 → 既存レコードから前回文を引き継ぐ (Supabase 同期時のみ意味あり)。
+        # ただし引き継ぎには鮮度上限を設ける (WEEKLY_COMMENTARY_MAX_AGE_DAYS)。
+        # これが無いと、生成が恒常的に失敗し続ける店舗で「1年前の先週は〜」が
+        # 新しい target_date/period/heatmap と一緒に is_published=true のまま
+        # 延々と表示され続け、誰も気づかない致命的な陳腐化になる。
+        if ctx.sync_to_supabase:
+            existing = _fetch_existing_weekly_commentary(store)
+            existing_generated_at = existing.get("_existing_generated_at")
+            age_days = _commentary_age_days(existing_generated_at, now=ctx.now)
+            text_keys = ("last_week_summary", "next_week_forecast", "ai_commentary")
+            has_existing_text = any(existing.get(k) for k in text_keys)
+
+            if has_existing_text and age_days is not None and age_days > WEEKLY_COMMENTARY_MAX_AGE_DAYS:
+                print(
+                    f"[weekly-insights] existing commentary for store={store} is stale "
+                    f"({age_days:.1f} days > {WEEKLY_COMMENTARY_MAX_AGE_DAYS}); "
+                    f"NOT carrying over, publishing without commentary (heatmap-only)",
+                    file=sys.stderr,
+                )
+                _notify_ops(
+                    f"[weekly-insights] store={store}: AI commentary generation failed/rejected "
+                    f"and the existing Supabase record is {age_days:.1f} days old "
+                    f"(> {WEEKLY_COMMENTARY_MAX_AGE_DAYS}d threshold). "
+                    f"Stale carry-over was SKIPPED; this week's report will publish "
+                    f"without last_week_summary/next_week_forecast. Investigate the "
+                    f"local Ollama/GHA Gemini pipeline for store={store}."
+                )
+            elif has_existing_text:
+                for k in text_keys:
+                    if existing.get(k):
+                        payload[k] = existing[k]
+                age_label = f"{age_days:.1f}d" if age_days is not None else "unknown age"
+                print(
+                    f"[weekly-insights] preserved existing commentary for store={store} "
+                    f"(keys={[k for k in text_keys if existing.get(k)]}, age={age_label})",
+                    file=sys.stderr,
+                )
+
+    store_dir = ctx.base_dir / store
+    _ensure_dir(store_dir)
+    out_path = store_dir / f"{ctx.date_label}.json"
+    with out_path.open("w", encoding="utf-8", newline="\n") as handle:
+        json.dump(payload, handle, ensure_ascii=True, indent=2)
+        handle.write("\n")
+
+    if ctx.sync_to_supabase:
+        _upsert_weekly_report_to_supabase(
+            store=store,
+            date_label=ctx.date_label,
+            generated_at=ctx.generated_at,
+            payload=payload,
+        )
 
 
 def main() -> int:
@@ -1286,6 +1499,8 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=DEFAULT_LIMIT)
     parser.add_argument("--threshold", type=float)
     parser.add_argument("--min-duration-minutes", type=int)
+    # --ideal / --gender-weight は出力 JSON の params に echo されるだけで、
+    # 窓の選定 (_build_busy_windows) には一切使われない。出力契約の後方互換のため残置。
     parser.add_argument("--ideal", type=float)
     parser.add_argument("--gender-weight", type=float)
     parser.add_argument(
@@ -1297,8 +1512,8 @@ def main() -> int:
             "自体を削除済み: frontend 側に読み手がゼロだったこと（weekly report ページは "
             "Supabase blog_drafts から直接取得、sitemap.ts は各店ディレクトリのファイル名"
             "一覧から lastModified を導出）をgrepで確認した上で退役した。"
-            "generate-weekly-insights.yml（GHA 緊急手動実行）がまだこのフラグを渡すため、"
-            "後方互換のため引数としてのみ残している。"
+            "古い手順書や手元のバッチがこのフラグを渡しても落ちないよう、"
+            "引数としてのみ残している。"
         ),
     )
     args = parser.parse_args()
@@ -1311,7 +1526,7 @@ def main() -> int:
     if not stores:
         raise SystemExit("stores are required. Use --stores or INSIGHTS_STORES.")
 
-    threshold = args.threshold if args.threshold is not None else _env_float("INSIGHTS_THRESHOLD", DEFAULT_SCORE_THRESHOLD)
+    threshold = args.threshold if args.threshold is not None else _env_float("INSIGHTS_THRESHOLD", DEFAULT_OCCUPANCY_THRESHOLD)
     min_duration_minutes = (
         args.min_duration_minutes
         if args.min_duration_minutes is not None
@@ -1326,11 +1541,11 @@ def main() -> int:
     timeout_seconds = max(1, _env_int("INSIGHTS_HTTP_TIMEOUT_SECONDS", DEFAULT_HTTP_TIMEOUT_SECONDS))
     retries = max(1, _env_int("INSIGHTS_HTTP_RETRIES", DEFAULT_HTTP_RETRIES))
     sync_to_supabase = _env_bool("INSIGHTS_SYNC_SUPABASE", False)
-    # fix #5: 収集停止店の陳腐化データ焼き直し防止。最新データがこの日数より古ければスキップ。
+    # 収集停止店の陳腐化データ焼き直し防止。最新データがこの日数より古ければスキップ。
     stale_days = max(1, _env_int("WEEKLY_STALE_DAYS", DEFAULT_WEEKLY_STALE_DAYS))
-    # fix #12: 1 夜あたり観測数の下限。これ未満の夜は daily_summary で low_sample フラグ付き。
+    # 1 夜あたり観測数の下限。これ未満の夜は daily_summary で low_sample フラグ付き。
     min_night_samples = max(1, _env_int("WEEKLY_MIN_NIGHT_SAMPLES", DEFAULT_WEEKLY_MIN_NIGHT_SAMPLES))
-    # fix #5: 明示オーバーライド用の active フラグ (stores.json)。既定は全店 active。
+    # 明示オーバーライド用の active フラグ (stores.json)。既定は全店 active。
     active_map = _load_store_active_map()
 
     base_url = (
@@ -1354,228 +1569,34 @@ def main() -> int:
     date_label = now.date().isoformat()
     generated_at = _iso(now)
 
+    ctx = WeeklyRunContext(
+        base_url=base_url,
+        base_dir=base_dir,
+        limit=args.limit,
+        threshold=threshold,
+        min_duration_minutes=min_duration_minutes,
+        ideal=ideal,
+        gender_weight=gender_weight,
+        timeout_seconds=timeout_seconds,
+        retries=retries,
+        sync_to_supabase=sync_to_supabase,
+        stale_days=stale_days,
+        min_night_samples=min_night_samples,
+        active_map=active_map,
+        now=now,
+        date_label=date_label,
+        generated_at=generated_at,
+    )
+
     for store in stores:
-        # fix #5: 明示オーバーライド (active=false) は HTTP フェッチ前に弾く。
-        if active_map.get(store) is False:
-            print(
-                f"[weekly-insights] SKIP store={store}: stores.json で active=false "
-                f"(手動オーバーライド)",
-                file=sys.stderr,
-            )
-            continue
-
-        rows = _load_rows(
-            base_url,
-            store,
-            args.limit,
-            timeout_seconds=timeout_seconds,
-            retries=retries,
-            user_agent=DEFAULT_USER_AGENT,
-        )
-        timestamps = [ts for ts in (_parse_timestamp(r) for r in rows) if ts is not None]
-        period_start = min(timestamps) if timestamps else None
-        period_end = max(timestamps) if timestamps else None
-
-        # fix #5: 鮮度チェック。収集停止店 (最新データが stale_days 日より古い) は生成/公開
-        # しない。これが無いと sapporo_ag のような停止店が毎週「今日更新」で 2ヶ月前データを
-        # 焼き直し、AI が同じ古いデータに毎回新しいコメンタリーを書いてしまう
-        # (実例 2026-07-07: 最新 2026-05-11 のデータを generated_at=2026-07-07 で再生成)。
-        skip_reason = _weekly_skip_reason(
-            store=store,
-            active_map=active_map,
-            period_end=period_end,
-            now=now,
-            stale_days=stale_days,
-        )
-        if skip_reason is not None:
-            print(f"[weekly-insights] SKIP store={store}: {skip_reason}", file=sys.stderr)
-            continue
-
-        totals = _collect_totals(rows)
-        baseline = _percentile(totals, 95.0) if totals else 0.0
-        baseline = baseline if baseline > 0 else 0.0
-
-        # fix #6: 全 consumer が同一の「直近7夜」を見るよう、points を上流で 1 度だけ切り詰める。
-        # これ以降の heatmap / daily_summary / 賑わい窓 / 狙い目TOP3 / AI入力 / points_used は
-        # すべてこの truncated points から作られ、集計期間・件数が完全に一致する。
-        points = _truncate_points_to_recent_nights(_build_points(rows, baseline))
-
-        # fix #2: 「賑わいやすい時間帯」は女性比重み付きの合成スコアではなく素の occupancy で
-        # ランク付けする (狙い目TOP3 と同じ指標)。満席時間帯が脱落する自己矛盾を解消。
-        windows = _build_busy_windows(points, threshold, min_duration_minutes)
-        serialized_windows = _serialize_windows(windows)
-        top_windows = sorted(
-            serialized_windows,
-            key=lambda w: w.get("avg_score") or 0,
-            reverse=True,
-        )[:3]
-
-        # v2: Phase A/B/D の追加データを構築 (すべて truncated points 基準)
-        heatmap = _build_day_hour_heatmap(points)
-        daily_summary = _build_daily_summary(points, min_night_samples=min_night_samples)
-        next_week_recs = _derive_next_week_recommendations(heatmap)
-
-        # _build_daily_summary は直近 WEEKLY_DAILY_SUMMARY_MAX_NIGHTS 夜だけに切り詰める
-        # (fukuoka 2026-07-03 実例: フェッチ元の rows に 9 夜分混入していた)。
-        # レポート上部の「集計期間」表示や metric_interpretations の period_days が
-        # 生の取得ウィンドウ (最大 9 日超) のままだと、"先週7夜" と謳いながら表示される
-        # 期間だけ数日分ズレて見える。daily_summary が実際に保持した夜の範囲・件数に
-        # period を合わせ、両者を一致させる。
-        if daily_summary:
-            kept_dates = [d["date"] for d in daily_summary]
-            report_period_start = datetime.fromisoformat(min(kept_dates)).replace(tzinfo=JST_OFFSET)
-            # 最終夜の営業終了 (翌 04:59 相当) を期間終端として表示する
-            report_period_end = datetime.fromisoformat(max(kept_dates)).replace(
-                tzinfo=JST_OFFSET
-            ) + timedelta(days=1, hours=4, minutes=59)
-            report_period_days = len(daily_summary)
-        else:
-            report_period_start = period_start
-            report_period_end = period_end
-            report_period_days = None
-
-        metrics_interp = _compute_metric_interpretations(
-            points_count=len(points),
-            period_start=report_period_start,
-            period_end=report_period_end,
-            baseline=baseline,
-            period_days_override=report_period_days,
-        )
-
-        payload = {
-            "analysis_id": f"weekly:{store}:{date_label}",
-            "type": "weekly",
-            "store": store,
-            "generated_at": generated_at,
-            "period": {"start": _iso(report_period_start), "end": _iso(report_period_end)},
-            # フェッチ元 API から返った生データの実際の範囲 (デバッグ・監査用。
-            # 上の period はレポート表示/daily_summary と一致させた「表示用」の期間)。
-            "raw_fetch_period": {"start": _iso(period_start), "end": _iso(period_end)},
-            "params": {
-                "threshold": threshold,
-                "min_duration_minutes": min_duration_minutes,
-                "ideal": ideal,
-                "gender_weight": gender_weight,
-                "occupancy_baseline": baseline,
-            },
-            "metrics": {
-                "points_used": len(points),
-                "baseline_p95_total": baseline,
-                "reliability_score": min(1.0, len(points) / 200.0),
-            },
-            # v2: Phase A
-            "metric_interpretations": metrics_interp,
-            "windows": serialized_windows,
-            "top_windows": top_windows,
-            # v2: Phase B
-            "day_hour_heatmap": heatmap,
-            # v2: Phase D
-            "next_week_recommendations": next_week_recs,
-            # v2 追補: 日別サマリ (先週何が起きたか の視覚化用)
-            "daily_summary": daily_summary,
-        }
-
-        # v2: Phase C — AI 自然文解説 (Gemini API key + フラグ ON のときのみ)
-        # v2.1: last_week_summary + next_week_forecast の 2 セクション分割
-        # v2.2: 失敗時は既存 Supabase レコードから前回文を引き継ぎ、上書き消失を防ぐ
-        commentary = _generate_ai_commentary(
-            store_label=store,
-            metrics_interp=metrics_interp,
-            heatmap=heatmap,
-            daily_summary=daily_summary,
-            top_windows=top_windows,
-            next_week_recs=next_week_recs,
-        )
-        if commentary:
-            # v2.3: 公開前の数値グラウンディング検証 (2026-07-03 全44店監査で発見した
-            # shinsaibashi 級の数値誤りを block する)。LLM を追加で呼ばない決定的チェック。
-            # 詳細: scripts/commentary_quality_gate.py
-            gate_ok, gate_reasons = check_weekly_commentary(commentary, daily_summary)
-            if not gate_ok:
-                print(
-                    f"[weekly-insights] commentary quality gate failed for store={store}: "
-                    f"{'; '.join(gate_reasons)}",
-                    file=sys.stderr,
-                )
-                commentary = None
-        if commentary:
-            if commentary.get("last_week_summary"):
-                payload["last_week_summary"] = commentary["last_week_summary"]
-            if commentary.get("next_week_forecast"):
-                payload["next_week_forecast"] = commentary["next_week_forecast"]
-            # 後方互換: 旧 ai_commentary 参照箇所のために連結も保持
-            joined_parts = [v for v in (commentary.get("last_week_summary"), commentary.get("next_week_forecast")) if v]
-            if joined_parts:
-                payload["ai_commentary"] = "\n\n".join(joined_parts)
-        else:
-            # 新規生成失敗 → 既存レコードから前回文を引き継ぐ (sync_to_supabase 時のみ意味あり)。
-            # ただし引き継ぎには鮮度上限を設ける (WEEKLY_COMMENTARY_MAX_AGE_DAYS)。
-            # これが無いと、生成が恒常的に失敗し続ける店舗で「1年前の先週は〜」が
-            # 新しい target_date/period/heatmap と一緒に is_published=true のまま
-            # 延々と表示され続け、誰も気づかない致命的な陳腐化になる。
-            if sync_to_supabase:
-                existing = _fetch_existing_weekly_commentary(store)
-                existing_generated_at = existing.get("_existing_generated_at")
-                age_days = _commentary_age_days(existing_generated_at, now=now)
-                text_keys = ("last_week_summary", "next_week_forecast", "ai_commentary")
-                has_existing_text = any(existing.get(k) for k in text_keys)
-
-                if has_existing_text and age_days is not None and age_days > WEEKLY_COMMENTARY_MAX_AGE_DAYS:
-                    print(
-                        f"[weekly-insights] existing commentary for store={store} is stale "
-                        f"({age_days:.1f} days > {WEEKLY_COMMENTARY_MAX_AGE_DAYS}); "
-                        f"NOT carrying over, publishing without commentary (heatmap-only)",
-                        file=sys.stderr,
-                    )
-                    _notify_ops(
-                        f"[weekly-insights] store={store}: AI commentary generation failed/rejected "
-                        f"and the existing Supabase record is {age_days:.1f} days old "
-                        f"(> {WEEKLY_COMMENTARY_MAX_AGE_DAYS}d threshold). "
-                        f"Stale carry-over was SKIPPED; this week's report will publish "
-                        f"without last_week_summary/next_week_forecast. Investigate the "
-                        f"local Ollama/GHA Gemini pipeline for store={store}."
-                    )
-                elif has_existing_text:
-                    for k in text_keys:
-                        if existing.get(k):
-                            payload[k] = existing[k]
-                    age_label = f"{age_days:.1f}d" if age_days is not None else "unknown age"
-                    print(
-                        f"[weekly-insights] preserved existing commentary for store={store} "
-                        f"(keys={[k for k in text_keys if existing.get(k)]}, age={age_label})",
-                        file=sys.stderr,
-                    )
-
-        store_dir = base_dir / store
-        _ensure_dir(store_dir)
-        out_path = store_dir / f"{date_label}.json"
-        with out_path.open("w", encoding="utf-8", newline="\n") as handle:
-            json.dump(payload, handle, ensure_ascii=True, indent=2)
-            handle.write("\n")
-
-        if sync_to_supabase:
-            _upsert_weekly_report_to_supabase(
-                store=store,
-                date_label=date_label,
-                generated_at=generated_at,
-                payload=payload,
-            )
+        _process_store(store, ctx)
 
     # 全店処理後、keep_alive="10m" で常駐させていたモデルをアンロードし GPU を音楽PJ等へ返す。
-    # (Request/urlopen は未 import のためここで自己完結して呼ぶ。best-effort)
-    try:
-        import urllib.request as _u
-        _u.urlopen(_u.Request(
-            "http://localhost:11434/api/generate",
-            data=json.dumps({"model": "gemma4:e4b", "keep_alive": 0, "prompt": ""}).encode("utf-8"),
-            headers={"Content-Type": "application/json"}, method="POST",
-        ), timeout=30).read()
-    except Exception:  # noqa: BLE001
-        pass
+    # (best-effort。失敗しても握りつぶす)
+    unload_ollama(OLLAMA_MODEL)
 
     # index.json は退役済み（2026-07-18 index.json retirement）。args.skip_index は
-    # ここでは一切参照しない (generate-weekly-insights.yml との後方互換のため
-    # argparse には残す no-op)。
+    # ここでは一切参照しない（古い呼び出しとの後方互換のため argparse には残す no-op）。
     return 0
 
 

@@ -109,7 +109,7 @@ Target commit: (see git)
 - **ML モデルプリロード**: Flask 起動時にバックグラウンドスレッドで全 38 店舗のモデルをメモリに先読み。初回リクエストの 5s/店舗 の遅延を解消
 - **Recharts 遅延読み込み**: `next/dynamic` で PreviewMainSection / CompareClient を lazy load。初期バンドル ~200KB 削減
 - **Supabase 容量管理**: `cleanup-old-logs.yml`（週次 cron）。1年超データのダウンサンプリング + 300万行上限の緊急削除。Free Tier 500MB を超えない安全弁
-- **SHAP 分析スクリプト**: `scripts/shap_analysis.py` — 店舗別の特徴量寄与度を SHAP TreeExplainer で診断
+- **SHAP 分析スクリプト（現在は使えない）**: 旧 `scripts/shap_analysis.py` — 店舗別の特徴量寄与度を SHAP TreeExplainer で診断していたが、2026-04-12 の XGBoost→LightGBM 移行でモデル形式が変わり動作しなくなった。`archive/shap_analysis.py` に退避（同じ理由で `archive/inspect_feature_importance.py` も退避）
 - **UI 強化**: lucide-react アイコン、framer-motion フェードインアニメーション、モバイルハンバーガーメニュー、アクティブページハイライト
 - **GitHub PAT 期限切れ監視**: 週次 GHA ワークフロー `check-pat-expiry.yml`。GitHub API でトークン有効期限を取得し、30日以内なら LINE Push で通知（7日以内は赤アラート）
 - **PWA**: Web App Manifest + アイコン PNG (192/512) + Service Worker（ネットワークファースト + stale-while-revalidate）。ホーム画面追加・オフラインフォールバック対応

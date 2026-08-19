@@ -182,7 +182,7 @@ npm run dev
 - `/reports/weekly/[store_slug]` が読めない: Supabase `blog_drafts` の該当行・`error_message` を確認
   （`index.json` は別バッチで廃止中の死蔵ファイルのため確認対象から除外）
 - **ブラウザで `/api/range` が 502**: Flask（`BACKEND_URL`、通常 `http://127.0.0.1:5000`）が起動していない、または URL が間違い。Flask を起動してから再読み込み。
-- **予測が直近値に引きずられる（秘伝のタレ）**: ラグ/MAへの依存が強すぎる可能性。`scripts/experiments/delta_target_nagasaki.py` と `scripts/experiments/ablation_signal_extraction.py` で Delta モデルを再検証し、AUC/Gain を確認してから本番ハイパラ・重みを調整する。
+- **予測が直近値に引きずられる（秘伝のタレ）**: ラグ/MAへの依存が強すぎる可能性。`archive/delta_target_nagasaki.py` と `archive/ablation_signal_extraction.py`（2026-03-24 の XGBoost 時代の実験。参考としてのみ）で Delta モデルの考え方を再確認し、AUC/Gain を見てから本番ハイパラ・重みを調整する。
 
 ### Next.js `npm run dev`（よくあるエラー）
 

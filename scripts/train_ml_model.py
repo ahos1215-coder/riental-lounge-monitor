@@ -757,6 +757,29 @@ def _coverage_stats(
     return stats
 
 
+def _summarize_gate_decisions(gate_decisions: list[dict]) -> dict[str, int]:
+    """Champion/Challenger ゲートの判定内訳（replaced / skipped / carried_forward）。"""
+    return {
+        "replaced": sum(1 for d in gate_decisions if d["decision"] == "replaced"),
+        "skipped": sum(1 for d in gate_decisions if d["decision"] == "skipped"),
+        "carried_forward": sum(1 for d in gate_decisions if d["decision"] == "carried_forward"),
+    }
+
+
+def _pick_default_store(configured_store_id: str | None, replaced_stores: set[str]) -> str | None:
+    """後方互換のグローバル別名 (model_men.txt / model_women.txt) の元になる店舗を選ぶ。
+
+    候補は「この run で実際に (再)学習してアップロードした店舗」だけ。carry-forward
+    された店舗は work_dir にファイルが無い（既存世代がそのまま Storage に残っている）。
+    1 店も学習していなければ None を返し、既存のグローバル別名には触れさせない。
+    """
+    if configured_store_id and configured_store_id in replaced_stores:
+        return configured_store_id
+    if replaced_stores:
+        return sorted(replaced_stores)[0]
+    return None
+
+
 def _write_github_step_summary(
     coverage: dict[str, Any], gate_decisions: list[dict[str, Any]],
 ) -> None:
@@ -818,6 +841,9 @@ def _build_metadata(
         "stale_store_days": cfg.stale_store_days,
         "objective": cfg.objective,
         "python_version": platform.python_version(),
+        # 実際の学習器は LightGBM（model_format も "lightgbm"）。
+        "lightgbm_version": lgb.__version__,
+        # 過去の metadata.json と形を揃えるための互換キー（読み手は現状いない）。
         "xgboost_version": xgb.__version__,
     }
     if metrics:
@@ -1167,11 +1193,7 @@ def main() -> int:
         if not store_models:
             raise SystemExit("no per-store models were trained or carried forward (all stores skipped)")
 
-        gate_summary = {
-            "replaced": sum(1 for d in gate_decisions if d["decision"] == "replaced"),
-            "skipped": sum(1 for d in gate_decisions if d["decision"] == "skipped"),
-            "carried_forward": sum(1 for d in gate_decisions if d["decision"] == "carried_forward"),
-        }
+        gate_summary = _summarize_gate_decisions(gate_decisions)
         print("[train-ml][gate][summary]", json.dumps(gate_summary, ensure_ascii=True))
         print("[train-ml][gate][decisions]", json.dumps(gate_decisions, ensure_ascii=True))
 
@@ -1192,12 +1214,7 @@ def main() -> int:
         # among the stores actually (re)trained+uploaded THIS run — carried-forward
         # stores have no local files in work_dir (their models already live in
         # storage from a prior run, untouched).
-        if cfg.store_id and cfg.store_id in replaced_stores:
-            default_store = cfg.store_id
-        elif replaced_stores:
-            default_store = sorted(replaced_stores)[0]
-        else:
-            default_store = None
+        default_store = _pick_default_store(cfg.store_id, replaced_stores)
 
         if default_store is not None:
             default_men = work_dir / store_models[default_store]["model_men"]

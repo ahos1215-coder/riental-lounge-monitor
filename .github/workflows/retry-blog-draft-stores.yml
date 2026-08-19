@@ -1,9 +1,10 @@
 # Supabase blog_drafts で error が残った店舗だけを再実行する（手動・緊急用）。
 #
-# 【重要・2026-07 追記】日次レポートは現在ローカル gemma4:12b (scripts/local_report_job.py,
+# 【重要・2026-07 追記】日次レポートは現在ローカル Ollama (scripts/local_report_job.py,
+# モデル名は scripts/_ollama_common.py の MODEL 定数が正,
 # Windows タスクスケジューラ) が生成しており、本ワークフローが叩く /api/cron/blog-draft は
 # 旧 Gemini/Vercel 経路で、同じ facts_id (auto_<store>_<edition>) に書き込む。
-# そのため無警戒に実行すると、ローカル gemma が既に公開した良好なレポートを
+# そのため無警戒に実行すると、ローカル Ollama が既に公開した良好なレポートを
 # Gemini 経由の結果で上書きしてしまう恐れがある。
 # これを防ぐため、実行前に該当 facts_id の現在の source を確認し、既に
 # local_gemma* が公開済みなら confirm_overwrite=yes を明示しない限りスキップする。

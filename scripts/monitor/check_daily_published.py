@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""日次レポートがその日ちゃんと公開されたかを Supabase に問い合わせて判定する。
+
+.github/workflows/check-daily-published.yml から `python scripts/monitor/check_daily_published.py`
+として呼ばれる（もとは同ワークフローの YAML ヒアドキュメントに直書きされていた。
+テストから触れず grep でも見つけにくかったため、2026-08-19 の整理でここへ移した）。
+判定ロジック・環境変数名・出力文言・終了コードは移設前と同じ。
+
+環境変数:
+  SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY  必須
+  INPUT_DATE     チェック対象日 YYYY-MM-DD（空欄 = UTC の今日 = JST 23:30 時点の今日）
+  MIN_PUBLISHED  各エディションの最低公開数（既定 30 / 全42店）
+  GITHUB_STEP_SUMMARY / GITHUB_OUTPUT  あれば書き込む（GHA 外では書かずに続行）
+
+終了コード: 0 = 両エディションとも基準を満たす / 1 = 不足・設定不備・照会失敗。
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import time
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from _retry_common import backoff_delay  # noqa: E402
+
+EDITIONS = ("evening_preview", "late_update")
+FETCH_ATTEMPTS = 3
+FETCH_BACKOFF_CAP = 30.0
+FETCH_TIMEOUT = 30
+
+
+def parse_content_range_total(content_range: str) -> int:
+    """PostgREST の `Content-Range: 0-0/44` から総件数だけを取り出す。
+
+    範囲が不明（`*/*` や空）なら 0 を返す（移設前の実装と同じ扱い）。
+    """
+    if "/" not in content_range:
+        return 0
+    try:
+        return int(content_range.split("/")[-1])
+    except ValueError:
+        return 0
+
+
+def count_published(url: str, key: str, target: str, edition: str) -> int:
+    """指定日・指定エディションの「読者に出せる」日次レポート件数を数える。
+
+    フロントと同じ条件（is_published=true かつ error_message is null）で絞る。
+    """
+    q = urllib.parse.urlencode({
+        "content_type": "eq.daily",
+        "target_date": f"eq.{target}",
+        "edition": f"eq.{edition}",
+        "is_published": "eq.true",
+        "error_message": "is.null",
+        "select": "facts_id",
+    })
+    req = urllib.request.Request(
+        f"{url}/rest/v1/blog_drafts?{q}",
+        headers={"apikey": key, "Authorization": f"Bearer {key}",
+                 "Prefer": "count=exact", "Range-Unit": "items", "Range": "0-0"},
+    )
+    last_err: Exception | None = None
+    for attempt in range(1, FETCH_ATTEMPTS + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT) as r:
+                return parse_content_range_total(r.headers.get("Content-Range", ""))
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            # 2026-08-18 の Supabase 飽和（544/429）は即時リトライでは抜けられなかったため、
+            # 試行の間に指数バックオフを挟む。
+            if attempt < FETCH_ATTEMPTS:
+                time.sleep(backoff_delay(attempt, FETCH_BACKOFF_CAP))
+    print(f"::error::Supabase 照会に失敗: {last_err}")
+    sys.exit(1)
+
+
+def build_detail(target: str, floor: int, results: dict[str, int]) -> tuple[str, list[str]]:
+    """サマリ本文と、基準を満たさなかったエディションの一覧を返す。"""
+    lines = [f"日次レポート公開チェック（{target} JST, 基準={floor}/エディション）"]
+    missing: list[str] = []
+    for edition in EDITIONS:
+        n = results[edition]
+        ok = n >= floor
+        lines.append(f"- {edition}: {n} 件 公開 {'OK' if ok else '不足！'}")
+        if not ok:
+            missing.append(f"{edition}={n}")
+    return "\n".join(lines), missing
+
+
+def _append_env_file(env_name: str, text: str) -> None:
+    """GHA が用意するファイル（GITHUB_STEP_SUMMARY 等）に追記する。無ければ何もしない。"""
+    path = os.environ.get(env_name)
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(text)
+
+
+def main() -> int:
+    url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+    key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or ""
+    if not url or not key:
+        print("::error::SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY secret 未設定")
+        return 1
+
+    target = (os.environ.get("INPUT_DATE") or "").strip()
+    if not target:
+        # 対象は「JST のその日」の日次レポート。cron は 14:30 UTC(=23:30 JST) で、
+        # その瞬間は UTC 日付 == JST 日付。GitHub の cron 遅延は後ろにしかずれず、
+        # UTC 日付は翌 00:00 UTC(=09:00 JST) まで変わらないので、UTC 日付をそのまま
+        # 使えば深夜跨ぎの遅延でも「まだ生成前の翌日」を誤って対象にしない。
+        # (旧実装は UTC+9h だったため、15:00 UTC 以降に遅延実行されると日付が翌日へ
+        #  飛び、未生成の当日を 0 件と誤検知して誤アラートを出していた。2026-07-06 実測)
+        target = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    floor = int(os.environ.get("MIN_PUBLISHED") or "30")
+
+    results = {e: count_published(url, key, target, e) for e in EDITIONS}
+    detail, missing = build_detail(target, floor, results)
+
+    _append_env_file("GITHUB_STEP_SUMMARY", detail + "\n")
+    _append_env_file("GITHUB_OUTPUT", "detail<<EOF\n" + detail + "\nEOF\n")
+    print(detail)
+
+    if missing:
+        print(f"::error::日次レポートが未公開/不足です（{target}): {', '.join(missing)}")
+        return 1
+    print("OK: 両エディションとも基準を満たしています。")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

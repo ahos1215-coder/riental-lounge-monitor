@@ -581,6 +581,80 @@ def _write_scorecard_summary(
         print(f"[score] scorecard summary write failed: {str(exc)[:120]}")
 
 
+def _summary_night_entry(
+    *,
+    night_date: str,
+    overall: float | None,
+    overall_baseline: float | None,
+    stores_scored: int,
+    overall_v2: float | None,
+    captured_at: datetime | None,
+    capture_minutes_late: int | None,
+    contaminated_capture: bool,
+) -> dict:
+    """ローリング summary.json に積む「今夜1行」を組み立てる。
+
+    `overall_v2` 以降は後方互換の追加キー（_fetch_live_accuracy は無視する）。
+    `captured_at_utc` / `capture_minutes_late` / `contaminated_capture` は
+    「開店後に撮ってしまったスナップショット」を後から見分けるための provenance。
+    """
+    return {
+        "night_date": night_date,
+        "overall_live_mae": overall,
+        "overall_baseline_mae": overall_baseline,
+        "stores_scored": stores_scored,
+        "overall_v2_mae": overall_v2,
+        "captured_at_utc": captured_at.isoformat() if captured_at is not None else None,
+        "capture_minutes_late": capture_minutes_late,
+        "contaminated_capture": contaminated_capture,
+    }
+
+
+def _merge_summary_nights(existing_nights: list[dict], entry: dict) -> list[dict]:
+    """今夜の行を先頭に置き、同じ夜の古い行を落として SUMMARY_KEEP 件で打ち切る。"""
+    night_date = entry.get("night_date")
+    return (
+        [entry] + [n for n in existing_nights if n.get("night_date") != night_date]
+    )[:SUMMARY_KEEP]
+
+
+def _collect_accuracy_alerts(
+    *,
+    overall: float | None,
+    overall_baseline: float | None,
+    summary_nights: list[dict],
+    expected: int,
+    stores_scored: int,
+) -> tuple[list[str], bool]:
+    """Act（PDCA を閉じる）: 本番劣化のアラート文面と、カバレッジ失敗かどうかを返す。
+
+    返り値の2つ目 `coverage_failure` は main() の終了コード判定にも使う。
+    """
+    alerts: list[str] = []
+    if overall is not None and overall_baseline is not None and overall > overall_baseline:
+        alerts.append(f"ML is NOT beating the naive baseline in production (live MAE {overall} vs naive {overall_baseline}).")
+    # 汚染夜は「直近の中央値」からも除外する（さもないと汚染された過去夜が
+    # スパイク検知の基準そのものを歪める）。
+    recent = [n.get("overall_live_mae") for n in _uncontaminated_recent(summary_nights[1:], 7)
+              if isinstance(n.get("overall_live_mae"), (int, float))]
+    if overall is not None and recent:
+        med = sorted(recent)[len(recent) // 2]
+        if med > 0 and overall > med * 1.5:
+            alerts.append(f"Live forecast error spiked: tonight {overall} vs recent median {round(med, 2)} (>1.5x).")
+
+    # スナップショットされていた店舗数(expected)に対し、実際に答え合わせできた
+    # 店舗数(stores_scored)が 90% 未満なら異常。0 件を含め、監視ジョブが
+    # green のまま死ぬのを防ぐ。expected==0（スナップショット自体が空）は
+    # 別枠でログのみ（snapshot 側の問題なので score 側の非ゼロ終了はしない）。
+    coverage_failure = expected > 0 and stores_scored < expected * 0.9
+    if coverage_failure:
+        alerts.append(
+            f"Only {stores_scored}/{expected} stores were scored (<90% coverage) — "
+            "check logs collection / store id mapping."
+        )
+    return alerts, coverage_failure
+
+
 def main() -> int:
     _load_env()
     supabase_url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
@@ -799,17 +873,19 @@ def main() -> int:
                 summary = loaded
         except Exception:  # noqa: BLE001
             pass
-    summary["nights"] = (
-        [{"night_date": night_date, "overall_live_mae": overall,
-          "overall_baseline_mae": overall_baseline, "stores_scored": len(per_store),
-          # 追加(後方互換): v2 の夜次 MAE。_fetch_live_accuracy は無視する（既存キーは不変）。
-          "overall_v2_mae": overall_v2,
-          # 追加(後方互換, 汚染検知provenance): 既存 consumer は無視できる新キー。
-          "captured_at_utc": captured_at.isoformat() if captured_at is not None else None,
-          "capture_minutes_late": capture_minutes_late,
-          "contaminated_capture": contaminated_capture}]
-        + [n for n in summary["nights"] if n.get("night_date") != night_date]
-    )[:SUMMARY_KEEP]
+    summary["nights"] = _merge_summary_nights(
+        summary["nights"],
+        _summary_night_entry(
+            night_date=night_date,
+            overall=overall,
+            overall_baseline=overall_baseline,
+            stores_scored=len(per_store),
+            overall_v2=overall_v2,
+            captured_at=captured_at,
+            capture_minutes_late=capture_minutes_late,
+            contaminated_capture=contaminated_capture,
+        ),
+    )
     summary["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
     _storage_put(bucket, "accuracy/scores/summary.json", json.dumps(summary, ensure_ascii=False).encode("utf-8"), supabase_url, key)
 
@@ -848,29 +924,14 @@ def main() -> int:
         print(f"[score] blend_weights compute failed: {str(exc)[:150]}")
 
     # --- Act (close the PDCA loop): alert on production degradation ---
-    alerts: list[str] = []
-    if overall is not None and overall_baseline is not None and overall > overall_baseline:
-        alerts.append(f"ML is NOT beating the naive baseline in production (live MAE {overall} vs naive {overall_baseline}).")
-    # 汚染夜は「直近の中央値」からも除外する（さもないと汚染された過去夜が
-    # スパイク検知の基準そのものを歪める）。
-    recent = [n.get("overall_live_mae") for n in _uncontaminated_recent(summary["nights"][1:], 7)
-              if isinstance(n.get("overall_live_mae"), (int, float))]
-    if overall is not None and recent:
-        med = sorted(recent)[len(recent) // 2]
-        if med > 0 and overall > med * 1.5:
-            alerts.append(f"Live forecast error spiked: tonight {overall} vs recent median {round(med, 2)} (>1.5x).")
-
-    # スナップショットされていた店舗数(expected)に対し、実際に答え合わせできた
-    # 店舗数(stores_scored)が 90% 未満なら異常。0 件を含め、監視ジョブが
-    # green のまま死ぬのを防ぐ。expected==0（スナップショット自体が空）は
-    # 別枠でログのみ（snapshot 側の問題なので score 側の非ゼロ終了はしない）。
     stores_scored = len(per_store)
-    coverage_failure = expected > 0 and stores_scored < expected * 0.9
-    if coverage_failure:
-        alerts.append(
-            f"Only {stores_scored}/{expected} stores were scored (<90% coverage) — "
-            "check logs collection / store id mapping."
-        )
+    alerts, coverage_failure = _collect_accuracy_alerts(
+        overall=overall,
+        overall_baseline=overall_baseline,
+        summary_nights=summary["nights"],
+        expected=expected,
+        stores_scored=stores_scored,
+    )
 
     if alerts:
         worst = sorted(per_store.items(), key=lambda kv: kv[1]["live_mae"], reverse=True)[:5]

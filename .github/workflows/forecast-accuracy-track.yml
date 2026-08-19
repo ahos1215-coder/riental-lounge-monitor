@@ -17,11 +17,10 @@ name: Forecast accuracy tracking
 # （live_mae履歴・blend_weights）から除外する対処を実装済み（根治ではなく検知+除外）。
 #
 # 根治として、warm-cdn.yml / scripts/warm_cdn_local.py と同じパターンで、snapshot の
-# プライマリ実行主体をオーナーPCの Task Scheduler（タスク名 `MEGRIBI-snapshot`、
-# 毎日18:10 JST、実体は `python scripts/snapshot_forecasts.py`）へ移す方針とする
-# （このコメントは移行準備の告知。Task Scheduler 登録はオーナー側の実施待ちのため、
-# 下の `schedule:` はそのまま維持し、GHA側はローカルジョブが未登録の間の実質プライマリ
-# 兼、登録後はバックアップ/日和見実行として残す）。
+# 実行主体はオーナーPCの Task Scheduler（タスク名 `MEGRIBI-snapshot`、毎日18:10 JST、
+# 実体は `python scripts/snapshot_forecasts.py`）へ完全移管済み。GHA 側の snapshot
+# `schedule:` は 2026-07-18 に削除した（下の schedule: を参照。手動の穴埋めが要るときだけ
+# workflow_dispatch で mode=snapshot を明示実行する）。
 # score（06:10 JST・mode=score）側は変更しない — GHA のままで問題ない
 # （汚染検知はスコアリング側で完結するため、スコアリングの実行主体には依存しない）。
 
@@ -70,13 +69,13 @@ jobs:
         id: decide
         env:
           INPUT_MODE: ${{ github.event.inputs.mode }}
-          SCHEDULE: ${{ github.event.schedule }}
         run: |
           set -euo pipefail
+          # 定発火は採点(score)の1本だけ。snapshot は 2026-07-18 に cron を削除し
+          # ローカル Task Scheduler へ移管したので、snapshot を回すのは
+          # workflow_dispatch で mode=snapshot を明示したときだけ。
           if [ -n "${INPUT_MODE:-}" ]; then
             MODE="$INPUT_MODE"
-          elif [ "${SCHEDULE:-}" = "10 9 * * *" ]; then
-            MODE="snapshot"
           else
             MODE="score"
           fi

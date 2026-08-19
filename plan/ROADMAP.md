@@ -146,7 +146,7 @@ Target commit: (see git)
 | ML v4: 傾き特徴量 | `total_slope_30min`（30分間の変化速度）追加。21 特徴量。schema v3→v4 |
 | ML: 時間減衰ウェイト | サンプル重み付けに指数減衰（90日半減期）追加。直近データをより重視 |
 | ML: 日次精度トラッキング | `metadata.json` の `daily_accuracy` に店舗別・日別 MAE を自動記録 |
-| SHAP 分析 | `scripts/shap_analysis.py` — TreeExplainer で特徴量寄与度を診断 |
+| SHAP 分析 | `scripts/shap_analysis.py` — TreeExplainer で特徴量寄与度を診断（**当時のもの。2026-04-12 の LightGBM 移行で動かなくなり `archive/shap_analysis.py` へ退避済み**） |
 | Flask モデルプリロード | 起動時にバックグラウンドスレッドで全 38 店舗のモデルをメモリに先読み |
 | Recharts 遅延読み込み | `next/dynamic` で PreviewMainSection / CompareClient を lazy load |
 | 公開 API レート制限 | 全 proxy route に IP ベースのスライディングウィンドウ（60 req/min） |

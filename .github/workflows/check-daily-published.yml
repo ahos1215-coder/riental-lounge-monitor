@@ -1,6 +1,7 @@
 name: Check daily reports published
 
-# ローカル(このPCのgemma4:12b)による日次レポート生成が、その日ちゃんと公開されたかを
+# ローカル(このPCの Ollama。モデル名は scripts/_ollama_common.py の MODEL が正)による
+# 日次レポート生成が、その日ちゃんと公開されたかを
 # GitHub 側から監視する。PC が落ちている / Ollama が固まっている / ジョブが途中で
 # 死んだ場合、当日の blog_drafts(content_type=daily, is_published=true) が欠けるので検知できる。
 # 失敗時はジョブが exit 1 する → GitHub が自動でオーナーにメール通知。
@@ -38,6 +39,9 @@ jobs:
     outputs:
       detail: ${{ steps.check.outputs.detail }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Query Supabase for today's daily reports
         id: check
         env:
@@ -45,76 +49,9 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           INPUT_DATE: ${{ github.event.inputs.date }}
           MIN_PUBLISHED: ${{ github.event.inputs.min_published || '30' }}
-        run: |
-          python3 - <<'PY'
-          import json, os, sys, urllib.request, urllib.parse
-          from datetime import datetime, timezone, timedelta
-
-          url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
-          key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or ""
-          if not url or not key:
-              print("::error::SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY secret 未設定")
-              sys.exit(1)
-
-          target = (os.environ.get("INPUT_DATE") or "").strip()
-          if not target:
-              # 対象は「JST のその日」の日次レポート。cron は 14:30 UTC(=23:30 JST) で、
-              # その瞬間は UTC 日付 == JST 日付。GitHub の cron 遅延は後ろにしかずれず、
-              # UTC 日付は翌 00:00 UTC(=09:00 JST) まで変わらないので、UTC 日付をそのまま
-              # 使えば深夜跨ぎの遅延でも「まだ生成前の翌日」を誤って対象にしない。
-              # (旧実装は UTC+9h だったため、15:00 UTC 以降に遅延実行されると日付が翌日へ
-              #  飛び、未生成の当日を 0 件と誤検知して誤アラートを出していた。2026-07-06 実測)
-              target = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-          floor = int(os.environ.get("MIN_PUBLISHED") or "30")
-          editions = ["evening_preview", "late_update"]
-
-          def count(edition):
-              q = urllib.parse.urlencode({
-                  "content_type": "eq.daily",
-                  "target_date": f"eq.{target}",
-                  "edition": f"eq.{edition}",
-                  "is_published": "eq.true",
-                  "error_message": "is.null",
-                  "select": "facts_id",
-              })
-              req = urllib.request.Request(
-                  f"{url}/rest/v1/blog_drafts?{q}",
-                  headers={"apikey": key, "Authorization": f"Bearer {key}",
-                           "Prefer": "count=exact", "Range-Unit": "items", "Range": "0-0"},
-              )
-              last_err = None
-              for _ in range(3):
-                  try:
-                      with urllib.request.urlopen(req, timeout=30) as r:
-                          cr = r.headers.get("Content-Range", "")  # 例 "0-0/44"
-                          return int(cr.split("/")[-1]) if "/" in cr else 0
-                  except Exception as e:
-                      last_err = e
-              print(f"::error::Supabase 照会に失敗: {last_err}")
-              sys.exit(1)
-
-          results = {e: count(e) for e in editions}
-          lines = [f"日次レポート公開チェック（{target} JST, 基準={floor}/エディション）"]
-          missing = []
-          for e in editions:
-              n = results[e]
-              ok = n >= floor
-              lines.append(f"- {e}: {n} 件 公開 {'OK' if ok else '不足！'}")
-              if not ok:
-                  missing.append(f"{e}={n}")
-          detail = "\n".join(lines)
-
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
-              fh.write(detail + "\n")
-          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
-              fh.write("detail<<EOF\n" + detail + "\nEOF\n")
-          print(detail)
-
-          if missing:
-              print(f"::error::日次レポートが未公開/不足です（{target}): {', '.join(missing)}")
-              sys.exit(1)
-          print("OK: 両エディションとも基準を満たしています。")
-          PY
+        # 判定ロジックの実体は scripts/monitor/check_daily_published.py（stdlib のみ）。
+        # テストは tests/test_monitor_published_checks.py。
+        run: python3 scripts/monitor/check_daily_published.py
 
   notify:
     needs: [check-published]
