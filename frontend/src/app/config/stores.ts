@@ -61,6 +61,22 @@ export function seatFullnessPercent(
   return Math.max(0, Math.min(100, pct));
 }
 
+/**
+ * 男女の合計人数から「店舗全体の席の埋まり具合(%)」を復元する。
+ *
+ * `capacity` は**片性別あたり**の席数なので、店舗全体の座席数は `capacity * 2`。
+ * この `×2` は店舗ページ／エリア／カード／比較／マイページ／週報の 11 箇所に手書きされており、
+ * 付け忘れると%が倍に出る（実際に間違えやすい）ため関数名に昇格させた。
+ * 片性別の%が欲しい場合は従来どおり seatFullnessPercent(count, capacity) を使う。
+ */
+export function seatFullnessPercentOfTotal(
+  total: number,
+  capacity: number | null | undefined,
+): number | null {
+  if (!capacity || capacity <= 0) return null;
+  return seatFullnessPercent(total, capacity * 2);
+}
+
 /** ブランドの表示ラベル (StoreCard 等で使用) */
 export const BRAND_DISPLAY_LABEL: Record<BrandId, string> = {
   oriental: "ORIENTAL LOUNGE",
@@ -142,12 +158,21 @@ export const STORE_REGION_BUTTON_LABEL: Partial<Record<string, string>> = {
 
 export const DEFAULT_STORE = STORES[0].slug;
 
-export function getStoreMetaBySlug(slug: string | null | undefined): StoreMeta {
+/**
+ * slug → 店舗メタ。**見つからなければ既定店（STORES[0]）を黙って返す**（lookup-or-default）。
+ * 旧名 `getStoreMetaBySlug` は「引く」だけに見えて実際は縮退するため、2026-08-19 に改名した。
+ *
+ * 注意: localStorage 由来の slug（マイページの履歴/お気に入り）には閉店店舗（例: 2026-07-11 閉店の
+ * sapporo_ag）が残り得る。その場合カードは既定店の名前・数値で描画され、リンク先だけ 404 になる。
+ * 「未知の slug は表示しない」に変える案は表示が変わるためオーナー判断待ちの別チケット。
+ * 未知を弾きたい呼び出しは getStoreMetaBySlugStrict（null 返し）を使う。
+ */
+export function getStoreMetaBySlugOrDefault(slug: string | null | undefined): StoreMeta {
   if (!slug) return STORES[0];
   const normalized = slug.toLowerCase();
   const found = STORES.find((s) => s.slug === normalized);
   if (!found && typeof window !== "undefined") {
-    console.warn(`[getStoreMetaBySlug] unknown slug "${slug}", falling back to default store`);
+    console.warn(`[getStoreMetaBySlugOrDefault] unknown slug "${slug}", falling back to default store`);
   }
   return found ?? STORES[0];
 }

@@ -9,7 +9,13 @@ import {
   getStoreHistorySlugs,
   removeFavoriteStore,
 } from "@/lib/browser/meguribiStorage";
-import { getStoreMetaBySlug, isPercentCrowdBrand, seatFullnessPercent, type StoreMeta } from "@/app/config/stores";
+import {
+  getStoreMetaBySlugOrDefault,
+  isPercentCrowdBrand,
+  seatFullnessPercent,
+  seatFullnessPercentOfTotal,
+  type StoreMeta,
+} from "@/app/config/stores";
 import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
 import {
   STORE_CARD_RANGE_LIMIT,
@@ -131,7 +137,7 @@ export default function MyPageClient() {
 
       const cards = await Promise.all(
         targets.map(async (slug): Promise<FavCardData> => {
-          const meta = getStoreMetaBySlug(slug);
+          const meta = getStoreMetaBySlugOrDefault(slug);
           const base: FavCardData = {
             slug, meta, men: 0, women: 0, total: 0, genderRatio: "—",
             sparklineMen: [], sparklineWomen: [],
@@ -196,7 +202,7 @@ export default function MyPageClient() {
   }, [favoriteSlugs]);
 
   const historyMetas = useMemo(
-    () => historySlugs.map((slug) => ({ slug, meta: getStoreMetaBySlug(slug) })),
+    () => historySlugs.map((slug) => ({ slug, meta: getStoreMetaBySlugOrDefault(slug) })),
     [historySlugs],
   );
 
@@ -355,7 +361,7 @@ export default function MyPageClient() {
                       <span>落ち着き <strong className="text-white/70">{card.forecastCalm}</strong></span>
                       <span>最大 <strong className="text-white/70">{
                         isPercentCrowdBrand(card.meta.brand) && card.meta.capacity
-                          ? `約${seatFullnessPercent(card.forecastMaxPred, card.meta.capacity * 2) ?? 0}%`
+                          ? `約${seatFullnessPercentOfTotal(card.forecastMaxPred, card.meta.capacity) ?? 0}%`
                           : `${card.forecastMaxPred}人`
                       }</strong></span>
                     </div>

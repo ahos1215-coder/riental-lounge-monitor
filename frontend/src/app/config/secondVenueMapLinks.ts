@@ -1,4 +1,4 @@
-import { getStoreMetaBySlug } from "./stores";
+import { getStoreMetaBySlugOrDefault } from "./stores";
 
 export type SecondVenuePurpose =
   | "darts"
@@ -58,7 +58,7 @@ function buildMapSearchUrl(areaLabel: string, keyword: string): string {
 }
 
 export function getSecondVenueMapLinks(storeSlug: string): SecondVenueMapLink[] {
-  const meta = getStoreMetaBySlug(storeSlug);
+  const meta = getStoreMetaBySlugOrDefault(storeSlug);
   const areaLabel = meta.mapsQueryBase || meta.areaLabel || meta.label;
 
   return PURPOSE_CONFIGS.map((config) => ({

@@ -1,14 +1,14 @@
 import {
   DEFAULT_STORE,
   buildStoreFullName,
-  getStoreMetaBySlug,
+  getStoreMetaBySlugOrDefault,
 } from "@/app/config/stores";
 
 export const FALLBACK_LAST_STORE = {
-  name: buildStoreFullName(getStoreMetaBySlug(DEFAULT_STORE)),
-  slug: getStoreMetaBySlug(DEFAULT_STORE).slug,
+  name: buildStoreFullName(getStoreMetaBySlugOrDefault(DEFAULT_STORE)),
+  slug: getStoreMetaBySlugOrDefault(DEFAULT_STORE).slug,
 };
 
 export function getAreaLabelFromSlug(slug: string): string {
-  return getStoreMetaBySlug(slug || DEFAULT_STORE).areaLabel || "エリア未設定";
+  return getStoreMetaBySlugOrDefault(slug || DEFAULT_STORE).areaLabel || "エリア未設定";
 }

@@ -17,7 +17,7 @@ import type {
   RangePoint,
   StoreSnapshot,
   TimeSeriesPoint,
-} from "@/app/hooks/storePreviewSnapshot";
+} from "@/lib/forecast/types";
 
 /** グラフ横軸の「HH:MM」。不正な ts はそのまま返す（ラベルを空にしない）。 */
 function formatLabel(ts: string): string {

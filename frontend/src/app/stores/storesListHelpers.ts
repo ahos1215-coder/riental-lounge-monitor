@@ -1,3 +1,5 @@
+import { crowdTierFromPeakTotal } from "@/lib/store/crowdThresholds";
+
 export type BrandFilter = "all" | "oriental" | "jis" | "aisekiya";
 export type ForecastPoint = { ts: string; total_pred?: number };
 
@@ -18,8 +20,9 @@ export const toHmJst = (iso: string): string =>
     hour12: false,
   }).format(new Date(iso));
 
+// 閾値の数値は lib/store/crowdThresholds.ts（LINE 下書きの crowd_label と共有）。
+// 文言はこの一覧固有（LINE 側は 混み/ほどよい/空き）。
 export const crowdLabelFromPred = (maxPred: number): string => {
-  if (maxPred >= 120) return "混雑";
-  if (maxPred >= 80) return "ほどよい";
-  return "空いている";
+  const tier = crowdTierFromPeakTotal(maxPred);
+  return tier === "busy" ? "混雑" : tier === "moderate" ? "ほどよい" : "空いている";
 };

@@ -7,6 +7,7 @@ import { recordStoreVisit } from "@/lib/browser/meguribiStorage";
 import {
   isPercentCrowdBrand,
   seatFullnessPercent,
+  seatFullnessPercentOfTotal,
   type BrandId,
 } from "@/app/config/stores";
 import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
@@ -134,7 +135,7 @@ function StoreCardImpl({
   const menFullPct = percentMode ? seatFullnessPercent(menCount, capacity) ?? 0 : null;
   const womenFullPct = percentMode ? seatFullnessPercent(womenCount, capacity) ?? 0 : null;
   const peakPredPct =
-    percentMode && capacity ? seatFullnessPercent(peakPredTotal, capacity * 2) ?? 0 : null;
+    percentMode && capacity ? seatFullnessPercentOfTotal(peakPredTotal, capacity) ?? 0 : null;
   const gender = (() => {
     const raw = stats?.genderRatio;
     if (!raw) return "-";

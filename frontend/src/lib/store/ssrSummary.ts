@@ -19,15 +19,21 @@
 //  - 実データのみ。無い値は出さない（0人・--:-- 等の「空箱」を作らない）
 //  - 相席屋（isPercentCrowdBrand）は在店人数を公開していないため、人数は一切出さず % のみ
 //  - 時刻は JST 絶対時刻（「◯分前」は生成時刻に依存し ISR で嘘になるため使わない）
-import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
-import type { StoreSnapshot, TimeSeriesPoint } from "@/app/hooks/storePreviewSnapshot";
+import {
+  isPercentCrowdBrand,
+  seatFullnessPercent,
+  seatFullnessPercentOfTotal,
+} from "@/app/config/stores";
+import type { StoreSnapshot, TimeSeriesPoint } from "@/lib/forecast/types";
+import { toNonNegIntOrNull } from "@/lib/range/rangeRows";
+import { MIN_HOURLY_BUCKETS, rollUpByNightHour } from "./nightHourlyRollup";
 import { formatNowHmJst } from "@/lib/date/nightWindow";
 
 /** peakTimeLabel / forecastUpdatedLabel が「値なし」を表すときのプレースホルダ */
 const PLACEHOLDER_TIME_LABELS = new Set(["", "-", "—", "--:--", "–"]);
 
-/** 時間帯別サマリーを出すのに必要な最小の時間数（1点だけでは「推移」にならない） */
-const MIN_HOURLY_BUCKETS = 2;
+// 時間帯別ロールアップと最小バケット数は lib/store/nightHourlyRollup.ts が正本
+// （エリアページ areaLiveSummary.ts と共有）。
 
 export type SsrStat = {
   /** 「男性」「女性」など */
@@ -57,10 +63,9 @@ export type StoreSsrSummaryData = {
   hourly: SsrStat[];
 };
 
-function toNonNegativeInt(value: unknown): number {
-  const n = Number(value ?? 0);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.round(n));
+/** 系列値（number|null）の非負整数化。値なしは 0 として扱う（SSR テキストは 0 人と書ける）。 */
+function toNonNegativeInt(value: number | null | undefined): number {
+  return toNonNegIntOrNull(value) ?? 0;
 }
 
 function isMeaningfulTimeLabel(raw: string | null | undefined): boolean {
@@ -75,24 +80,21 @@ function isMeaningfulTimeLabel(raw: string | null | undefined): boolean {
 export function rollUpHourlyActuals(
   series: readonly TimeSeriesPoint[],
 ): { hour: string; total: number }[] {
-  const byHour = new Map<string, number>();
+  const points: { hour: number; total: number }[] = [];
   for (const p of series) {
     if (p.menActual === null && p.womenActual === null) continue;
     const m = /^(\d{2}):\d{2}$/.exec(p.label ?? "");
     if (!m) continue;
-    const total = toNonNegativeInt(p.menActual ?? 0) + toNonNegativeInt(p.womenActual ?? 0);
-    if (total <= 0) continue;
-    const prev = byHour.get(m[1]);
-    if (prev === undefined || total > prev) byHour.set(m[1], total);
+    points.push({
+      hour: Number(m[1]),
+      total: toNonNegativeInt(p.menActual ?? 0) + toNonNegativeInt(p.womenActual ?? 0),
+    });
   }
-  // 夜窓は 19:00→翌05:00 なので、19〜23 を 00〜05 より前に並べる（時刻の昇順＝夜の流れ順）。
-  const nightOrder = (hh: string): number => {
-    const h = Number(hh);
-    return h >= 19 ? h : h + 24;
-  };
-  return Array.from(byHour.entries())
-    .sort((a, b) => nightOrder(a[0]) - nightOrder(b[0]))
-    .map(([hour, total]) => ({ hour, total }));
+  // 集計（時ごとの最大・夜順）は共通化。hour は従来どおり "19"/"00" の2桁文字列で返す。
+  return rollUpByNightHour(points).map(({ hour, total }) => ({
+    hour: String(hour).padStart(2, "0"),
+    total,
+  }));
 }
 
 /**
@@ -117,7 +119,7 @@ export function buildStoreSsrSummary(
   const genderStats: SsrStat[] = [];
 
   if (percentMode) {
-    const overallPct = seatFullnessPercent(total, capacity * 2);
+    const overallPct = seatFullnessPercentOfTotal(total, capacity);
     if (total > 0 && overallPct !== null) {
       occupancyLabel = "店内の埋まり具合";
       occupancyValue = `約${overallPct}%`;
@@ -157,7 +159,7 @@ export function buildStoreSsrSummary(
         const detail =
           pm != null || pw != null
             ? `男性${pm ?? 0}% / 女性${pw ?? 0}%`
-            : `最大 席埋まり 約${seatFullnessPercent(peakTotal, capacity * 2) ?? 0}%`;
+            : `最大 席埋まり 約${seatFullnessPercentOfTotal(peakTotal, capacity) ?? 0}%`;
         peakText = `${peakTime}（${detail}）`;
       } else {
         const pm = snapshot.peakMen != null ? Math.round(snapshot.peakMen) : null;
@@ -184,7 +186,7 @@ export function buildStoreSsrSummary(
       ? buckets
           .map(({ hour, total: t }) => {
             if (percentMode) {
-              const pct = seatFullnessPercent(t, capacity * 2);
+              const pct = seatFullnessPercentOfTotal(t, capacity);
               return pct === null ? null : { label: `${Number(hour)}時`, value: `約${pct}%` };
             }
             return { label: `${Number(hour)}時`, value: `${t}人` };

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { getStoreMetaBySlug, type StoreMeta } from "./config/stores";
+import { getStoreMetaBySlugOrDefault, type StoreMeta } from "./config/stores";
 import { LAST_STORE_KEY } from "@/lib/browser/meguribiStorage";
 import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
 import {
@@ -113,7 +113,7 @@ export default function HomePage({
     try {
       const slug = window.localStorage.getItem(LAST_STORE_KEY);
       if (!slug) return;
-      const found = getStoreMetaBySlug(slug);
+      const found = getStoreMetaBySlugOrDefault(slug);
       setLastStore(found);
     } catch {
       // localStorage が使えない環境では何もしない

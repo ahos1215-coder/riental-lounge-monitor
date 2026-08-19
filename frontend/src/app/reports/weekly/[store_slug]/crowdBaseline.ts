@@ -1,4 +1,4 @@
-import { isPercentCrowdBrand, seatFullnessPercent, type BrandId } from "@/app/config/stores";
+import { isPercentCrowdBrand, seatFullnessPercentOfTotal, type BrandId } from "@/app/config/stores";
 
 export type CrowdBaselineDisplay = {
   /** 表示する数値（不明時は "-"） */
@@ -14,7 +14,7 @@ export type CrowdBaselineDisplay = {
  *
  * 相席屋は在店人数を公開しておらず、当プロジェクトが持つ人数は %から逆算した推定値なので
  * 人数を出してはいけない（CLAUDE.md §4-3）。店舗ページ／比較ページ／マイページと同じく
- * `seatFullnessPercent(合計人数, capacity * 2)` で「席の埋まり具合(%)」に戻して表示する
+ * `seatFullnessPercentOfTotal(合計人数, capacity)` で「席の埋まり具合(%)」に戻して表示する
  * （capacity は片性別あたりの席数なので ×2 が店舗全体の座席数。新しい式は作らない）。
  */
 export function buildCrowdBaselineDisplay(
@@ -32,7 +32,7 @@ export function buildCrowdBaselineDisplay(
   }
 
   if (percentMode) {
-    const pct = seatFullnessPercent(Math.round(baselineP95Total), (store.capacity as number) * 2);
+    const pct = seatFullnessPercentOfTotal(Math.round(baselineP95Total), store.capacity);
     return { value: pct == null ? "-" : String(pct), unit, fallbackHint };
   }
 

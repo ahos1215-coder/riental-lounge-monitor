@@ -11,6 +11,7 @@ import {
   STORE_REGION_FILTER_ORDER,
   isPercentCrowdBrand,
   seatFullnessPercent,
+  seatFullnessPercentOfTotal,
   type StoreMeta,
   type BrandId,
 } from "@/app/config/stores";
@@ -219,7 +220,7 @@ export default function CompareClient() {
           const capacity = meta?.capacity ?? null;
           const percentMode = isPercentCrowdBrand(brand) && !!capacity;
           const toSeries = (total: number) =>
-            percentMode ? seatFullnessPercent(total, (capacity as number) * 2) ?? 0 : total;
+            percentMode ? seatFullnessPercentOfTotal(total, capacity) ?? 0 : total;
 
           const sparkline = rows
             .filter((r): r is RangeRow & { ts: string } => Boolean(r.ts))

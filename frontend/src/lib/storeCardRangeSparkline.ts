@@ -1,14 +1,20 @@
 /**
- * 店舗カード用: /api/range（store + limit のみ）の JSON から実測スパークラインを組み立てる。
- * plan/DECISIONS: サーバ側の時間フィルタは入れない。ここでも生データを時系列で並べるだけ。
+ * 店舗カード用: /api/range の JSON から実測スパークラインを組み立てる。
+ * このカードは store + limit だけで呼ぶ（任意の from/to は使わない）。
+ * plan/DECISIONS #3: サーバ側に**時刻粒度**のフィルタ（夜窓など）は入れない。
+ * ここでも生データを時系列で並べるだけ。
  */
 
-export type StoreCardRangeRow = {
-  ts?: string;
-  men?: number | null;
-  women?: number | null;
-  total?: number | null;
-};
+import {
+  parseRangeEnvelope,
+  pickLatestRow,
+  rowTotalOrNull,
+  toNonNegIntOrNull,
+  type RangeRow,
+} from "@/lib/range/rangeRows";
+
+/** 行の形は lib/range/rangeRows.ts の RangeRow が正本（別名のまま re-export して import 互換を保つ）。 */
+export type StoreCardRangeRow = RangeRow;
 
 /** 一覧・トップ・店舗詳細のカードで共通。API 負荷と描画のバランス */
 export const STORE_CARD_RANGE_LIMIT = 48;
@@ -21,35 +27,14 @@ export const STORE_CARD_SPARKLINE_POINTS = 12;
 export const SPARKLINE_GAP_BREAK_MIN_MINUTES = 60;
 export const SPARKLINE_GAP_BREAK_MEDIAN_MULT = 3;
 
-function finiteNonNeg(v: unknown): number | null {
-  if (typeof v === "number" && Number.isFinite(v)) {
-    return Math.max(0, Math.round(v));
-  }
-  if (typeof v === "string" && v.trim() !== "") {
-    const n = Number(v);
-    if (Number.isFinite(n)) return Math.max(0, Math.round(n));
-  }
-  return null;
-}
+const finiteNonNeg = toNonNegIntOrNull;
 
-export function rangeRowTotal(p: StoreCardRangeRow): number | null {
-  const t = finiteNonNeg(p.total);
-  if (t !== null) return t;
-  const m = finiteNonNeg(p.men);
-  const w = finiteNonNeg(p.women);
-  if (m === null && w === null) return null;
-  return (m ?? 0) + (w ?? 0);
-}
+/** 行の合計（全欠損は null）。実体は lib/range/rangeRows.ts。 */
+export const rangeRowTotal = rowTotalOrNull;
 
-/** Flask `{ ok, rows }`・配列・`data` を吸収 */
+/** Flask `{ ok, rows }`・配列・`data` を吸収（実体は lib/range/rangeRows.ts） */
 export function parseRangeResponse(body: unknown): StoreCardRangeRow[] {
-  if (Array.isArray(body)) return body as StoreCardRangeRow[];
-  if (body && typeof body === "object") {
-    const o = body as { data?: unknown; rows?: unknown };
-    if (Array.isArray(o.rows)) return o.rows as StoreCardRangeRow[];
-    if (Array.isArray(o.data)) return o.data as StoreCardRangeRow[];
-  }
-  return [];
+  return parseRangeEnvelope(body) as StoreCardRangeRow[];
 }
 
 export function orderedRangeRows(rows: StoreCardRangeRow[]): StoreCardRangeRow[] {
@@ -206,16 +191,7 @@ export function segmentIndicesByTimeGaps(
   return segments;
 }
 
+/** 最新行（ts が最も新しい行。実体は lib/range/rangeRows.ts） */
 export function pickLatestRangeRow(rows: StoreCardRangeRow[]): StoreCardRangeRow | null {
-  if (!rows.length) return null;
-  const scored = rows.map((r) => ({
-    r,
-    t: typeof r.ts === "string" ? new Date(r.ts).getTime() : NaN,
-  }));
-  const valid = scored.filter((x) => Number.isFinite(x.t));
-  if (valid.length) {
-    valid.sort((a, b) => b.t - a.t);
-    return valid[0]!.r;
-  }
-  return rows[rows.length - 1] ?? null;
+  return pickLatestRow(rows);
 }

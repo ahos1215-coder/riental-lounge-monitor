@@ -9,7 +9,7 @@
 // だったため、components からの参照が components → app/hooks という逆転依存を
 // 生んでいた。ロジックを変更せず本モジュールへ機械的に移設する
 // （storePreviewSnapshot.ts は re-export バレルとしてこれらを再公開する）。
-import type { PreviewRangeMode } from "@/app/hooks/storePreviewSnapshot";
+import type { PreviewRangeMode } from "@/lib/forecast/types";
 import { jstDateParts, jstHm } from "./jst";
 
 export type NightWindowRange = {

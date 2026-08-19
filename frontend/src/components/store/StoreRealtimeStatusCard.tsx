@@ -2,8 +2,12 @@
 
 import { GenderRatioBar } from "@/components/home/GenderRatioBar";
 import type { StoreSnapshot } from "@/app/hooks/useStorePreviewData";
-import { computeFreshness, crowdHintChip } from "@/app/hooks/storePreviewSnapshot";
-import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
+import { computeFreshness, crowdHintChip } from "@/lib/forecast/seriesAnalysis";
+import {
+  isPercentCrowdBrand,
+  seatFullnessPercent,
+  seatFullnessPercentOfTotal,
+} from "@/app/config/stores";
 
 type Props = {
   snapshot: StoreSnapshot;
@@ -35,7 +39,7 @@ export function StoreRealtimeStatusCard({ snapshot, loading, now }: Props) {
   const womenFullPct = percentMode ? seatFullnessPercent(women, snapshot.capacity) : null;
   const overallFullPct =
     percentMode && snapshot.capacity
-      ? seatFullnessPercent(total, snapshot.capacity * 2)
+      ? seatFullnessPercentOfTotal(total, snapshot.capacity)
       : null;
 
   // リアルタイム人数の鮮度。最新実測 ts と現在時刻から「◯分前更新」を出し、しきい値以上

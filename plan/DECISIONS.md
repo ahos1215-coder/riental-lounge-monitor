@@ -5,7 +5,10 @@ Target commit: (see git)
 ## Core decisions (keep)
 1) Supabase `logs` が唯一の Source of Truth。Google Sheet / GAS は legacy fallback（拡張禁止）。
 2) レイヤ構造は Supabase → Flask → Next.js（Next API routes は proxy）。フロントから Supabase 直アクセスしない。
-3) `/api/range` の公開契約は `store` + `limit` のみ。サーバ側の時間フィルタは入れない。Supabase は `ts.desc` 取得 → `ts.asc` 返却。
+3) `/api/range` の公開契約は `store` + `limit`（必須）＋ **任意の `from` / `to`（`YYYY-MM-DD`）**。Supabase は `ts.desc` 取得 → `ts.asc` 返却。
+   - `from`/`to` は日付単位の期間絞り込みのみ（`oriental/routes/data_range.py::_parse_range_query`）。フロント3箇所（`useStorePreviewData.ts` / `store/[id]/page.tsx` / `area/[area]/page.tsx`）が送っている。
+   - **夜窓（19:00–05:00）の判定はサーバーに入れない**（下の #4・ハードルール参照）。時刻単位のフィルタは今も禁止。
+   - 履歴: 元は「store + limit のみ」だったが、実装が先行して `from`/`to` を受けるようになっていた（2026-08-19 の「`to` だけ指定だと黙って無視される」バグ修正コメントが `data_range.py` に残っている）。2026-08-19 のコード整理で**文書を実装に合わせた**。日付パラメータを廃止するか維持するかは**オーナー判断の別チケット**（サーバー負荷とキャッシュキーに影響する）。
 4) **夜窓（19:00–05:00）の判定・絞り込み**
    - **店舗プレビュー UI**: フロント責務（`frontend/src/app/hooks/useStorePreviewData.ts`）。
    - **LINE ブログ下書き**: 取得済み `/api/range` の JSON に対して **`insightFromRange.ts`（Next サーバー）** で窓計算・集計。Flask の `/api/range` 契約は不変（**サーバ側に夜窓フィルタを足さない**）。
@@ -32,7 +35,8 @@ Target commit: (see git)
 18) **Daily Report の matrix**: **`max-parallel: 5`** (`989637e`, 2026-04 で 15 → 5 に削減)。Gemini 無料枠の毎分リクエスト制限 (RPM) に抵触して 429 が頻発したため。Render 負荷ではなく Gemini クォータが律速。
 
 ## やらないこと（ハードルール）
-- `/api/range` にクエリ追加・サーバ側の夜窓フィルタ追加。
+- `/api/range` に**時刻粒度**のクエリ追加・サーバ側の夜窓フィルタ追加。
+  （2026-08-19 追記: 「クエリ追加そのものの禁止」は日付パラメータ `from`/`to` の実装により事実上撤回済み＝#3 参照。禁止が残るのは「夜窓/時刻でサーバーが絞る」こと。この追認はオーナー確認が必要な方針転換なので、次の打ち合わせで明示的に承認を取ること。）
 - **Flask / Next の proxy 層で**「夜窓だけ返す」などの時間フィルタを入れる（**取得後のクライアント／サーバーアプリ層での集計は可**）。
 - Places API / DB 保存を二次会スポットの本流に戻す。
 - フロントから Supabase 直アクセス。

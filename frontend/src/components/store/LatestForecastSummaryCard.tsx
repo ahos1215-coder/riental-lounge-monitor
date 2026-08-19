@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import type { StoreSnapshot } from "@/app/hooks/useStorePreviewData";
-import { peakProgressChip } from "@/app/hooks/storePreviewSnapshot";
+import { peakProgressChip } from "@/lib/forecast/seriesAnalysis";
 import { isPercentCrowdBrand, seatFullnessPercent } from "@/app/config/stores";
 
 type Payload =

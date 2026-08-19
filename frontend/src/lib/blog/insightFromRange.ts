@@ -5,6 +5,8 @@
  * 集約対象外（同期漏れではない）。
  */
 import { jstHm, jstYmd } from "@/lib/date/jst";
+import { parseRangeEnvelope } from "@/lib/range/rangeRows";
+import { crowdTierFromPeakTotal } from "@/lib/store/crowdThresholds";
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
@@ -85,6 +87,12 @@ function ymdPlusDays(ymd: string, days: number): string {
   return jstYmd(d);
 }
 
+/**
+ * 夜窓（19:00 JST 〜 翌 05:00 JST）の ISO 文字列。
+ * 注: lib/date/nightWindow.ts の computeNightWindowFromBaseDate も同じ 19:00/05:00 を
+ * 独立にハードコードしている（共有できる定数が無く、こちらはサーバー専用・向こうは
+ * クライアント hooks 層の型に依存するため統合しない）。片方を変えるならもう片方も見ること。
+ */
 export function nightWindowIso(ymd: string): NightWindowIso {
   const from = `${ymd}T19:00:00+09:00`;
   const toYmd = ymdPlusDays(ymd, 1);
@@ -156,33 +164,37 @@ type CollectOptions = {
   shiftDays?: number;
 };
 
-function collectPoints(
+/**
+ * /api/range（実測）の列名候補。バックエンドの列名ゆれ（men/male/m）を吸収する。
+ * 同じリテラルが 8 箇所に手書きされていたのでここに集約した（値は変えていない）。
+ */
+const RANGE_KEYS: CollectOptions = {
+  totalKeys: ["total"],
+  menKeys: ["men", "male", "m"],
+  womenKeys: ["women", "female", "f"],
+};
+
+/** /api/forecast_today（予測）の列名候補。*_pred を優先し、無ければ実測名にフォールバック。 */
+const FORECAST_KEYS: CollectOptions = {
+  totalKeys: ["total_pred", "total"],
+  menKeys: ["men_pred", "men", "male", "m"],
+  womenKeys: ["women_pred", "women", "female", "f"],
+};
+
+/**
+ * 夜窓に入る点だけを時系列で返す（men/women は落として dt/total だけ）。
+ * 実体は collectPointsWithGender（同じループの上位互換）。
+ */
+export function collectPoints(
   rows: unknown[],
   fromIso: string,
   toIso: string,
   options: CollectOptions
 ): Array<{ dt: Date; total: number }> {
-  const from = new Date(fromIso);
-  const to = new Date(toIso);
-  const shiftMs = (options.shiftDays ?? 0) * MS_PER_DAY;
-  const points: Array<{ dt: Date; total: number }> = [];
-
-  for (const r of rows) {
-    if (!r || typeof r !== "object") continue;
-    const row = r as Record<string, unknown>;
-    const dt = parseTimestamp(row);
-    if (!dt) continue;
-    const shifted = shiftMs ? new Date(dt.getTime() + shiftMs) : dt;
-    if (shifted < from || shifted > to) continue;
-
-    const total = computeTotal(row, options.totalKeys, options.menKeys, options.womenKeys);
-    if (!Number.isFinite(total)) continue;
-
-    points.push({ dt: shifted, total: total as number });
-  }
-
-  points.sort((a, b) => a.dt.getTime() - b.dt.getTime());
-  return points;
+  return collectPointsWithGender(rows, fromIso, toIso, options).map(({ dt, total }) => ({
+    dt,
+    total,
+  }));
 }
 
 export function collectPointsWithGender(
@@ -429,10 +441,9 @@ export function computeInsight(points: Array<{ dt: Date; total: number }>): Insi
     if (p.total < avoid.total) avoid = p;
   }
 
-  const max = peak.total;
-  let crowd_label = "空き";
-  if (max >= 120) crowd_label = "混み";
-  else if (max >= 80) crowd_label = "ほどよい";
+  // 閾値の数値は lib/store/crowdThresholds.ts（store 一覧と共有）。文言はこの経路固有。
+  const tier = crowdTierFromPeakTotal(peak.total);
+  const crowd_label = tier === "busy" ? "混み" : tier === "moderate" ? "ほどよい" : "空き";
 
   return {
     peak_time: jstHm(peak.dt),
@@ -479,15 +490,8 @@ async function fetchJson(url: string, timeoutMs?: number): Promise<unknown> {
   }
 }
 
-function pickArray(data: unknown): unknown[] {
-  if (Array.isArray(data)) return data;
-  if (data && typeof data === "object") {
-    const o = data as Record<string, unknown>;
-    if (Array.isArray(o.rows)) return o.rows;
-    if (Array.isArray(o.data)) return o.data;
-  }
-  return [];
-}
+/** 封筒（配列 / {rows} / {data}）のほどきは lib/range/rangeRows.ts が正本。 */
+const pickArray = parseRangeEnvelope;
 
 export async function fetchRangeRows(backendBase: string, store: string, limit: number): Promise<unknown[]> {
   const base = backendBase.replace(/\/+$/, "");
@@ -552,21 +556,13 @@ export async function buildInsightFromBackend(
   try {
     insightTrace("[insight] buildInsightFromBackend -> api/range");
     rangeRows = await fetchRangeRows(backendBase, storeSlug, limit);
-    points = collectPoints(rangeRows, range.from, range.to, {
-      totalKeys: ["total"],
-      menKeys: ["men", "male", "m"],
-      womenKeys: ["women", "female", "f"],
-    });
+    points = collectPoints(rangeRows, range.from, range.to, RANGE_KEYS);
     insightTrace("[insight] api/range -> points", { points: points.length, window: "night" });
 
     // 今夜の窓（19:00〜翌05:00）にまだ1件も無いが、日中のサンプルはある → 同一日の全日（JST）で再集計
     if (points.length === 0 && rangeRows.length > 0) {
       const dayRange = dayWindowIso(dateYmd);
-      const dayPts = collectPoints(rangeRows, dayRange.from, dayRange.to, {
-        totalKeys: ["total"],
-        menKeys: ["men", "male", "m"],
-        womenKeys: ["women", "female", "f"],
-      });
+      const dayPts = collectPoints(rangeRows, dayRange.from, dayRange.to, RANGE_KEYS);
       insightTrace("[insight] api/range -> points", { points: dayPts.length, window: "day_fallback" });
       if (dayPts.length > 0) {
         points = dayPts;
@@ -597,11 +593,7 @@ export async function buildInsightFromBackend(
       const fetched = await fetchForecastRows(backendBase, storeSlug);
       forecastRows = fetched.rows;
       forecastReasoningNotes = fetched.reasoningNotes;
-      const fcPoints = collectPoints(forecastRows, range.from, range.to, {
-        totalKeys: ["total_pred", "total"],
-        menKeys: ["men_pred", "men", "male", "m"],
-        womenKeys: ["women_pred", "women", "female", "f"],
-      });
+      const fcPoints = collectPoints(forecastRows, range.from, range.to, FORECAST_KEYS);
       if (fcPoints.length > 0) {
         const lastActualMs = points[points.length - 1].dt.getTime();
         const futureForecast = fcPoints.filter((p) => p.dt.getTime() > lastActualMs);
@@ -632,17 +624,11 @@ export async function buildInsightFromBackend(
     }
 
     if (forecastRows.length > 0) {
-      points = collectPoints(forecastRows, range.from, range.to, {
-        totalKeys: ["total_pred", "total"],
-        menKeys: ["men_pred", "men", "male", "m"],
-        womenKeys: ["women_pred", "women", "female", "f"],
-      });
+      points = collectPoints(forecastRows, range.from, range.to, FORECAST_KEYS);
 
       if (points.length === 0) {
         const shifted = collectPoints(forecastRows, range.from, range.to, {
-          totalKeys: ["total_pred", "total"],
-          menKeys: ["men_pred", "men", "male", "m"],
-          womenKeys: ["women_pred", "women", "female", "f"],
+          ...FORECAST_KEYS,
           shiftDays: 1,
         });
         if (shifted.length > 0) {
@@ -660,22 +646,13 @@ export async function buildInsightFromBackend(
   const rowsForGender = source === "api/range" ? rangeRows : forecastRows;
   const genderOpts: CollectOptions =
     source === "api/range"
-      ? { totalKeys: ["total"], menKeys: ["men", "male", "m"], womenKeys: ["women", "female", "f"] }
-      : {
-          totalKeys: ["total_pred", "total"],
-          menKeys: ["men_pred", "men", "male", "m"],
-          womenKeys: ["women_pred", "women", "female", "f"],
-          shiftDays: shift === "+1day" ? 1 : undefined,
-        };
+      ? RANGE_KEYS
+      : { ...FORECAST_KEYS, shiftDays: shift === "+1day" ? 1 : undefined };
   const detailed = collectPointsWithGender(rowsForGender, range.from, range.to, genderOpts);
 
   const dayContext = computeDayContext(dateYmd);
   const todayPeak = points.length > 0 ? Math.max(...points.map((p) => p.total)) : null;
-  const rangeOpts: CollectOptions = {
-    totalKeys: ["total"],
-    menKeys: ["men", "male", "m"],
-    womenKeys: ["women", "female", "f"],
-  };
+  const rangeOpts: CollectOptions = RANGE_KEYS;
   const weekComparison = computeWeekComparison(rangeRows, dateYmd, todayPeak, rangeOpts);
   const draft_context = computeDraftContext(detailed, insight, edition, notes, {
     mlInferenceMode:

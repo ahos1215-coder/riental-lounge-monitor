@@ -35,7 +35,7 @@ describe("app/config/stores の生きている export は残っている", () =>
   const LIVE = [
     "STORES",
     "DEFAULT_STORE",
-    "getStoreMetaBySlug",
+    "getStoreMetaBySlugOrDefault",
     "getStoreMetaBySlugStrict",
     "isPercentCrowdBrand",
     "seatFullnessPercent",
@@ -49,7 +49,7 @@ describe("app/config/stores の生きている export は残っている", () =>
 
   it("slug 解決が従来どおり動く", () => {
     expect(storesConfig.getStoreMetaBySlugStrict("no-such-store")).toBeNull();
-    expect(storesConfig.getStoreMetaBySlug(null).slug).toBe(storesConfig.DEFAULT_STORE);
+    expect(storesConfig.getStoreMetaBySlugOrDefault(null).slug).toBe(storesConfig.DEFAULT_STORE);
   });
 });
 

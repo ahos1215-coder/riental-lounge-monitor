@@ -108,7 +108,9 @@ export function ForecastAccuracyCard({
   if (!metrics) return null;
 
   // 相席屋は人数非公開＝MAEも「席の埋まり具合(%)」の誤差(%pt)に換算して表示する。
-  // capacity は片性別の席数のため ×2 で店舗全体の座席数にする（seatFullnessPercentと同じ換算）。
+  // capacity は片性別の席数のため ×2 で店舗全体の座席数にする
+  // （「席の埋まり具合」は seatFullnessPercentOfTotal(total, capacity) が正本。ここは誤差(MAE)の
+  //   パーセントポイント換算＝0-100 クランプなし・小数1桁で意味が違うため、あえて別式のまま置く）。
   const maeUnit = percentMode ? "％pt MAE" : "人 MAE";
   const toDisplay = (v: number) =>
     percentMode && capacity ? Math.round((v / (capacity * 2)) * 100 * 10) / 10 : v;

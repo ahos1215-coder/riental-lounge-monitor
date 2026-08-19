@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DEFAULT_STORE, getStoreMetaBySlug } from "../config/stores";
+import { DEFAULT_STORE, getStoreMetaBySlugOrDefault } from "../config/stores";
 import {
   FORECAST_MAX_RETRIES,
   FORECAST_REFRESH_MS,
@@ -24,14 +24,16 @@ import {
   nightDateYYYYMMDD,
   parseForecastPoints,
   parseRangePoints,
-  pickCurrentActual,
   pickLatestActualPoint,
-  pickPeak,
   type ForecastPoint,
   type ForecastStatus,
   type PreviewRangeMode,
   type StoreSnapshot,
 } from "./storePreviewSnapshot";
+import {
+  assembleStoreSnapshot,
+  resolveLatestActualTs,
+} from "@/lib/forecast/assembleSnapshot";
 
 // このフックの利用側（page.tsx を含む）は従来どおり "./useStorePreviewData" から
 // 型を import できるよう、純粋関数モジュールの型を re-export しておく
@@ -130,7 +132,8 @@ export function isUsableInitialSnapshot(
 
 /**
  * PREVIEW 用のデータ取得フック
- * - /api/range（store/limit のみ）を叩き、選択した baseDate の夜窓（19:00-05:00）をフロントで絞り込む
+ * - /api/range（store + limit + 日付の from/to）を叩き、選択した baseDate の夜窓（19:00-05:00）を
+ *   フロントで絞り込む（夜窓＝時刻粒度の判定はサーバーに入れない。plan/DECISIONS #3/#4）
  * - 予測（/api/forecast_today）は today モードのみ取得（それ以外は取得しない）
  * - データが無い場合でも baseSnapshot を返し、UI を安全に表示する
  * - `initialSnapshot`（サーバーで取得済みのスナップショット）が渡され、かつ現在の表示条件
@@ -142,7 +145,7 @@ export function useStorePreviewData(
   initialSnapshot?: StoreSnapshot | null,
 ): StorePreviewState & StorePreviewControls {
   const meta = useMemo(
-    () => getStoreMetaBySlug(storeSlug ?? DEFAULT_STORE),
+    () => getStoreMetaBySlugOrDefault(storeSlug ?? DEFAULT_STORE),
     [storeSlug],
   );
   const baseSnapshot = useMemo(() => buildBaseSnapshot(meta), [meta]);
@@ -285,17 +288,6 @@ export function useStorePreviewData(
         const latestActual = pickLatestActualPoint(allRangePoints);
         const hasData = hasSeriesData(actualOnlySeries) || latestActual !== null;
 
-        // 夜窓フィルタで空になっても、最新の実測値があればカードは0固定にしない。
-        const current = pickCurrentActual(effectiveActualSeries);
-        const nowMen = latestActual?.nowMen ?? current.nowMen;
-        const nowWomen = latestActual?.nowWomen ?? current.nowWomen;
-        const { peakTotal, peakTimeLabel, peakTs: peakTsVal, peakMen: peakMenVal, peakWomen: peakWomenVal } = pickPeak(effectiveActualSeries);
-        // latestActual（夜窓フィルタ前の全データ）の ts を優先し、無ければ夜窓内系列の最新実測点で代替する。
-        const latestActualTs =
-          latestActual?.ts ??
-          [...effectiveActualSeries].reverse().find((p) => p.menActual !== null || p.womenActual !== null)?.ts ??
-          null;
-
         // 再試行中は forecastStatus を引き継ぎ、それ以外は loading 段階の "idle" を維持
         const initialForecastStatus: ForecastStatus =
           rangeMode !== "today"
@@ -304,25 +296,22 @@ export function useStorePreviewData(
               ? "retrying"
               : "idle";
 
-        const baseSnapshotResolved: StoreSnapshot = {
-          ...baseSnapshot,
+        // 夜窓フィルタで空になっても、最新の実測値があればカードは0固定にしない
+        // （now 値の優先順・ピーク・丸めは assembleStoreSnapshot に集約。判断値はここで決めて渡す）。
+        const baseSnapshotResolved: StoreSnapshot = assembleStoreSnapshot({
+          base: baseSnapshot,
+          series: effectiveActualSeries,
+          latestActual,
+          actualOnlyPeak: false,
           level: hasData ? "データ取得済み" : "データなし",
           recommendation: hasData ? "データ取得済み" : "データなし",
-          nowMen: Math.round(nowMen),
-          nowWomen: Math.round(nowWomen),
-          nowTotal: Math.round(nowMen + nowWomen),
-          peakTotal: Math.round(peakTotal),
-          peakTimeLabel,
-          peakTs: peakTsVal,
-          peakMen: peakMenVal,
-          peakWomen: peakWomenVal,
           forecastUpdatedLabel: "--:--",
-          series: effectiveActualSeries,
           hasData,
           forecastStatus: initialForecastStatus,
-          latestActualTs,
+          // latestActual（夜窓フィルタ前の全データ）の ts を優先し、無ければ夜窓内系列の最新実測点で代替する。
+          latestActualTs: resolveLatestActualTs(latestActual, effectiveActualSeries),
           completedNight,
-        };
+        });
 
         if (!cancelled) {
           setState((prev) => {
@@ -349,29 +338,26 @@ export function useStorePreviewData(
           const mergedSeries = buildSeries(rangePoints, forecastPoints, overlayAllForecast);
           const effectiveMergedSeries =
             mergedSeries.length > 0 ? mergedSeries : baseSnapshotResolved.series;
-          const mergedCurrent = pickCurrentActual(effectiveMergedSeries);
-          const mergedNowMen = latestActual?.nowMen ?? mergedCurrent.nowMen;
-          const mergedNowWomen = latestActual?.nowWomen ?? mergedCurrent.nowWomen;
           // 完了済みの夜（overlayAllForecast=true）は実測(実線)の上に予測(点線)を夜全体で
           // 重ねるため、系列に予測点が併存する。ピークは「その夜に実際どれだけ混んだか」を
           // 表すべきなので実測点のみから算出する（予測点で上書きされるのを防ぐ）。進行中の
           // today（overlayAllForecast=false）は従来どおり予測ピークも含めた算出を維持する。
-          const mergedPeak = pickPeak(effectiveMergedSeries, { actualOnly: completedNight });
-          const mergedSnapshot: StoreSnapshot = {
-            ...baseSnapshotResolved,
-            nowMen: Math.round(mergedNowMen),
-            nowWomen: Math.round(mergedNowWomen),
-            nowTotal: Math.round(mergedNowMen + mergedNowWomen),
-            peakTotal: Math.round(mergedPeak.peakTotal),
-            peakTimeLabel: mergedPeak.peakTimeLabel,
-            peakTs: mergedPeak.peakTs,
-            peakMen: mergedPeak.peakMen,
-            peakWomen: mergedPeak.peakWomen,
-            forecastUpdatedLabel: formatNowHmJst(new Date()),
+          const mergedSnapshot: StoreSnapshot = assembleStoreSnapshot({
+            base: baseSnapshotResolved,
             series: effectiveMergedSeries,
+            latestActual,
+            actualOnlyPeak: completedNight,
+            // 合流では level/recommendation/latestActualTs/completedNight は実測スナップショットの値を
+            // そのまま引き継ぐ（旧実装のスプレッド継承と同じ。再計算しない）。
+            level: baseSnapshotResolved.level,
+            recommendation: baseSnapshotResolved.recommendation,
+            // hook 側の「予測が合流できた」表示は無条件に現在時刻。page.tsx とは意図的に別物。
+            forecastUpdatedLabel: formatNowHmJst(new Date()),
             hasData: hasSeriesData(mergedSeries) || baseSnapshotResolved.hasData,
             forecastStatus: "ok",
-          };
+            latestActualTs: baseSnapshotResolved.latestActualTs,
+            completedNight: baseSnapshotResolved.completedNight,
+          });
           if (!cancelled) {
             setState((prev) => {
               // BUG B (rank4) モノトニシティ・ガード（forecast 合流後も同様に適用）。

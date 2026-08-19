@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { TrendingUp, ChevronRight } from "lucide-react";
 import { FadeIn } from "@/components/ui/FadeIn";
-import { getStoreMetaBySlug, isPercentCrowdBrand } from "@/app/config/stores";
+import { getStoreMetaBySlugOrDefault, isPercentCrowdBrand } from "@/app/config/stores";
 import type { MegribiScoreItem } from "./homeTypes";
 
 function ScoreBar({ score }: { score: number }) {
@@ -61,7 +61,7 @@ export function HomeTonightTop5({
             ) : (
               <div className="grid gap-2 sm:grid-cols-5">
                 {topStores.map((item, idx) => {
-                  const meta = getStoreMetaBySlug(item.slug);
+                  const meta = getStoreMetaBySlugOrDefault(item.slug);
                   return (
                     <Link
                       key={item.slug}

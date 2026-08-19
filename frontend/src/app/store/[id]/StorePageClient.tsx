@@ -18,7 +18,7 @@ import {
   pickLatestRangeRow,
 } from "@/lib/storeCardRangeSparkline";
 import { ForecastAccuracyCard } from "@/components/ForecastAccuracyCard";
-import { DEFAULT_STORE, STORES, STORE_REGION_FILTER_ORDER, distanceKm, getStoreMetaBySlug, getStoreMetaBySlugStrict } from "../../config/stores";
+import { DEFAULT_STORE, STORES, STORE_REGION_FILTER_ORDER, distanceKm, getStoreMetaBySlugOrDefault, getStoreMetaBySlugStrict } from "../../config/stores";
 import type { StoreSnapshot } from "../../hooks/useStorePreviewData";
 import { useDeferredFetchGate } from "./useDeferredFetchGate";
 import { StorePageFallback } from "./StorePageFallback";
@@ -51,7 +51,7 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
     }
   }, [slugFromPath, strictMeta, router]);
 
-  const meta = getStoreMetaBySlug(slugFromPath || searchParams.get("store") || DEFAULT_STORE);
+  const meta = getStoreMetaBySlugOrDefault(slugFromPath || searchParams.get("store") || DEFAULT_STORE);
   const slug = meta.slug;
 
   // メインのグラフ用データ（range/forecast_today）は MeguribiDashboardPreview 配下の

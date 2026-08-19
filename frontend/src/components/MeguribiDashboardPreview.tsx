@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import { useStorePreviewData, type StoreSnapshot } from "../app/hooks/useStorePreviewData";
 import {
   DEFAULT_STORE,
-  getStoreMetaBySlug,
+  getStoreMetaBySlugOrDefault,
 } from "../app/config/stores";
 
 /**
@@ -72,7 +72,7 @@ export default function MeguribiDashboardPreview({ headerActions, initialSnapsho
   const searchParams = useSearchParams();
 
   const slug = pathSlug || searchParams.get("store") || DEFAULT_STORE;
-  const meta = getStoreMetaBySlug(slug);
+  const meta = getStoreMetaBySlugOrDefault(slug);
 
   const {
     snapshot,

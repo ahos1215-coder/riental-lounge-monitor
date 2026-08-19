@@ -25,6 +25,7 @@ import {
   buildStoreFullName,
   isPercentCrowdBrand,
   seatFullnessPercent,
+  seatFullnessPercentOfTotal,
   type StoreMeta,
 } from "@/app/config/stores";
 import {
@@ -35,9 +36,11 @@ import {
   isWithinNight,
 } from "@/lib/date/nightWindow";
 import { orderedRangeRows, type StoreCardRangeRow } from "@/lib/storeCardRangeSparkline";
+import { rowTotalOrNull, toNonNegIntOrNull } from "@/lib/range/rangeRows";
+import { MIN_HOURLY_BUCKETS, rollUpByNightHour } from "@/lib/store/nightHourlyRollup";
 
-/** 時間帯別サマリーを出すのに必要な最小の時間数（1点だけでは「推移」にならない） */
-const MIN_HOURLY_BUCKETS = 2;
+// 時間帯別ロールアップと最小バケット数は lib/store/nightHourlyRollup.ts が正本
+// （店舗ページ ssrSummary.ts と共有）。
 
 export type AreaStoreLiveLine = {
   slug: string;
@@ -64,17 +67,11 @@ export type AreaLiveSummary = {
   lines: AreaStoreLiveLine[];
 };
 
-function toInt(v: unknown): number | null {
-  if (typeof v === "number" && Number.isFinite(v)) return Math.max(0, Math.round(v));
-  if (typeof v === "string" && v.trim() !== "") {
-    const n = Number(v);
-    if (Number.isFinite(n)) return Math.max(0, Math.round(n));
-  }
-  return null;
-}
+const toInt = toNonNegIntOrNull;
 
+/** エリア集計は「値なしの行」も 0 人として足す（店舗カードは null のまま扱う＝既存の差）。 */
 function rowTotal(r: StoreCardRangeRow): number {
-  return toInt(r.total) ?? (toInt(r.men) ?? 0) + (toInt(r.women) ?? 0);
+  return rowTotalOrNull(r) ?? 0;
 }
 
 function jstHourOf(ts: string): number | null {
@@ -123,7 +120,7 @@ export function buildAreaStoreLiveLine(
     if (total <= 0) return null;
     const ratio = `男${Math.round((men / total) * 100)}% / 女${Math.round((women / total) * 100)}%`;
     if (percentMode) {
-      const overall = seatFullnessPercent(total, capacity * 2);
+      const overall = seatFullnessPercentOfTotal(total, capacity);
       if (overall === null) return null;
       const mp = seatFullnessPercent(men, capacity);
       const wp = seatFullnessPercent(women, capacity);
@@ -158,24 +155,20 @@ export function buildAreaStoreLiveLine(
   const peakText = peakHm && peakDesc ? `${peakHm} に最多（${peakDesc}）` : null;
 
   // 時間帯別: 実測を「時」でまとめ、その時間帯の最大値を代表値にする（19→23→0→5 の夜順）
-  const byHour = new Map<number, number>();
+  const hourPoints: { hour: number; total: number }[] = [];
   for (const r of ordered) {
     if (!r.ts) continue;
     const h = jstHourOf(r.ts);
     if (h === null) continue;
-    const t = rowTotal(r);
-    if (t <= 0) continue;
-    const prev = byHour.get(h);
-    if (prev === undefined || t > prev) byHour.set(h, t);
+    hourPoints.push({ hour: h, total: rowTotal(r) });
   }
-  const nightOrder = (h: number) => (h >= 19 ? h : h + 24);
-  const buckets = [...byHour.entries()].sort((a, b) => nightOrder(a[0]) - nightOrder(b[0]));
+  const buckets = rollUpByNightHour(hourPoints);
   let hourlyText: string | null = null;
   if (buckets.length >= MIN_HOURLY_BUCKETS) {
     const parts = buckets
-      .map(([h, t]) => {
+      .map(({ hour: h, total: t }) => {
         if (percentMode) {
-          const p = seatFullnessPercent(t, capacity * 2);
+          const p = seatFullnessPercentOfTotal(t, capacity);
           return p === null ? null : `${h}時 約${p}%`;
         }
         if (percentBrand) return null;

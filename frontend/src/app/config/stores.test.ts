@@ -7,6 +7,7 @@ import {
   distanceKm,
   isPercentCrowdBrand,
   seatFullnessPercent,
+  seatFullnessPercentOfTotal,
   type StoreMeta,
 } from "./stores";
 
@@ -33,6 +34,34 @@ describe("seatFullnessPercent", () => {
 
   it("returns null when capacity is 0", () => {
     expect(seatFullnessPercent(5, 0)).toBeNull();
+  });
+});
+
+// 番犬（C-06）: 「合計人数 → 店舗全体の席の埋まり具合(%)」は capacity が片性別あたりのため
+// ×2 が要る。11 箇所の手書き `seatFullnessPercent(total, capacity * 2)` をこの関数に集約した。
+describe("seatFullnessPercentOfTotal", () => {
+  it("capacity は片性別あたり＝合計は capacity*2 が満席", () => {
+    expect(seatFullnessPercentOfTotal(40, 20)).toBe(100);
+  });
+
+  it("旧来の手書き式 seatFullnessPercent(total, capacity * 2) と同じ値を返す", () => {
+    for (const [total, capacity] of [
+      [0, 38],
+      [7, 38],
+      [45, 38],
+      [76, 38],
+      [200, 38],
+      [-5, 38],
+    ] as const) {
+      expect(seatFullnessPercentOfTotal(total, capacity)).toBe(
+        seatFullnessPercent(total, capacity * 2),
+      );
+    }
+  });
+
+  it("capacity が無い/0 なら null（相席屋以外・未設定店）", () => {
+    expect(seatFullnessPercentOfTotal(30, null)).toBeNull();
+    expect(seatFullnessPercentOfTotal(30, 0)).toBeNull();
   });
 });
 
