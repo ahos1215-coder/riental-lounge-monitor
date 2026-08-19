@@ -305,7 +305,13 @@ export async function fetchLatestPublishedReportByStore(
     // edition」が固定で勝ち、直近に再生成した edition(例: 手動再実行や 18:00→21:30 の進行)が
     // 表示されない不整合が起きる(表示の「更新」時刻は updated_at を使うため二重に不整合)。
     // updated_at.desc(nulls last) + created_at.desc をタイブレークにして最新の再生成を出す。
-    `&order=updated_at.desc.nullslast,created_at.desc&limit=1`;
+    //
+    // target_date.desc を最優先に置くのは carry-over 対策(2026-08-19 監査・所見1)。
+    // 生成に失敗した edition は「前回の良品の本文と target_date」をそのまま書き戻す
+    // (scripts/local_report_job.py の _apply_carry_over_or_fail) ため、行は古い日付のまま
+    // updated_at だけが今になる。updated_at だけで並べると、今日成功した片方の edition より
+    // 昨日分の carry-over 行が勝ってしまう。日付が新しい行を先に見る。
+    `&order=target_date.desc,updated_at.desc.nullslast,created_at.desc&limit=1`;
   try {
     const res = await fetch(url, {
       method: "GET",

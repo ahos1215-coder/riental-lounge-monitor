@@ -12,8 +12,12 @@
        1発勝負のまま変化しない。
      - 全試行を使い切った場合のみ sample(fallback) に落ちる（従来どおり）。
   2) carry-over（このファイルのコア修正）:
-     - 生成失敗時、直前に公開済みの本文が Supabase に残っていればそれを維持し、
-       error_message だけ今回の失敗理由に更新する（_apply_carry_over_or_fail）。
+     - 生成失敗時、直前に公開済みの本文が Supabase に残っていればそれを維持する
+       （_apply_carry_over_or_fail）。2026-08-19 の監査（所見1）で、その行が
+       error_message 付きだったためフロント（`is_published=eq.true&error_message=is.null`
+       で絞る blogDrafts.ts）から消えて 404 になっていた問題を修正した:
+       error_message は None のまま、target_date は前回の行から引き継ぎ、失敗理由は
+       insight_json.last_error と内部フラグ `_carried_over` に残す。
      - 新規店舗・前回も失敗していた場合は、従来どおり空本文 + is_published=False
        + error_message の2状態のまま（引き継ぐものが無いのは仕様どおり）。
      - 成功パスは完全に無変更（carry-over 用の Supabase 読み取りは一切発生しない）。
@@ -271,11 +275,63 @@ class TestApplyCarryOverOrFail:
 
         assert record["mdx_content"] == "# prior good report\nbody"
         assert record["is_published"] is True
-        # error_message は「今回」の理由。前回の内容ではない。
-        assert record["error_message"] == "facts fetch failed: timed out"
-        # メタデータは今回の base のまま（前回の行の target_date 等に引きずられない）。
+        # 所見1(a): フロント (blogDrafts.ts) は is_published=true かつ error_message is null で
+        # 「表示可能な良品」を絞る。carry-over 行の error_message は None のままにしないと
+        # /reports/daily/<slug> が 404 になり一覧からも消える。
+        assert record["error_message"] is None
+        # 所見1(b): target_date は前回の行のものを引き継ぐ（「今日の日付で前日の本文」を防ぐ）。
+        assert record["target_date"] == "2026-07-17"
         assert record["facts_id"] == base["facts_id"]
+        # 失敗理由は表示に使われない insight_json 側と内部フラグに残す。
+        assert record["insight_json"]["last_error"]["message"] == "facts fetch failed: timed out"
+        assert record["insight_json"]["last_error"]["failed_target_date"] == base["target_date"]
+        assert record["insight_json"]["last_error"]["carried_over_from"] == "2026-07-17"
+        assert record["_carried_over"] is True
+        assert record["_carry_over_reason"] == "facts fetch failed: timed out"
+
+    def test_carry_over_falls_back_to_today_when_prior_target_date_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """前回行に target_date が無い/空の異常系では、当日の日付にフォールバックする
+        （None を書いて NOT NULL 制約に触れたり日付欄が空になったりしないこと）。"""
+        base = self._base()
+        monkeypatch.setattr(
+            lrj, "_fetch_existing_daily_report",
+            lambda facts_id: {"mdx_content": "# prior", "is_published": True, "target_date": None},
+        )
+
+        record = lrj._apply_carry_over_or_fail(base, "reason", allow_fetch=True)
+
         assert record["target_date"] == base["target_date"]
+        assert record["is_published"] is True
+        assert record["error_message"] is None
+
+    def test_carry_over_internal_flags_are_not_sent_to_supabase(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`_carried_over` / `_carry_over_reason` は集計用の内部フラグであり、
+        Supabase の blog_drafts には送らない（その列は存在しない）。
+        併せて、読者に届く3点（本文・公開フラグ・日付）が意図どおり送られることを固定する。"""
+        base = self._base()
+        monkeypatch.setattr(lrj, "_fetch_existing_daily_report", lambda facts_id: _prior_good_row())
+        record = lrj._apply_carry_over_or_fail(base, "reason", allow_fetch=True)
+
+        monkeypatch.setattr(lrj, "_supabase_conf", lambda: ("https://proj.supabase.co", "key"))
+        sent: dict[str, Any] = {}
+
+        def _fake_urlopen(req, timeout=30):
+            sent["body"] = json.loads(req.data.decode("utf-8"))
+            return _FakeResp(json.dumps([{"id": "x"}]).encode())
+
+        monkeypatch.setattr(lrj, "urlopen", _fake_urlopen)
+        lrj._upsert_daily_report_to_supabase(record)
+
+        assert "_carried_over" not in sent["body"]
+        assert "_carry_over_reason" not in sent["body"]
+        assert sent["body"]["is_published"] is True
+        assert sent["body"]["error_message"] is None
+        assert sent["body"]["target_date"] == "2026-07-17"
+        assert sent["body"]["insight_json"]["last_error"]["message"] == "reason"
 
     def test_brand_new_store_no_prior_row_writes_empty_and_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """brand-new store failure still writes empty+error: 引き継ぐものが無ければ2状態目のまま。"""
@@ -376,7 +432,9 @@ class TestBuildRecordCarryOver:
 
         assert record["is_published"] is True
         assert record["mdx_content"] == "# prior good report\nbody"
-        assert "facts fetch failed" in record["error_message"]
+        assert record["error_message"] is None
+        assert "facts fetch failed" in record["_carry_over_reason"]
+        assert record["target_date"] == "2026-07-17"
 
     def test_sample_fallback_carries_over_prior_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
@@ -392,7 +450,8 @@ class TestBuildRecordCarryOver:
 
         assert record["is_published"] is True
         assert record["mdx_content"] == "# prior good report\nbody"
-        assert "sample fallback" in record["error_message"]
+        assert record["error_message"] is None
+        assert "sample fallback" in record["_carry_over_reason"]
 
     def test_ollama_failure_carries_over_prior_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(lrj.spk, "fetch_store_facts", lambda slug: {"source": "live", "megribi_score": 0.6})
@@ -406,7 +465,8 @@ class TestBuildRecordCarryOver:
 
         assert record["is_published"] is True
         assert record["mdx_content"] == "# prior good report\nbody"
-        assert "ollama generation failed" in record["error_message"]
+        assert record["error_message"] is None
+        assert "ollama generation failed" in record["_carry_over_reason"]
 
     def test_brand_new_store_failure_writes_empty_and_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def _raise(slug):
@@ -475,7 +535,10 @@ class TestBuildRecordCarryOver:
 
         assert second_run["is_published"] is True
         assert second_run["mdx_content"] == first_run["mdx_content"]
-        assert second_run["error_message"] is not None
+        assert second_run["error_message"] is None
+        assert second_run["_carry_over_reason"] is not None
+        # 同日再実行では前回行の target_date も当日なので、引き継いでも当日のまま。
+        assert second_run["target_date"] == first_run["target_date"]
 
     def test_carry_over_only_reads_the_matching_edition_facts_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """evening_preview / late_update は facts_id が別。carry-over が互いの行を
@@ -519,7 +582,8 @@ class TestFailureRecordCarryOver:
 
         assert record["is_published"] is True
         assert record["mdx_content"] == "# prior good report\nbody"
-        assert record["error_message"] == "lock/gen error: timeout"
+        assert record["error_message"] is None
+        assert record["_carry_over_reason"] == "lock/gen error: timeout"
 
     def test_brand_new_store_writes_empty_and_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(lrj, "_fetch_existing_daily_report", lambda facts_id: {})
@@ -605,3 +669,116 @@ class TestMaybeWaitForDegradedBackend:
         lrj._maybe_wait_for_degraded_backend()
 
         assert sleeps == [5.0]
+
+
+# --------------------------------------------------------------------------- #
+# facts_block / prompt_daily: LLM に何を渡すか（2026-08-19 監査・所見2）
+#
+# オリエンタル(ol_*)の occupancy_rate / めぐりびスコアは定員80人決め打ちの推定で
+# 構造的に誤るため、オーナー判断で UI から非表示になっている
+# （frontend/src/lib/featureFlags.ts の SHOW_MEGRIBI_JUDGMENTS=false）。
+# 同じ値からレポート本文の「今は空いている/混んでいる」が作られていたので、
+# LLM への入力からも外した。相席屋(ay_*)は capacity が実値なので % は渡してよいが、
+# 人数は内部の逆算推定値なので渡さない。
+# --------------------------------------------------------------------------- #
+class TestFactsBlockBrandRules:
+    def _full_facts(self) -> dict[str, Any]:
+        return {
+            "slug": "shibuya",
+            "source": "live",
+            "megribi_score": 0.62,
+            "occupancy_rate": 0.48,
+            "female_ratio": 0.44,
+            "latest_total": 22,
+            "latest_ts": "21:05",
+            "men_seat_pct": 60,
+            "women_seat_pct": 40,
+            "forecast_peak_total": 30.0,
+            "forecast_peak_time": "22:30",
+        }
+
+    def test_oriental_block_hides_occupancy_and_score(self) -> None:
+        block = lrj.spk.facts_block(self._full_facts(), "オリエンタルラウンジ 渋谷", brand="oriental")
+
+        assert "スコア" not in block
+        assert "0.62" not in block
+        assert "埋まり具合" not in block
+        assert "0.48" not in block
+        # 代わりに実測人数・時刻・今夜のピーク予測は渡す。
+        assert "22" in block
+        assert "21:05" in block
+        assert "22:30" in block
+
+    def test_aisekiya_block_has_percent_but_no_headcount(self) -> None:
+        facts = self._full_facts()
+        block = lrj.spk.facts_block(facts, "相席屋 渋谷店", brand="aisekiya")
+
+        assert "埋まり具合" in block
+        assert "約48%" in block
+        assert "60%" in block and "40%" in block
+        # 人数（latest_total / forecast_peak_total）は一切渡さない。
+        assert "人" not in block  # 「〜人」「来店人数」等の人数表現が1つも無いこと
+        assert "直近の来店人数" not in block
+        assert "30.0" not in block
+        # スコアはどちらのブランドにも渡さない。
+        assert "スコア" not in block
+        assert "0.62" not in block
+        # 男女別の席の埋まり具合を渡しているので、紛らわしい「女性の割合」は渡さない。
+        assert "女性の割合" not in block
+
+    def test_ratio_is_rendered_as_percent_not_raw_0_1(self) -> None:
+        """0〜1 の生値は SYSTEM プロンプトで本文禁止なので、入力の時点で % に直しておく。"""
+        block = lrj.spk.facts_block(self._full_facts(), "オリエンタルラウンジ 渋谷", brand="oriental")
+        assert "約44%" in block
+        assert "0.44" not in block
+
+    def test_missing_fields_are_skipped_without_error(self) -> None:
+        for brand in ("oriental", "aisekiya"):
+            block = lrj.spk.facts_block({"slug": "x", "source": "live"}, "テスト店", brand=brand)
+            assert "テスト店" in block
+            assert "データ出典: live" in block
+
+    def test_prompt_daily_does_not_ask_for_crowding_verdict(self) -> None:
+        facts = self._full_facts()
+        prompt = lrj.prompt_daily("オリエンタルラウンジ 渋谷", facts, brand="oriental")
+
+        # 「今は空いている/混んでいる」を判定させる指示が外れていること。
+        assert "今は空いている" not in prompt
+        # めぐりびスコア・埋まり具合の実値がプロンプトに現れないこと。
+        assert "めぐりびスコア" not in prompt
+        assert "0.62" not in prompt
+        assert "0.48" not in prompt
+
+    def test_prompt_daily_for_aisekiya_forbids_headcount(self) -> None:
+        facts = self._full_facts()
+        prompt = lrj.prompt_daily("相席屋 渋谷店", facts, brand="aisekiya")
+
+        assert "人数は書かない。" in prompt
+        assert "おおよその人数" not in prompt
+
+    def test_build_record_passes_store_brand_to_prompt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """本番経路（build_record）が stores.json の brand をプロンプトへ渡していること。
+        ay_* の店に人数を渡してしまう回帰を防ぐ。"""
+        captured: dict[str, str] = {}
+
+        monkeypatch.setattr(lrj.spk, "fetch_store_facts", lambda slug: self._full_facts())
+
+        def _fake_run_ollama(model, system, user, **kwargs):
+            captured["user"] = user
+            return ("# 見出し\n本文です。", 1.0, "")
+
+        monkeypatch.setattr(lrj.spk, "run_ollama", _fake_run_ollama)
+
+        lrj.build_record(
+            slug="ay_shibuya", store_row=_store_row("ay_shibuya", brand="aisekiya"),
+            edition="evening_preview", target_date="2026-08-19", mode="publish",
+        )
+        assert "人数は書かない。" in captured["user"]
+        assert "埋まり具合" in captured["user"]
+
+        lrj.build_record(
+            slug="shibuya", store_row=_store_row("shibuya"),
+            edition="evening_preview", target_date="2026-08-19", mode="publish",
+        )
+        assert "人数は書かない。" not in captured["user"]
+        assert "埋まり具合" not in captured["user"]

@@ -116,6 +116,11 @@ def fetch_store_facts(slug: str) -> dict:
             facts["latest_total"] = row.get("total")
             facts["men_seat_pct"] = row.get("men_seat_pct")
             facts["women_seat_pct"] = row.get("women_seat_pct")
+            # 「いつの実測か」を本文で言えるようにするための時刻（同一レスポンス内の値なので
+            # 追加のAPI呼び出しは発生しない）。ISO文字列から HH:MM だけを取り出す。
+            ts = row.get("ts") or ""
+            if isinstance(ts, str) and len(ts) >= 16:
+                facts["latest_ts"] = ts[11:16]
     except Exception as e:  # noqa: BLE001
         facts["megribi_error"] = str(e)
     try:
@@ -143,16 +148,52 @@ def fetch_store_facts(slug: str) -> dict:
     return facts
 
 
-def facts_block(facts: dict, label: str) -> str:
+def _pct(value: object) -> str | None:
+    """0-1 の割合を『約NN%』の文字列にする。数値でなければ None。"""
+    try:
+        return f"約{round(float(value) * 100)}%"  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def facts_block(facts: dict, label: str, brand: str = "oriental") -> str:
+    """LLM に渡す事実ブロックを組み立てる。ブランドで渡す指標を変える。
+
+    2026-08-19 の監査 (所見2) を受けての設計:
+      - オリエンタル (ol_*) は定員を一律 80 人と決め打ちした推定のため、
+        `occupancy_rate`（席の埋まり具合）と `megribi_score` が構造的に誤る。
+        オーナー判断で UI からも非表示にしてある指標なので
+        （frontend/src/lib/featureFlags.ts の SHOW_MEGRIBI_JUDGMENTS=false）、
+        LLM にも渡さない。渡すのは実測人数・時刻・今夜のピーク予測だけ。
+      - 相席屋 (ay_*) は capacity が実値なので席の埋まり具合(%)は渡してよい。
+        ただし人数は内部の逆算推定値なので渡さない（%表示のみが正式仕様）。
+      - `megribi_score` はどちらのブランドにも渡さない。0〜1 の内部スコアであり、
+        『狙い目かどうか』という判定そのものが現在は無効化されているため。
+    """
+    is_aisekiya = brand == "aisekiya"
     lines = [f"【{label}】"]
+
     def add(k, name, suffix=""):
         if facts.get(k) is not None:
             lines.append(f"- {name}: {facts[k]}{suffix}")
-    add("megribi_score", "めぐりびスコア(0-1, 高いほど狙い目)")
-    add("occupancy_rate", "現在の席の埋まり具合(0-1)")
-    add("female_ratio", "女性比率(0-1)")
-    add("latest_total", "直近の来店規模(推定・人)")
-    add("forecast_peak_total", "今夜のピーク予測(推定規模)")
+
+    if is_aisekiya:
+        seat = _pct(facts.get("occupancy_rate"))
+        if seat:
+            lines.append(f"- 現在の席の埋まり具合: {seat}")
+        add("men_seat_pct", "男性席の埋まり具合", "%")
+        add("women_seat_pct", "女性席の埋まり具合", "%")
+    else:
+        add("latest_total", "直近の来店人数(実測・人)")
+        add("forecast_peak_total", "今夜のピーク予測(人)")
+
+    add("latest_ts", "直近データの時刻")
+    if not is_aisekiya:
+        # 相席屋には男女別の席の埋まり具合を既に渡している。似た数字（来店者に占める
+        # 女性の割合 / 女性席の埋まり具合）を2つ並べるとLLMが取り違えるので渡さない。
+        female = _pct(facts.get("female_ratio"))
+        if female:
+            lines.append(f"- 女性の割合: {female}")
     add("forecast_peak_time", "ピーク予測時刻")
     lines.append(f"- データ出典: {facts.get('source')}")
     return "\n".join(lines)
@@ -163,8 +204,9 @@ SYSTEM = (
     "相席ラウンジの混雑データをもとに、来店を検討する一般ユーザー向けに書きます。"
     "初めて読む人がさっと一読しただけで分かるよう、やさしい普段の言葉で簡潔に書きます。"
     "『めぐりびスコア0.08』『埋まり具合0.075』のような内部指標や 0〜1 の生の数値は本文に出さず、"
-    "『空いています』『混んでいます』『ほぼ満席』『半分くらい』のように普通の言葉で言い換えます。"
-    "使う数字は、時刻(例: 23時ごろ)やおおよその人数など、誰でも直感的に分かるものだけにします。"
+    "渡されたデータにある人数・割合・時刻を、そのまま普段の言葉で述べます。"
+    "渡されたデータに無い『空いています』『混んでいます』『ほぼ満席』のような混雑の断定はしません。"
+    "使う数字は、時刻(例: 23時ごろ)やおおよその人数・割合など、誰でも直感的に分かるものだけにします。"
     "誇張せず、データに無い事柄（予約の可否・待ち時間・特典など）には言及しません。"
     "出力は Markdown。1行目を『# 見出し』にし、その後に本文。前置き・言い訳・メタ発言は書かない。"
 )

@@ -29,17 +29,23 @@
   --mode publish : 成功/失敗に応じた本番の is_published で実際に書き込む。
 
 安全設計 (#16/#17 由来 → #2 で carry-over を追加し3状態に拡張):
-  1) 成功                         : is_published=True,  error_message=None,  mdx_content=本文
-  2) 失敗・前回の公開済み本文あり : is_published=True,  error_message=<理由>, mdx_content=前回の本文
+  1) 成功                         : is_published=True,  error_message=None, mdx_content=本文,
+                                    target_date=当日
+  2) 失敗・前回の公開済み本文あり : is_published=True,  error_message=None, mdx_content=前回の本文,
+                                    target_date=前回のまま, insight_json.last_error=<理由>
   3) 失敗・前回の公開済み本文なし : is_published=False, error_message=<理由>, mdx_content=""
 
-  (2) が今回のコア修正（#2 CONFIRMED BUG）: 2026-07-16 21:30、facts 取得が backend の
+  (2) の error_message を None に保つのは意図的（2026-08-19 の監査・所見1）。フロントは
+  `is_published=eq.true&error_message=is.null` で「表示可能な良品」を絞るため、失敗理由を
+  error_message に書くと carry-over 行がフロントから消える（/reports/daily/<slug> が 404）。
+  失敗理由は insight_json.last_error と標準エラー出力に残す。
+
+  (2) の導入が #2 CONFIRMED BUG のコア修正: 2026-07-16 21:30、facts 取得が backend の
   メモリイベントに起因するタイムアウトで失敗し、42店中1店しか生成できなかった。従来は
   失敗時に必ず (3) を書いており、これが既に公開されていた「前回の良品」まで空本文で
   上書きして消していた。この修正では失敗時にまず直前の Supabase 行を読み
   (_fetch_existing_daily_report)、is_published=True かつ本文が非空の行があれば
-  それを維持したまま error_message だけ今回の失敗理由に更新する
-  (_apply_carry_over_or_fail)。前回も公開済みでなければ (3) のまま
+  その本文と target_date を維持する (_apply_carry_over_or_fail)。前回も公開済みでなければ (3) のまま
   （新規店舗・前回も失敗していた場合は引き継ぐものが無いため、これは仕様どおり）。
   facts 取得自体もタイムアウト延長 + リトライ (local_llm_spike.FACTS_FETCH_RETRIES) で
   一時的な backend 劣化を吸収し、そもそも (2)/(3) に落ちる頻度を下げる。
@@ -204,14 +210,37 @@ def _store_id_for(row: dict[str, Any]) -> str:
 # 日次レポート用プロンプト（週次用の prompt_weekly は「週次」と書いてしまうため使わない）
 # ---------------------------------------------------------------------------
 
-def prompt_daily(store_label: str, facts: dict[str, Any]) -> str:
+def _brand_for(store_row: dict[str, Any]) -> str:
+    """stores.json の brand をそのまま返す（未設定なら oriental 扱い）。
+    facts_block / prompt_daily の分岐に使う。"""
+    return str(store_row.get("brand") or "oriental")
+
+
+def prompt_daily(store_label: str, facts: dict[str, Any], brand: str = "oriental") -> str:
+    """日次レポート用のユーザープロンプト。
+
+    2026-08-19 の監査 (所見2) で「今は空いている/混んでいる」の判定指示を外した。
+    根拠: その判定はオリエンタル全店の定員を一律 80 人と決め打ちした occupancy_rate /
+    めぐりびスコアに由来しており、オーナーが構造的な誤りとして UI から非表示にした指標
+    （frontend/src/lib/featureFlags.ts の SHOW_MEGRIBI_JUDGMENTS=false）と同じもの。
+    本文は「何時ごろに何人ぐらい来ているか」という事実記述に寄せる。
+    """
+    is_aisekiya = brand == "aisekiya"
+    # 相席屋は人数を出さない（内部の逆算推定値のため。%表示のみが正式仕様）。
+    number_hint = (
+        "普段の言葉と直感的な数字(時刻・おおよその割合)だけで書く。人数は書かない。"
+        if is_aisekiya
+        else "普段の言葉と直感的な数字(時刻・おおよその人数)だけで書く。"
+    )
     return (
-        f"次のデータは相席ラウンジ「{store_label}」の現在の混雑状況と今夜の予測です。\n\n"
-        f"{spk.facts_block(facts, store_label)}\n\n"
+        f"次のデータは相席ラウンジ「{store_label}」の今夜ここまでの実測と、これからの予測です。\n\n"
+        f"{spk.facts_block(facts, store_label, brand=brand)}\n\n"
         "これをもとに、今夜これから来店を検討している“初めての人”にも一目で伝わる短い日次レポートを書いてください。"
         "見出し(#)のあと、本文は2〜3文だけ。長くしない。"
-        "『今は空いている/混んでいる』→『混みそうなのは何時ごろか』→『いつ行くと良さそうか』の流れで、"
-        "普段の言葉と直感的な数字(時刻・おおよその人数)だけで書く。"
+        "『今どのくらい来ているか(渡されたデータの事実)』→『何時ごろが最も多くなりそうか』→"
+        "『いつ行くと良さそうか』の流れで書く。"
+        f"{number_hint}"
+        "渡されたデータに無い混雑の断定（空いている/混んでいる/ほぼ満席）はしない。"
         "内部スコアや0〜1の生の数値は本文に出さない。"
         "週次のまとめではなく「今夜」の話として書くこと。前置き・言い訳・メタ発言は書かない。"
     )
@@ -329,13 +358,29 @@ def _apply_carry_over_or_fail(
 ) -> dict[str, Any]:
     """生成失敗時のレコードを組み立てる（#2 CONFIRMED BUG のコア修正）。
 
-    直前に公開済みの本文が Supabase に残っていれば、それを消さずに引き継ぐ
-    (mdx_content/is_published は前回のまま、error_message だけ今回の失敗理由に更新)。
+    直前に公開済みの本文が Supabase に残っていれば、それを消さずに引き継ぐ。
     無ければ（新規店舗・前回も失敗していた等、引き継ぐものが無い場合）従来どおり
-    空本文 + is_published=False で書く。
+    空本文 + is_published=False + error_message で書く。
 
     「前回の良品」は is_published=True かつ mdx_content が非空の行のみを指す
     （前回も失敗行だった場合は引き継ぐものが無いのと同じ扱いになる）。
+
+    2026-08-19 の監査 (所見1) による修正 — carry-over 行が読者に届いていなかった:
+      1) error_message は None のままにする。フロント
+         (frontend/src/lib/supabase/blogDrafts.ts の fetchLatestPublishedReportByStore /
+         fetchAllLatestPublishedReports) は `is_published=eq.true&error_message=is.null`
+         で絞るため、以前のように失敗理由を error_message に書くと carry-over 行が
+         「表示可能な良品」から外れ、/reports/daily/<slug> が 404 になり一覧からも消えていた。
+         失敗理由は insight_json.last_error（daily では本文表示に使われない jsonb 列）と
+         標準エラー出力に残す。専用列がある方が望ましく、追加 SQL は報告書に記載した。
+      2) target_date は前回の行のものを引き継ぐ。今日の日付のまま書くと「今日の日付で
+         前日の本文」という嘘の表示になるため。GHA の未公開監視
+         (.github/workflows/check-daily-published.yml) は `target_date=eq.<当日>` で
+         数えるので、日付を引き継いだ carry-over 行は当日分としてカウントされない
+         ＝生成失敗の検知は従来どおり効き続ける。
+      3) 返り値の `_carried_over` / `_carry_over_reason` は Supabase には書かない
+         （_upsert_daily_report_to_supabase は明示した列だけを送る）。呼び出し側が
+         「成功」と「carry-over」を集計で区別するためだけの内部フラグ。
 
     allow_fetch=False（--mode dry-run から渡される）のときは Supabase に一切触れない
     既存の契約（モジュール docstring 参照）を守るためフェッチ自体を省略し、常に
@@ -347,15 +392,36 @@ def _apply_carry_over_or_fail(
     prior_mdx = existing.get("mdx_content")
     prior_published = bool(existing.get("is_published"))
     if prior_published and isinstance(prior_mdx, str) and prior_mdx.strip():
+        prior_date = existing.get("target_date")
+        kept_date = (
+            prior_date if isinstance(prior_date, str) and prior_date.strip() else base["target_date"]
+        )
         _pr(
             f"      [carry-over] keeping prior published body for facts_id={base['facts_id']} "
-            f"(prior target_date={existing.get('target_date')}); today's failure: {reason}"
+            f"(kept target_date={kept_date}); today's failure: {reason}"
         )
+        # 失敗理由は「表示可能な良品」契約を壊さない場所へ残す（error_message は使わない）。
+        print(
+            f"[local-report][carry-over] facts_id={base['facts_id']} kept_target_date={kept_date} "
+            f"reason={reason}".encode("ascii", "backslashreplace").decode("ascii"),
+            file=sys.stderr,
+        )
+        insight_json = dict(base.get("insight_json") or {})
+        insight_json["last_error"] = {
+            "message": reason,
+            "at": datetime.now(JST).isoformat(timespec="seconds"),
+            "failed_target_date": base["target_date"],
+            "carried_over_from": kept_date,
+        }
         return {
             **base,
+            "target_date": kept_date,
             "mdx_content": prior_mdx,
+            "insight_json": insight_json,
             "is_published": True,
-            "error_message": reason,
+            "error_message": None,
+            "_carried_over": True,
+            "_carry_over_reason": reason,
         }
     return {
         **base,
@@ -414,7 +480,7 @@ def build_record(
         return _apply_carry_over_or_fail(base, reason, allow_fetch=allow_fetch)
 
     # 2) Ollama 生成（呼び出し側で gpu_lock を取得済みの前提）
-    user_prompt = prompt_daily(store_label, facts)
+    user_prompt = prompt_daily(store_label, facts, brand=_brand_for(store_row))
     tuned = _load_tuned_options() or {"num_gpu": 999}
     text, elapsed, err = spk.run_ollama(MODEL, spk.SYSTEM, user_prompt, options=tuned, think=False, keep_alive="10m")
     if err and tuned and "num_gpu" in tuned:
@@ -529,6 +595,8 @@ def _print_record(slug: str, record: dict[str, Any]) -> None:
     _pr(f"  line_user_id  : {record['line_user_id']}")
     _pr(f"  is_published  : {record['is_published']}")
     _pr(f"  error_message : {record['error_message']}")
+    if record.get("_carried_over"):
+        _pr(f"  carried_over  : True (reason: {record.get('_carry_over_reason')})")
     if record.get("_debug_facts_source"):
         _pr(f"  (debug) facts_source : {record['_debug_facts_source']}")
     if record.get("_debug_elapsed_sec") is not None:
@@ -614,16 +682,18 @@ def main() -> int:
                 slug, store_map[slug], args.edition, target_date, f"lock/gen error: {exc}", mode=args.mode
             )
 
-        # #2 由来: is_published だけでなく error_message の有無で「今回の生成が
-        # 成功したか」を区別する。is_published=True かつ error_message ありは
-        # carry-over（前回の良品を維持しつつ今回の失敗を記録した状態）で、
-        # 今回の生成自体は失敗している。
-        if record["is_published"] and record["error_message"] is None:
+        # #2 由来: 「今回の生成が成功したか」を集計で区別する。carry-over 行は
+        # 読者に届けるため error_message を None のままにする（所見1）ので、
+        # 内部フラグ `_carried_over`（Supabase には書かれない）で判定する。
+        if record.get("_carried_over"):
+            gen_carried += 1
+            status = (
+                f"CARRY-OVER(kept prior body from {record['target_date']}; "
+                f"{record.get('_carry_over_reason')})"
+            )
+        elif record["is_published"] and record["error_message"] is None:
             gen_ok += 1
             status = "OK"
-        elif record["is_published"]:
-            gen_carried += 1
-            status = f"CARRY-OVER(kept prior body; {record['error_message']})"
         else:
             gen_fail += 1
             status = f"FAIL({record['error_message']})"

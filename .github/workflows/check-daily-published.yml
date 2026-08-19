@@ -5,6 +5,13 @@ name: Check daily reports published
 # 死んだ場合、当日の blog_drafts(content_type=daily, is_published=true) が欠けるので検知できる。
 # 失敗時はジョブが exit 1 する → GitHub が自動でオーナーにメール通知。
 # さらに OPS_NOTIFY_WEBHOOK_URL があれば Slack/Discord にも通知する。
+#
+# carry-over 行との関係（2026-08-19 監査・所見1）:
+#   生成に失敗した edition は「前回の良品の本文と target_date」を書き戻す
+#   （scripts/local_report_job.py の _apply_carry_over_or_fail）。読者に届けるため
+#   error_message は None のままだが、target_date は前日のままなので、下の
+#   `target_date=eq.<当日>` の条件で当日分としてはカウントされない
+#   ＝ 生成失敗の検知はこれまでどおり効く（読者には前回の良品が出続ける）。
 
 on:
   schedule:
@@ -17,7 +24,7 @@ on:
         required: false
         default: ""
       min_published:
-        description: "各エディションの最低公開数（既定30 / 全44店）"
+        description: "各エディションの最低公開数（既定30 / 全42店）"
         required: false
         default: "30"
 
