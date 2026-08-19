@@ -2,6 +2,8 @@ CLAUDE.md — MEGRIBI（Oriental Lounge Monitor）3分マップ
 最終更新: 2026-07-11（Batch B3: 新規作成。全ての記述は実コードを確認して書いた。詳細な根拠・過去の設計判断は plan/*.md を参照。
 Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追記 + sapporo_ag閉店で店舗数42（37+5）に更新）。
 2026-07-18: weekly `index.json` 廃止（別バッチ）の反映 + コメント/ENV.md/e2e/依存関係の修正（Fable監査分）
+2026-08-19: 大整理第3弾（Fable棚卸し59件→Sonnet反証→Opus実装・挙動不変）の反映。共通モジュール地図（§7）を新設、
+`/api/range` 契約の実態合わせ、モデル名の正本の移動、vercel.json の実在、テスト規約（conftest / server-only）を追記。
 
 このファイルは「初めてこのリポジトリを開いた AI が3分で全体像を掴み、古いドキュメントに
 騙されないようにする」ためのものです。plan/ 配下の各ファイルより新しく、迷ったときは
@@ -100,8 +102,10 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
 
 - **エントリポイント**: `wsgi:app`（`wsgi.py` → `oriental.create_app()`）。`multi_collect.py`
   トップレベル + `/tasks/multi_collect`（`oriental/routes/tasks.py`）。
-- **`/api/range` の契約**: `store` + `limit` のみ。サーバー側の時間フィルタは禁止（夜窓判定は
-  フロント `useStorePreviewData.ts` / LINE用 `insightFromRange.ts` の役割）。
+- **`/api/range` の契約**: 必須は `store` + `limit`。任意で `from`/`to`（YYYY-MM-DD・日付粒度）を受け、
+  片方だけならその1日。**時刻粒度のサーバー側フィルタは禁止**（夜窓判定はフロント `useStorePreviewData.ts` /
+  LINE用 `insightFromRange.ts` の役割）。マルチ店舗の `stores=` 解釈は `utils/stores.parse_store_slugs`
+  （小文字化→既知のみ→重複除去→上限）に一本化（range_multi / forecast_today_multi / megribi_score 共通）。
 - **API 一式**: `/healthz`, `/api/meta`, `/api/current`, `/api/range`, `/api/range_multi`,
   `/api/forecast_*`, `/api/forecast_today_multi`, `/api/megribi_score`, `/api/forecast_accuracy`,
   `/api/holiday_status`, `/tasks/*`。既存互換性を維持すること。
@@ -112,8 +116,10 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
   `/reports/weekly/[store_slug]`, `/blog/[slug]`, `/area/[area]`。
 - **店舗マスタの単一ソース**: `oriental/utils/stores.py::ALL_STORE_IDS`（Python側の店舗解決・ML
   allow-list）と `frontend/src/data/stores.json`（Frontend & 収集スクリプト共通）。行数は常に一致。
-- **やらないと決めていること**: n8n（LINE/ブログ配管に不使用）／Vercel Cron（`vercel.json`削除済み、
-  二重実行防止）／二次会の Places API 化（map-link方式を維持）。
+- **やらないと決めていること**: n8n（LINE/ブログ配管に不使用）／Vercel Cron（`frontend/vercel.json` は
+  main 以外のビルドを止める `ignoreCommand` 専用で cron は持たない。二重実行防止）／二次会の Places API 化
+  （map-link方式を維持）／`model_xgb.py` の改名／GoogleSheet fallback・GAS 送信経路・`/api/forecast_next_hour`
+  `/api/second_venues` プロキシの削除（外部呼び出し・障害時挙動が変わるためオーナー判断待ち）。
 
 ---
 
@@ -142,9 +148,10 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
    `plan/CDN_WARMING_LOCAL.md` で確認すること。
 6. **ドキュメントのピンポイントな値（モデル名等）は最終的にコードで確認すること。**
    実例: 本番モデルは2026-07-08に `gemma4:12b`→`gemma4:e4b` へ変更されたが、
-   `docs/LOCAL_LLM_SETUP.md` 本文は2026-07-11まで旧名のままだった（修正済み。正本は
-   `scripts/local_report_job.py` の `MODEL` 定数）。なお `scripts/tune_local_llm.py` の既定モデルと
-   `scripts/experiments/local_llm_spike.py` の `MODELS` に残る `gemma4:12b` はベンチ比較用の
+   `docs/LOCAL_LLM_SETUP.md` 本文は2026-07-11まで旧名のままだった（修正済み）。**モデル名の正本は
+   `scripts/_ollama_common.py` の `MODEL` 定数**（2026-08-19 に `local_report_job.py` から移動。daily/weekly
+   とも同じ定数を参照し、`local_report_job.MODEL` は再エクスポート）。なお `scripts/tune_local_llm.py` の
+   既定モデルと `scripts/experiments/local_llm_spike.py` の `MODELS` に残る `gemma4:12b` はベンチ比較用の
    意図的な残置であり、本番モデルの参照ではない。
 7. **`schema_version` は3箇所同期が必要**: `oriental/config.py` の既定値 / GHA Repository Variable
    `FORECAST_MODEL_SCHEMA_VERSION` / Render 環境変数。ズレると `model_registry.py` が
@@ -180,9 +187,46 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
 python -m pytest -q         # pytest.ini: testpaths=tests, pythonpath=.
 ```
 
+- `tests/conftest.py` が `DISABLE_MODEL_PRELOAD=1` を立てる（モデル事前ロードのスレッドがグローバル
+  `time.sleep` を差し替えるテストに混入してランダムに落ちる穴を封止）。
+- vitest は `server-only` を `src/test/server-only-stub.ts` に alias（サーバー専用モジュールを import する
+  テストを書ける）。`next build` / `npm test` 全体は作業ツリーを共有する並列エージェントと衝突するため、
+  並列作業中は各班は `npx tsc --noEmit` + `npx vitest run <file>` のみ、統括が最後にまとめて回す。
+- 番犬テストの流儀: 整理の前に「旧実装の出力をフィクスチャ/スナップショットに固定」→整理→同じテストが緑。
+  URL表は `tests/test_url_map_stability.py`（SHA一致）、店舗マスタは `test_store_id_ssot.py`、
+  ページ metadata は `src/lib/seo/pageMetadata.snapshot.test.ts`、StoreSnapshot 組立は
+  `assembleStoreSnapshot.parity.test.ts` が検問。
+- `scripts/score_forecasts.py` / `snapshot_forecasts.py` は argparse を持たない＝引数を付けても本番ジョブが
+  丸ごと走る。確認目的で実行しない（import / pytest で確認）。
+
 ```powershell
 cd frontend; npm run dev    # Next.js（frontendディレクトリ内で実行。二重cdに注意）
 python app.py                # Flask ローカル起動（.env に環境変数、plan/ENV.md参照）
 ```
+
+## 7. 共通モジュール地図（同じ処理を手書きしない。ここを先に探す）
+
+| したいこと | 使うもの |
+|---|---|
+| Supabase の認証ヘッダ・Storage オブジェクト取得（Flask 側） | `oriental/clients/supabase.py`（`auth_headers` / `storage_object_url` / `storage_get_bytes`） |
+| 有限数判定・ts 正規化・env の float 読み（Flask/ML 側） | `oriental/ml/_num.py` |
+| 店舗マスタ（ID/slug/capacity/座標）・`stores=` の解釈 | `oriental/utils/stores.py`（`ALL_STORE_IDS` / `load_stores_rows` / `parse_store_slugs`） |
+| 連休ブロック・夜セッション日付（-6h） | `oriental/ml/holiday_calendar.py`（`off_block_bounds`）/ `oriental/ml/night_type.py` |
+| forecast 応答の形・エラーコード | `routes/forecast.py::_success_body` / `ml/forecast_service.py::_error_result` |
+| バッチ scripts の .env 読み・Storage GET/PUT・REST | `scripts/_supabase_common.py` |
+| scripts の slug↔store_id・店舗一覧 | `scripts/_stores_common.py` |
+| scripts の再試行/バックオフ・運用通知(Slack/Discord) | `scripts/_retry_common.py` / `scripts/_ops_notify.py` |
+| scripts が oriental の純粋モジュールを最小依存で読む | `scripts/_standalone_import.py` |
+| ローカル LLM（Ollama）呼び出し・facts 取得・SYSTEM・MODEL | `scripts/_ollama_common.py`（daily/weekly 共通） |
+| GHA 監視ジョブの本体 | `scripts/monitor/*.py`（WF は1行で呼ぶだけ） |
+| JST の日付部品・YYYY-MM-DD/HH:MM・夜窓(19時境界)・夜セッション(6時境界) | `frontend/src/lib/date/jst.ts` / `nightWindow.ts` |
+| BACKEND_URL の既定値・Next の /api 透過プロキシ | `frontend/src/lib/backendUrl.ts` / `frontend/src/lib/api/` |
+| ページ metadata（title/description/canonical/OG/Twitter）・OG画像 | `frontend/src/lib/seo/` / `frontend/src/lib/og/` |
+| MDX 前処理（frontmatter 除去・見出し抽出） | `frontend/src/lib/blog/mdx.ts` |
+| /api/range 行のパース・合計・最新行 | `frontend/src/lib/range/` |
+| StoreSnapshot の組立（range→series→now/peak） | `frontend/src/lib/forecast/assembleSnapshot.ts`（型は `lib/forecast/types.ts`） |
+| 相席屋の %換算・時間帯ロールアップ | `frontend/src/app/config/stores.ts`（`seatFullnessPercent` 等）/ `frontend/src/lib/store/nightHourlyRollup.ts` |
+| 料金計算（オリエンタル/相席屋） | `frontend/src/lib/pricing/computeCost.ts`（相席屋は `computeCostAisekiya.ts`、共有は `computeCostShared.ts`） |
+| 退役スクリプト | リポジトリ直下 `archive/`（README に理由）。`scripts/experiments/` は実験専用（本番は依存しない） |
 
 このファイルの記述と実際のコードが食い違っていたら、コードを信じて `CLAUDE.md` を更新してください。
