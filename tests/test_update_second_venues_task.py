@@ -1,5 +1,4 @@
 from oriental.clients.google_places import NearbyPlace, PlaceDetails
-from oriental.domain.second_venues_genre import map_types_to_genre
 from oriental.tasks.update_second_venues import update_all_second_venues
 
 
@@ -96,12 +95,3 @@ def test_update_all_second_venues_builds_payload_and_upserts():
 
     assert client.nearby_calls[0] == (35.0, 139.0)
     assert set(client.detail_calls) == {"p1", "p2"}
-
-
-def test_map_types_to_genre_precedence():
-    assert map_types_to_genre(["karaoke", "bar"]) == "カラオケ"
-    assert map_types_to_genre(["pub"]) == "バー"
-    assert map_types_to_genre(["lodging"]) == "ホテル"
-    assert map_types_to_genre(["restaurant"]) == "居酒屋"
-    assert map_types_to_genre(["night_club"]) == "クラブ / ライブバー"
-    assert map_types_to_genre(["unknown"]) == "その他"

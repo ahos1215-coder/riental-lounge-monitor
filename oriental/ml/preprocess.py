@@ -305,48 +305,7 @@ def _holiday_position_map(dates: list[date], flags: list[bool]) -> dict[date, in
     return result
 
 
-def _is_payday_week(d: date) -> int:
-    return int(_in_payday_window_for_month(d, d.year, d.month) or _in_prev_month_window(d))
-
-
 def _days_from_25th_clipped(d: date) -> int:
     # 日付の周期性を保ちつつ、25日付近(-5..+5)を強調する連続特徴量
     diff = d.day - 25
     return int(max(-5, min(5, diff)))
-
-
-def _in_prev_month_window(d: date) -> bool:
-    if d.month == 1:
-        y, m = d.year - 1, 12
-    else:
-        y, m = d.year, d.month - 1
-    return _in_payday_window_for_month(d, y, m)
-
-
-def _in_payday_window_for_month(d: date, year: int, month: int) -> bool:
-    try:
-        payday = date(year, month, 25)
-    except ValueError:
-        return False
-    # 25日から直後の日曜日まで
-    days_to_sunday = (6 - payday.weekday()) % 7
-    window_end = payday + timedelta(days=days_to_sunday)
-    return payday <= d <= window_end
-
-
-def build_features(df: pd.DataFrame, tz: str) -> pd.DataFrame:
-    """
-    学習/推論で共通の特徴量生成。
-    入力: df は ["ts","men","women","total"] を含むこと。
-    - ts を tz-aware に正規化
-    - 欠損は前後埋め
-    - add_time_features(...) を適用
-    戻り値: 特徴量列を含む DataFrame（FEATURE_COLUMNS をこの中から参照）
-    """
-    if df is None or df.empty:
-        return df
-    out = df.copy()
-    out["ts"] = pd.to_datetime(out["ts"], utc=True, errors="coerce").dt.tz_convert(tz)
-    out = out.bfill().ffill()
-    out = add_time_features(out)
-    return out

@@ -7,7 +7,6 @@ import math
 
 from ..clients.google_places import GooglePlacesClient, NearbyPlace, PlaceDetails
 from ..data.second_venues_repository import SecondVenuesRepository
-from ..domain.second_venues_genre import map_types_to_genre
 from ..clients.google_places import classify_genre
 
 MAX_SECOND_VENUES_RADIUS_M = 800  # 徒歩10分圏内の目安
@@ -92,37 +91,6 @@ def update_all_second_venues(
             logger.exception("update_second_venues.upsert_failed store_id=%s", store_id)
 
     return {"total_venues": total_written, "stores": len(store_list)}
-
-
-def run_update_second_venues_task(
-    *,
-    stores: Iterable[dict],
-    pref_coords: dict[str, tuple[float, float]],
-    google_api_key: str,
-    supabase_url: str,
-    supabase_key: str,
-    session,
-    logger: logging.Logger,
-) -> dict[str, int]:
-    if not google_api_key:
-        logger.warning("update_second_venues.skip_no_google_api_key")
-        return {"total_venues": 0, "stores": len(list(stores))}
-
-    google_client = GooglePlacesClient(api_key=google_api_key, session=session, logger=logger)
-    repository = SecondVenuesRepository(
-        base_url=supabase_url,
-        api_key=supabase_key,
-        session=session,
-        logger=logger,
-    )
-
-    return update_all_second_venues(
-        stores=stores,
-        google_client=google_client,
-        repository=repository,
-        logger=logger,
-        pref_coords=pref_coords,
-    )
 
 
 def _build_payloads(
@@ -215,19 +183,6 @@ def distance_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * c
 
 
-def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """2点の緯度経度から距離(m)をざっくり計算する。"""
-    r = 6371000.0  # 地球半径 (m)
-    phi1 = math.radians(lat1)
-    phi2 = math.radians(lat2)
-    d_phi = math.radians(lat2 - lat1)
-    d_lambda = math.radians(lon2 - lon1)
-
-    a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return r * c
-
-
 def _guess_second_venue_category(name: str, genre: str) -> str | None:
     """店名や genre 文字列からざっくりカテゴリを推定する。"""
     text = f"{name} {genre}".lower()
@@ -270,7 +225,7 @@ def _select_second_venues_rows(
             continue
 
         try:
-            dist = _haversine_m(float(store_lat), float(store_lng), float(lat), float(lng))
+            dist = distance_m(float(store_lat), float(store_lng), float(lat), float(lng))
         except Exception:
             continue
 

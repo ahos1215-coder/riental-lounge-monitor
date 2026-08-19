@@ -1,27 +1,20 @@
 [project]
 name = "riental-lounge-monitor"
 version = "0.0.0"
-requires-python = ">=3.13"
+# CI(GHA)は 3.12、オーナーPCのローカルバッチは 3.14 で動いている。
+# 3.12 でも動くことが下限の約束（3.13+ 専用構文を書かない）。
+requires-python = ">=3.12"
 dependencies = []
 
-[tool.black]
-line-length = 100
-target-version = ["py313"]
-
+# lint は ruff のみ（.github/workflows/python-ci.yml で non-blocking 実行）。
+# black / mypy はどこからも呼ばれていないため設定を置かない。
+# pytest の設定は pytest.ini が唯一の正本（pytest.ini > pyproject.toml の優先順位のため、
+# ここに [tool.pytest.ini_options] を書いても効かない）。
 [tool.ruff]
 line-length = 100
-target-version = "py313"
+target-version = "py312"
 select = ["E", "F", "I", "B", "C4", "PIE", "RUF"]
 ignore = ["B905"]
 
 [tool.ruff.per-file-ignores]
 "oriental/templates/*" = ["ALL"]
-
-[tool.mypy]
-python_version = "3.13"
-plugins = ["pydantic.mypy"]
-warn_return_any = true
-warn_unused_configs = true
-
-[tool.pytest.ini_options]
-addopts = "-q"

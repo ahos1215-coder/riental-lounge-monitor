@@ -24,11 +24,11 @@ import threading
 import time
 import urllib.parse
 import urllib.request
-from pathlib import Path
 from typing import Dict, Optional, Tuple
 
-# frontend/src/data/stores.json が全ブランドの store_id + lat/lon の単一ソース。
-_STORES_JSON = Path(__file__).resolve().parents[2] / "frontend" / "src" / "data" / "stores.json"
+# store_id + lat/lon の単一ソース(frontend/src/data/stores.json)の読み手。
+# 読めない場合は [] が返るので、下の _store_coords は自然と {} になる（安全設計の維持）。
+from ..utils.stores import load_stores_rows
 
 _TTL_SEC = 3600  # 予報は 1 時間キャッシュ
 _OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
@@ -43,16 +43,12 @@ def _store_coords() -> Dict[str, Tuple[float, float]]:
     global _coords_cache
     if _coords_cache is None:
         result: Dict[str, Tuple[float, float]] = {}
-        try:
-            rows = json.loads(_STORES_JSON.read_text(encoding="utf-8"))
-            for s in rows:
-                sid = s.get("store_id")
-                lat = s.get("lat")
-                lon = s.get("lon")
-                if sid and isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
-                    result[sid] = (float(lat), float(lon))
-        except Exception:
-            result = {}
+        for s in load_stores_rows():
+            sid = s.get("store_id")
+            lat = s.get("lat")
+            lon = s.get("lon")
+            if sid and isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+                result[sid] = (float(lat), float(lon))
         _coords_cache = result
     return _coords_cache
 

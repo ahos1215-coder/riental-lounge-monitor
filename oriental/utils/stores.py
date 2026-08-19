@@ -1,6 +1,28 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Tuple
+
+# 全ブランドの store_id / capacity / lat・lon の単一ソース。oriental/ 内でこのファイルを
+# 読むのは下の load_stores_rows() だけ（読み手が増えると新店追加時の見落としが増えるため）。
+STORES_JSON_PATH = Path(__file__).resolve().parents[2] / "frontend" / "src" / "data" / "stores.json"
+
+
+def load_stores_rows() -> list[dict]:
+    """stores.json を list[dict] として返す。読めない/壊れている場合は [] を返す。
+
+    呼び出し側が素朴に `row.get(...)` できるよう、list でない JSON や dict 以外の要素は
+    ここで落とす（本関数は絶対に raise しない = 起動やリクエストを巻き添えにしない）。
+    """
+    try:
+        rows = json.loads(STORES_JSON_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    if not isinstance(rows, list):
+        return []
+    return [r for r in rows if isinstance(r, dict)]
+
 
 # --- フォールバック専用（private） ---------------------------------------
 # 単一ソースは frontend/src/data/stores.json。STORE_IDS / AISEKIYA_STORE_IDS は
@@ -70,23 +92,16 @@ _FALLBACK_AISEKIYA_STORE_IDS = [
 # する（新規追加漏れで static list が古いままでも、少なくとも起動時に落ちたり
 # 空リストで全店解決不能になったりしない）。
 def _load_store_ids_from_stores_json() -> Tuple[list[str], list[str]]:
-    import json
-    from pathlib import Path
-
-    path = Path(__file__).resolve().parents[2] / "frontend" / "src" / "data" / "stores.json"
-    try:
-        rows = json.loads(path.read_text(encoding="utf-8"))
-        oriental_ids = [
-            s["store_id"] for s in rows if s.get("brand") == "oriental" and s.get("store_id")
-        ]
-        aisekiya_ids = [
-            s["store_id"] for s in rows if s.get("brand") == "aisekiya" and s.get("store_id")
-        ]
-        if not oriental_ids or not aisekiya_ids:
-            raise ValueError("stores.json produced an empty oriental/aisekiya store_id list")
-        return oriental_ids, aisekiya_ids
-    except Exception:
+    rows = load_stores_rows()
+    oriental_ids = [
+        s["store_id"] for s in rows if s.get("brand") == "oriental" and s.get("store_id")
+    ]
+    aisekiya_ids = [
+        s["store_id"] for s in rows if s.get("brand") == "aisekiya" and s.get("store_id")
+    ]
+    if not oriental_ids or not aisekiya_ids:
         return list(_FALLBACK_STORE_IDS), list(_FALLBACK_AISEKIYA_STORE_IDS)
+    return oriental_ids, aisekiya_ids
 
 
 STORE_IDS, AISEKIYA_STORE_IDS = _load_store_ids_from_stores_json()
@@ -96,26 +111,18 @@ ALL_STORE_IDS = STORE_IDS + AISEKIYA_STORE_IDS
 
 # 相席屋の店舗ごとの総座席数（男女計）。単一ソースは stores.json の各店 `capacity`
 # フィールド（= 片性別の座席数）で、総座席数はその ×2。ここではハードコードせず
-# stores.json から導出する（フロント `config/stores.ts` と同じ出典に統一）。
+# stores.json から導出する（フロント frontend/src/app/config/stores.ts と同じ出典に統一）。
 # 生の座席レイアウト(tables/vip)は multi_collect.py の AISEKIYA_STORES にあり、
 # tests/test_store_capacity_ssot.py が「(tables+vip)*2 == stores.json.capacity」を検証する。
 # 読み込み失敗時は空 dict（呼び出し側は既定 80.0 にフォールバックするので安全）。
 def _load_aisekiya_total_capacity() -> dict[str, int]:
-    import json
-    from pathlib import Path
-
-    path = Path(__file__).resolve().parents[2] / "frontend" / "src" / "data" / "stores.json"
     result: dict[str, int] = {}
-    try:
-        rows = json.loads(path.read_text(encoding="utf-8"))
-        for s in rows:
-            if s.get("brand") == "aisekiya":
-                cap = s.get("capacity")
-                sid = s.get("store_id")
-                if sid and isinstance(cap, (int, float)) and cap > 0:
-                    result[sid] = int(cap) * 2  # 片性別 -> 総座席数
-    except Exception:
-        result = {}
+    for s in load_stores_rows():
+        if s.get("brand") == "aisekiya":
+            cap = s.get("capacity")
+            sid = s.get("store_id")
+            if sid and isinstance(cap, (int, float)) and cap > 0:
+                result[sid] = int(cap) * 2  # 片性別 -> 総座席数
     return result
 
 

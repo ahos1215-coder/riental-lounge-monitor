@@ -25,8 +25,16 @@ from datetime import date, datetime, timedelta, timezone
 
 import jpholiday
 
+# 休業日の定義・お盆/年末年始の期間・連休ブロック走査は holiday_calendar が単一ソース。
 try:
-    from oriental.ml.holiday_calendar import is_off_day
+    from oriental.ml.holiday_calendar import (
+        _MAX_SEARCH_DAYS,
+        NEW_YEAR_RANGE_END_MD as _NYE_END_MONTH_DAY,
+        NEW_YEAR_RANGE_START_MD as _NYE_START_MONTH_DAY,
+        OBON_RANGE_MD as _OBON_RANGE_MD,
+        is_off_day,
+        off_block_bounds as _off_block_bounds,
+    )
 except ModuleNotFoundError:
     # 最小依存環境(GHAのbuild-templates/snapshotジョブ=stdlib+jpholidayのみ)では、
     # パッケージ経由importが oriental/__init__.py の flask 等を引き込んで失敗する。
@@ -40,6 +48,11 @@ except ModuleNotFoundError:
     assert _spec and _spec.loader
     _spec.loader.exec_module(_m)
     is_off_day = _m.is_off_day
+    _off_block_bounds = _m.off_block_bounds
+    _OBON_RANGE_MD = _m.OBON_RANGE_MD
+    _NYE_END_MONTH_DAY = _m.NEW_YEAR_RANGE_END_MD
+    _NYE_START_MONTH_DAY = _m.NEW_YEAR_RANGE_START_MD
+    _MAX_SEARCH_DAYS = _m._MAX_SEARCH_DAYS
 
 __all__ = ["classify_night", "special_block", "night_date_of", "day_off"]
 
@@ -47,14 +60,6 @@ JST = timezone(timedelta(hours=9))
 
 # 夜セッションの -6h シフト（深夜0-5時台を前夜の続きとして扱う）。postprocess と同一。
 NIGHT_SESSION_SHIFT_HOURS = 6
-
-# お盆 (8/13-15)。
-_OBON_RANGE_MD = ((8, 13), (8, 15))
-# 年末年始 (12/29 以降 / 1/3 以前)。
-_NYE_END_MONTH_DAY = (12, 29)
-_NYE_START_MONTH_DAY = (1, 3)
-# 連休ブロック探索の最大日数（片側）。
-_MAX_SEARCH_DAYS = 14
 
 
 def day_off(d: date) -> bool:
@@ -76,29 +81,6 @@ def classify_night(d: date) -> str:
     if day_off(d):
         return "M"
     return "L"
-
-
-def _off_block_bounds(d: date) -> tuple[date, date]:
-    """d を含む連続「休業日(is_off_day)」ブロックの開始日・終了日を返す。
-
-    is_off_day は土日 + 法定祝日 + 振替 + 慣習休業(お盆/年末年始)を含む
-    （holiday_calendar と同一）。GW の連休クラスタ検出に使う。
-    """
-    start = d
-    for _ in range(_MAX_SEARCH_DAYS):
-        prev = start - timedelta(days=1)
-        if is_off_day(prev):
-            start = prev
-        else:
-            break
-    end = d
-    for _ in range(_MAX_SEARCH_DAYS):
-        nxt = end + timedelta(days=1)
-        if is_off_day(nxt):
-            end = nxt
-        else:
-            break
-    return start, end
 
 
 def _gw_window(year: int) -> tuple[date, date]:

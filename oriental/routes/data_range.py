@@ -24,13 +24,11 @@ from ._cache import SingleFlightTTLCache
 from .common import (
     get_config as _config,
     get_supabase_provider,
-    resolve_store_id,
     resolve_store_id_strict,
 )
 from .data import bp
 
 _supabase_provider = get_supabase_provider
-_resolve_store_id = resolve_store_id
 
 # マルチストア系エンドポイントの上限。既知の全店舗数（42店舗）を下回らないようにする。
 # DoS 対策は SLUG_TO_ID による既知 slug のみのフィルタリングとレート制限で担保する。

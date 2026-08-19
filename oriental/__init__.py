@@ -1,11 +1,10 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import os
 import threading
 from pathlib import Path
 
-from flask import Flask, jsonify
-from pydantic import ValidationError
+from flask import Flask
 
 from .clients.gas_client import GasClient
 from .clients.http import ConfiguredSession
@@ -33,20 +32,11 @@ def _preload_models(app: Flask) -> None:
                 app.logger.warning("model_preload.skip no_registry")
                 return
 
-            stores_json = Path(__file__).resolve().parents[1] / "frontend" / "src" / "data" / "stores.json"
-            store_ids: list[str] = []
-            if stores_json.exists():
-                import json
-                with open(stores_json, encoding="utf-8") as f:
-                    for entry in json.load(f):
-                        sid = entry.get("store_id", "")
-                        if sid:
-                            store_ids.append(sid)
-            if not store_ids:
-                store_ids = [f"ol_{s}" for s in [
-                    "nagasaki", "fukuoka", "kokura", "shibuya", "ebisu", "shinjuku",
-                    "sendai_ag", "umeda_ag", "namba", "kyoto", "kobe",
-                ]]
+            # 店舗マスタは utils.stores の単一ソースを使う（stores.json が読めない場合の
+            # フォールバックもそちらが持つ。ここで独自に読むと二重管理になる）。
+            from .utils.stores import ALL_STORE_IDS
+
+            store_ids = list(ALL_STORE_IDS)
 
             loaded = 0
             for sid in store_ids:
@@ -90,10 +80,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
     app.register_blueprint(data.bp)
     app.register_blueprint(tasks.bp)
     app.register_blueprint(forecast.bp)
-
-    @app.errorhandler(ValidationError)
-    def _handle_validation_error(err: ValidationError):  # type: ignore[override]
-        return jsonify({"ok": False, "errors": err.errors()}), 400
 
     # Preload ML models in background thread (non-blocking)
     if cfg.enable_forecast and os.getenv("DISABLE_MODEL_PRELOAD") != "1":

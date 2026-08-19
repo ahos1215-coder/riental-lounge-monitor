@@ -61,19 +61,13 @@ def is_off_day(d: date) -> bool:
     return False
 
 
-def get_holiday_block(target_date: date) -> tuple[int, Optional[float]]:
-    """
-    target_date を含む連続休業ブロックの長さと位置を返す。
+def off_block_bounds(target_date: date) -> tuple[date, date]:
+    """target_date を含む連続休業ブロックの開始日・終了日を返す。
 
-    Returns:
-        (block_length, block_position):
-            block_length: 0 なら平日 (休業日でない)、>=1 なら連続休業日数
-            block_position: 0.0 (ブロック初日) ~ 1.0 (ブロック最終日)、平日なら None
-                            length=1 の単発休日は 0.5 とする
+    休業日の定義 (is_off_day) と探索幅 (_MAX_SEARCH_DAYS) はこのモジュールが単一ソース。
+    night_type.special_block の GW 連休クラスタ判定もこの関数を使う。
+    target_date 自身が休業日でない場合は (target_date, target_date) を返す。
     """
-    if not is_off_day(target_date):
-        return (0, None)
-
     # ブロックの開始日 (target から後ろに歩く)
     start = target_date
     for _ in range(_MAX_SEARCH_DAYS):
@@ -91,6 +85,24 @@ def get_holiday_block(target_date: date) -> tuple[int, Optional[float]]:
             end = nxt
         else:
             break
+
+    return start, end
+
+
+def get_holiday_block(target_date: date) -> tuple[int, Optional[float]]:
+    """
+    target_date を含む連続休業ブロックの長さと位置を返す。
+
+    Returns:
+        (block_length, block_position):
+            block_length: 0 なら平日 (休業日でない)、>=1 なら連続休業日数
+            block_position: 0.0 (ブロック初日) ~ 1.0 (ブロック最終日)、平日なら None
+                            length=1 の単発休日は 0.5 とする
+    """
+    if not is_off_day(target_date):
+        return (0, None)
+
+    start, end = off_block_bounds(target_date)
 
     block_length = (end - start).days + 1
     if block_length == 1:

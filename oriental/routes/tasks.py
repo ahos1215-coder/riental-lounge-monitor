@@ -11,7 +11,6 @@ from typing import Any, Tuple
 
 from bs4 import BeautifulSoup
 from flask import Blueprint, current_app, jsonify, request
-from pydantic import ValidationError
 
 from ..clients.gas_client import GasClient, GasClientError
 from ..clients.google_places import GooglePlacesClient
@@ -296,46 +295,6 @@ def _session():
 
 def _gas_client() -> GasClient:
     return current_app.config["GAS_CLIENT"]
-
-
-def _gather_collect_payload(cfg: AppConfig) -> dict[str, Any]:
-    payload = request.get_json(silent=True) or {}
-
-    for key in ("men", "women", "total"):
-        if key in request.args:
-            value = request.args.get(key, type=int)
-            if value is not None:
-                payload.setdefault(key, value)
-
-    if "ts" not in payload:
-        ts_arg = request.args.get("ts")
-        if ts_arg:
-            payload["ts"] = ts_arg
-        else:
-            form_ts = request.form.get("ts")
-            if form_ts:
-                payload["ts"] = form_ts
-
-    payload.setdefault("store", cfg.store_name)
-    payload.setdefault("ts", timeutil.isoformat(timeutil.now(cfg.timezone), cfg.timezone))
-
-    if "total" not in payload:
-        men = payload.get("men")
-        women = payload.get("women")
-        if isinstance(men, int) and isinstance(women, int):
-            payload["total"] = men + women
-
-    return payload
-
-
-def _serialise_errors(errors: list[Any]) -> list[Any]:
-    serialised: list[Any] = []
-    for item in errors:
-        if isinstance(item, dict):
-            serialised.append({k: (str(v) if isinstance(v, Exception) else v) for k, v in item.items()})
-        else:
-            serialised.append(str(item))
-    return serialised
 
 
 def _run_collection(
