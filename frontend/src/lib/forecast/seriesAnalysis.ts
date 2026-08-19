@@ -70,8 +70,21 @@ export function buildSeries(
   for (const p of sortedForecasts) {
     if (!p.ts) continue;
     const t = new Date(p.ts).getTime();
+    // 「過去の予測は残さない」判定は ts の値（絶対時刻）で行う。
+    //
+    // バグ修正: 以前はこの keepForecast を「同一 ts の実測が map に既に居る場合
+    // （existing）」にしか適用していなかった。しかし本番の ts は
+    //   実測 /api/range          : "2026-08-18T19:55:22.571678+00:00"（秒・マイクロ秒付き・UTC）
+    //   予測 /api/forecast_today : "2026-08-19T19:00:00+09:00"（15分グリッド・JST）
+    // と粒度もオフセット表記も異なり文字列キーが一度も一致しないため、過去区間の予測は
+    // 常に else 分岐に落ちて値付きのまま残っていた。結果、進行中の夜の
+    // pickPeak（menActual ?? menForecast）が「もう外れたと分かっている過去の予測」を
+    // ピークとして拾い、SSR 本文とチップに起きなかった数字が出ていた。
+    //
+    // 実測が 1 点も無い場合（開店前・収集停止中など）は lastActualTime が 0 になるが、
+    // その場合は「過去」の基準が無いので従来どおり全予測を残す（グラフを空にしない）。
     const keepForecast =
-      overlayAllForecast || (lastActualTime > 0 && t > lastActualTime);
+      overlayAllForecast || lastActualTime === 0 || t > lastActualTime;
 
     const existing = map.get(p.ts);
     const menForecast = toRoundedOrNull(p.men_pred) ?? existing?.menForecast ?? null;
@@ -90,8 +103,8 @@ export function buildSeries(
         label: formatLabel(p.ts),
         menActual: null,
         womenActual: null,
-        menForecast,
-        womenForecast,
+        menForecast: keepForecast ? menForecast : null,
+        womenForecast: keepForecast ? womenForecast : null,
       });
     }
   }
