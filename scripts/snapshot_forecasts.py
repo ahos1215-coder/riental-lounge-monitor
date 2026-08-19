@@ -116,7 +116,14 @@ def _get_json(url: str, retries: int = 3):
     return None
 
 
-def _storage_put(bucket: str, path: str, payload: bytes, url: str, key: str) -> None:
+def _storage_put(bucket: str, path: str, payload: bytes, url: str, key: str, retries: int = 3) -> None:
+    """Storage へ書き込む。429/5xx・ネットワーク断は指数バックオフで再試行する。
+
+    ここが1発で落ちるとその夜の A スナップショットを丸ごと失い、翌朝の
+    score_forecasts.py が答え合わせできない（= 精度追跡に穴が空く）ため、
+    _get_json() と同様に再試行する。401/403/404 のような恒久エラーは
+    再試行しても無駄なので即座に送出する。
+    """
     endpoint = f"{url}/storage/v1/object/{bucket}/{path}"
     headers = {
         "apikey": key,
@@ -124,8 +131,21 @@ def _storage_put(bucket: str, path: str, payload: bytes, url: str, key: str) -> 
         "x-upsert": "true",
         "Content-Type": "application/json",
     }
-    req = urllib.request.Request(endpoint, data=payload, method="POST", headers=headers)
-    urllib.request.urlopen(req, timeout=30)
+    for attempt in range(1, retries + 1):
+        req = urllib.request.Request(endpoint, data=payload, method="POST", headers=headers)
+        try:
+            urllib.request.urlopen(req, timeout=30)
+            return
+        except urllib.error.HTTPError as exc:
+            retryable = exc.code == 429 or exc.code >= 500
+            if not retryable or attempt >= retries:
+                raise
+            print(f"[snapshot][warn] PUT {path} failed (HTTP {exc.code}), retry {attempt}/{retries - 1}")
+        except Exception as exc:  # noqa: BLE001 - URLError/timeout など
+            if attempt >= retries:
+                raise
+            print(f"[snapshot][warn] PUT {path} failed ({str(exc)[:120]}), retry {attempt}/{retries - 1}")
+        time.sleep(3 * attempt)
 
 
 def _storage_get(bucket: str, path: str, url: str, key: str) -> bytes | None:

@@ -1,6 +1,7 @@
 name: Cleanup Old Logs
 
-# 毎週月曜 07:00 JST (UTC 日曜 22:00) に自動実行
+# 毎週日曜 14:00 JST (UTC 日曜 05:00) に自動実行
+# （2026-08-18 に旧 UTC 日曜 22:00 から移動。理由は下の schedule: のコメント参照）
 # 手動実行も可能（dry_run で確認してから execute）
 #
 # 安全装置: cleanup_old_logs.py --execute は破壊的（logs テーブルから実データを削除）。

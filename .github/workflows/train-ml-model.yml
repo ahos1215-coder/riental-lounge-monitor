@@ -13,10 +13,19 @@ on:
         description: "対象店舗ID（空なら全店舗）"
         required: false
   schedule:
-    # 日次: UTC 20:30 = JST 05:30（Optuna なし、固定パラメータで再学習のみ）
+    # 日次: UTC 20:30 = JST 翌 05:30（Optuna なし、固定パラメータで再学習のみ）
     - cron: "30 20 * * *"
-    # 週次: 毎週月曜 UTC 22:00 (日曜) = JST 月曜 07:00（営業終了後・Optuna HPO あり）
+    # 週次: UTC 日曜 22:00 = JST 月曜 07:00（営業終了後・Optuna HPO あり）
     - cron: "0 22 * * 0"
+
+# 日次(UTC 日曜 20:30)と週次 Optuna(UTC 日曜 22:00)は同じ日に 1.5 時間差で走る。
+# 日次が長引くと両者が重なり、同じ Supabase logs テーブルと同じ Storage
+# forecast/latest/* を同時に読み書きして「片方の学習結果を上書きする」
+# 競合になり得るため、直列化する。cancel-in-progress: false = 後発は待つ
+# （どちらの学習もスキップさせない）。
+concurrency:
+  group: train-ml-model
+  cancel-in-progress: false
 
 jobs:
   train:

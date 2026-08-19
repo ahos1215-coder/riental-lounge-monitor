@@ -211,6 +211,26 @@ def forecast_today():
     return jsonify(body)
 
 
+def _multi_entry(body: dict) -> dict:
+    """キャッシュ上の完全エンベロープ（forecast_today と共有）を
+    forecast_today_multi の by_slug 用の形に整形する。
+
+    single/multi のどちらが先にキャッシュを埋めても by_slug の形が一定になるよう、
+    ここで必ず絞る（reasoning は 42 店舗分だと重いので multi では返さない）。
+    """
+    if not isinstance(body, dict):
+        return {"ok": False, "data": [], "error": "forecast_failed"}
+    if not body.get("ok", True):
+        return {"ok": False, "data": [], "error": body.get("error") or "forecast_failed"}
+    return {
+        "ok": True,
+        "data": body.get("data") or [],
+        "blend_w_ml": body.get("blend_w_ml"),
+        "blended_slots": body.get("blended_slots"),
+        "clamped_slots": body.get("clamped_slots"),
+    }
+
+
 @bp.get("/forecast_today_multi")
 def forecast_today_multi():
     """複数店舗の forecast_today を1リクエストで返す。
@@ -253,13 +273,19 @@ def forecast_today_multi():
                 store_id=store_id, freq_min=freq, start_h=start_h, end_h=end_h
             )
             if not raw.get("ok", True):
-                body = {"ok": False, "data": [], "error": raw.get("error") or "forecast_failed"}
-                return (body, _error_status(raw)), False
+                return (raw, _error_status(raw)), False
 
             points = _normalize_points(raw, logger)
+            # キャッシュには forecast_today（単体）と同一の完全エンベロープを入れる。
+            # multi が先に温めた場合に単体レスポンスから insufficient_history /
+            # reasoning が欠落し、フロント(useStorePreviewData)が
+            # 「データ準備中」ではなく再試行→unavailable に落ちるのを防ぐ。
+            # multi 自身のレスポンスは _multi_entry() で従来どおりの形に絞る。
             result = {
                 "ok": True,
                 "data": points,
+                "reasoning": raw.get("reasoning", {}),
+                "insufficient_history": bool(raw.get("insufficient_history", False)),
                 # forecast_today と同様、後処理の効き具合を店舗別に観測できるよう透過する。
                 "blend_w_ml": raw.get("blend_w_ml"),
                 "blended_slots": raw.get("blended_slots"),
@@ -268,7 +294,7 @@ def forecast_today_multi():
             return (result, 200), True
 
         (body, _http_status), cache_status = cache.get_or_compute(cache_key, _compute)
-        return slug, body, cache_status
+        return slug, _multi_entry(body), cache_status
 
     by_slug: dict = {}
     errors_by_slug: dict = {}

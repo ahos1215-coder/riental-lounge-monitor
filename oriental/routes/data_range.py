@@ -408,6 +408,12 @@ def _parse_range_query(cfg: AppConfig) -> RangeQuery:
     elif raw_from:
         end = start
 
+    # from だけ指定 -> その1日分（上の elif）。to だけ指定 -> ここで同じく1日分にする。
+    # 下流は start と end が両方揃っているときだけ期間フィルタを効かせるため、
+    # 片方だけだと `to` が黙って無視され「最新N件」が返っていた（2026-08-19 修正）。
+    if start is None and end is not None:
+        start = end
+
     if start and end and start > end:
         raise RangeQueryError("from must be before to")
 
