@@ -71,51 +71,67 @@ export function TimelineLegend(props: TimelineLegendProps) {
   );
 }
 
+/** 系列名 → 「実測 / 予測」 */
+const SERIES_KIND: Record<string, "実測" | "予測"> = {
+  "男性：実測": "実測",
+  "女性：実測": "実測",
+  "男性：予測": "予測",
+  "女性：予測": "予測",
+};
+
+/** 系列名 → 「男性 / 女性」 */
+const SERIES_WHO: Record<string, string> = {
+  "男性：実測": "男性",
+  "女性：実測": "女性",
+  "男性：予測": "男性",
+  "女性：予測": "女性",
+};
+
 export function TimelineTooltip({ active, payload, label = "", unit = "" }: TimelineTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
 
-  // 短縮ラベル: スマホでグラフの上に重なる面積を最小にするため「男性（実測）」→「男・実」。
-  // 系列の色（実測/予測で同色・線種違い）と併せて判別できる。
-  const labels: Record<string, string> = {
-    "男性：実測": "男・実",
-    "女性：実測": "女・実",
-    "男性：予測": "男・予",
-    "女性：予測": "女・予",
-  };
-
   const filtered = payload.filter((entry) => {
     const name = entry.name ?? "";
-    return !!labels[name] && typeof entry.value === "number";
+    return !!SERIES_WHO[name] && typeof entry.value === "number";
   });
   if (!filtered.length) return null;
+
+  // 同じ時刻の点は通常「実測だけ」か「予測だけ」なので、共通なら種別を先頭に1回だけ出して
+  // 各値は「男性 17人」と読みやすいまま保つ（横1行に収めるための圧縮で
+  // 「男・実」のような略語にしたら読みづらくなった、というオーナー指摘への対応）。
+  const kinds = new Set(filtered.map((e) => SERIES_KIND[e.name ?? ""]));
+  const sharedKind = kinds.size === 1 ? [...kinds][0] : null;
 
   return (
     <div
       style={{
-        backgroundColor: "rgba(2,6,23,0.92)",
+        backgroundColor: "rgba(2,6,23,0.94)",
         border: "1px solid #1f2937",
-        borderRadius: 8,
-        fontSize: 11,
-        lineHeight: 1.2,
-        padding: "4px 8px",
+        borderRadius: 10,
+        fontSize: 12,
+        lineHeight: 1.25,
+        padding: "5px 10px",
         whiteSpace: "nowrap",
         display: "flex",
-        alignItems: "center",
-        gap: 8,
-        boxShadow: "0 4px 16px rgba(0,0,0,0.5)",
+        alignItems: "baseline",
+        gap: 10,
+        boxShadow: "0 4px 16px rgba(0,0,0,0.55)",
       }}
     >
-      <span style={{ color: "#e5e7eb", fontVariantNumeric: "tabular-nums" }}>
+      <span style={{ color: "#e5e7eb", fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>
         {typeof label === "number" ? jstHm(new Date(label)) : label}
       </span>
+      {sharedKind && <span style={{ color: "#94a3b8" }}>{sharedKind}</span>}
       {filtered.map((entry, idx) => {
         const name = entry.name ?? "";
         const raw = entry.value;
         const valueText = typeof raw === "number" ? `${Math.round(raw)}${unit}` : "-";
         const color = entry.color ?? "#e5e7eb";
+        const who = SERIES_WHO[name] ?? name;
+        const text = sharedKind ? who : `${who}（${SERIES_KIND[name]}）`;
         return (
           <span key={`${name}-${idx}`} style={{ color, fontVariantNumeric: "tabular-nums" }}>
-            {labels[name] ?? name} {valueText}
+            {text} {valueText}
           </span>
         );
       })}
