@@ -49,8 +49,37 @@ function notFoundRewrite(request: NextRequest) {
   return NextResponse.rewrite(new URL("/__not_found__", request.url));
 }
 
+/**
+ * 閉店して店舗マスタから削除済みの店舗 slug。
+ * 診断②(2026-08-20)の GSC 実測で、閉店済み /store/ay_niigata が Google に残り続け
+ * （90日で193表示・21クリック・順位6.5位）、検索から来た実利用者が 404 に着地し続けて
+ * いたことが判明した。404（一時的な不在）ではなく 410 Gone（恒久的な削除）を返すことで
+ * Google のインデックスから早く消し、利用者には店舗一覧への案内を出す。
+ * 店舗を閉店処理（stores.json から削除）したらここに slug を追記すること。
+ */
+const CLOSED_STORE_SLUGS = new Set(["ay_niigata", "sapporo_ag"]);
+
+function closedStoreGone(): NextResponse {
+  const html = `<!doctype html><html lang="ja"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex"><title>閉店した店舗 | めぐりび</title></head>
+<body style="margin:0;display:flex;min-height:100vh;align-items:center;justify-content:center;background:#050505;color:#e2e8f0;font-family:sans-serif;text-align:center">
+<div><p style="font-size:15px;line-height:1.8">この店舗は閉店したため、ページを終了しました。</p>
+<p style="margin-top:16px"><a href="/stores" style="color:#a5b4fc">全店舗の混雑状況一覧へ →</a></p></div>
+</body></html>`;
+  return new NextResponse(html, {
+    status: 410,
+    headers: { "content-type": "text/html; charset=utf-8" },
+  });
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  const storeMatch = pathname.match(/^\/store\/([^/]+)\/?$/);
+  if (storeMatch && CLOSED_STORE_SLUGS.has(decodeURIComponent(storeMatch[1]).toLowerCase())) {
+    return closedStoreGone();
+  }
 
   const blogMatch = pathname.match(/^\/blog\/([^/]+)\/?$/);
   if (blogMatch) {
@@ -74,5 +103,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/blog/:slug*", "/reports/daily/:slug*", "/reports/weekly/:slug*"],
+  matcher: ["/blog/:slug*", "/reports/daily/:slug*", "/reports/weekly/:slug*", "/store/:slug*"],
 };

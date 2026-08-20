@@ -1179,8 +1179,9 @@
  "/reports/weekly/shibuya": {
   "title": "オリエンタルラウンジ 渋谷本店 · Weekly Report",
   "description": "オリエンタルラウンジ 渋谷本店 の最新AI週報（毎週水曜更新）を表示します。",
-  "alternates": {
-   "canonical": "http://localhost:3000/reports/weekly/shibuya"
+  "robots": {
+   "index": false,
+   "follow": true
   },
   "openGraph": {
    "title": "オリエンタルラウンジ 渋谷本店 · Weekly Report | めぐりび",
@@ -1218,8 +1219,9 @@
  "/reports/weekly/ay_chiba": {
   "title": "相席屋 千葉中央店 · Weekly Report",
   "description": "相席屋 千葉中央店 の最新AI週報（毎週水曜更新）を表示します。",
-  "alternates": {
-   "canonical": "http://localhost:3000/reports/weekly/ay_chiba"
+  "robots": {
+   "index": false,
+   "follow": true
   },
   "openGraph": {
    "title": "相席屋 千葉中央店 · Weekly Report | めぐりび",

@@ -75,6 +75,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     description,
     path: `/reports/weekly/${encodeURIComponent(store_slug)}`,
     ogType: "article",
+    // Weekly Report も Daily と同じく毎週上書きされる従属コンテンツ。診断②(2026-08-20)の GSC 実測で
+    // weekly が「地名+店名」系クエリの表示を店舗ページから奪いつつクリックを生んでいない
+    // （例: 長崎 weekly 128表示/0クリック）ことが判明したため、daily(2026-07-01 出荷)と同型の
+    // noindex にして検索評価を安定URLの /store/[slug] に集約する（follow は残す）。
+    canonical: false,
+    robots: { index: false, follow: true },
   });
 }
 
