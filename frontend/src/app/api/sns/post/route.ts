@@ -146,6 +146,11 @@ export async function POST(req: NextRequest) {
   if (!storeSlug || !blogUrl) {
     return NextResponse.json({ ok: false, error: "store_slug and blog_url are required" }, { status: 400 });
   }
+  // 診断④(2026-08-20・N-1): 呼び出し元は自前GHAのみだが、将来の改修で任意URLがツイート本文に
+  // 載る事故を防ぐため、自ドメイン配下だけを許可する（防御的チェック）。
+  if (!/^https:\/\/(www\.)?meguribi\.jp\//.test(blogUrl)) {
+    return NextResponse.json({ ok: false, error: "blog_url must be under meguribi.jp" }, { status: 400 });
+  }
   if (!ALLOWED_STORE_SLUGS.has(storeSlug)) {
     return NextResponse.json({ ok: false, error: "store_not_allowed_for_auto_post", store_slug: storeSlug }, { status: 403 });
   }

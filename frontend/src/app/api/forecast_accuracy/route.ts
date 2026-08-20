@@ -8,6 +8,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   return proxyBackendGet(req, {
     path: "/api/forecast_accuracy",
     ttlSeconds: TTL_SECONDS,
+    rateLimit: { key: "forecast_accuracy", limit: 30 },
     swrSeconds: 7200,
   });
 }

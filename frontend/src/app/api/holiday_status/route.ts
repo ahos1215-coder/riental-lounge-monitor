@@ -8,6 +8,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   return proxyBackendGet(req, {
     path: "/api/holiday_status",
     ttlSeconds: TTL_SECONDS,
+    rateLimit: { key: "holiday_status", limit: 60 },
     swrSeconds: 7200,
     // date 未指定ならクエリごと付けない（バックエンド側で「今日」扱い）
     buildQuery: (sp) => {

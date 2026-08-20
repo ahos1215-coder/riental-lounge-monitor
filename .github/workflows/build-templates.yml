@@ -21,6 +21,10 @@ on:
   schedule:
     - cron: "30 22 * * *"   # 07:30 JST 毎日（スコアリング 06:10 JST の後）
 
+# 最小権限（診断④ 2026-08-20・W-3）: このWFはリポジトリへ書き込まない。
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest

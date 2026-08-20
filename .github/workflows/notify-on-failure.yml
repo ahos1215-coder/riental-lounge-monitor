@@ -14,6 +14,10 @@ on:
         type: string
         default: ""
 
+# 最小権限（診断④ 2026-08-20・W-3）: このWFはリポジトリへ書き込まない。
+permissions:
+  contents: read
+
 jobs:
   notify:
     runs-on: ubuntu-latest

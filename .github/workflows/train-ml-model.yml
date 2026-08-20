@@ -27,6 +27,10 @@ concurrency:
   group: train-ml-model
   cancel-in-progress: false
 
+# 最小権限（診断④ 2026-08-20・W-3）: このWFはリポジトリへ書き込まない。
+permissions:
+  contents: read
+
 jobs:
   train:
     runs-on: ubuntu-latest

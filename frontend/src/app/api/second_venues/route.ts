@@ -8,6 +8,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   return proxyBackendGet(req, {
     path: "/api/second_venues",
     ttlSeconds: TTL_SECONDS,
+    rateLimit: { key: "second_venues", limit: 30 },
     swrSeconds: 7200,
     buildQuery: (sp) => `store=${encodeURIComponent(sp.get("store") ?? "")}`,
     defaultContentType: "application/json",

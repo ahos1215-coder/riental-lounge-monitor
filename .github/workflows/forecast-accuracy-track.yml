@@ -46,6 +46,10 @@ on:
     # 手動の穴埋めが要る時は workflow_dispatch で mode=snapshot を明示実行できる。
     - cron: "10 21 * * *"  # 06:10 JST — score last night vs actuals（採点はGHAのまま）
 
+# 最小権限（診断④ 2026-08-20・W-3）: このWFはリポジトリへ書き込まない。
+permissions:
+  contents: read
+
 jobs:
   track:
     runs-on: ubuntu-latest
