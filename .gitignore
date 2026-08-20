@@ -80,3 +80,6 @@ data/aisekiya_alert_sent.txt
 # 週次アナリティクス(scripts/analytics_weekly_report.py)のGoogleサービスアカウント鍵。
 # 閲覧専用ロボットの秘密鍵なので絶対にコミットしない。設定手順は docs/ANALYTICS_SETUP.md。
 /secrets/
+
+# 外部レビュー用の非公開データ（実トラフィック数値など。公開リポなので追跡しない）
+/plan/_local/
