@@ -61,11 +61,16 @@ MEGRIBI の開発補助 AI（Codex）向けのガイドライン。既存の決�
 
 ## Backend Rules（Flask）
 ### /api/range（最重要制約）
-- 公開契約として受け付けるクエリは store + limit のみ（新規クエリ追加禁止）。
+> 契約の正本は **`../CLAUDE.md` §3「絶対不変リスト」**。ここは編集時のチェックリスト。
+
+- 必須クエリは store + limit。任意で from / to（**YYYY-MM-DD の日付粒度のみ**）を受ける
+  （実装は `oriental/routes/data_range.py::_parse_range_query`）。片方だけならその1日。
 - Supabase には ts.desc でクエリし、応答では ts.asc に並べ替えて返す。
-- from/to のような時間フィルタや、夜窓（19:00-05:00）のサーバーサイド絞り込みを追加しない。
+- **時刻粒度**の時間フィルタや、夜窓（19:00-05:00）のサーバーサイド絞り込みを追加しない。
   - 夜窓ロジックはフロント責務。
-- MAX_RANGE_LIMIT（既定 50000）で limit を clamp する。フロント推奨は 200-400。
+- MAX_RANGE_LIMIT（既定 6000）で limit を clamp する。フロント推奨は 200-400。
+- /api/range_multi は「店舗数 × limit」が MAX_RANGE_TOTAL_ROWS（既定 12000）を超えると
+  422 `range-request-too-large` で弾く（2026-08-21 外部レビュー F4）。
 
 ### Forecast
 - /api/forecast_today / /api/forecast_next_hour は ENABLE_FORECAST=1 のときのみ有効。
@@ -111,7 +116,8 @@ MEGRIBI の開発補助 AI（Codex）向けのガイドライン。既存の決�
 ---
 
 ## Prohibited / Caution（抜粋）
-- /api/range にクエリ追加・サーバ側時間フィルタ追加をしない。
+- /api/range に**時刻粒度**のクエリ追加・サーバ側時間フィルタ追加をしない
+  （`from`/`to` の**日付粒度**は実装済みの正式な契約。正本は `../CLAUDE.md` §3）。
 - Flask の `/api/range` で夜窓（19:00-05:00）をサーバ側で判定/絞り込みしない（Next の `insightFromRange` や店舗 UI で行う）。
 - legacy Google Sheet / GAS を拡張しない。
 - Second venues を Places API / Supabase 保存前提に戻さない（map-link を維持）。

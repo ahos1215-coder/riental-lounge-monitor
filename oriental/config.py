@@ -42,6 +42,9 @@ class AppConfig:
     data_file: Path
     log_file: Path
     max_range_limit: int  # FIX: configurable /api/range upper bound
+    max_range_total_rows: int  # 1リクエストで返してよい総行数（stores 数 × limit）の上限
+    api_rate_limit_enabled: bool
+    api_rate_limit_per_min: int
     forecast_model_bucket: str
     forecast_model_prefix: str
     forecast_model_cache_dir: Path
@@ -61,6 +64,16 @@ class AppConfig:
         # （bug #6, 2026-07 Fable audit）。温め済みの正規経路は最大 1200 行（昨日ビュー）
         # なので 6000 でも十分な余裕がある。env MAX_RANGE_LIMIT で上書き可能なのは維持。
         max_range_limit = _as_int(os.getenv("MAX_RANGE_LIMIT", "6000"), fallback=6000)  # FIX
+        # 1リクエストの総返却行数（= 店舗数 × limit）の上限。/api/range_multi は
+        # 42店 × 6000行 を無認証で1発要求できてしまい、workers=1/threads=8 の本番を
+        # 1リクエストで飽和させられる（2026-08-21 外部レビュー F4）。
+        # 正規の呼び出しは最大でも 12店 × 48行 = 576 / 3店 × 200行 = 600 なので
+        # 12000 でも 20倍の余裕があり、42×6000=252000 は 21倍下回って弾かれる。
+        max_range_total_rows = _as_int(os.getenv("MAX_RANGE_TOTAL_ROWS", "12000"), fallback=12000)
+        # IP 単位の緩いレート制限（/api/* のみ。/healthz・/readyz・/tasks/* は対象外）。
+        # 誤爆時は Render の環境変数 API_RATE_LIMIT_ENABLED=0 だけで完全停止できる。
+        api_rate_limit_enabled = os.getenv("API_RATE_LIMIT_ENABLED", "1").strip() != "0"
+        api_rate_limit_per_min = _as_int(os.getenv("API_RATE_LIMIT_PER_MIN", "300"), fallback=300)
         forecast_model_refresh_sec = _as_int(os.getenv("FORECAST_MODEL_REFRESH_SEC", "900"), fallback=900)
         enable_forecast = os.getenv("ENABLE_FORECAST", "0").strip() == "1"
         supabase_url = os.getenv("SUPABASE_URL", "")
@@ -97,6 +110,9 @@ class AppConfig:
             data_file=data_file,
             log_file=data_dir / "log.jsonl",
             max_range_limit=max_range_limit,
+            max_range_total_rows=max_range_total_rows,
+            api_rate_limit_enabled=api_rate_limit_enabled,
+            api_rate_limit_per_min=api_rate_limit_per_min,
             forecast_model_bucket=os.getenv("FORECAST_MODEL_BUCKET", "ml-models"),
             forecast_model_prefix=os.getenv("FORECAST_MODEL_PREFIX", "forecast/latest"),
             forecast_model_cache_dir=forecast_model_cache_dir,

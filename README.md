@@ -41,8 +41,13 @@ npm run dev
 ```
 
 ## 重要な制約（必ず守る）
-- `/api/range` の引数は `store` / `limit` のみ（from/to などの追加は禁止）。
-- 夜窓（19:00–05:00）の判定・絞り込みは **店舗 UI** とし、フロント（`useStorePreviewData.ts`）で行う。LINE 下書きは `insightFromRange.ts`（Next サーバー）で、**取得済み `/api/range` に対して**窓計算（Flask `/api/range` の契約は不変）。
+
+> **API 契約の正本は `CLAUDE.md` §3「絶対不変リスト」**。同じ内容を複数の文書に書くと必ず食い違うため、
+> ここには要点だけを置き、詳細は CLAUDE.md を見ること（食い違いを見つけたらコードが正）。
+
+- `/api/range` の必須引数は `store` + `limit`。任意で `from` / `to`（YYYY-MM-DD・**日付粒度のみ**）を受ける。
+  **時刻粒度のサーバー側フィルタは禁止**（夜窓の判定はフロントの責務）。
+- 夜窓（19:00–05:00）の判定・絞り込みは **店舗 UI** とし、フロント（`useStorePreviewData.ts`）で行う。LINE 下書きは `insightFromRange.ts`（Next サーバー）で、**取得済み `/api/range` に対して**窓計算（Flask 側は日付粒度までしか絞らない）。
 - データの正本は Supabase `logs`。Google Sheet / GAS はレガシー fallback。
 - レイヤ構造は Supabase → Flask → Next.js を維持（フロントから Supabase を直接叩かない）。
 - 二次会スポットは map-link 方式（Places API 依存に戻さない）。
@@ -54,7 +59,8 @@ npm run dev
 - ドキュメントは UTF-8 (no BOM) + LF を維持。CRLF で差分が出やすい点に注意。
 
 ## やらないこと（抜粋）
-- `/api/range` にクエリ追加・サーバ側の夜窓フィルタ追加。
+- `/api/range` に**時刻粒度**のクエリ追加・サーバ側の夜窓フィルタ追加。
+  （`from`/`to` の**日付粒度**は実装済みの正式な契約。詳細は `CLAUDE.md` §3）
 - Places API / DB 保存を前提に二次会スポットを作り直す。
 - フロントから Supabase に直接アクセス。
 

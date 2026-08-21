@@ -85,7 +85,13 @@ Daily Report（毎日 18:00 / 21:30 JST）:
   【主】ローカル Task Scheduler MEGRIBI-daily-evening / MEGRIBI-daily-late
   └─ scripts/local_report_job.py --stores all --edition <evening_preview|late_update> --mode publish
      └─ Ollama (gemma4:e4b, http://localhost:11434) で本文生成 → Supabase blog_drafts upsert
-        (content_type='daily', is_published=true。失敗時は本文空 + is_published=false + error_message)
+        (content_type='daily', is_published=true)
+        失敗時は **carry-over 方式**（scripts/local_report_job.py::_apply_carry_over_or_fail。
+        2026-08-19 に weekly と揃えた。正本は ../CLAUDE.md §1）:
+          ・前回の公開済み本文がある → 本文 / is_published=true / target_date を**そのまま維持**し、
+            error_message は **null のまま**（フロントは is_published=true かつ error_message is null で
+            表示行を絞るため、ここに理由を書くと読者から記事が消える）。理由は insight_json.last_error へ。
+          ・前回の公開済み本文が無い（新規店・前回も失敗）→ 本文空 + is_published=false + error_message
   【緊急用のみ・通常は無効】trigger-blog-cron.yml（GHA, workflow_dispatch）
   └─ matrix: オリエンタル 37 store × 独立ジョブ (max-parallel: 5)。相席屋5店舗は対象外。
      └─ GET /api/cron/blog-draft?store=<slug>&edition=... → Gemini → Supabase blog_drafts
@@ -172,8 +178,13 @@ trigger-blog-cron.yml (Daily Report) 完了
 ```
 
 ## Contracts / Constraints
-- `/api/range` の公開契約は `store` + `limit` のみ
-  - server-side の時間フィルタ禁止。night window は **店舗 UI のフロント**および **LINE 用 `insightFromRange.ts`** で実施
+
+> 契約の正本は **`../CLAUDE.md` §3「絶対不変リスト」**。ここは要約。
+
+- `/api/range` の公開契約は必須 `store` + `limit`、任意 `from` / `to`（YYYY-MM-DD の日付粒度）
+  - server-side の**時刻粒度**フィルタは禁止。night window は **店舗 UI のフロント**および **LINE 用 `insightFromRange.ts`** で実施
+- `/api/*` は IP 単位のレート制限（既定 300回/分・`API_RATE_LIMIT_ENABLED=0` で停止）と
+  1リクエストの総行数上限（`MAX_RANGE_TOTAL_ROWS`、既定 12000）を持つ。`/healthz` `/readyz` `/tasks/*` は対象外
 - Secrets は環境変数のみ（`NEXT_PUBLIC_*` に秘密を入れない）
 - 既存エンドポイント互換性を維持（/healthz, /api/meta, /api/current, /api/range, /api/forecast_*, /tasks/*）
 - Second venues は map-link 方式を維持（Places API 依存に戻さない）

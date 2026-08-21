@@ -86,8 +86,12 @@ Target commit: (see git)
 ---
 
 ## Constraints（短縮版）
+
+> 契約の正本は **`../CLAUDE.md` §3「絶対不変リスト」**。ここは索引用の短縮版。
+
 - Supabase `logs` が source of truth（Sheets/GAS は legacy fallback）
-- `/api/range` は `store` + `limit` のみ（クエリ追加・サーバ側時間フィルタ禁止）
+- `/api/range` の必須は `store` + `limit`、任意で `from` / `to`（YYYY-MM-DD の日付粒度）。
+  **時刻粒度のサーバ側フィルタは禁止**
 - **Flask は夜窓を採らない**。店舗 UI は `useStorePreviewData.ts`。**LINE 下書き**は `insightFromRange.ts`（取得済み JSON の集計）
 - 二次会は map-link が本流
 - **ブログ下書きに n8n は使わない**

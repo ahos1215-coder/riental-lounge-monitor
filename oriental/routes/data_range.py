@@ -307,6 +307,36 @@ def api_range_multi():
             422,
         )
 
+    # コスト上限: 1リクエストで生成しうる総行数（店舗数 × limit）を弾く。
+    # 無認証の公開エンドポイントなので、42店 × 6000行 = 252,000行 を1発で要求でき、
+    # workers=1 / threads=8 の本番を1リクエストで飽和させられた（2026-08-21 外部レビュー F4）。
+    # 正規の呼び出しは最大でも 12店 × 48行 = 576 / 3店 × 200行 = 600 なので、
+    # 既定 12000（env MAX_RANGE_TOTAL_ROWS）でも 20 倍の余裕がある。
+    # 単体 /api/range は stores=1 のため MAX_RANGE_LIMIT だけで既に頭打ちになる。
+    requested_rows = len(slugs) * query.limit
+    if requested_rows > cfg.max_range_total_rows:
+        logger.warning(
+            "api_range_multi.too_many_rows slug_count=%d limit=%d requested_rows=%d max=%d",
+            len(slugs),
+            query.limit,
+            requested_rows,
+            cfg.max_range_total_rows,
+        )
+        return (
+            jsonify(
+                {
+                    "ok": False,
+                    "error": "range-request-too-large",
+                    "detail": (
+                        f"stores({len(slugs)}) x limit({query.limit}) = {requested_rows} rows "
+                        f"exceeds the {cfg.max_range_total_rows} row budget; "
+                        "request fewer stores or a smaller limit"
+                    ),
+                }
+            ),
+            422,
+        )
+
     # Flask コンテキスト外のワーカースレッドで使えるよう、参照を先に取得
     # （current_app プロキシはワーカースレッドの中では使えないため、cache は
     # 必ずここで実体を取り出しておく。forecast.py の forecast_today_multi と

@@ -10,6 +10,7 @@ from .clients.gas_client import GasClient
 from .clients.http import ConfiguredSession
 from .config import AppConfig
 from .routes import data, health, tasks, forecast
+from .routes.common import register_api_rate_limit
 from .utils import storage
 from .utils.log import setup_logging
 
@@ -75,6 +76,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
     app.logger.setLevel(logger.level)
 
     storage.ensure_data_dir(cfg)
+
+    # 公開 /api/* の IP 単位レート制限（/healthz・/readyz・/tasks/* は対象外）。
+    # env API_RATE_LIMIT_ENABLED=0 で丸ごと無効化できる（緊急停止スイッチ）。
+    register_api_rate_limit(app, cfg)
 
     app.register_blueprint(health.bp)
     app.register_blueprint(data.bp)

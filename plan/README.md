@@ -20,16 +20,15 @@ Target commit: (see git)
 4. **`DECISIONS.md`** — 壊してはいけない判断
 5. **`API_CONTRACT.md`** — Flask + Next `/api/line` の契約
 6. **`API_CURRENT.md`** — `/api/current` の位置づけ（補足）
-7. **`ARCHITECTURE.md`** — データフロー
-8. **`RUNBOOK.md`** — ローカル起動・本番メモ・**定期ジョブ**・トラブルシュート（旧 ONBOARDING / CRON を統合）
-9. **`ENV.md`** — 環境変数
-10. **`BLOG_PIPELINE.md`** — LINE → 下書き（技術）
-11. **`BLOG_CONTENT.md`** — ブログ編集方針
-12. **`BLOG_REQUEST_SCHEMA.md`** — 依頼 JSON のスキーマ（任意・契約）
-13. **`SECOND_VENUES.md`** — 二次会 map-link 方針
-14. **`VISION_AND_FUTURE.md`** — 構想・フェーズ・備忘
-15. **`ROADMAP.md`** — 短いタスク一覧・当面やらないこと
-16. **`CHECKLISTS.md`** — デプロイ前チェック
+7. **`RUNBOOK.md`** — ローカル起動・本番メモ・**定期ジョブ**・トラブルシュート（旧 ONBOARDING / CRON を統合）
+8. **`ENV.md`** — 環境変数
+9. **`BLOG_PIPELINE.md`** — LINE → 下書き（技術）
+10. **`BLOG_CONTENT.md`** — ブログ編集方針
+11. **`BLOG_REQUEST_SCHEMA.md`** — 依頼 JSON のスキーマ（任意・契約）
+12. **`SECOND_VENUES.md`** — 二次会 map-link 方針
+13. **`VISION_AND_FUTURE.md`** — 構想・フェーズ・備忘
+14. **`ROADMAP.md`** — 短いタスク一覧・当面やらないこと
+15. **`CHECKLISTS.md`** — デプロイ前チェック
 
 **用語が曖昧なとき**: `GLOSSARY.md`
 
