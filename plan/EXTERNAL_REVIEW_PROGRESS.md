@@ -172,3 +172,16 @@ Backend、Frontend、ML/バッチ、監視を静的に追跡し、P1で実見し
 3. 監視3案（LINE通知の集約 / PC死活 / 週次ダイジェストに運用行）— GitHub Secrets に
    `LINE_CHANNEL_ACCESS_TOKEN` / `LINE_USER_ID` が要る
 4. 監視が厳しくなった件（全42店必須）でうるさければ `ALLOWED_MISSING_SLUGS` / `STRICT_ALL_STORES=0`
+
+---
+
+## 第3ラウンド（出荷した12件の修正の検証）
+
+R3_STATUS: NOT_STARTED
+R3_UPDATED: 2026-08-21
+R3_NEXT: `plan/EXTERNAL_REVIEW_ROUND3_2026-08-21.md` を読み、§5 の V1 から順に検証する
+R3_DONE: （まだ無し）
+R3_FINDINGS: （まだ無し）
+
+依頼書: `plan/EXTERNAL_REVIEW_ROUND3_2026-08-21.md`
+最終レポートの出力先: `plan/EXTERNAL_REVIEW_ROUND3_FINDINGS.md`
