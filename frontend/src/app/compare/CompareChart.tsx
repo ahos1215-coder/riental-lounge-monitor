@@ -11,6 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import { isPercentCrowdBrand, type BrandId } from "@/app/config/stores";
+import { compareHourlyTicks } from "@/lib/compare/compareSeries";
 
 export type CompareChartStoreData = {
   label: string;
@@ -23,6 +24,8 @@ type CompareChartProps = {
   storeDataMap: Record<string, CompareChartStoreData | undefined>;
   colors: string[];
   formatTime: (ts: number) => string;
+  /** 表示中の夜（例: 「8/20(木) 19:00 → 翌05:00」）。どの夜のグラフかを見出しに出す。 */
+  nightLabel: string;
 };
 
 /** 人数(オリエンタル)系列は左軸、占有率%(相席屋)系列は右軸に割り当てる Recharts の yAxisId。 */
@@ -92,15 +95,28 @@ export default function CompareChart({
   storeDataMap,
   colors,
   formatTime,
+  nightLabel,
 }: CompareChartProps) {
   const brands = selectedSlugs.map(
     (slug) => storeDataMap[slug]?.brand ?? "oriental",
   );
   const axes = resolveCompareAxes(brands);
+  // X 軸は「時刻に比例した数値軸」（TimelineChart と同じ）。目盛りは1時間刻みに固定して、
+  // 5分スロットの半端な時刻がラベルに出ないようにする。
+  const tsList = chartData
+    .map((r) => Number(r.ts))
+    .filter((t) => Number.isFinite(t));
+  const ticks = compareHourlyTicks(
+    tsList.length ? Math.min(...tsList) : Number.NaN,
+    tsList.length ? Math.max(...tsList) : Number.NaN,
+  );
 
   return (
     <section className="mt-8 rounded-2xl border border-white/10 bg-black/40 p-4 md:p-6">
-      <h2 className="text-lg font-bold">混雑推移の比較</h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-lg font-bold">混雑推移の比較</h2>
+        <p className="text-xs text-white/40">{nightLabel}</p>
+      </div>
       <p className="mt-1 text-xs text-white/50">
         実線 = 実測、点線 = ML 予測（相席屋は席の埋まり具合 % / オリエンタルは人数）
         {axes.dual ? "。単位が違うため 左軸=人数 / 右軸=% に分けています" : ""}
@@ -111,11 +127,14 @@ export default function CompareChart({
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.5} />
             <XAxis
               type="number"
+              scale="time"
               dataKey="ts"
               domain={["dataMin", "dataMax"]}
+              ticks={ticks.length ? ticks : undefined}
               tickFormatter={(v) => formatTime(v)}
               stroke="#94a3b8"
               tick={{ fill: "#94a3b8", fontSize: 10 }}
+              minTickGap={22}
             />
             {axes.showCountAxis && (
               <YAxis

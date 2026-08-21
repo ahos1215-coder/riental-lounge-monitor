@@ -10,6 +10,18 @@ import { jstHm } from "@/lib/date/jst";
 // 比較ページだけ「最新行＝配列末尾」「合計＝men+women（total 列を無視）」という
 // 独自実装が残っており、順不同や total だけの行で他ページと違う値を出していた。
 import { pickLatestRow, rowTotalOrNull, type RangeRow } from "@/lib/range/rangeRows";
+import {
+  addDays,
+  computeNightBaseDate,
+  computeNightWindowFromBaseDate,
+  formatYMD,
+} from "@/lib/date/nightWindow";
+import {
+  buildActualSeries,
+  buildCompareChartData,
+  buildForecastSeries,
+  nightWindowLabel,
+} from "@/lib/compare/compareSeries";
 import type { ForecastPoint } from "@/lib/forecast/types";
 import { track } from "@/lib/analytics";
 import {
@@ -39,6 +51,12 @@ const CompareChart = dynamic(() => import("./CompareChart"), {
 
 const MAX_COMPARE = 3;
 
+// /api/range_multi の 1 店舗あたり取得件数。
+// from/to は「日付粒度」（夜窓は 19:00-翌05:00 で日をまたぐため 2 日ぶんを要求する）で、
+// Flask は新しい方から limit 件を返す。5分間隔なので 300 件 ≒ 直近25時間分＝
+// 夜窓（10時間）を、翌日の夕方に開いた場合でも取りこぼさない最小限の余裕。
+const RANGE_LIMIT = 300;
+
 type StoreData = {
   slug: string;
   label: string;
@@ -52,6 +70,8 @@ type StoreData = {
   sparkline: { ts: number; total: number }[];
   forecast: { ts: number; total: number }[];
   megribiScore: number | null;
+  /** カードの数値がいつ時点のものか（最新実測行の ts / epoch ms）。取れなければ null。 */
+  updatedAt: number | null;
   loading: boolean;
 };
 
@@ -88,6 +108,14 @@ export default function CompareClient() {
   const [storeDataMap, setStoreDataMap] = useState<Record<string, StoreData>>({});
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [searchText, setSearchText] = useState("");
+  // 表示する「夜」の基準日（19時境界。19:00 より前に開いたら前夜）。
+  // 店舗ページと同じ規約（lib/date/nightWindow.ts）に揃える。マウント時に一度だけ決め、
+  // 以後は同じ夜を見続ける（描画のたびに窓がずれてグラフが揺れないようにする）。
+  const [nightBaseDate] = useState<Date>(() => computeNightBaseDate(new Date()));
+  const nightWindow = useMemo(
+    () => computeNightWindowFromBaseDate(nightBaseDate),
+    [nightBaseDate],
+  );
 
   // Initialize from URL params
   useEffect(() => {
@@ -166,6 +194,7 @@ export default function CompareClient() {
           sparkline: [],
           forecast: [],
           megribiScore: null,
+          updatedAt: null,
           loading: true,
         };
       }
@@ -173,12 +202,21 @@ export default function CompareClient() {
     });
 
     const csvSlugs = selectedSlugs.join(",");
+    // 夜窓（19:00-翌05:00 JST）は日をまたぐので、日付粒度の from/to は2日ぶん要求する。
+    // 時刻での絞り込みはサーバー側では行わない規約（CLAUDE.md §3）なので、
+    // 実際の夜窓フィルタは下の buildActualSeries / buildForecastSeries が行う。
+    const fromYmd = formatYMD(nightBaseDate);
+    const toYmd = formatYMD(addDays(nightBaseDate, 1));
 
     // Fetch range_multi + megribi_score + forecast in parallel
     // 判定表示OFF中は比較カードの判定ラベル自体が非表示のため megribi_score の取得をスキップする
     // （featureFlags.ts の SHOW_MEGRIBI_JUDGMENTS を true に戻せば fetch は自動的に復活する）。
     Promise.all([
-      fetch(`/api/range_multi?stores=${csvSlugs}&limit=200`).then((r) => r.json()).catch(() => ({})),
+      fetch(
+        `/api/range_multi?stores=${csvSlugs}&from=${fromYmd}&to=${toYmd}&limit=${RANGE_LIMIT}`,
+      )
+        .then((r) => r.json())
+        .catch(() => ({})),
       SHOW_MEGRIBI_JUDGMENTS
         ? fetch(`/api/megribi_score?stores=${csvSlugs}`).then((r) => r.json()).catch(() => ({}))
         : Promise.resolve({}),
@@ -212,23 +250,21 @@ export default function CompareClient() {
           const toSeries = (total: number) =>
             percentMode ? seatFullnessPercentOfTotal(total, capacity) ?? 0 : total;
 
-          const sparkline = rows
-            .filter((r): r is RangeRow & { ts: string } => Boolean(r.ts))
-            .map((r) => ({ ts: new Date(r.ts).getTime(), total: toSeries(rowTotalOrNull(r) ?? 0) }));
+          // グラフ用の系列は「表示中の夜（19:00-翌05:00）」だけに絞る。
+          // 旧実装は最新200件をそのまま描いていたため、複数の夜と日中（13:20 等）が
+          // 1本の折れ線に混ざっていた（外部レビュー F10）。
+          const sparkline = buildActualSeries(rows, nightWindow, toSeries);
 
           const forecastRows: ForecastPoint[] = Array.isArray(forecastData?.by_slug?.[slug]?.data)
             ? forecastData.by_slug[slug].data
             : [];
-          // total_pred が null の行（履歴データ不足で予測不能な店舗）は除外する。
-          // 0 埋めすると「今夜ずっと0人」の平坦な予測ラインとして誤表示されるため。
-          const forecastPoints = forecastRows
-            .filter(
-              (r): r is ForecastPoint & { ts: string; total_pred: number } =>
-                Boolean(r.ts) && typeof r.total_pred === "number",
-            )
-            .map((r) => ({ ts: new Date(r.ts).getTime(), total: toSeries(r.total_pred) }));
+          const forecastPoints = buildForecastSeries(forecastRows, nightWindow, toSeries);
 
           const score = scoreMap.has(slug) ? (scoreMap.get(slug) as number) : null;
+          // カードの数値は「最新の実測行」＝夜窓で絞らない（従来どおり）。
+          // その代わり、いつ時点の値かをカードに出す（店舗詳細と見比べられるように）。
+          const latestTs = latest?.ts ? new Date(latest.ts).getTime() : NaN;
+          const updatedAt = Number.isFinite(latestTs) ? latestTs : null;
 
           copy[slug] = {
             slug,
@@ -243,6 +279,7 @@ export default function CompareClient() {
             sparkline,
             forecast: forecastPoints,
             megribiScore: score,
+            updatedAt,
             loading: false,
           };
         }
@@ -252,29 +289,18 @@ export default function CompareClient() {
   }, [selectedSlugs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Build merged chart data
-  const chartData = useMemo(() => {
-    const allTsSet = new Set<number>();
-    for (const slug of selectedSlugs) {
-      const data = storeDataMap[slug];
-      if (!data) continue;
-      for (const p of data.sparkline) allTsSet.add(p.ts);
-      for (const p of data.forecast) allTsSet.add(p.ts);
-    }
-    const allTs = Array.from(allTsSet).sort((a, b) => a - b);
-
-    return allTs.map((ts) => {
-      const point: Record<string, unknown> = { ts, label: formatTime(ts) };
-      for (const slug of selectedSlugs) {
-        const data = storeDataMap[slug];
-        if (!data) continue;
-        const actual = data.sparkline.find((p) => p.ts === ts);
-        const fc = data.forecast.find((p) => p.ts === ts);
-        if (actual) point[`actual_${slug}`] = actual.total;
-        if (fc) point[`forecast_${slug}`] = fc.total;
-      }
-      return point;
-    });
-  }, [selectedSlugs, storeDataMap]);
+  // 5分スロットに丸めてからマージする（外部レビュー F7）。実測 ts は店舗ごとに秒がズレる
+  // ため、旧実装の「ts 完全一致で和集合」では各行に片方の店の値しか入らず、
+  // connectNulls=false の線が1点ごとに途切れて実測線がほぼ見えていなかった。
+  const chartData = useMemo(
+    () =>
+      buildCompareChartData({
+        slugs: selectedSlugs,
+        seriesBySlug: storeDataMap,
+        formatTime,
+      }),
+    [selectedSlugs, storeDataMap],
+  );
 
   const filteredStores = useMemo(() => {
     const q = searchText.trim().toLowerCase();
@@ -460,6 +486,13 @@ export default function CompareClient() {
                           詳細 →
                         </Link>
                       </div>
+                      {/* この数字がいつ時点のものかを明示する（店舗詳細と見比べたとき、
+                          同じ時点のデータかどうかが分からなかった。外部レビュー F10）。 */}
+                      <p className="mt-1 text-[10px] text-white/35">
+                        {data.updatedAt !== null
+                          ? `更新 ${formatTime(data.updatedAt)}`
+                          : "更新時刻: 取得できず"}
+                      </p>
                     </>
                   )}
                 </div>
@@ -476,8 +509,22 @@ export default function CompareClient() {
             storeDataMap={storeDataMap}
             colors={COLORS}
             formatTime={formatTime}
+            nightLabel={nightWindowLabel(nightBaseDate)}
           />
         )}
+
+        {/* 夜窓で絞った結果が空（例: 19時を回った直後でまだ1件も無い）ときは、
+            グラフ枠ごと消えて「壊れている」ように見えるため理由を出す。 */}
+        {selectedSlugs.length >= 2 &&
+          chartData.length === 0 &&
+          selectedSlugs.every((s) => storeDataMap[s] && !storeDataMap[s].loading) && (
+            <section className="mt-8 rounded-2xl border border-white/10 bg-black/40 p-4 md:p-6">
+              <h2 className="text-lg font-bold">混雑推移の比較</h2>
+              <p className="mt-2 text-sm text-white/50">
+                {nightWindowLabel(nightBaseDate)} のデータがまだありません。
+              </p>
+            </section>
+          )}
 
         {selectedSlugs.length === 0 && (
           <div className="mt-12 rounded-2xl border border-dashed border-white/15 bg-white/[0.02] p-8 text-center">
