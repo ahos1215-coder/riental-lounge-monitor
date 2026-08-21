@@ -148,6 +148,22 @@ class InProcessRateLimiter:
     def limit(self) -> int:
         return self._limit
 
+    def status(self) -> dict:
+        """/healthz 用の観測値。
+
+        `tracked_keys` が「実際に来ているリクエスト数」と同じ勢いで増えていくなら、
+        キーの取り方（`client_ip()`）が毎回違う値を返していて**制限が効いていない**という意味。
+        2026-08-21 に本番で400連打しても429が出ない事象を追うために足した。
+        """
+        with self._lock:
+            counts = [int(v[1]) for v in self._buckets.values()]
+        return {
+            "enabled": True,
+            "per_min": self._limit,
+            "tracked_keys": len(counts),
+            "max_count_in_window": max(counts) if counts else 0,
+        }
+
     def check(self, key: str, now: float | None = None) -> tuple[bool, int]:
         """(許可するか, Retry-After 秒) を返す。"""
         ts = time.monotonic() if now is None else now
@@ -179,20 +195,29 @@ class InProcessRateLimiter:
 def client_ip() -> str:
     """レート制限のキーに使うクライアント IP。
 
-    **`X-Forwarded-For` の「先頭」を使ってはいけない**（2026-08-21）。先頭は元クライアントが
-    自由に詐称できるヘッダなので、`X-Forwarded-For: <毎回ランダム>` を付けるだけで
-    レート制限を丸ごと素通りできてしまう。XFF は各プロキシが「自分が受け取った相手の IP」を
-    **末尾に追記**していく仕様なので、**最後の要素 = Render が実際に見た接続元**が
-    唯一信用できる値になる。ここではそれをキーにする。
+    優先順（2026-08-21）:
 
-    注意（意図的な仕様）: 通常の利用者トラフィックは Vercel の Next.js プロキシ経由で来るため、
-    Render から見た接続元は Vercel の egress IP になる＝**利用者全員が1つのバケットを共有**する。
-    それでよい。ここで守りたいのは「Backend を直接叩いて高コスト API を連打される」ケース
-    （外部レビューF4）であり、その直叩き側は各自の実 IP で別バケットになる。
-    共有バケット側が詰まるのを避けるため、上限は実トラフィックに対して十分大きく取ってある。
+    1. `CF-Connecting-IP` — 本番 Render の前段は Cloudflare（レスポンスの `Server: cloudflare` /
+       `cf-cache-status` で確認済み）。このヘッダは Cloudflare が**必ず自分で上書きする**ため、
+       接続元が偽装しても意味が無い＝信用できる唯一の元クライアント IP。
+    2. `True-Client-IP` — 一部の Cloudflare プランで付く同等のヘッダ。
+    3. `X-Forwarded-For` の**末尾** — プロキシは「自分が受け取った相手の IP」を末尾に追記する
+       仕様なので、末尾はいちばん手前のプロキシが書いた値＝相対的に信用できる。
+       **先頭は使わない**: 先頭は接続元が自由に付けられるので、リクエストごとにランダムな
+       XFF を送るだけでレート制限を丸ごと素通りできてしまう。
+    4. `remote_addr` — ヘッダが何も無いローカル実行・テスト用。
 
-    ヘッダが無いローカル実行やテストでは `remote_addr` にフォールバックする。
+    注意（意図した仕様）: 通常の利用者トラフィックは Vercel の Next.js プロキシ経由で来るため、
+    元クライアント IP は Vercel の egress IP になる＝**利用者全員が1つのバケットを共有**する。
+    それでよい。ここで守りたいのは「Backend を直叩きして高コスト API を連打される」ケース
+    （外部レビュー F4）で、その直叩き側は各自の実 IP で別バケットになる。共有バケット側が
+    詰まらないよう、上限は実トラフィック（CDN warming 1周 約134リクエスト・分散済み）に対して
+    十分な余裕を取ってある。
     """
+    for header in ("CF-Connecting-IP", "True-Client-IP"):
+        value = (request.headers.get(header) or "").strip()
+        if value:
+            return value
     forwarded = request.headers.get("X-Forwarded-For", "")
     if forwarded:
         parts = [p.strip() for p in forwarded.split(",") if p.strip()]

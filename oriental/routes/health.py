@@ -20,7 +20,21 @@ def healthz():
     payload["forecast_model"] = _forecast_model_status()
     payload["data_freshness"] = _data_freshness(cfg)
     payload["memory"] = _memory_status()
+    payload["api_rate_limit"] = _rate_limit_status()
     return jsonify(payload)
+
+
+def _rate_limit_status() -> dict:
+    """`/api/*` レート制限の効きを外から観測できるようにする（2026-08-21）。
+
+    本番で 400 連打しても 429 が出ない事象を、ログを見られない状態でも切り分けられるように
+    した。連打の直後にこれを見て `tracked_keys` が 1 なら効いている（同じ IP を1バケットに
+    まとめられている）、連打数と同じ勢いで増えていればキーの取り方が壊れている。
+    """
+    limiter = current_app.config.get("API_RATE_LIMITER")
+    if limiter is None:
+        return {"enabled": False}
+    return limiter.status()
 
 
 def _process_rss_mb() -> float | None:

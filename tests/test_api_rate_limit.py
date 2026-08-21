@@ -195,3 +195,55 @@ def test_正規の呼び出しは既定の予算に収まる(monkeypatch):
 def test_行数予算はenvで上書きできる(monkeypatch):
     monkeypatch.setenv("MAX_RANGE_TOTAL_ROWS", "777")
     assert AppConfig.from_env().max_range_total_rows == 777
+
+
+# --------------------------------------------------------------------------- #
+# client_ip(): 本番(Render + Cloudflare)で「効かない」事故を踏まえた優先順の固定
+# --------------------------------------------------------------------------- #
+def test_CFConnectingIPが最優先で使われる(monkeypatch):
+    """Cloudflare が必ず自分で上書きするヘッダなので、詐称された XFF より優先する。"""
+    from oriental.routes.common import client_ip
+
+    app = create_app(AppConfig.from_env())
+    with app.test_request_context(
+        "/api/meta",
+        headers={
+            "CF-Connecting-IP": "203.0.113.5",
+            "X-Forwarded-For": "9.9.9.9, 10.0.0.1",
+        },
+    ):
+        assert client_ip() == "203.0.113.5"
+
+
+def test_CFヘッダが無ければXFFの末尾を使う(monkeypatch):
+    """先頭は接続元が自由に詐称できるので使わない（それだと制限を素通りできる）。"""
+    from oriental.routes.common import client_ip
+
+    app = create_app(AppConfig.from_env())
+    with app.test_request_context(
+        "/api/meta", headers={"X-Forwarded-For": "9.9.9.9, 198.51.100.2"}
+    ):
+        assert client_ip() == "198.51.100.2"
+
+
+def test_ヘッダが何も無ければremote_addr(monkeypatch):
+    from oriental.routes.common import client_ip
+
+    app = create_app(AppConfig.from_env())
+    with app.test_request_context("/api/meta", environ_base={"REMOTE_ADDR": "127.0.0.1"}):
+        assert client_ip() == "127.0.0.1"
+
+
+def test_healthzにレート制限の観測値が出る(monkeypatch):
+    """本番で「効いているのか」を外から切り分けられるようにするための計器。"""
+    client = create_app(AppConfig.from_env()).test_client()
+    body = client.get("/healthz").get_json()
+    assert body["api_rate_limit"]["enabled"] is True
+    assert body["api_rate_limit"]["per_min"] >= 1
+    assert "tracked_keys" in body["api_rate_limit"]
+
+    client.get("/api/meta", headers={"CF-Connecting-IP": "203.0.113.77"})
+    client.get("/api/meta", headers={"CF-Connecting-IP": "203.0.113.77"})
+    status = client.get("/healthz").get_json()["api_rate_limit"]
+    # 同じ CF-Connecting-IP は1バケットにまとまる（増え続けるならキーが壊れている）
+    assert status["max_count_in_window"] >= 2
