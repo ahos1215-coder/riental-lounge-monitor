@@ -110,7 +110,10 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
       .map((x) => x.s);
   }, [slug, meta.regionLabel, meta.lat, meta.lon]);
 
-  const [reportSummary, setReportSummary] = useState<ReportSummaryData>({ weekly: null });
+  const [reportSummary, setReportSummary] = useState<ReportSummaryData>({
+    weekly: null,
+    weeklyError: false,
+  });
 
   // 非クリティカル: グラフ本体（range/forecast_today）を待たせないよう、メインデータの
   // 初回解決かフォールバックタイマーまで発火を遅らせる（コールド店舗のバックエンド輻輳回避）。
@@ -122,10 +125,17 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
       .then((body: { ok?: boolean; weekly?: ReportSummaryItem }) => {
         if (!active) return;
         if (body.ok) {
-          setReportSummary({ weekly: body.weekly ?? null });
+          setReportSummary({ weekly: body.weekly ?? null, weeklyError: false });
+        } else {
+          // 2026-08-21 外部レビュー F11: 503(Supabase障害等)を無言で捨てると
+          // 「この店には週報がまだ無い」と区別できなかった。取得失敗を明示する。
+          setReportSummary({ weekly: null, weeklyError: true });
         }
       })
-      .catch(() => {/* サイレント */});
+      .catch(() => {
+        if (!active) return;
+        setReportSummary({ weekly: null, weeklyError: true });
+      });
     return () => { active = false; };
   }, [slug, canFireDeferred]);
 
@@ -224,6 +234,18 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
       {/* AI レポート要約セクション（Weekly Report のみ） */}
       {hasWeeklyReport && (
         <StoreReportSummarySection weekly={reportSummary.weekly} slug={slug} />
+      )}
+      {/* 週報の取得に失敗（Supabase障害など）した場合の注記（外部レビュー F11）。
+          「週報がまだ無い」との違いが分かるよう、無言でカードを消さない。
+          LatestForecastSummaryCard の失敗時表示と言い回し・トーンを揃える。 */}
+      {!hasWeeklyReport && reportSummary.weeklyError && (
+        <section className="mx-auto w-full max-w-6xl px-4">
+          <div className="rounded-2xl border border-white/5 bg-white/[0.02] px-4 py-3">
+            <p className="text-[11px] text-white/30">
+              週報を取得できませんでした。しばらくすると自動的に更新されます。
+            </p>
+          </div>
+        </section>
       )}
 
       {/* 非クリティカル: モジュールレベルで長期キャッシュ済みだが、コールド店舗での

@@ -228,7 +228,11 @@ export async function fetchLatestPublishedReportByStoreWithStatus(
     // (scripts/local_report_job.py の _apply_carry_over_or_fail) ため、行は古い日付のまま
     // updated_at だけが今になる。updated_at だけで並べると、今日成功した片方の edition より
     // 昨日分の carry-over 行が勝ってしまう。日付が新しい行を先に見る。
-    `&order=target_date.desc,updated_at.desc.nullslast,created_at.desc&limit=1`;
+    //
+    // facts_id.desc は保険のタイブレーカー(2026-08-21 外部レビュー F6・現象3)。
+    // 3キー全て同値の行が来た場合、PostgREST の並びは不定になりうる
+    // (現行の逐次 upsert では実質起きないが、将来の並行書き込みに備える)。
+    `&order=target_date.desc,updated_at.desc.nullslast,created_at.desc,facts_id.desc&limit=1`;
   const rows = await restGetRows(url, key);
   // restGetRows は「本当に0件」なら [] を、取得そのものに失敗したら null を返す。
   if (rows === null) return { row: null, failed: true };
@@ -407,8 +411,9 @@ const REPORT_LIST_DEFAULT_LIMIT = 200;
  * 全店舗の最新の公開済みレポートを取得（一覧ページ用）。
  * 各店舗の最新1件のみ返す（並び順の先勝ちで重複除去）。
  *
- * 並びは `target_date.desc, updated_at.desc.nullslast, created_at.desc`
- * （単店取得の fetchLatestPublishedReportByStore と同じ流儀）。
+ * 並びは `target_date.desc, updated_at.desc.nullslast, created_at.desc, facts_id.desc`
+ * （単店取得の fetchLatestPublishedReportByStoreWithStatus と同じ流儀。末尾の facts_id.desc は
+ * 3キー同値時の保険のタイブレーカー。2026-08-21 外部レビュー F6・現象3）。
  * created_at.desc だった旧実装は、固定 facts_id を PATCH し続ける daily/weekly では
  * 「初回 INSERT 日時」で並べることになり、今日再生成した便より古い行が勝っていた
  * （2026-08-21 外部レビュー F6・現象1）。
@@ -425,7 +430,7 @@ export async function fetchAllLatestPublishedReports(
     `${endpoint}?select=store_slug,target_date,edition,created_at,updated_at,mdx_content` +
     `&content_type=eq.${encodeURIComponent(contentType)}` +
     `&is_published=eq.true&error_message=is.null&mdx_content=not.eq.` +
-    `&order=target_date.desc,updated_at.desc.nullslast,created_at.desc` +
+    `&order=target_date.desc,updated_at.desc.nullslast,created_at.desc,facts_id.desc` +
     `&limit=${Math.min(limit, 200)}`;
   // 一覧ページは 300 秒キャッシュ（他の GET は no-store）。
   const rows = await restGetRows(url, key, { revalidateSeconds: 300 });

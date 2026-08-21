@@ -9,6 +9,14 @@ export type ReportSummaryData = {
   // Daily カードは v2 で削除済 (LatestForecastSummaryCard の「今日の傾向まとめ」に統合)。
   // ここでは weekly のみ保持する。
   weekly: ReportSummaryItem;
+  /**
+   * /api/reports/store-summary の取得に失敗したか（外部レビュー F11）。
+   * 2026-08-21 に同APIは Supabase 障害時 503 を返すようになったが、受け手側が
+   * `if (body.ok)` でしか処理しておらず、失敗時は無言でカードが消えるだけだった
+   * （「週報がまだ無い」と区別できない）。true のときは LatestForecastSummaryCard の
+   * 失敗時と同じトーンの注記を出す。
+   */
+  weeklyError: boolean;
 };
 
 export type RealtimeCardStats = {

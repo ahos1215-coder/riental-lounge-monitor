@@ -22,6 +22,7 @@ import {
   buildForecastSeries,
   hasNightRolledOver,
   nightWindowLabel,
+  shouldApplyResponse,
 } from "@/lib/compare/compareSeries";
 import type { ForecastPoint } from "@/lib/forecast/types";
 import { track } from "@/lib/analytics";
@@ -225,20 +226,40 @@ export default function CompareClient() {
     const fromYmd = nightYmd;
     const toYmd = formatYMD(addDays(nightBaseDate, 1));
 
+    // 非同期応答の競合対策（外部レビュー F10）: 夜が19時をまたいで切り替わったとき、
+    // 旧夜の fetch が新夜の fetch より後に解決すると、見出しは新夜・グラフは旧夜、
+    // という状態に無言で上書きされていた。cleanup で cancelled を立てて古い応答を捨て、
+    // AbortController で in-flight のリクエストも中断する（React は新しい effect を
+    // 実行する前に必ず前回の cleanup を呼ぶ）。
+    let cancelled = false;
+    const ac = new AbortController();
+    const requestNightYmd = nightYmd;
+
     // Fetch range_multi + megribi_score + forecast in parallel
     // 判定表示OFF中は比較カードの判定ラベル自体が非表示のため megribi_score の取得をスキップする
     // （featureFlags.ts の SHOW_MEGRIBI_JUDGMENTS を true に戻せば fetch は自動的に復活する）。
     Promise.all([
       fetch(
         `/api/range_multi?stores=${csvSlugs}&from=${fromYmd}&to=${toYmd}&limit=${RANGE_LIMIT}`,
+        { signal: ac.signal },
       )
         .then((r) => r.json())
         .catch(() => ({})),
       SHOW_MEGRIBI_JUDGMENTS
-        ? fetch(`/api/megribi_score?stores=${csvSlugs}`).then((r) => r.json()).catch(() => ({}))
+        ? fetch(`/api/megribi_score?stores=${csvSlugs}`, { signal: ac.signal })
+            .then((r) => r.json())
+            .catch(() => ({}))
         : Promise.resolve({}),
-      fetch(`/api/forecast_today_multi?stores=${csvSlugs}`).then((r) => r.json()).catch(() => ({})),
-    ]).then(([rangeData, scoreData, forecastData]) => {
+      fetch(`/api/forecast_today_multi?stores=${csvSlugs}`, { signal: ac.signal })
+        .then((r) => r.json())
+        .catch(() => ({})),
+    ])
+      .then(([rangeData, scoreData, forecastData]) => {
+      // 後着した旧夜の応答、またはこの effect が既に片付けられている場合は捨てる。
+      // 個々の fetch の .catch(() => ({})) が abort の reject も握りつぶして {} にするため、
+      // ここに来た時点では abort は既に無害化されている——それでも cancelled を見るのは、
+      // 「AbortController.abort() が間に合わなかった（応答がほぼ同時に届いた）」場合の保険。
+      if (!shouldApplyResponse({ cancelled, requestNightYmd, currentNightYmd: nightYmd })) return;
       // megribi_score は {data:[{slug,score}]} 形式。slug->score の Map にする。
       const scoreMap = new Map<string, number>();
       if (Array.isArray(scoreData?.data)) {
@@ -302,7 +323,17 @@ export default function CompareClient() {
         }
         return copy;
       });
-    });
+      })
+      .catch(() => {
+        // 個々の fetch は既に .catch(() => ({})) で握りつぶしているため通常はここに来ないが、
+        // Promise.all 自体や .then 内の処理が想定外に reject した場合の保険（abort も含めて
+        // エラー表示は出さない——F10 の直接原因ではないが、無言で失敗して構わない箇所）。
+      });
+
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
     // nightYmd を依存に入れているのは、夜が変わって storeDataMap を空にしたときに
     // この effect を再発火させて取り直すため（storeDataMap 自体は依存に入れると毎回回る）。
   }, [selectedSlugs, nightYmd]); // eslint-disable-line react-hooks/exhaustive-deps

@@ -123,7 +123,7 @@ describe("Supabase REST GET の呼び出し契約（URL・ヘッダ・キャッ�
     [
       "fetchLatestPublishedReportByStore",
       (m: typeof import("./blogDrafts")) => m.fetchLatestPublishedReportByStore("Shibuya", "weekly"),
-      "https://proj.supabase.co/rest/v1/blog_drafts?select=facts_id,store_slug,target_date,mdx_content,insight_json,source,content_type,edition,public_slug,created_at,updated_at&store_slug=eq.shibuya&content_type=eq.weekly&is_published=eq.true&error_message=is.null&order=target_date.desc,updated_at.desc.nullslast,created_at.desc&limit=1",
+      "https://proj.supabase.co/rest/v1/blog_drafts?select=facts_id,store_slug,target_date,mdx_content,insight_json,source,content_type,edition,public_slug,created_at,updated_at&store_slug=eq.shibuya&content_type=eq.weekly&is_published=eq.true&error_message=is.null&order=target_date.desc,updated_at.desc.nullslast,created_at.desc,facts_id.desc&limit=1",
       "no-store",
     ],
     [
@@ -159,7 +159,7 @@ describe("Supabase REST GET の呼び出し契約（URL・ヘッダ・キャッ�
     await mod.fetchAllLatestPublishedReports("daily", 1000);
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe(
-      "https://proj.supabase.co/rest/v1/blog_drafts?select=store_slug,target_date,edition,created_at,updated_at,mdx_content&content_type=eq.daily&is_published=eq.true&error_message=is.null&mdx_content=not.eq.&order=target_date.desc,updated_at.desc.nullslast,created_at.desc&limit=200",
+      "https://proj.supabase.co/rest/v1/blog_drafts?select=store_slug,target_date,edition,created_at,updated_at,mdx_content&content_type=eq.daily&is_published=eq.true&error_message=is.null&mdx_content=not.eq.&order=target_date.desc,updated_at.desc.nullslast,created_at.desc,facts_id.desc&limit=200",
     );
     expect(calls[0].init.method).toBe("GET");
     expect(calls[0].init.cache).toBeUndefined();
@@ -241,7 +241,8 @@ describe("fetchAllLatestPublishedReports の並び・上限・障害の扱い（
     expect(order).toContain("updated_at.desc.nullslast");
     expect(order).not.toBe("created_at.desc");
     // 単店取得（fetchLatestPublishedReportByStore）と同じ流儀に揃っていること。
-    expect(order).toBe("target_date.desc,updated_at.desc.nullslast,created_at.desc");
+    // 末尾の facts_id.desc は F6 の保険のタイブレーカー（外部レビュー F6・現象3）。
+    expect(order).toBe("target_date.desc,updated_at.desc.nullslast,created_at.desc,facts_id.desc");
   });
 
   it("F6-1: select に updated_at を含む（カードの日時表示に使う）", async () => {

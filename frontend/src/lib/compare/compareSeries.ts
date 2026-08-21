@@ -181,3 +181,26 @@ export function compareHourlyTicks(minTs: number, maxTs: number): number[] {
 export function hasNightRolledOver(current: Date, now: Date): boolean {
   return formatYMD(computeNightBaseDate(now)) !== formatYMD(current);
 }
+
+/**
+ * 比較ページの非同期応答を state に反映してよいか（＝後着した古い応答を捨てるか）を判定する。
+ *
+ * 経緯（2026-08-21 外部レビュー F10）: データ取得 effect に AbortController も世代チェックも
+ * 無かったため、夜が 19:00 をまたいで切り替わったとき「旧夜の fetch が新夜の fetch より
+ * 後に解決する」と、見出しは新夜・グラフは旧夜という状態に無言で上書きされていた
+ * （エラーも空表示も出ないため利用者は気づけない）。
+ *
+ * cleanup が effect 再実行より必ず先に走る React の保証を使い、`cancelled` で
+ * 「このリクエストを出した effect はもう片付けられたか」を見る。それとは別に、
+ * `requestNightYmd`（fetch を発行した時点の夜）と `currentNightYmd`（適用しようとしている
+ * 時点の夜）を比較する保険を重ねる——effect の cleanup が何らかの理由で走らなくても
+ * （React の保証が壊れる将来の変更等）、夜が変わっていれば古い応答だと分かるようにするため。
+ */
+export function shouldApplyResponse(args: {
+  cancelled: boolean;
+  requestNightYmd: string;
+  currentNightYmd: string;
+}): boolean {
+  if (args.cancelled) return false;
+  return args.requestNightYmd === args.currentNightYmd;
+}

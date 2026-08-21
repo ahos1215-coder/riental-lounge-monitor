@@ -15,6 +15,7 @@ import {
   floorToCompareSlot,
   hasNightRolledOver,
   nightWindowLabel,
+  shouldApplyResponse,
 } from "./compareSeries";
 import type { RangeRow } from "@/lib/range/rangeRows";
 import type { ForecastPoint } from "@/lib/forecast/types";
@@ -186,5 +187,38 @@ describe("hasNightRolledOver", () => {
   it("翌日の19時を過ぎても true", () => {
     const base = computeNightBaseDate(at("2026-08-20T11:00:00Z")); // 8/20の夜
     expect(hasNightRolledOver(base, at("2026-08-21T11:00:00Z"))).toBe(true); // 8/21の夜
+  });
+});
+
+describe("shouldApplyResponse", () => {
+  // 番犬（外部レビュー F10）: 比較ページのデータ取得 effect は AbortController も
+  // cancelled フラグも世代チェックも無かったため、夜が19時をまたいで切り替わったとき
+  // 「旧夜の fetch が新夜の fetch より後に解決する」と、見出しは新夜・グラフは旧夜という
+  // 状態に無言で上書きされていた。effect 側は cancelled/世代(夜)の2つを渡すだけにして、
+  // 「適用してよいか」の判定はこの純粋関数に切り出して固定する。
+  it("cancelled でも夜が同じでも適用してよい（通常系）", () => {
+    expect(
+      shouldApplyResponse({ cancelled: false, requestNightYmd: "2026-08-20", currentNightYmd: "2026-08-20" }),
+    ).toBe(true);
+  });
+
+  it("cleanup 済み（cancelled）なら夜が同じでも捨てる", () => {
+    expect(
+      shouldApplyResponse({ cancelled: true, requestNightYmd: "2026-08-20", currentNightYmd: "2026-08-20" }),
+    ).toBe(false);
+  });
+
+  it("cancelled でなくても、応答が届く間に夜が変わっていたら捨てる（F10 の本丸）", () => {
+    // 19:00 をまたいだ直後、旧夜(8/20)の fetch がまだ in-flight のまま
+    // effect が再実行されて新夜(8/21)の nightYmd になった、というケース。
+    expect(
+      shouldApplyResponse({ cancelled: false, requestNightYmd: "2026-08-20", currentNightYmd: "2026-08-21" }),
+    ).toBe(false);
+  });
+
+  it("cancelled かつ夜も違う（両方の理由が重なっても false のまま）", () => {
+    expect(
+      shouldApplyResponse({ cancelled: true, requestNightYmd: "2026-08-20", currentNightYmd: "2026-08-21" }),
+    ).toBe(false);
   });
 });
