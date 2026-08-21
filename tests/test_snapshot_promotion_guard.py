@@ -128,6 +128,39 @@ class Test正規パスへの昇格ガード:
         assert payload["missing_slugs"] == []
         assert "umeda" not in payload["expected_slugs"]
 
+    def test_全店を除外したら正規パスへ昇格せず非ゼロ終了する(
+        self, monkeypatch, captured_puts, capsys
+    ) -> None:
+        """F1 追補: 逃がし弁(SNAPSHOT_ALLOWED_MISSING)に全店を並べると expected=[] になり、
+        旧実装の `complete = not missing` は「欠けている店が無い」と誤判定して中身が
+        空の payload を正規パスへ昇格させていた。expected が空なら complete にしない。
+        """
+        monkeypatch.setenv("SNAPSHOT_ALLOWED_MISSING", ",".join(SLUGS))
+        _wire_backend(monkeypatch, {s: _points() for s in SLUGS})
+
+        assert snap.main() == 1
+
+        paths = [p for p, _ in captured_puts]
+        assert len(paths) == 1
+        assert paths[0].startswith(f"{snap.PARTIAL_DIR}/"), paths
+        _path, payload = captured_puts[0]
+        assert payload["expected_slugs"] == []
+        assert payload["missing_slugs"] == []  # 空集合同士なので「欠けている店」は無い
+        out = capsys.readouterr().out
+        assert "expected slug set is empty" in out
+
+    def test_除外数が全店の1_4超なら警告する(self, monkeypatch, capsys) -> None:
+        monkeypatch.setenv("SNAPSHOT_ALLOWED_MISSING", "umeda,ay_ueno")  # 3店中2店=1/4超
+        assert snap._expected_slugs(list(SLUGS)) == ["shibuya"]
+        assert "excludes 2/3" in capsys.readouterr().out
+
+    def test_未知のslugを除外指定したら警告する(self, monkeypatch, capsys) -> None:
+        monkeypatch.setenv("SNAPSHOT_ALLOWED_MISSING", "not_a_real_slug")
+        assert snap._expected_slugs(list(SLUGS)) == list(SLUGS)
+        out = capsys.readouterr().out
+        assert "unknown slug" in out
+        assert "not_a_real_slug" in out
+
 
 class Testscore側のcoverage分母:
     def test_expected_slugsから算出する_by_slug件数ではない(self) -> None:

@@ -20,6 +20,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from oriental import create_app
@@ -140,8 +142,66 @@ class Test同期モードのレスポンス:
         assert body["ok"] is False and body["status"] == "failed"
 
 
+class Test既定の非同期経路をHTTPで叩く:
+    """2026-08-21 外部レビュー F3 追補: 既定経路（クエリなしの GET /tasks/multi_collect、
+    202+バックグラウンドスレッド実行）を HTTP 経由で叩くテストが1本も無く、
+    `_run_collect_background` の単体テスト（Test非同期モードの状態）だけでは
+    ルーティング・202レスポンス・その後の /status 反映までは検証できていなかった。
+    ここでは実スレッドの完了をポーリングで待つ（cron-job.org からの実呼び出しに
+    一番近い経路）。既定の非同期202レスポンス自体は変えない（オーナー判断待ち、
+    CLAUDE.md 参照）。
+    """
+
+    def _wait_until_not_running(self, client, timeout: float = 2.0) -> dict:
+        deadline = time.monotonic() + timeout
+        body = client.get("/tasks/multi_collect/status").get_json()
+        while body["status"] == "running" and time.monotonic() < deadline:
+            time.sleep(0.02)
+            body = client.get("/tasks/multi_collect/status").get_json()
+        return body
+
+    def test_全店成功なら202でrunning_その後statusは正直な結果(
+        self, client, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            tasks_mod, "collect_all_once", lambda: {"stores": 42, "success": 42, "fail": 0}
+        )
+        resp = client.get("/tasks/multi_collect")
+        assert resp.status_code == 202
+        body = resp.get_json()
+        assert body["ok"] is True
+        assert body["accepted"] is True
+        assert body["status"] == "running"
+
+        status_body = self._wait_until_not_running(client)
+        assert status_body["status"] == "completed"
+        assert status_body["ok"] is True
+        assert status_body["result"]["success"] == 42
+
+    def test_一部失敗なら202でrunning_その後statusはok_false(
+        self, client, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            tasks_mod, "collect_all_once", lambda: {"stores": 42, "success": 22, "fail": 20}
+        )
+        resp = client.get("/tasks/multi_collect")
+        assert resp.status_code == 202
+        assert resp.get_json()["status"] == "running"
+
+        status_body = self._wait_until_not_running(client)
+        assert status_body["status"] == "completed_with_failures"
+        assert status_body["ok"] is False
+        assert status_body["result"]["fail"] == 20
+
+
 class Testステータス照会:
     def test_last_runに直前の実行が残る(self, client, monkeypatch: pytest.MonkeyPatch) -> None:
+        """2026-08-21 外部レビュー F3 追補: 旧実装はここで body["ok"] is True を assert
+        していた——`GET /status` のトップレベル ok が `jsonify({"ok": True, ...})` の
+        リテラル固定だったせいで、直前の実行が20店失敗（status="completed_with_failures"）
+        でも ok:true になる誤仕様を、このテスト自身が「仕様」として固定していた。
+        ok を status に連動させたので、一部失敗のときは ok は False になるのが正しい。
+        """
         monkeypatch.setattr(
             tasks_mod, "collect_all_once", lambda: {"stores": 42, "success": 22, "fail": 20}
         )
@@ -149,14 +209,49 @@ class Testステータス照会:
         tasks_mod._run_collect_background("t9")
 
         body = client.get("/tasks/multi_collect/status").get_json()
-        assert body["ok"] is True
+        assert body["ok"] is False
         assert body["status"] == "completed_with_failures"
         assert body["last_run"]["status"] == "completed_with_failures"
         assert body["last_run"]["result"]["fail"] == 20
         assert body["last_run"]["completed_at"]
         assert body["process_started_at"]
 
-    def test_一度も走っていなければlast_runは空(self, client) -> None:
+    def test_全店成功なら直前の実行でok_true(self, client, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            tasks_mod, "collect_all_once", lambda: {"stores": 42, "success": 42, "fail": 0}
+        )
+        tasks_mod._collect_task.update(task_id="t10", started_at="2026-08-21T09:00:00+00:00")
+        tasks_mod._run_collect_background("t10")
+
         body = client.get("/tasks/multi_collect/status").get_json()
+        assert body["ok"] is True
+        assert body["status"] == "completed"
+
+    def test_全滅なら直前の実行でok_false(self, client, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            tasks_mod, "collect_all_once", lambda: {"stores": 42, "success": 0, "fail": 42}
+        )
+        tasks_mod._collect_task.update(task_id="t11", started_at="2026-08-21T09:00:00+00:00")
+        tasks_mod._run_collect_background("t11")
+
+        body = client.get("/tasks/multi_collect/status").get_json()
+        assert body["ok"] is False
+        assert body["status"] == "failed"
+
+    def test_一度も走っていなければlast_runは空(self, client) -> None:
+        """idle（一度も走っていない）はそれ自体エラーではないので ok は True のまま
+        （まだ何も失敗していない状態を「異常」と cron 監視に誤読させないため）。"""
+        body = client.get("/tasks/multi_collect/status").get_json()
+        assert body["ok"] is True
         assert body["status"] == "idle"
         assert body["last_run"]["status"] is None
+
+    def test_実行中はok_true(self, client) -> None:
+        """running もまだ結果が確定していないだけで失敗ではないので ok は True のまま。"""
+        with tasks_mod._collect_lock:
+            tasks_mod._collect_task.update(
+                task_id="t12", status="running", started_at="2026-08-21T09:00:00+00:00"
+            )
+        body = client.get("/tasks/multi_collect/status").get_json()
+        assert body["ok"] is True
+        assert body["status"] == "running"

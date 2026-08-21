@@ -326,12 +326,22 @@ def tasks_multi_collect_status():
     F2: `last_run`（直前の実行の開始/終了時刻・status・件数）と `process_started_at` を
     併記する。プロセス内メモリなので再起動で消える点は変わらないが、「このプロセスで
     最後に走った収集がいつ・何件成功したか」を外から確認できる。
+
+    2026-08-21 外部レビュー F3 追補: 以前はトップレベル `ok` が `jsonify({"ok": True, ...})`
+    のリテラル固定で、42店中20店が保存に失敗していても（status="completed_with_failures"）
+    `ok:true` を返していた。しかも tests/test_collect_task_outcome.py がその誤仕様を
+    assert で固定していた（テストが誤仕様を守っていた実例）。ここでは `ok` を実際の
+    `status` に連動させる: `completed` のときだけ true。`running`（まだ結果が出ていない
+    ＝失敗と決まったわけではない進行中の状態）と `idle`（一度も走っていない＝これ自体は
+    異常ではない）も、cron 側が「異常」と誤読しないよう false にはしない。
     """
     if _require_cron_secret():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
     with _collect_lock:
+        status = _collect_task.get("status")
+        ok = status in ("completed", "running", "idle")
         return jsonify({
-            "ok": True,
+            "ok": ok,
             **_collect_task,
             "last_run": dict(_collect_last_run),
             "process_started_at": _process_started_at,

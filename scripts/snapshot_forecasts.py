@@ -106,9 +106,36 @@ def _expected_slugs(slugs: list[str] | None = None) -> list[str]:
     既定は全店。恒久的に予測が出ない店が出たとき、コード変更なしで運用を止めない
     ための逃げ道として、環境変数 `SNAPSHOT_ALLOWED_MISSING`（カンマ区切りの slug）で
     期待集合から外せる。外した店は当然その夜の答え合わせ対象からも外れる。
+
+    2026-08-21 外部レビュー F1 追補: この逃がし弁に全店の slug を並べると
+    `expected=[]` になり、呼び出し元の `complete = not missing` は「欠けている店が
+    無い」＝True と誤判定して、中身が空のスナップショットを正規パスへ昇格させてしまう
+    （F1 の主目的「壊れた成果物を正規パスへ昇格させない」がこの経路だけ破られる）。
+    ここでは空集合そのものは禁止しない（呼び出し元 main() が expected 空なら昇格させ
+    ない判断をする）が、次の2点は運用者が気づけるようここで警告する:
+      - 除外リストに stores.json に存在しない slug が混ざっている（打ち間違い）
+      - 除外数が全店の1/4を超えている（想定より多い＝設定ミスの疑い）
     """
     base = list(slugs) if slugs is not None else _all_store_slugs()
     allowed = {s.strip() for s in (os.environ.get("SNAPSHOT_ALLOWED_MISSING") or "").split(",") if s.strip()}
+    if not allowed:
+        return base
+
+    base_set = set(base)
+    unknown = sorted(allowed - base_set)
+    if unknown:
+        print(
+            "[snapshot][warn] SNAPSHOT_ALLOWED_MISSING has unknown slug(s) "
+            f"(not in stores.json, check for typos): {','.join(unknown)}"
+        )
+
+    excluded = allowed & base_set
+    if base and len(excluded) * 4 > len(base):
+        print(
+            f"[snapshot][warn] SNAPSHOT_ALLOWED_MISSING excludes {len(excluded)}/{len(base)} "
+            "stores (>25%) - confirm this is intentional, not a stale/overbroad env var"
+        )
+
     return [s for s in base if s not in allowed]
 
 
@@ -315,7 +342,10 @@ def main() -> int:
     # 順位3の「空 snapshot が30日以上」はこの経路）。
     expected = _expected_slugs(slugs)
     missing = _missing_slugs(expected, by_slug)
-    complete = not missing
+    # 2026-08-21 外部レビュー F1 追補: expected が空（＝逃がし弁で全店を除外した）だと
+    # missing も必ず空になり、以前は `complete = not missing` が True を返して中身空の
+    # payload を正規パスへ書いていた。「期待集合が非空」を complete の必要条件に加える。
+    complete = bool(expected) and not missing
 
     payload = {
         "night_date": night_date,
@@ -334,12 +364,19 @@ def main() -> int:
         return 0
 
     # 不完全: 正規パスは前夜までの last-good のまま残す（＝上書き破壊しない）。
-    print(
-        f"[snapshot][ERROR] incomplete capture for night {night_date}: "
-        f"{len(missing)}/{len(expected)} stores missing -> canonical "
-        f"{bucket}/{SNAPSHOT_DIR}/{night_date}.json was NOT written (kept last-good). "
-        f"missing={','.join(missing)}"
-    )
+    if not expected:
+        print(
+            f"[snapshot][ERROR] expected slug set is empty for night {night_date} "
+            "(SNAPSHOT_ALLOWED_MISSING excluded every store?) -> canonical "
+            f"{bucket}/{SNAPSHOT_DIR}/{night_date}.json was NOT written (kept last-good)."
+        )
+    else:
+        print(
+            f"[snapshot][ERROR] incomplete capture for night {night_date}: "
+            f"{len(missing)}/{len(expected)} stores missing -> canonical "
+            f"{bucket}/{SNAPSHOT_DIR}/{night_date}.json was NOT written (kept last-good). "
+            f"missing={','.join(missing)}"
+        )
     if not by_slug:
         print("[snapshot][ERROR] no forecasts captured at all (backend down or all stores empty)")
     return 1
