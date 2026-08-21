@@ -25,9 +25,17 @@ on:
         required: false
         default: ""
       min_published:
-        description: "各エディションの最低公開数（既定30 / 全42店）"
+        description: "各エディションの最低公開数の下限フロア（既定30）。既定では下の strict_all_stores=1 が優先し全42店必須"
         required: false
         default: "30"
+      allowed_missing_slugs:
+        description: "欠落を許す店舗 slug（カンマ区切り。緊急時のGHA生成で相席屋5店が対象外になる場合など。空欄=全店必須）"
+        required: false
+        default: ""
+      strict_all_stores:
+        description: "1=全42店必須（既定・推奨） / 0=旧挙動の下限フロア判定に戻す"
+        required: false
+        default: "1"
 
 permissions:
   contents: read
@@ -49,6 +57,8 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           INPUT_DATE: ${{ github.event.inputs.date }}
           MIN_PUBLISHED: ${{ github.event.inputs.min_published || '30' }}
+          ALLOWED_MISSING_SLUGS: ${{ github.event.inputs.allowed_missing_slugs }}
+          STRICT_ALL_STORES: ${{ github.event.inputs.strict_all_stores || '1' }}
         # 判定ロジックの実体は scripts/monitor/check_daily_published.py（stdlib のみ）。
         # テストは tests/test_monitor_published_checks.py。
         run: python3 scripts/monitor/check_daily_published.py

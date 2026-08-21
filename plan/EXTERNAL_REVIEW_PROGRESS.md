@@ -4,19 +4,31 @@
 > 利用上限で中断した後、次回起動時にここを読んで続きから再開します。
 > 指示書は `plan/EXTERNAL_REVIEW_2026-08-21.md`。人間（オーナー）とClaudeも状況確認のためにここを読みます。
 
-STATUS: ROUND1_DONE
-UPDATED: 2026-08-21 03:46 JST
-NEXT: 第2ラウンド開始待ち（依頼書: `plan/EXTERNAL_REVIEW_ROUND2_2026-08-21.md`。開始したら STATUS を RUNNING に、NEXT に現在の論点A〜Hを書く）
+STATUS: COMPLETE
+UPDATED: 2026-08-21 04:48 JST
+NEXT: `plan/EXTERNAL_REVIEW_ROUND2_FINDINGS.md` をオーナーが確認する
 
 ---
 
-## 第2ラウンド（論点A〜Hの決着）
+## 第2ラウンド（論点A〜Gの決着）
 
-R2_STATUS: NOT_STARTED
-R2_UPDATED: （日時）
-R2_NEXT: 論点A（事業判断・まず plan/_local/ROUND2_METRICS.md を読む）
-R2_DONE: （回答済みの論点をここに列挙）
-R2_FINDINGS: （途中で確定した結論をここに都度追記。中断してもここに残っていれば引き継げる）
+R2_STATUS: COMPLETE
+R2_UPDATED: 2026-08-21 04:48 JST
+R2_NEXT: なし（第2ラウンド報告書の確認待ち）
+R2_DONE: `plan/_local/ROUND2_METRICS.md` を最初に全文読了／第2ラウンド依頼書を全文読了／公開競合・公式サービスをGETで再確認／PageSpeed Insightsをmobile・desktopで実測／公開forecast GETで42店の現行blend適用状況を確認／F2・F3・F13・F14をコードと公開HTMLで再検証／論点Aの15案、B〜Gの回答、第1回判定訂正、90日提言を `plan/EXTERNAL_REVIEW_ROUND2_FINDINGS.md` に作成／`git diff --check` 成功
+R2_FINDINGS:
+- 実利用は直近28日37人・リピート5人・47セッション・105PV。検索は90日4,093表示/83クリック、直近28日1,209表示/33クリック。母数は極小だが、20〜1時台の来店直前用途と、実利用者による料金試算・期間切替の1セッションは確認できる。
+- 検索露出の35.5%がDaily/Weeklyで、`/stores` は1,244表示に対して1クリック。露出不足だけでなく、着地・検索意図・スニペットの不一致が強い。ただし平均順位だけを「本丸」とするには、ページ別の順位・CTR・検索意図を分解する必要がある。
+- 9ヶ月・約129万行・5分×42店×男女別の履歴は、現在値一覧より「条件付きの意思決定」「似た夜の比較」「横断的な異常・機会検出」に使うと固有性が出る。
+- Python全体テストは提供環境で1,053件成功した実測が共有されたため、第1回の環境制約は解消済みとして扱う。
+- 第1回の「横断サービスは現在値中心で、履歴・予測はMEGRIBIだけ」という市場認識は誤り。相席なうは88店規模の履歴ヒートマップ、月次統計、季節予測、料金比較・試算まで公開している。MEGRIBIの差は横断/履歴というカテゴリではなく、5分粒度・約129万行・店舗別の天候/祝日/給料日/直近速度を含む予測を、現在値・料金・通知と一つの来店判断へ束ねられる点に絞る。
+- PageSpeed公開UIの独立2回のlab計測で、トップのmobile LCPは4.4〜4.5秒、desktopは1.1秒。CrUX/field dataは母数不足で未提供。mobileのLCP要素はFadeIn内のHero説明文で、初期`opacity:0`の修正はUX/SEO交差施策として優先価値がある。ただし単発labから順位低迷の原因とは断定しない。
+- `/store/[id]` と `/area/[area]` のH1/主要SSR内容はFadeInを使わず、公開raw HTMLにも`opacity:0`がない。F13の波及はトップに限定して扱う。
+- 現行公開forecast 42店ではblend weight平均0.539、範囲0.454〜0.596で、下限0.15・上限0.9到達は0店。全店39/40slotでblend適用を確認した。自己参照評価の測定バイアスは確定だが、現在のweight発散実害は未確認。
+- 計画済みのblend適用率と週次peak/ghost/bandだけではML成分の寄与を識別できない。配信値を変えず、blend直前のpreblend成分・baseline・served・weight/maskを同一slotでsnapshotし、翌朝に別採点するshadow評価が必要。
+- F2は5分再試行と独立2時間heartbeatを踏まえ、第1回の「高」から「中」へ修正する。F3は、42店中20店の大部分のslotが欠けても全体fresh・店舗age<3日・失敗率50%未満を満たして無期限にgreenとなり得るため、データ完全性の影響として「高」を維持する。主欠陥は非同期そのものより、期待集合の永続化完了をsuccess条件にしていない点。
+- F14の「一覧順・監視対象日もずれる」は根拠がなく撤回する。一覧は`created_at`、週次監視は`updated_at`/店舗集合を見るため、確認できる波及は火曜の`target_date`表示、生成JSON名、場合によってはsitemap `lastModified`に限る。重大度は中から低へ修正する。
+- 8月事故の再発を1本で早期検知するなら、PC外の2時間GHAがPC last-seen、snapshot last-attempt/last-good、expected/observed/missing、generation_id一致を検査し、LINEへ通知するnight-integrity sentinel。実装順は正規snapshotの書込前完全性guard（F1）を先、その直後にsentinel/LINE、最後に週次digest。
 
 ---
 
@@ -112,7 +124,6 @@ Backend、Frontend、ML/バッチ、監視を静的に追跡し、P1で実見し
 
 <!-- 例: Supabase の Storage バケット ml-models は Private か？（画面でしか確認できない） -->
 
-- GA4/GSCで実際の週次利用者数、再訪率、`store_view` 後の行動、外部送客クリックはどの程度か（外部管理画面のため未確認）。
 - UptimeRobot、cron-job.org、Vercel/Render、`OPS_NOTIFY_WEBHOOK_URL` の通知先が現在どこまで有効か（秘密値・外部設定を開かず未確認）。
 - Windows Task Scheduler 6本の現在のprincipalと「ログオン状態に関係なく実行」の実設定（リポジトリ外のため未確認）。
 

@@ -17,13 +17,21 @@ on:
   workflow_dispatch:
     inputs:
       min_stores:
-        description: "公開済みとみなす最低店舗数（既定38 / 全42店の下限フロア + 余裕）"
+        description: "公開済みとみなす最低店舗数の下限フロア（既定38）。既定では下の strict_all_stores=1 が優先し全42店必須"
         required: false
         default: "38"
       max_staleness_days:
         description: "最新更新がこれより古ければ失敗扱い（既定8日 = 先週水曜分が来ていない）"
         required: false
         default: "8"
+      allowed_missing_slugs:
+        description: "欠落を許す店舗 slug（カンマ区切り。緊急時のGHA生成で相席屋5店が対象外になる場合など。空欄=全店必須）"
+        required: false
+        default: ""
+      strict_all_stores:
+        description: "1=全42店必須（既定・推奨） / 0=旧挙動の下限フロア判定に戻す"
+        required: false
+        default: "1"
 
 permissions:
   contents: read
@@ -44,6 +52,8 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           MIN_STORES: ${{ github.event.inputs.min_stores || '38' }}
+          ALLOWED_MISSING_SLUGS: ${{ github.event.inputs.allowed_missing_slugs }}
+          STRICT_ALL_STORES: ${{ github.event.inputs.strict_all_stores || '1' }}
           MAX_STALENESS_DAYS: ${{ github.event.inputs.max_staleness_days || '8' }}
         # 判定ロジックの実体は scripts/monitor/check_weekly_published.py（stdlib のみ）。
         # テストは tests/test_monitor_published_checks.py。

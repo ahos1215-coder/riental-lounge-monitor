@@ -2,6 +2,8 @@ CLAUDE.md — MEGRIBI（Oriental Lounge Monitor）3分マップ
 最終更新: 2026-07-11（Batch B3: 新規作成。全ての記述は実コードを確認して書いた。詳細な根拠・過去の設計判断は plan/*.md を参照。
 Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追記 + sapporo_ag閉店で店舗数42（37+5）に更新）。
 2026-07-18: weekly `index.json` 廃止（別バッチ）の反映 + コメント/ENV.md/e2e/依存関係の修正（Fable監査分）
+2026-08-21: 外部レビュー(ChatGPT/Codex)第1〜2ラウンドの指摘15件のうち12件を修正した反映
+（/api/* のレート制限・/api/range の総行数上限・スナップショット昇格ガード・監視の全店必須化・週報のJST日付）。
 2026-08-19: 大整理第3弾（Fable棚卸し59件→Sonnet反証→Opus実装・挙動不変）の反映。共通モジュール地図（§7）を新設、
 `/api/range` 契約の実態合わせ、モデル名の正本の移動、vercel.json の実在、テスト規約（conftest / server-only）を追記。
 
@@ -70,6 +72,9 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
 `SUPABASE_SERVICE_ROLE_KEY`（Next.jsサーバー側のみで使用、ブラウザからは直叩きしない）／
 `FORECAST_MODEL_BUCKET`(既定`ml-models`)+`FORECAST_MODEL_PREFIX`(既定`forecast/latest`)+
 `FORECAST_MODEL_SCHEMA_VERSION`(既定`v7`)／`ENABLE_FORECAST`／`GEMINI_API_KEY`（Editorial・GHA緊急時用）。
+`API_RATE_LIMIT_PER_MIN`(既定300)+`API_RATE_LIMIT_ENABLED`(既定1。`0`で即停止＝キルスイッチ)／
+`MAX_RANGE_TOTAL_ROWS`(既定12000)／`SNAPSHOT_MIN_STORES`系の昇格ガード／`STRICT_ALL_STORES`(既定1)+
+`ALLOWED_MISSING_SLUGS`(監視の逃がし弁)／`DAILY_EXIT_NONZERO`(既定1)。
 全量は `plan/ENV.md`。
 
 ---
@@ -106,6 +111,20 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
   片方だけならその1日。**時刻粒度のサーバー側フィルタは禁止**（夜窓判定はフロント `useStorePreviewData.ts` /
   LINE用 `insightFromRange.ts` の役割）。マルチ店舗の `stores=` 解釈は `utils/stores.parse_store_slugs`
   （小文字化→既知のみ→重複除去→上限）に一本化（range_multi / forecast_today_multi / megribi_score 共通）。
+- **`/api/*` のレート制限**（2026-08-21・外部レビューF4）: Flask 側にプロセス内レート制限がある
+  （既定 `API_RATE_LIMIT_PER_MIN=300`/分・IP単位、超過時 429）。**対象は `/api/*` のみ**で、
+  `/healthz` `/readyz` `/tasks/*` `/api/tasks/*` `/static/*` は**必ず除外**（収集・監視を止めないため）。
+  障害時は `API_RATE_LIMIT_ENABLED=0` で即無効化できる。`/api/range` は
+  `len(stores) * limit > MAX_RANGE_TOTAL_ROWS`(既定12000) で 422 `range-request-too-large`。
+- **壊れた成果物を正規パスへ昇格させない**（2026-08-21・外部レビューF1）: `scripts/snapshot_forecasts.py` は
+  規定数に満たない夜は `accuracy/snapshots/<date>.json` を**上書きせず非ゼロ終了**する。
+  `scripts/score_forecasts.py` はスナップショット不在を「no snapshot found」でアラート＋exit 1。
+  **嘘の精度を出さない代わりに、欠落した夜は精度が空欄になる**のが正しい挙動（空欄を「バグ」と誤認しないこと）。
+- **監視は既定で全42店必須**（2026-08-21・外部レビューF8）: `scripts/monitor/check_daily_published.py` /
+  `check_weekly_published.py` は `STRICT_ALL_STORES=1`（既定）で期待店舗集合との差分を見る。
+  WF 入力 `min_published`/`min_stores` は**下限フロアに過ぎない**。緩めるときだけ
+  `ALLOWED_MISSING_SLUGS=<slug,slug>` か `STRICT_ALL_STORES=0` を使う（緊急時のGHA日次はオリエンタル37店のみ
+  対象なので、その日は相席屋5店を `ALLOWED_MISSING_SLUGS` に入れる）。
 - **API 一式**: `/healthz`, `/api/meta`, `/api/current`, `/api/range`, `/api/range_multi`,
   `/api/forecast_*`, `/api/forecast_today_multi`, `/api/megribi_score`, `/api/forecast_accuracy`,
   `/api/holiday_status`, `/tasks/*`。既存互換性を維持すること。
