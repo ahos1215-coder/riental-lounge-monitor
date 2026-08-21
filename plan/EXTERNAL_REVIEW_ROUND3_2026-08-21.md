@@ -45,6 +45,11 @@ Supabase/Storage の応答形・Vercel と Render の境界）が本番と違う
    このリポジトリは**公開GitHubリポジトリ**です。環境変数は「名前」だけ言及可、値は禁止です。
 4. **本番に副作用のある操作をしない。**
    - 実行してよい: `git log` / `git show` / `git diff` / `python -m pytest` / `npx vitest run` / `npx tsc --noEmit`
+   - **補足（第3ラウンドで判明・2026-08-21）**: `oriental/config.py` は import 時に `.env` / `.env.local` を
+     プロセスの環境変数へ読み込みます（ローカル開発用の設計）。つまり `pytest` を走らせると
+     **秘密値がテストプロセスのメモリに載ります**。画面やログには出ませんが、
+     「読み取り専用＝秘密に一切触れない」ではない点に注意してください。
+     秘密に一切触れたくない場合は、環境変数を空にした clean checkout で実行するか、pytest を使わず静的確認に留めてください。
    - **実行禁止**: `scripts/score_forecasts.py`、`scripts/snapshot_forecasts.py`
      （引数を受け付けない作りなので、実行すると**本番ジョブが丸ごと走ってデータベースに書き込みます**）
    - **実行禁止**: `scripts/local_report_job.py --mode publish`（本番の記事を上書きします。`--mode dry-run` は可）
