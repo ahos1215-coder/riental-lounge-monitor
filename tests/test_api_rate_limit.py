@@ -136,9 +136,11 @@ def test_XForwardedForの先頭IPごとに数える(monkeypatch):
 
     for _ in range(2):
         assert client.get("/api/meta", headers={"X-Forwarded-For": "203.0.113.1, 10.0.0.1"}).status_code == 200
-    assert client.get("/api/meta", headers={"X-Forwarded-For": "203.0.113.1"}).status_code == 429
+    # 同じ「最後の要素(=Renderが見た接続元)」なら、先頭を書き換えても同じバケット。
+    # 先頭を信用していた頃は、ここで先頭を変えるだけで制限を素通りできていた。
+    assert client.get("/api/meta", headers={"X-Forwarded-For": "198.51.100.7, 10.0.0.1"}).status_code == 429
     # 別クライアントは巻き込まれない
-    assert client.get("/api/meta", headers={"X-Forwarded-For": "203.0.113.9"}).status_code == 200
+    assert client.get("/api/meta", headers={"X-Forwarded-For": "203.0.113.9, 10.0.0.2"}).status_code == 200
 
 
 def test_キルスイッチで完全に無効化できる(monkeypatch):

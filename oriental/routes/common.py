@@ -179,14 +179,25 @@ class InProcessRateLimiter:
 def client_ip() -> str:
     """レート制限のキーに使うクライアント IP。
 
-    Render は必ずプロキシ越しなので `X-Forwarded-For` の**先頭**（元クライアント）を採る。
+    **`X-Forwarded-For` の「先頭」を使ってはいけない**（2026-08-21）。先頭は元クライアントが
+    自由に詐称できるヘッダなので、`X-Forwarded-For: <毎回ランダム>` を付けるだけで
+    レート制限を丸ごと素通りできてしまう。XFF は各プロキシが「自分が受け取った相手の IP」を
+    **末尾に追記**していく仕様なので、**最後の要素 = Render が実際に見た接続元**が
+    唯一信用できる値になる。ここではそれをキーにする。
+
+    注意（意図的な仕様）: 通常の利用者トラフィックは Vercel の Next.js プロキシ経由で来るため、
+    Render から見た接続元は Vercel の egress IP になる＝**利用者全員が1つのバケットを共有**する。
+    それでよい。ここで守りたいのは「Backend を直接叩いて高コスト API を連打される」ケース
+    （外部レビューF4）であり、その直叩き側は各自の実 IP で別バケットになる。
+    共有バケット側が詰まるのを避けるため、上限は実トラフィックに対して十分大きく取ってある。
+
     ヘッダが無いローカル実行やテストでは `remote_addr` にフォールバックする。
     """
     forwarded = request.headers.get("X-Forwarded-For", "")
     if forwarded:
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     return request.remote_addr or "unknown"
 
 
