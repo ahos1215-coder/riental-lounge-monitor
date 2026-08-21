@@ -191,13 +191,26 @@ function toRecord(value: unknown): Record<string, unknown> {
   return {};
 }
 
-export async function fetchLatestPublishedReportByStore(
+/**
+ * 単店の最新レポート。取得できたかどうか（`failed`）を**区別して**返す。
+ *
+ * 2026-08-21 の F11 修正は一覧（`fetchAllLatestPublishedReports`）にだけ入れたが、
+ * 単店側は「行が無い」も「Supabase に繋がらない」も同じ `null` に潰していたため、
+ * 障害時に「この店にはレポートがありません」と平然と表示してしまう同型のバグが残っていた。
+ *
+ * 既存の呼び出し元（6箇所）の戻り値を変えないよう、従来の
+ * `fetchLatestPublishedReportByStore()` は薄いラッパーとして残してある。
+ * 「0件」と「障害」を出し分けたい API ルートだけがこちらを使う。
+ */
+export async function fetchLatestPublishedReportByStoreWithStatus(
   storeSlug: string,
   contentType: PublishedReportType,
-): Promise<PublishedReportRow | null> {
+): Promise<{ row: PublishedReportRow | null; failed: boolean }> {
   const conf = endpointUrl();
   const slug = storeSlug.trim().toLowerCase();
-  if (!conf || !slug) return null;
+  // 設定が無い＝「レポートが無い」ではなく「見に行けていない」。障害側として扱う。
+  if (!conf) return { row: null, failed: true };
+  if (!slug) return { row: null, failed: false };
   const { endpoint, key } = conf;
   const url =
     `${endpoint}?select=facts_id,store_slug,target_date,mdx_content,insight_json,source,content_type,edition,public_slug,created_at,updated_at` +
@@ -217,10 +230,12 @@ export async function fetchLatestPublishedReportByStore(
     // 昨日分の carry-over 行が勝ってしまう。日付が新しい行を先に見る。
     `&order=target_date.desc,updated_at.desc.nullslast,created_at.desc&limit=1`;
   const rows = await restGetRows(url, key);
-  const v = rows?.[0];
-  if (!v) return null;
+  // restGetRows は「本当に0件」なら [] を、取得そのものに失敗したら null を返す。
+  if (rows === null) return { row: null, failed: true };
+  const v = rows[0];
+  if (!v) return { row: null, failed: false };
   const ct = typeof v.content_type === "string" ? v.content_type : "";
-  if (ct !== "daily" && ct !== "weekly") return null;
+  if (ct !== "daily" && ct !== "weekly") return { row: null, failed: false };
   const row: PublishedReportRow = {
     facts_id: typeof v.facts_id === "string" ? v.facts_id : "",
     store_slug: typeof v.store_slug === "string" ? v.store_slug : "",
@@ -234,7 +249,15 @@ export async function fetchLatestPublishedReportByStore(
     created_at: typeof v.created_at === "string" ? v.created_at : undefined,
     updated_at: typeof v.updated_at === "string" ? v.updated_at : undefined,
   };
-  return row.facts_id && row.store_slug ? row : null;
+  return { row: row.facts_id && row.store_slug ? row : null, failed: false };
+}
+
+/** 後方互換の薄いラッパー（障害と0件を区別しない従来の形）。 */
+export async function fetchLatestPublishedReportByStore(
+  storeSlug: string,
+  contentType: PublishedReportType,
+): Promise<PublishedReportRow | null> {
+  return (await fetchLatestPublishedReportByStoreWithStatus(storeSlug, contentType)).row;
 }
 
 export async function fetchPublishedEditorialBySlug(slug: string): Promise<PublishedEditorialRow | null> {

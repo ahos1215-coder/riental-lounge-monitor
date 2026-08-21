@@ -1,7 +1,7 @@
 "use server";
 
 import { NextResponse } from "next/server";
-import { fetchLatestPublishedReportByStore, isBlogDraftsConfigured } from "@/lib/supabase/blogDrafts";
+import { fetchLatestPublishedReportByStoreWithStatus } from "@/lib/supabase/blogDrafts";
 import { buildLatestSummaryTitle } from "@/lib/blog/latestSummaryTitle";
 import {
   pickFirstNonEmptyLine,
@@ -55,14 +55,16 @@ export async function GET(req: Request) {
   const store = normalizeStoreSlug(url.searchParams.get("store"));
   if (!store) return NextResponse.json({ ok: false, error: "store is required" }, { status: 400 });
 
-  if (!isBlogDraftsConfigured()) {
+  const { row, failed } = await fetchLatestPublishedReportByStoreWithStatus(store, "daily");
+
+  // 取得できなかったときに hasData:false（＝レポートが無い）と偽らない（F11 と同じ扱い）。
+  if (failed) {
     return NextResponse.json(
-      { ok: true, hasData: false },
-      { status: 200, headers: { "cache-control": CACHE_HEADER } },
+      { ok: false, error: "reports-unavailable" },
+      { status: 503, headers: { "cache-control": "no-store" } },
     );
   }
 
-  const row = await fetchLatestPublishedReportByStore(store, "daily");
   if (!row) {
     return NextResponse.json(
       { ok: true, hasData: false },

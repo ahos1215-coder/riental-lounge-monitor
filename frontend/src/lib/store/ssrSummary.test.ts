@@ -130,6 +130,39 @@ describe("buildStoreSsrSummary", () => {
     );
     expect(s).toBeNull();
   });
+
+  // 2026-08-21 F5 の姉妹実装ガード。クローラが読む静的 HTML に「予測かもしれない値」を
+  // ピーク目安として焼かないこと。ライブのカード側は LatestForecastSummaryCard.test.ts が検問。
+  it("予測が取れていない進行中の夜は、ピーク目安を出さない", () => {
+    for (const status of ["retrying", "unavailable", "insufficient_history", "idle"] as const) {
+      const s = buildStoreSsrSummary(
+        baseSnapshot({
+          forecastStatus: status,
+          completedNight: false,
+          peakTimeLabel: "22:15",
+          peakTotal: 98,
+        }),
+      );
+      expect(s!.peakText, status).toBeNull();
+    }
+  });
+
+  it("予測が取れている / 夜が完了しているならピーク目安を出す", () => {
+    const ok = buildStoreSsrSummary(
+      baseSnapshot({ forecastStatus: "ok", completedNight: false, peakTimeLabel: "22:15", peakTotal: 98 }),
+    );
+    expect(ok!.peakText).not.toBeNull();
+    const done = buildStoreSsrSummary(
+      baseSnapshot({
+        forecastStatus: "unavailable",
+        completedNight: true,
+        peakTimeLabel: "22:15",
+        peakTotal: 98,
+      }),
+    );
+    expect(done!.peakText).not.toBeNull();
+  });
+
 });
 
 describe("rollUpHourlyActuals", () => {

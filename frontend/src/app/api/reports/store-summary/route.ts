@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  fetchLatestPublishedReportByStore,
-  isBlogDraftsConfigured,
-} from "@/lib/supabase/blogDrafts";
+import { fetchLatestPublishedReportByStoreWithStatus } from "@/lib/supabase/blogDrafts";
 import { extractBullets, extractFirstHeading, stripFrontmatter } from "@/lib/blog/mdx";
 
 import { formatJstLabel as _fmtJst } from "@/lib/dateFormat";
@@ -24,20 +21,22 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: "store is required" }, { status: 400 });
   }
 
-  if (!isBlogDraftsConfigured()) {
-    return NextResponse.json(
-      { ok: true, daily: null, weekly: null },
-      {
-        status: 200,
-        headers: { "cache-control": CACHE_HEADER },
-      },
-    );
-  }
-
   // /store/[id] からの Daily Report カードは v2 (2026-04-23) で削除済み。
   // このエンドポイントは現在 weekly のみを使うため daily の Supabase クエリを省略する。
   // 後方互換のため `daily: null` をレスポンスに残す。
-  const weeklyRow = await fetchLatestPublishedReportByStore(store, "weekly");
+  const { row: weeklyRow, failed } = await fetchLatestPublishedReportByStoreWithStatus(
+    store,
+    "weekly",
+  );
+
+  // 取得できなかったときに「この店には週報がありません」と偽らない（F11 と同じ扱い）。
+  // 設定不備・Supabase 障害はここに来る。エラーを CDN に焼き付けないよう no-store。
+  if (failed) {
+    return NextResponse.json(
+      { ok: false, error: "reports-unavailable" },
+      { status: 503, headers: { "cache-control": "no-store" } },
+    );
+  }
 
   const weekly = weeklyRow
     ? {

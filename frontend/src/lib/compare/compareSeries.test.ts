@@ -5,7 +5,7 @@
 //  F10 = 夜窓（19:00-翌05:00 JST）の外（別の夜・日中）の行が混ざらないこと。
 // どちらも描画そのものではなく、Recharts に渡す配列の中身を固定する。
 import { describe, expect, it } from "vitest";
-import { computeNightWindowFromBaseDate } from "@/lib/date/nightWindow";
+import { computeNightBaseDate, computeNightWindowFromBaseDate } from "@/lib/date/nightWindow";
 import {
   COMPARE_SLOT_MS,
   buildActualSeries,
@@ -13,6 +13,7 @@ import {
   buildForecastSeries,
   compareHourlyTicks,
   floorToCompareSlot,
+  hasNightRolledOver,
   nightWindowLabel,
 } from "./compareSeries";
 import type { RangeRow } from "@/lib/range/rangeRows";
@@ -160,5 +161,30 @@ describe("compareHourlyTicks", () => {
   it("データが無い/逆転しているときは空", () => {
     expect(compareHourlyTicks(Number.NaN, 1)).toEqual([]);
     expect(compareHourlyTicks(2, 1)).toEqual([]);
+  });
+});
+
+describe("hasNightRolledOver", () => {
+  const at = (iso: string) => new Date(iso);
+
+  it("同じ夜のあいだは false", () => {
+    // 20:00 JST に開き、23:00 JST になっても「同じ夜」
+    const base = computeNightBaseDate(at("2026-08-20T11:00:00Z")); // 20:00 JST
+    expect(hasNightRolledOver(base, at("2026-08-20T14:00:00Z"))).toBe(false); // 23:00 JST
+  });
+
+  it("深夜2時も前夜のまま（19時境界なので日付が変わっても同じ夜）", () => {
+    const base = computeNightBaseDate(at("2026-08-20T11:00:00Z")); // 8/20 20:00 JST
+    expect(hasNightRolledOver(base, at("2026-08-20T17:00:00Z"))).toBe(false); // 8/21 02:00 JST
+  });
+
+  it("18時台に開いたまま19時を過ぎたら true（今夜へ切り替える合図）", () => {
+    const base = computeNightBaseDate(at("2026-08-20T09:30:00Z")); // 18:30 JST → 前夜(8/19)
+    expect(hasNightRolledOver(base, at("2026-08-20T10:30:00Z"))).toBe(true); // 19:30 JST → 8/20
+  });
+
+  it("翌日の19時を過ぎても true", () => {
+    const base = computeNightBaseDate(at("2026-08-20T11:00:00Z")); // 8/20の夜
+    expect(hasNightRolledOver(base, at("2026-08-21T11:00:00Z"))).toBe(true); // 8/21の夜
   });
 });

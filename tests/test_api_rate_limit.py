@@ -128,7 +128,7 @@ def test_healthzとtasksは制限を受けない(monkeypatch):
         assert client.get("/tasks/multi_collect/status").status_code != 429
 
 
-def test_XForwardedForの先頭IPごとに数える(monkeypatch):
+def test_XForwardedForは末尾IPごとに数える_先頭は詐称できるので使わない(monkeypatch):
     _no_supabase(monkeypatch)
     monkeypatch.setenv("API_RATE_LIMIT_ENABLED", "1")
     monkeypatch.setenv("API_RATE_LIMIT_PER_MIN", "2")

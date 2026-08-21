@@ -15,7 +15,7 @@
 //      21:40 のように **複数の夜と日中が混ざった** 折れ線になっていた。
 //      → 店舗ページと同じ夜窓（19:00-翌05:00 JST / lib/date/nightWindow.ts）で絞る。
 import type { NightWindowRange } from "@/lib/date/nightWindow";
-import { isWithinNight } from "@/lib/date/nightWindow";
+import { computeNightBaseDate, formatYMD, isWithinNight } from "@/lib/date/nightWindow";
 import { rowTotalOrNull, type RangeRow } from "@/lib/range/rangeRows";
 import type { ForecastPoint } from "@/lib/forecast/types";
 
@@ -163,4 +163,21 @@ export function compareHourlyTicks(minTs: number, maxTs: number): number[] {
   const ticks: number[] = [];
   for (let t = first; t <= maxTs; t += HOUR_MS) ticks.push(t);
   return ticks;
+}
+
+/**
+ * 表示中の「夜」が変わったか（＝ページを開いたまま19:00 JSTをまたいだか）を判定する。
+ *
+ * 2026-08-21 の F10 修正で、比較ページは `computeNightBaseDate()` をマウント時に一度だけ
+ * 決めて `from`/`to` に使うようにした。これは「描画のたびに窓がずれてグラフが揺れない」
+ * ための設計だが、**19:00 をまたいでもその夜のまま固定される**という副作用があった。
+ * 18時台にページを開いたまま19時を過ぎ、そこで店舗を追加すると、その店だけ「昨夜」を
+ * 取りに行き、しかも見出しも昨夜の日付のまま——という状態になる（修正前は from/to を
+ * 付けていなかったので常に最新が返っていた＝この修正が持ち込んだ回帰）。
+ *
+ * そこで「夜が変わったら丸ごと取り直す」ための純粋関数として切り出した。
+ * 日付文字列で比較するのは、Date インスタンスの同一性ではなく“どの夜か”だけを見たいため。
+ */
+export function hasNightRolledOver(current: Date, now: Date): boolean {
+  return formatYMD(computeNightBaseDate(now)) !== formatYMD(current);
 }

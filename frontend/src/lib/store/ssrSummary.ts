@@ -143,11 +143,19 @@ export function buildStoreSsrSummary(
       ? `男${Math.round((men / total) * 100)}% / 女${Math.round((women / total) * 100)}%`
       : null;
 
-  // ピーク目安。LatestForecastSummaryCard の mlHighlightChips と同じ値・同じ言い回しに揃える。
+  // ピーク目安。LatestForecastSummaryCard の buildHighlightSection と同じ値・同じ言い回しに揃える。
+  //
+  // 2026-08-21 の F5 修正（予測が取れないとき実測ピークを「予測」と偽らない）は
+  // LatestForecastSummaryCard.tsx にだけ入れた。こちらはクローラが読む静的 HTML を作る
+  // 姉妹実装なので、同じガードを明示的に置く。現状は page.tsx 側が
+  // 「forecastStatus !== "ok" のとき series に予測点を混ぜない」という不変条件を守っているため
+  // 数値としては実測由来になっているが、それは**テストで固定されていない暗黙の契約**であり、
+  // 崩れた瞬間に「予測値を実測として検索結果に焼く」という最も直りにくい形のバグになる。
+  const peakIsTrustworthy = snapshot.completedNight === true || snapshot.forecastStatus === "ok";
   let peakText: string | null = null;
   const peakTime = (snapshot.peakTimeLabel ?? "").trim();
   const peakTotal = toNonNegativeInt(snapshot.peakTotal);
-  if (isMeaningfulTimeLabel(peakTime)) {
+  if (peakIsTrustworthy && isMeaningfulTimeLabel(peakTime)) {
     if (peakTotal > 0) {
       if (percentMode) {
         const pm =

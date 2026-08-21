@@ -20,6 +20,7 @@ import {
   buildActualSeries,
   buildCompareChartData,
   buildForecastSeries,
+  hasNightRolledOver,
   nightWindowLabel,
 } from "@/lib/compare/compareSeries";
 import type { ForecastPoint } from "@/lib/forecast/types";
@@ -56,6 +57,8 @@ const MAX_COMPARE = 3;
 // Flask は新しい方から limit 件を返す。5分間隔なので 300 件 ≒ 直近25時間分＝
 // 夜窓（10時間）を、翌日の夕方に開いた場合でも取りこぼさない最小限の余裕。
 const RANGE_LIMIT = 300;
+// 19時をまたいだかの確認間隔。夜の切り替わりに気づくためだけの軽い比較なので1分で十分。
+const NIGHT_ROLLOVER_CHECK_MS = 60_000;
 
 type StoreData = {
   slug: string;
@@ -109,13 +112,27 @@ export default function CompareClient() {
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [searchText, setSearchText] = useState("");
   // 表示する「夜」の基準日（19時境界。19:00 より前に開いたら前夜）。
-  // 店舗ページと同じ規約（lib/date/nightWindow.ts）に揃える。マウント時に一度だけ決め、
-  // 以後は同じ夜を見続ける（描画のたびに窓がずれてグラフが揺れないようにする）。
-  const [nightBaseDate] = useState<Date>(() => computeNightBaseDate(new Date()));
+  // 店舗ページと同じ規約（lib/date/nightWindow.ts）に揃える。描画のたびに再計算すると
+  // 窓がずれてグラフが揺れるので state に持つが、**19:00 をまたいだときだけ**切り替える。
+  // 固定したままにすると、18時台に開いたタブで19時を過ぎてから店舗を追加したときに
+  // その店だけ「昨夜」を取りに行き、見出しも昨夜のまま——という状態になる（2026-08-21 の
+  // F10 修正が持ち込んだ回帰。判定は lib/compare/compareSeries.ts の hasNightRolledOver）。
+  const [nightBaseDate, setNightBaseDate] = useState<Date>(() => computeNightBaseDate(new Date()));
   const nightWindow = useMemo(
     () => computeNightWindowFromBaseDate(nightBaseDate),
     [nightBaseDate],
   );
+  const nightYmd = formatYMD(nightBaseDate);
+  // 夜が変わったら基準日を進め、取得済みデータを捨てて取り直す（昨夜と今夜が混ざらないように）。
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (hasNightRolledOver(nightBaseDate, new Date())) {
+        setNightBaseDate(computeNightBaseDate(new Date()));
+        setStoreDataMap({});
+      }
+    }, NIGHT_ROLLOVER_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [nightBaseDate]);
 
   // Initialize from URL params
   useEffect(() => {
@@ -205,7 +222,7 @@ export default function CompareClient() {
     // 夜窓（19:00-翌05:00 JST）は日をまたぐので、日付粒度の from/to は2日ぶん要求する。
     // 時刻での絞り込みはサーバー側では行わない規約（CLAUDE.md §3）なので、
     // 実際の夜窓フィルタは下の buildActualSeries / buildForecastSeries が行う。
-    const fromYmd = formatYMD(nightBaseDate);
+    const fromYmd = nightYmd;
     const toYmd = formatYMD(addDays(nightBaseDate, 1));
 
     // Fetch range_multi + megribi_score + forecast in parallel
@@ -286,7 +303,9 @@ export default function CompareClient() {
         return copy;
       });
     });
-  }, [selectedSlugs]); // eslint-disable-line react-hooks/exhaustive-deps
+    // nightYmd を依存に入れているのは、夜が変わって storeDataMap を空にしたときに
+    // この effect を再発火させて取り直すため（storeDataMap 自体は依存に入れると毎回回る）。
+  }, [selectedSlugs, nightYmd]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Build merged chart data
   // 5分スロットに丸めてからマージする（外部レビュー F7）。実測 ts は店舗ごとに秒がズレる
