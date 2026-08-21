@@ -149,9 +149,30 @@ def _load_rows(
     retries: int,
     user_agent: str,
 ) -> list[dict[str, Any]]:
-    query = urlencode({"store": store, "limit": str(limit)})
+    # キャッシュバスター（2026-08-21）。
+    # 既定の base_url は Vercel(https://www.meguribi.jp) で、`/api/range` は CDN に
+    # `s-maxage=240, stale-while-revalidate=300` で載る。ところが `store=<slug>&limit=5000`
+    # という組み合わせは**この週次ジョブしか叩かない**（サイトの画面は数十〜数百行しか要求しない）。
+    # 誰も取りに来ないキーは stale-while-revalidate の裏側の再検証が進まず、週1回このジョブが
+    # 触れた瞬間に古いキャッシュがそのまま返る。実測 2026-08-21:
+    #   www.meguribi.jp 経由 kyoto → 最新 2026-08-18（X-Vercel-Cache: STALE / Age 539）
+    #   Flask 直叩き      kyoto → 最新 2026-08-20
+    # 週報は「最新データが WEEKLY_STALE_DAYS(既定10) 日より古ければスキップ」する設計なので、
+    # 古い応答を掴んだ店だけが**無言でスキップ**される。実害として kyoto の週報が
+    # 2026-07-28 から24日間更新されないまま放置されていた（他41店は正常）。
+    # バッチが自分の判断材料を CDN 越しに読むのが誤りなので、毎回異なるキーで取りに行く。
+    # サーバー側の契約は変えていない（未知クエリは無視される）。
+    cache_buster = f"{int(time.time())}-{os.getpid()}"
+    query = urlencode({"store": store, "limit": str(limit), "_cb": cache_buster})
     url = f"{base_url.rstrip('/')}/api/range?{query}"
-    headers = {"accept": "application/json", "User-Agent": user_agent}
+    headers = {
+        "accept": "application/json",
+        "User-Agent": user_agent,
+        # CDN と中間キャッシュにも「保存済みを返すな」と伝える（効かない層があっても
+        # 上の _cb で確実に外せるので、こちらは念のため）。
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    }
     last_error: Exception | None = None
 
     for attempt in range(1, retries + 1):
@@ -418,10 +439,18 @@ def _fetch_existing_weekly_commentary(store: str) -> dict[str, Any]:
     新規生成が 429 等で失敗した場合に、前回の文章を保持するために使う。
     取得失敗・存在しない場合は空 dict。
 
-    返り値には本文 3 フィールドに加え、鮮度判定用の `_existing_generated_at`
-    (insight_json.generated_at があればそれ、無ければ行の updated_at/created_at) を
-    ISO 文字列で含める。呼び出し側はこれで carry-over の年齢を判定できる
-    (WEEKLY_COMMENTARY_MAX_AGE_DAYS)。
+    返り値には本文 3 フィールドに加え、鮮度判定用の `_existing_generated_at` と
+    連鎖 carry-over 回数 `_existing_carry_over_count` を含める。呼び出し側はこれで
+    carry-over の年齢・連続回数を判定できる (WEEKLY_COMMENTARY_MAX_AGE_DAYS)。
+
+    2026-08-21 外部レビュー V9: `_existing_generated_at` は
+    `insight_json.commentary_generated_at`（本文が最後に**新規生成**された時刻）を
+    最優先で読む。旧実装は `insight_json.generated_at`（このジョブの実行時刻＝
+    carry-over でも毎回更新される）しか見ておらず、carry-over のたびに本文の
+    実年齢が0にリセットされ、`WEEKLY_COMMENTARY_MAX_AGE_DAYS` に永久に到達しない
+    バグがあった。`commentary_generated_at` はこの修正より前の行には存在しないため、
+    無ければ旧来どおり `generated_at` → `updated_at` → `created_at` にフォールバック
+    する（後方互換）。
     """
     conf = _supabase_conf()
     if conf is None:
@@ -446,10 +475,16 @@ def _fetch_existing_weekly_commentary(store: str) -> dict[str, Any]:
             if isinstance(v, str) and v.strip():
                 out[k] = v
         existing_generated_at = (
-            ij.get("generated_at") or row.get("updated_at") or row.get("created_at")
+            ij.get("commentary_generated_at")
+            or ij.get("generated_at")
+            or row.get("updated_at")
+            or row.get("created_at")
         )
         if isinstance(existing_generated_at, str) and existing_generated_at.strip():
             out["_existing_generated_at"] = existing_generated_at
+        carry_over_count = ij.get("commentary_carry_over_count")
+        if isinstance(carry_over_count, int) and not isinstance(carry_over_count, bool):
+            out["_existing_carry_over_count"] = carry_over_count
         return out
     except Exception as exc:  # noqa: BLE001
         print(f"[weekly-insights] fetch existing commentary failed: {exc}", file=sys.stderr)
@@ -1280,11 +1315,13 @@ class WeeklyRunContext:
     generated_at: str
 
 
-def _process_store(store: str, ctx: WeeklyRunContext) -> None:
+def _process_store(store: str, ctx: WeeklyRunContext) -> str | None:
     """1 店舗分の週報 JSON を組み立てて書き出す（必要なら Supabase へも upsert）。
 
     スキップ条件（stores.json の active=false / データが陳腐化）に当たった場合は
-    何も書かずに戻る。例外はそのまま呼び出し元へ伝播させる（従来どおり）。
+    何も書かずに**スキップ理由の文字列**を返す（2026-08-21。以前は None を返して黙って
+    消えていたため、41店が更新されて1店だけ何週間も止まっている状態に誰も気づけなかった）。
+    生成できたときは None。例外はそのまま呼び出し元へ伝播させる（従来どおり）。
     """
     # 明示オーバーライド (active=false) は HTTP フェッチ前に弾く。
     if ctx.active_map.get(store) is False:
@@ -1293,7 +1330,7 @@ def _process_store(store: str, ctx: WeeklyRunContext) -> None:
             f"(手動オーバーライド)",
             file=sys.stderr,
         )
-        return
+        return "stores.json で active=false (手動オーバーライド)"
 
     rows = _load_rows(
         ctx.base_url,
@@ -1320,7 +1357,7 @@ def _process_store(store: str, ctx: WeeklyRunContext) -> None:
     )
     if skip_reason is not None:
         print(f"[weekly-insights] SKIP store={store}: {skip_reason}", file=sys.stderr)
-        return
+        return skip_reason
 
     totals = _collect_totals(rows)
     baseline = _percentile(totals, 95.0) if totals else 0.0
@@ -1438,6 +1475,13 @@ def _process_store(store: str, ctx: WeeklyRunContext) -> None:
         joined_parts = [v for v in (commentary.get("last_week_summary"), commentary.get("next_week_forecast")) if v]
         if joined_parts:
             payload["ai_commentary"] = "\n\n".join(joined_parts)
+        # 2026-08-21 外部レビュー V9: 本文が今回**新規生成**された時刻を専用フィールドに
+        # 記録する。payload["generated_at"] はジョブ実行のたびに更新される（carry-over
+        # でも同じ）ので、鮮度判定にそれを使うと年齢が毎週0に戻ってしまう
+        # (_fetch_existing_weekly_commentary の docstring 参照)。新規生成が成功したので
+        # 連続 carry-over カウントもここで 0 に戻す。
+        payload["commentary_generated_at"] = ctx.generated_at
+        payload["commentary_carry_over_count"] = 0
     else:
         # 新規生成失敗 → 既存レコードから前回文を引き継ぐ (Supabase 同期時のみ意味あり)。
         # ただし引き継ぎには鮮度上限を設ける (WEEKLY_COMMENTARY_MAX_AGE_DAYS)。
@@ -1470,10 +1514,20 @@ def _process_store(store: str, ctx: WeeklyRunContext) -> None:
                 for k in text_keys:
                     if existing.get(k):
                         payload[k] = existing[k]
+                # 2026-08-21 外部レビュー V9: carry-over のときは本文の生成時刻を
+                # 「引き継いだ元の値」のまま据え置く（今回の実行時刻に更新しない）。
+                # これで次回以降の鮮度判定が本文の実年齢を正しく積み上げていく。
+                # 連続 carry-over 回数も引き継いで +1 する（見えるようにするだけで、
+                # ここでは閾値による警告/失敗はしない）。
+                if existing_generated_at:
+                    payload["commentary_generated_at"] = existing_generated_at
+                prev_count = existing.get("_existing_carry_over_count") or 0
+                payload["commentary_carry_over_count"] = prev_count + 1
                 age_label = f"{age_days:.1f}d" if age_days is not None else "unknown age"
                 print(
                     f"[weekly-insights] preserved existing commentary for store={store} "
-                    f"(keys={[k for k in text_keys if existing.get(k)]}, age={age_label})",
+                    f"(keys={[k for k in text_keys if existing.get(k)]}, age={age_label}, "
+                    f"carry_over_count={payload['commentary_carry_over_count']})",
                     file=sys.stderr,
                 )
 
@@ -1592,8 +1646,16 @@ def main() -> int:
         generated_at=generated_at,
     )
 
+    # スキップした店を集計する（2026-08-21）。
+    # 以前は _process_store が SKIP を stderr に1行出して黙って return するだけだったため、
+    # 「41店は更新され、1店だけ何週間も止まっている」という状態が誰にも見えなかった
+    # （実例: kyoto が 2026-07-28 から24日間放置。原因は CDN 経由で古いデータを掴んでいたこと）。
+    # ここで集計して最後にまとめて出し、終了コードにも乗せる。
+    skipped: list[tuple[str, str]] = []
     for store in stores:
-        _process_store(store, ctx)
+        reason = _process_store(store, ctx)
+        if reason:
+            skipped.append((store, reason))
 
     # 全店処理後、keep_alive="10m" で常駐させていたモデルをアンロードし GPU を音楽PJ等へ返す。
     # (best-effort。失敗しても握りつぶす)
@@ -1601,6 +1663,20 @@ def main() -> int:
 
     # index.json は退役済み（2026-07-18 index.json retirement）。args.skip_index は
     # ここでは一切参照しない（古い呼び出しとの後方互換のため argparse には残す no-op）。
+
+    if skipped:
+        print(
+            f"[weekly-insights] SKIPPED {len(skipped)}/{len(stores)} store(s):",
+            file=sys.stderr,
+        )
+        for store, reason in skipped:
+            print(f"[weekly-insights]   - {store}: {reason}", file=sys.stderr)
+        # 「一部だけ生成できなかった」を成功と区別する。日次の local_report_job.py が
+        # carry-over のみのとき exit 2 を返すのと同じ流儀（`DAILY_EXIT_NONZERO` と対になる
+        # `WEEKLY_EXIT_NONZERO=0` で従来どおり 0 に戻せる）。
+        if os.environ.get("WEEKLY_EXIT_NONZERO", "1").strip() != "0":
+            return 2
+
     return 0
 
 

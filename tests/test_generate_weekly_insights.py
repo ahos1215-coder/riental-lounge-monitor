@@ -595,11 +595,20 @@ def _run_main_dry(tmp_path, monkeypatch, extra_argv: list[str]) -> int:
 
 
 class TestIndexJsonRetired:
+    """index.json 退役の検問。
+
+    2026-08-21 追記: このクラスの `_run_main_dry` は `/api/range` を空で返すスタブなので、
+    全店が「タイムスタンプ付きデータが取得できませんでした」でスキップされる。
+    同日に「1店でもスキップしたら exit 2」を入れた（41店更新・1店だけ何週間も停止、を
+    見えるようにするため）ので、ここでの期待値は 0 ではなく 2 になる。
+    このクラスが見ているのは index.json を書かないことであって終了コードではない。
+    """
+
     def test_skip_index_flag_still_accepted_but_writes_nothing(self, tmp_path, monkeypatch) -> None:
         # generate-weekly-insights.yml (GHA 緊急手動実行) は今も --skip-index を渡す。
         # argparse がこのフラグを拒否しない (後方互換の no-op) ことを確認する。
         rc = _run_main_dry(tmp_path, monkeypatch, ["--skip-index"])
-        assert rc == 0
+        assert rc == 2  # 全店スキップ（上のクラス docstring 参照）
         index_path = tmp_path / "frontend" / "content" / "insights" / "weekly" / "index.json"
         assert not index_path.exists()
 
@@ -607,9 +616,16 @@ class TestIndexJsonRetired:
         # --skip-index を付けなくても index.json は生成されない
         # (真の退役: フラグの有無に関係なく書き込みコード自体が無い)。
         rc = _run_main_dry(tmp_path, monkeypatch, [])
-        assert rc == 0
+        assert rc == 2  # 全店スキップ（上のクラス docstring 参照）
         index_path = tmp_path / "frontend" / "content" / "insights" / "weekly" / "index.json"
         assert not index_path.exists()
+
+    def test_スキップがあっても_WEEKLY_EXIT_NONZERO_0_なら0で終わる(self, tmp_path, monkeypatch) -> None:
+        # 逃がし弁。Task Scheduler の LastTaskResult を 0 のままにしたい運用のために残す
+        # （日次の DAILY_EXIT_NONZERO と同じ流儀）。
+        monkeypatch.setenv("WEEKLY_EXIT_NONZERO", "0")
+        rc = _run_main_dry(tmp_path, monkeypatch, [])
+        assert rc == 0
 
     def test_preexisting_stale_index_json_is_left_untouched(self, tmp_path, monkeypatch) -> None:
         # 2026-06-30 で凍結していたような既存の index.json が万一残っていても、
@@ -621,5 +637,5 @@ class TestIndexJsonRetired:
         index_path.write_text(stale_content, encoding="utf-8")
 
         rc = _run_main_dry(tmp_path, monkeypatch, [])
-        assert rc == 0
+        assert rc == 2  # 全店スキップ（上のクラス docstring 参照）
         assert index_path.read_text(encoding="utf-8") == stale_content
