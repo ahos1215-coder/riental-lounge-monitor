@@ -136,3 +136,39 @@ Backend、Frontend、ML/バッチ、監視を静的に追跡し、P1で実見し
 - P2物理地図: 本番UI=`frontend/src`、Flask=`oriental`、収集=`multi_collect.py`、定時処理=`scripts`、CI/定時=`.github/workflows`、DB変更=`supabase/migrations`、テスト=`tests` + `frontend/src/**/*.test.*` + `frontend/e2e`。
 - 個人運用としては、コード量そのものより「cron-job.org + Render + Vercel + Supabase + オーナーPC Task Scheduler/Ollama + GHA 21本 + LINE + X」という運用面の接点数が大きい。
 - 作業開始時から `frontend/package-lock.json` にユーザー所有の変更がある。触らず保持する。レビューが変更するのは許可された進捗/最終レポートのみ。
+
+---
+
+## 【完了】2026-08-21 修正の出荷（第1〜2ラウンドの指摘のうち12件）
+
+検証で CONFIRMED / PARTIAL と判定した12件を4班（担当ファイル分離）で修正し、main へ出荷済み。
+
+| コミット | 内容 |
+|---|---|
+| `fix(frontend)` | F5 予測不在時の「予測ハイライト」偽装 / F6 一覧の並び(created_at→target_date) / F11 取得失敗を0件と偽らない(503+失敗カード) / F13 トップSSRのopacity:0 |
+| `fix(compare)` | F7 収集時刻ズレで実測線が繋がらない(5分スロット丸め) / F10 夜窓1本に限定・時刻比例軸 |
+| `fix(data)` | F1 壊れたsnapshotの昇格ガード / F3 収集の途中死の回収 / F8 監視の全店必須化 / F14 週報target_dateのJST化 |
+| `fix(backend/docs)` | F4 `/api/*` レート制限＋`/api/range` 総行数上限 / F15 入口文書5本の契約分裂を是正 |
+| `docs(review)` | CLAUDE.md §3 に契約を反映 / 監視の逃がし弁をGHA入力に追加 |
+| `fix(sec)` ×2 | レート制限自体の穴（XFF先頭は詐称可 → 末尾へ）と、**本番で全く効いていなかった件**（Cloudflare配下のため CF-Connecting-IP を使用）＋ `/healthz` に計器追加 |
+
+### 本番での実測（推測でなく計測して確認したこと）
+
+- `/api/range_multi?stores=40&limit=1000` → **422 range-request-too-large**（40000行 > 12000）
+- `/api/meta` を8並列で400連打 → 修正前 **429が0件**（＝効いていなかった）／修正後 **300通過・100を429**
+- `/healthz` の `api_rate_limit` → `{enabled:true, per_min:300, tracked_keys:2, max_count_in_window:300}`
+- `/store/sapporo_ag`（閉店）→ 410、`/compare` に `8/20(木) 19:00 → 翌05:00` 表示、
+  `/store/shibuya` の見出しが「この夜の**実測**ハイライト」に
+
+### 見送り（オーナーに報告済み・意図的）
+
+- F9 予測の自己参照 blend（shadow採点）／F12 Champion/Challenger の評価期間
+- Codex の新機能15案すべて（オーナー判断 2026-08-21）
+
+### オーナー側で残っている判断
+
+1. Supabase Storage bucket `ml-models` が Private か（1分で確認できる）
+2. `CONTACT_FORM_URL` に入れる Google フォームの URL
+3. 監視3案（LINE通知の集約 / PC死活 / 週次ダイジェストに運用行）— GitHub Secrets に
+   `LINE_CHANNEL_ACCESS_TOKEN` / `LINE_USER_ID` が要る
+4. 監視が厳しくなった件（全42店必須）でうるさければ `ALLOWED_MISSING_SLUGS` / `STRICT_ALL_STORES=0`
