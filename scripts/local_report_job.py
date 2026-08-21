@@ -50,6 +50,13 @@
   （新規店舗・前回も失敗していた場合は引き継ぐものが無いため、これは仕様どおり）。
   facts 取得自体もタイムアウト延長 + リトライ (_ollama_common.FACTS_FETCH_RETRIES) で
   一時的な backend 劣化を吸収し、そもそも (2)/(3) に落ちる頻度を下げる。
+
+終了コード（2026-08-21・外部レビュー F8）:
+  0 : 全店成功（dry-run も常に 0）
+  1 : 1店でも生成失敗 (3) または Supabase 書き込み失敗があった
+  2 : 生成失敗は無いが carry-over (2) があった＝読者には前回分が出ている degraded 状態
+  旧実装は何店失敗しても常に 0 を返していたため、Task Scheduler の LastTaskResult が
+  常に成功に見え、部分障害に気づけなかった。DAILY_EXIT_NONZERO=0 で旧挙動（常に0）に戻せる。
 """
 
 from __future__ import annotations
@@ -595,6 +602,27 @@ def _print_record(slug: str, record: dict[str, Any]) -> None:
     _pr("  -----------------------------------------------------------------------")
 
 
+def _exit_code(*, gen_fail: int, write_err: int, gen_carried: int) -> int:
+    """バッチ結果から終了コードを決める（0=全店成功 / 1=失敗あり / 2=carry-over のみ）。
+
+    2026-08-21 外部レビュー F8: 旧実装は何店失敗しても常に 0 を返していたため、
+    Task Scheduler の LastTaskResult も GHA 監視も「成功」に見えた。
+    DAILY_EXIT_NONZERO=0 で旧挙動（常に 0）へ戻せる。
+    """
+    if (os.environ.get("DAILY_EXIT_NONZERO") or "1").strip() == "0":
+        return 0
+    if gen_fail or write_err:
+        _pr(f"[exit] FAIL: generated_fail={gen_fail} write_errors={write_err} -> exit 1")
+        return 1
+    if gen_carried:
+        _pr(
+            f"[exit] DEGRADED: {gen_carried} store(s) kept a previously published body "
+            "(carry-over; readers see an older report) -> exit 2"
+        )
+        return 2
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="MEGRIBI daily report job (local LLM)")
     parser.add_argument("--kind", default="daily", choices=["daily"], help="report kind (only 'daily' supported)")
@@ -720,7 +748,8 @@ def main() -> int:
     )
     if args.mode == "dry-run":
         _pr("[info] mode=dry-run -> NOTHING was written to Supabase.")
-    return 0
+        return 0
+    return _exit_code(gen_fail=gen_fail, write_err=write_err, gen_carried=gen_carried)
 
 
 if __name__ == "__main__":

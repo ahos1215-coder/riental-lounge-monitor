@@ -25,7 +25,20 @@ bp = Blueprint("tasks", __name__)
 # ---------- Background collect task state (process-local) ----------
 _collect_task: dict[str, Any] = {
     "task_id": None,
-    "status": "idle",       # idle | running | completed | failed
+    # idle | running | completed | completed_with_failures | failed
+    "status": "idle",
+    "started_at": None,
+    "completed_at": None,
+    "result": None,
+    "error": None,
+}
+# 直前の実行の結果（次の実行が始まって _collect_task が上書きされても残す）。
+# F2: プロセス再起動で消える揮発状態のままだが、少なくとも「同じプロセスで前回いつ
+# 走って何件成功したか」を /tasks/multi_collect/status から読めるようにする
+# （DB への永続化は今回やらない）。
+_collect_last_run: dict[str, Any] = {
+    "task_id": None,
+    "status": None,
     "started_at": None,
     "completed_at": None,
     "result": None,
@@ -33,18 +46,70 @@ _collect_task: dict[str, Any] = {
 }
 _collect_lock = threading.Lock()
 
+# プロセス起動時刻（status の見かた: last_run が None かつ起動から日が経っていれば
+# 「このプロセスでは一度も収集が走っていない」）。
+_process_started_at = datetime.now(timezone.utc).isoformat()
+
+
+def _collect_outcome(result: Any) -> Tuple[str, bool]:
+    """collect_all_once() の戻り値から (status, ok) を決める。
+
+    2026-08-21 外部レビュー F3: 旧実装は戻り値の success/fail 件数を一切見ず、例外さえ
+    出なければ status="completed" / ok=True にしていた。42店中20店が保存に失敗しても
+    cron からは「成功」に見え、鮮度監視（最新行の古さ）も残り22店の更新で緑のままに
+    なるため、履歴が静かに欠け続ける。件数を見て正直に分ける:
+
+      - 全店成功            -> ("completed", True)
+      - 一部失敗            -> ("completed_with_failures", False)
+      - 全滅 / 戻り値が異常 -> ("failed", False)
+
+    HTTP ステータスコードは変えない（cron-job.org の再試行挙動を変えないため）。
+    """
+    if not isinstance(result, dict):
+        return "failed", False
+    try:
+        stores = int(result.get("stores") or 0)
+        success = int(result.get("success") or 0)
+        fail = int(result.get("fail") or 0)
+    except (TypeError, ValueError):
+        return "failed", False
+    if stores <= 0 or success <= 0:
+        return "failed", False
+    if fail > 0:
+        return "completed_with_failures", False
+    return "completed", True
+
+
+def _remember_last_run() -> None:
+    """_collect_task の現在値を「直前の実行」として控える（_collect_lock 内で呼ぶこと）。"""
+    _collect_last_run.update(
+        task_id=_collect_task.get("task_id"),
+        status=_collect_task.get("status"),
+        started_at=_collect_task.get("started_at"),
+        completed_at=_collect_task.get("completed_at"),
+        result=_collect_task.get("result"),
+        error=_collect_task.get("error"),
+    )
+
 
 def _run_collect_background(task_id: str) -> None:
     """Background thread target — runs collect_all_once() outside Flask request."""
     global _collect_task
     try:
         result = collect_all_once()
+        status, _ok = _collect_outcome(result)
         with _collect_lock:
             _collect_task.update(
-                status="completed",
+                status=status,
                 completed_at=datetime.now(timezone.utc).isoformat(),
                 result=result,
                 error=None,
+            )
+            _remember_last_run()
+        if status != "completed":
+            _bg_logger().error(
+                "collect_all_once.incomplete mode=async task_id=%s status=%s result=%s",
+                task_id, status, result,
             )
     except Exception as exc:
         with _collect_lock:
@@ -54,6 +119,50 @@ def _run_collect_background(task_id: str) -> None:
                 result=None,
                 error=str(exc),
             )
+            _remember_last_run()
+
+
+def _is_production() -> bool:
+    """本番(Render)かどうか。判定方法は _require_cron_secret() と揃える。"""
+    return bool(
+        os.getenv("RENDER")
+        or os.getenv("RENDER_SERVICE_ID")
+        or os.getenv("FLASK_ENV") == "production"
+    )
+
+
+def _warn_if_production_without_supabase() -> None:
+    """本番で Supabase 未設定なら起動時に警告する（F3 の補足）。
+
+    multi_collect.insert_supabase_log() は HAS_SUPABASE=False のとき True を返す
+    （docstring 明記の開発時フォールバック＝そのまま維持する）。そのため設定漏れは
+    fail 件数に現れず、収集が1行も保存していなくても success に見える。挙動は変えず、
+    起動時のログで気づけるようにする。
+    """
+    if not _is_production():
+        return
+    import multi_collect as _mc  # 遅延参照（テストが差し替えやすいように）
+
+    if not getattr(_mc, "HAS_SUPABASE", False):
+        import logging
+
+        logging.getLogger(__name__).error(
+            "tasks.startup: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are NOT set in production — "
+            "collect_all_once() will report success while persisting nothing."
+        )
+
+
+_warn_if_production_without_supabase()
+
+
+def _bg_logger():
+    """バックグラウンドスレッド用のロガー（app context 外でも落ちないように）。"""
+    try:
+        return current_app.logger
+    except Exception:  # noqa: BLE001
+        import logging
+
+        return logging.getLogger(__name__)
 
 
 def _require_cron_secret() -> bool:
@@ -158,12 +267,24 @@ def tasks_multi_collect():
         try:
             result = collect_all_once()
             duration = time.perf_counter() - started
-            logger.info("collect_all_once.success mode=sync duration_sec=%.3f", duration)
-            return jsonify({"ok": True, "task": "collect_all_once", **result})
+            status, ok = _collect_outcome(result)
+            if ok:
+                logger.info("collect_all_once.success mode=sync duration_sec=%.3f", duration)
+            else:
+                # F3: 例外が出なくても「期待した店舗を保存できていない」なら成功にしない。
+                logger.error(
+                    "collect_all_once.incomplete mode=sync status=%s duration_sec=%.3f result=%s",
+                    status, duration, result,
+                )
+            # **result を先に展開する（stores/success/fail/duration_sec）。ok/status は
+            # こちらが決めた値を必ず勝たせる。
+            return jsonify({**result, "ok": ok, "task": "collect_all_once", "status": status})
         except Exception as exc:  # noqa: BLE001
             duration = time.perf_counter() - started
             logger.exception("collect_all_once.failed mode=sync duration_sec=%.3f", duration)
-            return jsonify({"ok": False, "task": "collect_all_once", "error": str(exc)})
+            return jsonify({
+                "ok": False, "task": "collect_all_once", "status": "failed", "error": str(exc),
+            })
 
     # 非同期モード（デフォルト）
     with _collect_lock:
@@ -200,11 +321,21 @@ def tasks_multi_collect():
 
 @bp.route("/tasks/multi_collect/status", methods=["GET"])
 def tasks_multi_collect_status():
-    """現在（または直前）の collect タスクの実行状態を返す。"""
+    """現在（または直前）の collect タスクの実行状態を返す。
+
+    F2: `last_run`（直前の実行の開始/終了時刻・status・件数）と `process_started_at` を
+    併記する。プロセス内メモリなので再起動で消える点は変わらないが、「このプロセスで
+    最後に走った収集がいつ・何件成功したか」を外から確認できる。
+    """
     if _require_cron_secret():
         return jsonify({"ok": False, "error": "unauthorized"}), 401
     with _collect_lock:
-        return jsonify({"ok": True, **_collect_task})
+        return jsonify({
+            "ok": True,
+            **_collect_task,
+            "last_run": dict(_collect_last_run),
+            "process_started_at": _process_started_at,
+        })
 
 
 @bp.route("/api/tasks/collect_all_once", methods=["GET", "POST"])

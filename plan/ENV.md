@@ -85,6 +85,25 @@ LINE Webhook（`frontend/src/app/api/line/route.ts`）:
   `oriental/routes/data_range.py`（`default_limit=min(500, cfg.max_range_limit)` /
   `limit=max(1, min(limit, cfg.max_range_limit))`）。`forecast_service.py` の履歴取得は
   `min(cfg.max_range_limit, 1200)` で別途キャップされる）
+- `MAX_RANGE_TOTAL_ROWS`（int, 既定 `12000`。`oriental/config.py` → `oriental/routes/data_range.py::api_range_multi`。
+  **1リクエストで生成してよい総行数の予算**＝「stores 数 × limit」。超えると 422
+  `{"ok":false,"error":"range-request-too-large"}` で弾く。2026-08-21 の外部レビュー F4 で、無認証の
+  `/api/range_multi?stores=<42店>&limit=6000` が 252,000 行 × 12並列を1リクエストで要求でき、
+  workers=1 / threads=8 の本番を飽和させられることが判明したため追加。
+  実際に使われている最大の組み合わせは 12店×48行=576 と 3店×200行=600 なので、既定 12000 でも約20倍の余裕がある。
+  単体 `/api/range` は stores=1 のため `MAX_RANGE_LIMIT` だけで既に頭打ちになる（追加のチェックは無い））
+- `API_RATE_LIMIT_ENABLED`（`0` で完全無効化、既定 `1`。`oriental/routes/common.py::register_api_rate_limit`）
+  **緊急停止スイッチ**。誤爆で正規利用者が 429 になったときは、Render の環境変数をこれ1つ `0` にして再起動すれば
+  導入前と完全に同じ挙動に戻る（before_request フック自体を登録しなくなる）。
+- `API_RATE_LIMIT_PER_MIN`（int, 既定 `300`。同上）
+  IP 単位・60秒の固定窓で数える上限。対象は **`/api/*` のみ**で、`/healthz` `/readyz` `/tasks/*`
+  `/api/tasks/*` `/static/*` は**対象外**（外形監視と cron を絶対に落とさないため）。
+  クライアントの識別は `X-Forwarded-For` の先頭（Render は必ずプロキシ越し）、無ければ `remote_addr`。
+  超過時は 429 + `{"ok":false,"error":"rate-limited"}` + `Retry-After` ヘッダ。
+  カウンタはプロセス内メモリ（`workers=1` なので実質サーバー全体）。追跡 IP は最大4096件で、
+  超えたら古い窓から捨てる。正規の呼び出し元は Vercel の SSR/ISR（多数IP）、オーナーPCの
+  `warm_cdn_local.py`（245URL・10分毎）、`snapshot_forecasts.py`（42店）、ブラウザからの Next プロキシ経由。
+  既定 300 はこれらに十分な余裕を見た値（Vercel の egress IP が偏っても詰まらないようにするため）。
 - `TIMEZONE`
 
 基本設定:

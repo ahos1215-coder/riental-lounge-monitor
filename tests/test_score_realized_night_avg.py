@@ -61,7 +61,8 @@ def test_realized_night_avg_persisted_additively_and_matches_actual_mean(monkeyp
     # 予測は一律 total_pred=10.0（過大予測のシナリオ: 実測は 5..17 で平均11.0、
     # 予測平均が実測平均と一致しないことを保証し、自己参照バグとの違いを明確にする）。
     a_points = [{"ts": s.isoformat(), "total_pred": 10.0} for s in slots]
-    snapshot = {"by_slug": {"shibuya": a_points}}
+    # expected_slugs: F1 後の snapshot が必ず持つ分母（合成は1店だけ）。
+    snapshot = {"expected_slugs": ["shibuya"], "by_slug": {"shibuya": a_points}}
 
     now_totals = [5.0 + i * 0.5 for i in range(25)]  # 5.0..17.0, mean == 11.0 exactly
     now_rows = [{"ts": s.isoformat(), "total": v} for s, v in zip(slots, now_totals)]
@@ -97,7 +98,8 @@ def test_realized_night_avg_absent_when_no_matched_slots(monkeypatch) -> None:
     slots = [base.replace(hour=19, minute=0) + timedelta(minutes=15 * i) for i in range(25)]
 
     a_points = [{"ts": s.isoformat(), "total_pred": 10.0} for s in slots]
-    snapshot = {"by_slug": {"shibuya": a_points}}
+    # expected_slugs: F1 後の snapshot が必ず持つ分母（合成は1店だけ）。
+    snapshot = {"expected_slugs": ["shibuya"], "by_slug": {"shibuya": a_points}}
 
     # 実測行が一件も返らない(空リスト) -> スロットが一切マッチしない
     now_rows: list[dict] = []

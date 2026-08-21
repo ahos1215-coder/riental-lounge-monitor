@@ -1566,7 +1566,11 @@ def main() -> int:
     # するだけで index.json を見ない）。集約インデックスは元々不要だった。
 
     now = datetime.now(timezone.utc)
-    date_label = now.date().isoformat()
+    # 2026-08-21（外部レビュー F14）: 定期実行は水曜 06:30 JST = 火曜 21:30 UTC なので、
+    # UTC の日付をそのまま date_label にすると公開週報の target_date・生成 JSON の
+    # ファイル名・sitemap の lastModified が1日前（火曜）になっていた。表示用の日付は
+    # JST で作る。`generated_at`（機械可読の生成時刻）と鮮度判定用の `now` は UTC のまま。
+    date_label = now.astimezone(JST_OFFSET).date().isoformat()
     generated_at = _iso(now)
 
     ctx = WeeklyRunContext(

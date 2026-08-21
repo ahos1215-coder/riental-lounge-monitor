@@ -28,6 +28,7 @@ def test_main_writes_v2_and_scorecard_additively(monkeypatch) -> None:
         for s in slots
     ]
     snapshot = {
+        "expected_slugs": ["shibuya"],  # F1: coverage の分母（合成は1店だけ）
         "by_slug": {"shibuya": a_points},
         "v2": {
             "shibuya": {

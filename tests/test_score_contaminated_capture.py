@@ -114,6 +114,7 @@ def _wire_main(monkeypatch, *, capture_hour: int, capture_minute: int, existing_
     captured = base.replace(hour=capture_hour, minute=capture_minute).astimezone(timezone.utc).isoformat()
 
     snapshot = {
+        "expected_slugs": ["shibuya"],  # F1: coverage の分母（合成は1店だけ）
         "by_slug": {"shibuya": [{"ts": slot.isoformat(), "total_pred": 50.0}]},
         "captured_at_utc": captured,
     }

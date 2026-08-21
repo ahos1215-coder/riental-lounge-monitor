@@ -782,3 +782,33 @@ class TestFactsBlockBrandRules:
         )
         assert "人数は書かない。" not in captured["user"]
         assert "埋まり具合" not in captured["user"]
+
+
+class Test終了コード:
+    """F8: 部分障害を Task Scheduler / 監視から見えるようにする（旧実装は常に exit 0）。
+
+    0 = 全店成功 / 1 = 生成失敗・書き込み失敗あり / 2 = carry-over のみ（degraded）。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _default_env(self, monkeypatch: pytest.MonkeyPatch):
+        monkeypatch.delenv("DAILY_EXIT_NONZERO", raising=False)
+
+    def test_全店成功なら0(self) -> None:
+        assert lrj._exit_code(gen_fail=0, write_err=0, gen_carried=0) == 0
+
+    def test_生成失敗があれば1(self) -> None:
+        assert lrj._exit_code(gen_fail=1, write_err=0, gen_carried=0) == 1
+
+    def test_書き込み失敗があれば1(self) -> None:
+        assert lrj._exit_code(gen_fail=0, write_err=3, gen_carried=0) == 1
+
+    def test_carry_overだけなら2(self) -> None:
+        assert lrj._exit_code(gen_fail=0, write_err=0, gen_carried=2) == 2
+
+    def test_失敗とcarry_overが同居したら1が優先(self) -> None:
+        assert lrj._exit_code(gen_fail=1, write_err=0, gen_carried=5) == 1
+
+    def test_off_switchで旧挙動へ戻せる(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DAILY_EXIT_NONZERO", "0")
+        assert lrj._exit_code(gen_fail=9, write_err=9, gen_carried=9) == 0

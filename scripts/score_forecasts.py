@@ -50,7 +50,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # シブリングとしてベアインポートする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _ops_notify import notify_ops  # noqa: E402
-from _stores_common import slug_to_store_id  # noqa: E402
+from _stores_common import all_slugs, slug_to_store_id  # noqa: E402
 from _supabase_common import _load_env, auth_headers, storage_get, storage_put  # noqa: E402
 
 # ログ接頭辞だけを固定した別名。既存テストの monkeypatch.setattr(sf, "_storage_get", ...)
@@ -657,6 +657,34 @@ def _collect_accuracy_alerts(
     return alerts, coverage_failure
 
 
+def _expected_count(snapshot: dict, by_slug: dict) -> int:
+    """coverage 判定の分母（＝その夜「揃っているべきだった」店舗数）を決める。
+
+    2026-08-21 外部レビュー F1: 旧実装は `len(by_slug)`＝スナップショット自身の件数を
+    期待数にしていたため、空スナップショットでは coverage 検査が無効化し（expected==0）、
+    部分欠落では欠けた店がそのまま分母から消えていた（自己参照）。
+
+    優先順:
+      1. snapshot の `expected_slugs`（snapshot_forecasts.py が必ず書く。F1 修正後）
+      2. 現在の全店舗集合（`expected_slugs` を持たない古いスナップショットの後方互換。
+         フィールドが無いだけでクラッシュしない）
+      3. 店舗マスタも読めない異常時のみ `len(by_slug)`（旧挙動）
+    """
+    exp = snapshot.get("expected_slugs")
+    if isinstance(exp, list) and exp:
+        return len({s for s in exp if isinstance(s, str) and s.strip()})
+    try:
+        fleet = all_slugs()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[score][warn] store master unavailable ({str(exc)[:120]}) — falling back to snapshot size")
+        return len(by_slug)
+    print(
+        "[score] snapshot has no expected_slugs (pre-F1 file) — "
+        f"using the current store master ({len(fleet)} stores) as the coverage denominator."
+    )
+    return len(fleet)
+
+
 def main() -> int:
     _load_env()
     supabase_url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
@@ -677,7 +705,7 @@ def main() -> int:
         return 1
     snapshot = json.loads(snap_raw.decode())
     by_slug = snapshot.get("by_slug") or {}
-    expected = len(by_slug)
+    expected = _expected_count(snapshot, by_slug)
 
     base = datetime.strptime(night_date, "%Y%m%d").replace(tzinfo=JST)
 

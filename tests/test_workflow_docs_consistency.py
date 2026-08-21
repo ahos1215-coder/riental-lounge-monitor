@@ -116,6 +116,12 @@ _ENV_KEYS_NOT_FROM_WORKFLOW = {
     "GITHUB_OUTPUT",   # runner が常に設定する
     "GITHUB_ENV",
     "GITHUB_STEP_SUMMARY",
+    # 2026-08-21 (F8): 監視の「緩め方」を指定する opt-out ノブ。**渡さないときの既定が
+    # 最も厳しい判定**（STRICT_ALL_STORES=1 = 期待店舗集合との差分で失敗 /
+    # ALLOWED_MISSING_SLUGS 空 = 全店必須）なので、WF が渡し忘れても監視は黙らない。
+    # 新規店の猶予などで緩めたくなったときだけ WF 側に env を足す。
+    "STRICT_ALL_STORES",
+    "ALLOWED_MISSING_SLUGS",
 }
 
 

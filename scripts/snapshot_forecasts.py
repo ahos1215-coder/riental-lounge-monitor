@@ -8,7 +8,15 @@ metadata.json / the accuracy card — and is exactly the gap that hid the
 weather/skew bugs. See plan/FORECAST_ACCURACY.md.
 
 Storage layout (reuses the existing model bucket, no new infra):
-    <FORECAST_MODEL_BUCKET>/accuracy/snapshots/<YYYYMMDD>.json   (night of YYYYMMDD, JST)
+    <FORECAST_MODEL_BUCKET>/accuracy/snapshots/<YYYYMMDD>.json            (night of YYYYMMDD, JST)
+    <FORECAST_MODEL_BUCKET>/accuracy/snapshots/_partial/<YYYYMMDD>.json   (診断用の退避先)
+
+Validate-before-promote (2026-08-21, 外部レビュー F1): 期待する店舗 slug 集合が
+すべて揃った夜だけを正規パスへ書く。1店でも欠けた夜は `_partial/` へ退避し、
+欠落店名を出力して非ゼロ終了する（正規パスは前夜までの last-good を保持）。
+payload には常に `expected_slugs` / `missing_slugs` / `captured_at_utc` を含めるので、
+翌朝の score_forecasts.py は「そのスナップショット自身の件数」ではなく
+`expected_slugs` を分母に coverage を判定できる。
 
 Every payload includes `captured_at_utc` (see main() below) precisely so
 score_forecasts.py can detect a late capture: if this job fires meaningfully
@@ -82,10 +90,35 @@ TEMPLATES_PATH = "forecast/templates_v2.json"
 # V2_SLOTS は scripts/_night_slots.py で定義（build_templates.py の SLOTS と共有）。
 V2_STALE_HOURS = 48  # テンプレがこれより古い/無い → v2=null（A は無傷）
 
+# 正規パス（翌朝 score_forecasts.py が読む唯一の場所）と、不完全キャプチャの退避先。
+SNAPSHOT_DIR = "accuracy/snapshots"
+PARTIAL_DIR = "accuracy/snapshots/_partial"
+
 
 def _all_store_slugs() -> list[str]:
     # 全ブランド（oriental + aisekiya 等）を対象にする。相席屋も予測の答え合わせに載せる。
     return all_slugs()
+
+
+def _expected_slugs(slugs: list[str] | None = None) -> list[str]:
+    """今夜「揃っているべき」slug 集合（＝正規パスへ昇格する条件）。
+
+    既定は全店。恒久的に予測が出ない店が出たとき、コード変更なしで運用を止めない
+    ための逃げ道として、環境変数 `SNAPSHOT_ALLOWED_MISSING`（カンマ区切りの slug）で
+    期待集合から外せる。外した店は当然その夜の答え合わせ対象からも外れる。
+    """
+    base = list(slugs) if slugs is not None else _all_store_slugs()
+    allowed = {s.strip() for s in (os.environ.get("SNAPSHOT_ALLOWED_MISSING") or "").split(",") if s.strip()}
+    return [s for s in base if s not in allowed]
+
+
+def _missing_slugs(expected: list[str], by_slug: dict[str, list]) -> list[str]:
+    """期待集合のうち、使える予測点列が1点も取れなかった slug（ソート済み）。
+
+    キー自体が無い場合だけでなく、空リスト（＝翌朝1スロットも答え合わせできない）も
+    欠落として扱う。
+    """
+    return sorted(s for s in expected if not (by_slug.get(s) or []))
 
 
 def _get_json(url: str, retries: int = 3):
@@ -274,20 +307,42 @@ def main() -> int:
         v2_by_slug = {slug: None for slug in slugs}
     v2_ok = sum(1 for v in v2_by_slug.values() if v)
 
+    # 2026-08-21 外部レビュー F1: 期待集合と突き合わせ、欠けている夜は**正規パスを
+    # 上書きしない**（旧実装は成功した店だけの by_slug をその夜の正規パスへ保存し、
+    # 空でも保存してから exit 1 していた。翌朝の score は「その欠陥スナップショット
+    # 自身の件数」を期待数にするため、空なら coverage 検査が無効化され、部分欠落なら
+    # 欠けた店が分母から消える＝監視が緑のまま精度追跡に穴が空く。docs/FAILURE_MAP.md
+    # 順位3の「空 snapshot が30日以上」はこの経路）。
+    expected = _expected_slugs(slugs)
+    missing = _missing_slugs(expected, by_slug)
+    complete = not missing
+
     payload = {
         "night_date": night_date,
         "captured_at_utc": datetime.now(timezone.utc).isoformat(),
         "backend": backend,
         "stores": len(by_slug),
+        "expected_slugs": expected,
+        "missing_slugs": missing,
         "by_slug": by_slug,
         "v2": v2_by_slug,
     }
-    path = f"accuracy/snapshots/{night_date}.json"
+    path = f"{SNAPSHOT_DIR if complete else PARTIAL_DIR}/{night_date}.json"
     _storage_put(bucket, path, json.dumps(payload, ensure_ascii=False).encode("utf-8"), supabase_url, key)
-    print(f"[snapshot] saved {len(by_slug)}/{len(slugs)} stores (v2 for {v2_ok}) -> {bucket}/{path}")
+    print(f"[snapshot] saved {len(by_slug)}/{len(expected)} stores (v2 for {v2_ok}) -> {bucket}/{path}")
+    if complete:
+        return 0
+
+    # 不完全: 正規パスは前夜までの last-good のまま残す（＝上書き破壊しない）。
+    print(
+        f"[snapshot][ERROR] incomplete capture for night {night_date}: "
+        f"{len(missing)}/{len(expected)} stores missing -> canonical "
+        f"{bucket}/{SNAPSHOT_DIR}/{night_date}.json was NOT written (kept last-good). "
+        f"missing={','.join(missing)}"
+    )
     if not by_slug:
-        raise SystemExit("no forecasts captured (backend down or all stores empty)")
-    return 0
+        print("[snapshot][ERROR] no forecasts captured at all (backend down or all stores empty)")
+    return 1
 
 
 if __name__ == "__main__":

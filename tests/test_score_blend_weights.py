@@ -104,7 +104,12 @@ def _wire_main(monkeypatch, *, now_total, prev_total):
     night_date = (datetime.now(sf.JST) - timedelta(days=1)).strftime("%Y%m%d")
     base = datetime.strptime(night_date, "%Y%m%d").replace(tzinfo=sf.JST)
     slot = base.replace(hour=23, minute=0, second=0, microsecond=0)
-    snapshot = {"by_slug": {"shibuya": [{"ts": slot.isoformat(), "total_pred": 50.0}]}}
+    # expected_slugs: F1 後の snapshot が必ず持つ「その夜揃っているべき店」。
+    # 合成スナップショットは1店だけなので、coverage 判定の分母も1店に固定する。
+    snapshot = {
+        "expected_slugs": ["shibuya"],
+        "by_slug": {"shibuya": [{"ts": slot.isoformat(), "total_pred": 50.0}]},
+    }
 
     def fake_get(bucket, path, url, key):
         if path.startswith("accuracy/snapshots/"):
