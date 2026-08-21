@@ -159,7 +159,7 @@ describe("Supabase REST GET の呼び出し契約（URL・ヘッダ・キャッ�
     await mod.fetchAllLatestPublishedReports("daily", 1000);
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe(
-      "https://proj.supabase.co/rest/v1/blog_drafts?select=store_slug,target_date,edition,created_at,mdx_content&content_type=eq.daily&is_published=eq.true&error_message=is.null&mdx_content=not.eq.&order=created_at.desc&limit=200",
+      "https://proj.supabase.co/rest/v1/blog_drafts?select=store_slug,target_date,edition,created_at,updated_at,mdx_content&content_type=eq.daily&is_published=eq.true&error_message=is.null&mdx_content=not.eq.&order=target_date.desc,updated_at.desc.nullslast,created_at.desc&limit=200",
     );
     expect(calls[0].init.method).toBe("GET");
     expect(calls[0].init.cache).toBeUndefined();
@@ -174,7 +174,8 @@ describe("Supabase REST GET の呼び出し契約（URL・ヘッダ・キャッ�
     const mod = await import("./blogDrafts");
     expect(await mod.fetchLatestPublishedReportByStore("shibuya", "daily")).toBeNull();
     expect(await mod.fetchAllPublishedEditorialSlugs()).toEqual([]);
-    expect(await mod.fetchAllLatestPublishedReports("weekly")).toEqual([]);
+    // 未設定は「0件」ではなく設定不備＝障害（F11）。
+    expect(await mod.fetchAllLatestPublishedReports("weekly")).toEqual({ items: [], failed: true });
     expect(calls).toHaveLength(0);
   });
 
@@ -187,13 +188,122 @@ describe("Supabase REST GET の呼び出し契約（URL・ヘッダ・キャッ�
 
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({}) }) as unknown as Response));
     expect(await mod.fetchPublishedEditorialBySlug("x")).toBeNull();
-    expect(await mod.fetchAllLatestPublishedReports("daily")).toEqual([]);
 
     vi.stubGlobal("fetch", vi.fn(async () => {
       throw new Error("network down");
     }));
     expect(await mod.fetchLatestUnpublishedEditorialByLineUser("U1")).toBeNull();
     expect(await mod.fetchAllPublishedEditorialSlugs()).toEqual([]);
+  });
+});
+
+/**
+ * F6 / F11（2026-08-21 外部レビュー）の番犬テスト。
+ *
+ * F6-1: daily / weekly は固定 facts_id を PATCH し続けるため created_at は初回 INSERT 時刻で
+ *       止まる。並びも表示も created_at では「8/20 の記事に 05/11 が併記される」。
+ * F6-2: 取得上限 50 では daily の 42 店 × 2 便 ＝ 84 行を取り切れず、一部店舗が
+ *       一覧に一生出てこない。
+ * F11 : 取得失敗を [] にすると「本当に0件」と区別できない。
+ */
+describe("fetchAllLatestPublishedReports の並び・上限・障害の扱い（F6 / F11）", () => {
+  const originalEnv = { ...process.env };
+  let capturedUrl2 = "";
+
+  function stubRows(rows: unknown, ok = true) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        capturedUrl2 = url;
+        return { ok, json: async () => rows } as unknown as Response;
+      }),
+    );
+  }
+
+  beforeEach(() => {
+    capturedUrl2 = "";
+    process.env.SUPABASE_URL = ENDPOINT_ENV.SUPABASE_URL;
+    process.env.SUPABASE_SERVICE_ROLE_KEY = ENDPOINT_ENV.SUPABASE_SERVICE_ROLE_KEY;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("F6-1: 並びは target_date.desc が最優先で、created_at.desc 単独ではない", async () => {
+    stubRows([]);
+    const mod = await import("./blogDrafts");
+    await mod.fetchAllLatestPublishedReports("daily");
+    const order = decodeURIComponent(capturedUrl2).match(/order=([^&]+)/)?.[1] ?? "";
+    expect(order.startsWith("target_date.desc")).toBe(true);
+    expect(order).toContain("updated_at.desc.nullslast");
+    expect(order).not.toBe("created_at.desc");
+    // 単店取得（fetchLatestPublishedReportByStore）と同じ流儀に揃っていること。
+    expect(order).toBe("target_date.desc,updated_at.desc.nullslast,created_at.desc");
+  });
+
+  it("F6-1: select に updated_at を含む（カードの日時表示に使う）", async () => {
+    stubRows([
+      {
+        store_slug: "shibuya",
+        target_date: "2026-08-20",
+        edition: "late_update",
+        created_at: "2026-05-11T21:40:00+09:00",
+        updated_at: "2026-08-20T21:40:00+09:00",
+        mdx_content: "# 今夜の渋谷\n本文",
+      },
+    ]);
+    const mod = await import("./blogDrafts");
+    const res = await mod.fetchAllLatestPublishedReports("daily");
+    expect(decodeURIComponent(capturedUrl2)).toContain("updated_at");
+    expect(res.failed).toBe(false);
+    expect(res.items[0].updated_at).toBe("2026-08-20T21:40:00+09:00");
+    // created_at（初回 INSERT）も落とさない。表示側が updated_at を優先するだけ。
+    expect(res.items[0].created_at).toBe("2026-05-11T21:40:00+09:00");
+    expect(res.items[0].heading).toBe("今夜の渋谷");
+  });
+
+  it("F6-2: 既定の取得上限は 42店×2便＝84 行を上回る（一部店舗が一生出てこない状態にしない）", async () => {
+    stubRows([]);
+    const mod = await import("./blogDrafts");
+    await mod.fetchAllLatestPublishedReports("daily");
+    const limit = Number(decodeURIComponent(capturedUrl2).match(/limit=(\d+)/)?.[1] ?? "0");
+    expect(limit).toBeGreaterThanOrEqual(84);
+  });
+
+  it("店舗ごとに先勝ちで1件へ畳む（並び順が新しい行を勝たせる前提）", async () => {
+    stubRows([
+      { store_slug: "shibuya", target_date: "2026-08-20", mdx_content: "# 新\n" },
+      { store_slug: "shibuya", target_date: "2026-08-19", mdx_content: "# 旧\n" },
+      { store_slug: "umeda", target_date: "2026-08-20", mdx_content: "# 梅田\n" },
+    ]);
+    const mod = await import("./blogDrafts");
+    const res = await mod.fetchAllLatestPublishedReports("daily");
+    expect(res.items.map((i) => i.store_slug)).toEqual(["shibuya", "umeda"]);
+    expect(res.items[0].target_date).toBe("2026-08-20");
+  });
+
+  it("F11: HTTP エラー / 非配列 JSON / ネットワーク例外は failed:true（「0件」と区別する）", async () => {
+    const mod = await import("./blogDrafts");
+
+    stubRows([], false);
+    expect(await mod.fetchAllLatestPublishedReports("daily")).toEqual({ items: [], failed: true });
+
+    stubRows({});
+    expect(await mod.fetchAllLatestPublishedReports("daily")).toEqual({ items: [], failed: true });
+
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("network down");
+    }));
+    expect(await mod.fetchAllLatestPublishedReports("weekly")).toEqual({ items: [], failed: true });
+  });
+
+  it("F11: 本当に0件のときは failed:false（空表示と障害表示を取り違えない）", async () => {
+    stubRows([]);
+    const mod = await import("./blogDrafts");
+    expect(await mod.fetchAllLatestPublishedReports("weekly")).toEqual({ items: [], failed: false });
   });
 });
 

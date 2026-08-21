@@ -357,28 +357,56 @@ export type ReportListItem = {
   target_date: string;
   edition?: string;
   created_at?: string;
+  /** 一覧カードの日時表示はこちら（created_at は固定 facts_id の初回 INSERT 時刻で動かない）。 */
+  updated_at?: string;
   heading: string | null;
 };
 
 /**
+ * 一覧取得の結果。`failed: true` は「取得できなかった」であって「0件」ではない。
+ *
+ * 背景（2026-08-21 外部レビュー F11）: 以前は Supabase 未設定・HTTP エラー・非配列 JSON・
+ * ネットワーク例外をすべて `[]` に潰していたため、障害時に利用者へ
+ * 「現在、公開済みの Daily Report はありません」と案内していた。呼び出し側が
+ * 「本当に0件」と「障害」を区別できるようにする。
+ */
+export type ReportListResult = { items: ReportListItem[]; failed: boolean };
+
+/**
+ * daily は 42 店 × 2 便（evening_preview / late_update）＝最大 84 行、weekly は 42 行が
+ * 固定 facts_id で存在し続ける。取得後に store_slug で最新1件へ畳むため、
+ * 上限が行数を下回ると「一部店舗が一覧に一生出てこない」。実在しうる全行を取り切る既定値。
+ * （2026-08-21 外部レビュー F6・現象2。以前の既定は 50 だった）
+ */
+const REPORT_LIST_DEFAULT_LIMIT = 200;
+
+/**
  * 全店舗の最新の公開済みレポートを取得（一覧ページ用）。
- * 各店舗の最新1件のみ返す（created_at desc で取得し、フロントで重複除去）。
+ * 各店舗の最新1件のみ返す（並び順の先勝ちで重複除去）。
+ *
+ * 並びは `target_date.desc, updated_at.desc.nullslast, created_at.desc`
+ * （単店取得の fetchLatestPublishedReportByStore と同じ流儀）。
+ * created_at.desc だった旧実装は、固定 facts_id を PATCH し続ける daily/weekly では
+ * 「初回 INSERT 日時」で並べることになり、今日再生成した便より古い行が勝っていた
+ * （2026-08-21 外部レビュー F6・現象1）。
  */
 export async function fetchAllLatestPublishedReports(
   contentType: PublishedReportType,
-  limit = 50,
-): Promise<ReportListItem[]> {
+  limit = REPORT_LIST_DEFAULT_LIMIT,
+): Promise<ReportListResult> {
   const conf = endpointUrl();
-  if (!conf) return [];
+  // Supabase 未設定は「0件」ではなく設定不備＝障害として扱う。
+  if (!conf) return { items: [], failed: true };
   const { endpoint, key } = conf;
   const url =
-    `${endpoint}?select=store_slug,target_date,edition,created_at,mdx_content` +
+    `${endpoint}?select=store_slug,target_date,edition,created_at,updated_at,mdx_content` +
     `&content_type=eq.${encodeURIComponent(contentType)}` +
     `&is_published=eq.true&error_message=is.null&mdx_content=not.eq.` +
-    `&order=created_at.desc&limit=${Math.min(limit, 200)}`;
+    `&order=target_date.desc,updated_at.desc.nullslast,created_at.desc` +
+    `&limit=${Math.min(limit, 200)}`;
   // 一覧ページは 300 秒キャッシュ（他の GET は no-store）。
   const rows = await restGetRows(url, key, { revalidateSeconds: 300 });
-  if (!rows) return [];
+  if (!rows) return { items: [], failed: true };
   const seen = new Set<string>();
   const items: ReportListItem[] = [];
   for (const v of rows) {
@@ -396,10 +424,11 @@ export async function fetchAllLatestPublishedReports(
       target_date: typeof v.target_date === "string" ? v.target_date : "",
       edition: typeof v.edition === "string" ? v.edition : undefined,
       created_at: typeof v.created_at === "string" ? v.created_at : undefined,
+      updated_at: typeof v.updated_at === "string" ? v.updated_at : undefined,
       heading,
     });
   }
-  return items;
+  return { items, failed: false };
 }
 
 /**

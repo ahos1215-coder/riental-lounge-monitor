@@ -16,17 +16,35 @@ type Payload =
   | { ok: true; hasData: true; href: string; title: string; updatedLabel: string; bullets: string[] }
   | { ok: false; error: string };
 
+/**
+ * peakTimeLabel / forecastUpdatedLabel が「値なし」を表すときのプレースホルダ。
+ * lib/store/ssrSummary.ts の PLACEHOLDER_TIME_LABELS と同じ集合（SSR 要約と表示条件を揃える）。
+ * これを弾かないと「予測更新 --:--」のような、更新時刻に見えるだけの空文字がチップになる。
+ */
+const PLACEHOLDER_TIME_LABELS = new Set(["", "-", "—", "--:--", "–"]);
+
+function isMeaningfulTimeLabel(raw: string | null | undefined): boolean {
+  const s = (raw ?? "").trim();
+  return s.length > 0 && !PLACEHOLDER_TIME_LABELS.has(s);
+}
+
 /** リアルタイムカードの「予測ハイライト」と同じ数値から、要約用バッジ文言を最大3つ生成 */
-function mlHighlightChips(snapshot: StoreSnapshot, now: Date = new Date()): string[] {
+function mlHighlightChips(
+  snapshot: StoreSnapshot,
+  now: Date = new Date(),
+  { includeUpdated = true }: { includeUpdated?: boolean } = {},
+): string[] {
   // 相席屋は在店人数を公開しておらず%のみ。ピーク要約も人数ではなく席の埋まり具合(%)で出す。
   const percentMode = isPercentCrowdBrand(snapshot.brand) && !!snapshot.capacity;
   const cap = snapshot.capacity ?? 0;
   const peak = Math.max(0, Math.round(Number(snapshot.peakTotal ?? 0)));
-  const peakTime = snapshot.peakTimeLabel?.trim() || "";
-  const updated = snapshot.forecastUpdatedLabel?.trim() || "";
+  const peakTime = isMeaningfulTimeLabel(snapshot.peakTimeLabel) ? snapshot.peakTimeLabel.trim() : "";
+  const updated = isMeaningfulTimeLabel(snapshot.forecastUpdatedLabel)
+    ? snapshot.forecastUpdatedLabel.trim()
+    : "";
 
   const chips: string[] = [];
-  if (peak > 0 && peakTime && peakTime !== "—") {
+  if (peak > 0 && peakTime) {
     if (percentMode) {
       const pm = snapshot.peakMen != null ? seatFullnessPercent(Math.round(snapshot.peakMen), cap) : null;
       const pw = snapshot.peakWomen != null ? seatFullnessPercent(Math.round(snapshot.peakWomen), cap) : null;
@@ -42,10 +60,10 @@ function mlHighlightChips(snapshot: StoreSnapshot, now: Date = new Date()): stri
         : `最大 ${peak} 人`;
       chips.push(`ピーク目安 ${peakTime}（${detail}）`);
     }
-  } else if (peakTime && peakTime !== "—") {
+  } else if (peakTime) {
     chips.push(`ピーク目安 ${peakTime}`);
   }
-  if (updated && updated !== "—") {
+  if (includeUpdated && updated) {
     chips.push(`予測更新 ${updated}`);
   }
   // ピーク進捗チップ（ピーク前=「あと約…」/ 通過後=「ピークは過ぎました」/ 完了済みの夜=非表示）は
@@ -56,6 +74,41 @@ function mlHighlightChips(snapshot: StoreSnapshot, now: Date = new Date()): stri
     chips.push(progressChip);
   }
   return chips.slice(0, 3);
+}
+
+export type HighlightSection = { heading: string; chips: string[] };
+
+/**
+ * 「ハイライト（要点）」の見出しとチップを決める唯一の場所。
+ *
+ * 背景（2026-08-21 外部レビュー F5）: 以前はこのカードが `forecastStatus` を一切見ずに
+ * チップを描画していた。予測が取れていない夜でも `peakTotal` は実測の最大値で埋まる
+ * （pickPeak は実測を優先する）ため、実測ピークが「予測ハイライト」として出てしまい、
+ * 同じ画面の「予測データを取得できませんでした」「今夜の予測が出たら表示されます」と
+ * 矛盾していた。ここで次の3通りに割り切る。
+ *
+ * 1. 完了済みの夜（昨日 / 先週 / 過去日 / 夜が終わった今日）
+ *    → 値は実測そのものなので「実測ハイライト」と名乗る。予測の更新時刻は出さない。
+ * 2. 進行中の夜で forecastStatus === "ok"
+ *    → 従来どおり「予測ハイライト」。
+ * 3. それ以外（retrying / unavailable / insufficient_history / idle）
+ *    → 予測はまだ無い。実測ピークを予測と名乗らせないため、セクションごと出さない
+ *      （画面上部の StoreStatusMessages が理由を出している）。
+ */
+export function buildHighlightSection(
+  snapshot: StoreSnapshot,
+  now: Date = new Date(),
+): HighlightSection | null {
+  const completed = snapshot.completedNight === true;
+  if (!completed && snapshot.forecastStatus !== "ok") return null;
+
+  const chips = mlHighlightChips(snapshot, now, { includeUpdated: !completed });
+  if (chips.length === 0) return null;
+
+  return {
+    heading: completed ? "この夜の実測ハイライト（要点）" : "予測ハイライト（要点）",
+    chips,
+  };
 }
 
 /**
@@ -153,7 +206,7 @@ export function LatestForecastSummaryCard({
   const bullets = Array.isArray(p.bullets) ? p.bullets.filter(Boolean).slice(0, 3) : [];
   if (bullets.length === 0) return null;
 
-  const highlightChips = snapshot ? mlHighlightChips(snapshot, now) : [];
+  const highlight = snapshot ? buildHighlightSection(snapshot, now) : null;
 
   return (
     <section className="rounded-2xl border border-indigo-500/20 bg-indigo-950/10 p-4">
@@ -174,11 +227,11 @@ export function LatestForecastSummaryCard({
         </Link>
       </div>
 
-      {highlightChips.length > 0 && (
+      {highlight && (
         <div className="mt-3 border-t border-white/[0.06] pt-3">
-          <p className="mb-2 text-[10px] font-medium text-emerald-200/75">予測ハイライト（要点）</p>
+          <p className="mb-2 text-[10px] font-medium text-emerald-200/75">{highlight.heading}</p>
           <div className="flex flex-wrap gap-2">
-            {highlightChips.map((text, i) => (
+            {highlight.chips.map((text, i) => (
               <span
                 key={`${i}-${text.slice(0, 12)}`}
                 className="inline-flex max-w-full items-center rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2.5 py-1 text-[10px] font-medium text-emerald-100/90"

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import {
   fetchAllLatestPublishedReports,
-  isBlogDraftsConfigured,
   type PublishedReportType,
 } from "@/lib/supabase/blogDrafts";
 
@@ -12,14 +11,19 @@ export async function GET(req: Request) {
   const raw = url.searchParams.get("type") ?? "daily";
   const contentType: PublishedReportType = raw === "weekly" ? "weekly" : "daily";
 
-  if (!isBlogDraftsConfigured()) {
+  const { items, failed } = await fetchAllLatestPublishedReports(contentType);
+
+  // 障害（Supabase 未設定 / HTTP エラー / 非配列 JSON / ネットワーク例外）を
+  // 「0件」として 200 で返さない。空と障害が区別できないと、利用者には
+  // 「レポートがまだありません」と嘘の案内が出て、外形監視も気づけない
+  // （2026-08-21 外部レビュー F11）。失敗レスポンスは CDN にも載せない。
+  if (failed) {
     return NextResponse.json(
-      { ok: true, data: [] },
-      { status: 200, headers: { "cache-control": CACHE_HEADER } },
+      { ok: false, error: "reports_unavailable" },
+      { status: 503, headers: { "cache-control": "no-store" } },
     );
   }
 
-  const items = await fetchAllLatestPublishedReports(contentType, 50);
   return NextResponse.json(
     { ok: true, data: items },
     { status: 200, headers: { "cache-control": CACHE_HEADER } },

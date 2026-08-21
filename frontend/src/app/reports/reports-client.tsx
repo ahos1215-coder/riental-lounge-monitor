@@ -18,6 +18,12 @@ type ReportItem = {
   target_date: string;
   edition?: string;
   created_at?: string;
+  /**
+   * カードに出す日時はこちら。daily / weekly は固定 facts_id を上書きし続ける設計なので
+   * created_at は初回作成日のまま動かない（＝8/20 の記事に「05/11」が併記される原因）。
+   * 2026-08-21 外部レビュー F6。
+   */
+  updated_at?: string;
   heading: string | null;
 };
 
@@ -64,6 +70,9 @@ export function ReportsPageClient() {
   const [dailyItems, setDailyItems] = useState<ReportItemWithMeta[]>([]);
   const [weeklyItems, setWeeklyItems] = useState<ReportItemWithMeta[]>([]);
   const [loading, setLoading] = useState(true);
+  // 「取得に失敗した」と「本当に0件」を区別する（2026-08-21 外部レビュー F11）。
+  const [dailyFailed, setDailyFailed] = useState(false);
+  const [weeklyFailed, setWeeklyFailed] = useState(false);
 
   const updateUrl = useCallback(
     (newTab: ReportTab, newRegion: string, newQuery: string) => {
@@ -111,25 +120,42 @@ export function ReportsPageClient() {
           fetch("/api/reports/list?type=weekly", { signal: ac.signal }),
         ]);
 
-        const parse = async (res: Response): Promise<ReportItemWithMeta[]> => {
-          if (!res.ok) return [];
-          const json = (await res.json()) as { ok: boolean; data?: ReportItem[] };
-          if (!json.ok || !Array.isArray(json.data)) return [];
-          return json.data
+        // 上流障害（503 / ok:false / 壊れた JSON）は「0件」ではなく failed として返す。
+        const parse = async (
+          res: Response,
+        ): Promise<{ items: ReportItemWithMeta[]; failed: boolean }> => {
+          if (!res.ok) return { items: [], failed: true };
+          let json: { ok?: boolean; data?: ReportItem[] };
+          try {
+            json = (await res.json()) as { ok?: boolean; data?: ReportItem[] };
+          } catch {
+            return { items: [], failed: true };
+          }
+          if (!json.ok || !Array.isArray(json.data)) return { items: [], failed: true };
+          const items = json.data
             .map((r) => {
               const meta = getStoreMetaBySlugStrict(r.store_slug);
               if (!meta) return null;
               return { ...r, meta };
             })
             .filter(Boolean) as ReportItemWithMeta[];
+          return { items, failed: false };
         };
 
+        const daily = await parse(dailyRes);
+        const weekly = await parse(weeklyRes);
         if (!ac.signal.aborted) {
-          setDailyItems(await parse(dailyRes));
-          setWeeklyItems(await parse(weeklyRes));
+          setDailyItems(daily.items);
+          setDailyFailed(daily.failed);
+          setWeeklyItems(weekly.items);
+          setWeeklyFailed(weekly.failed);
         }
       } catch {
-        /* ignore */
+        // ネットワーク例外。abort（タブ離脱・再実行）は障害ではないので出さない。
+        if (!ac.signal.aborted) {
+          setDailyFailed(true);
+          setWeeklyFailed(true);
+        }
       } finally {
         if (!ac.signal.aborted) setLoading(false);
       }
@@ -138,6 +164,7 @@ export function ReportsPageClient() {
   }, []);
 
   const items = tab === "daily" ? dailyItems : weeklyItems;
+  const failed = tab === "daily" ? dailyFailed : weeklyFailed;
 
   const filtered = useMemo(() => {
     let result = items;
@@ -329,8 +356,20 @@ export function ReportsPageClient() {
             </div>
           )}
 
+          {/* 取得失敗 — 「0件」と混同させない（F11） */}
+          {!loading && failed && (
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-6 text-center">
+              <p className="text-sm text-amber-200">
+                レポート一覧を一時的に取得できませんでした。
+              </p>
+              <p className="mt-1 text-xs text-white/50">
+                しばらく待ってからページを再読み込みしてください（レポート自体が消えたわけではありません）。
+              </p>
+            </div>
+          )}
+
           {/* Empty */}
-          {!loading && filtered.length === 0 && (
+          {!loading && !failed && filtered.length === 0 && (
             <div className="rounded-2xl border border-slate-800 bg-slate-950/80 p-6 text-center">
               {query || region !== "all" ? (
                 <p className="text-sm text-slate-400">
@@ -382,7 +421,7 @@ export function ReportsPageClient() {
                         ` · ${EDITION_LABELS[item.edition] ?? item.edition}`}
                     </span>
                     <span className="text-[10px] text-white/35">
-                      {formatJst(item.created_at)}
+                      {formatJst(item.updated_at ?? item.created_at)}
                     </span>
                   </div>
                 </Link>

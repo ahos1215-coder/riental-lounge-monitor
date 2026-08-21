@@ -5,25 +5,34 @@ import { Sparkles } from "lucide-react";
 import { FadeIn } from "@/components/ui/FadeIn";
 import { STORES } from "@/app/config/stores";
 
+/**
+ * トップのファーストビュー。
+ *
+ * すべての FadeIn に `immediate` を付けている（2026-08-21 外部レビュー F13）。
+ * 既定の FadeIn は SSR HTML に `opacity:0` を焼くため、H1・説明文・CTA が hydration まで
+ * 見えず、mobile の LCP が 4.4〜4.5 秒（LCP 要素はこの中の説明文）だった。
+ * ここは初回 paint から可視でなければならないので演出を外す。
+ * ページ下部（HomeStoreDirectory / HomeTonightTop5 など）の FadeIn は従来どおり。
+ */
 export function HomeHero() {
   return (
-          <FadeIn direction="none" duration={0.6}>
+          <FadeIn direction="none" duration={0.6} immediate>
             <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-black">
               <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(129,140,248,0.45)_0%,transparent_42%),radial-gradient(circle_at_80%_80%,rgba(248,113,113,0.4)_0%,transparent_42%)] opacity-80" />
               <div className="relative z-10 flex flex-col justify-center px-8 py-8 md:px-10 md:py-10">
-                <FadeIn delay={0.1} direction="left">
+                <FadeIn delay={0.1} direction="left" immediate>
                   <p className="text-[11px] font-semibold tracking-[0.25em] text-indigo-200">
                     MEGRIBI — 相席ラウンジの混雑予測
                   </p>
                 </FadeIn>
-                <FadeIn delay={0.2}>
+                <FadeIn delay={0.2} immediate>
                   <h1 className="mt-3 text-3xl font-bold leading-tight tracking-[-0.04em] md:text-4xl">
                     いつ行けば空いてる？
                     <br />
                     <span className="text-indigo-300">AI が教えます。</span>
                   </h1>
                 </FadeIn>
-                <FadeIn delay={0.35}>
+                <FadeIn delay={0.35} immediate>
                   <p className="mt-4 max-w-xl text-sm text-slate-100/80">
                     全国 {STORES.length} 店舗の相席ラウンジの混雑状況をリアルタイムで収集。
                     AI が今夜のピーク時間を予測して、ベストな来店タイミングの参考をお届けします。
@@ -31,7 +40,7 @@ export function HomeHero() {
                 </FadeIn>
 
                 {/* 3つの特徴 — 初見ユーザー向け */}
-                <FadeIn delay={0.4}>
+                <FadeIn delay={0.4} immediate>
                   <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <div className="rounded-xl border border-indigo-500/20 bg-indigo-500/5 px-4 py-3">
                       <p className="text-xs font-bold text-indigo-200">リアルタイム混雑</p>
@@ -48,7 +57,7 @@ export function HomeHero() {
                   </div>
                 </FadeIn>
 
-                <FadeIn delay={0.5}>
+                <FadeIn delay={0.5} immediate>
                 <div className="mt-5 flex flex-wrap gap-3 text-sm">
                   <Link
                     href="/stores"
