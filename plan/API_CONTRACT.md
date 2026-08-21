@@ -1,14 +1,21 @@
 # API_CONTRACT
-Last updated: 2026-03-30 (Round 9 整合: ML 3.0 / schema v4)
+Last updated: 2026-08-21（外部レビュー F15 対応: `/api/range` の `from`/`to` 記述を実装に合わせて訂正）
 Target commit: (see git)
 
 MEGRIBI の公開契約。**Flask（Render）** と **Next.js（Vercel）の LINE Webhook** を含む。互換性を壊さないこと。
 
+**契約の正本は `CLAUDE.md` §3「絶対不変リスト」。** 本ファイルはその詳細版（レスポンス例・エラーコードなど）
+であり、食い違いを見つけたら `CLAUDE.md` を優先する。
+
 ## Global rules
 - Source of truth: Supabase `logs`（Google Sheet / GAS は legacy fallback）。
 - レイヤ構造: Supabase → Flask → Next.js（frontend は Next API routes 経由で backend を呼ぶ）。
-- `/api/range` の公開契約は **`store` / `limit` のみ**。サーバ側の時間フィルタは追加しない。
-- Night window（19:00–05:00）: **店舗 UI** はフロント（`useStorePreviewData.ts`）。**LINE 下書き**は **`insightFromRange.ts`** で取得済み行に対して集計。Flask は夜窓を採らない。
+- `/api/range` の公開契約は `store` と `limit` が必須で、`from`/`to`（日付粒度・任意）も正式に受け付ける
+  （詳細は下記 `GET /api/range` を参照。2026-08-21 訂正: 旧版は必須2パラメータしか公開契約に含めていない
+  と書いていたが誤りだった）。
+  この文書が本来言いたかったのは「Flask に**時刻粒度**の夜窓ロジックを持たせない」であって、
+  「クエリを1つも足すな」ではない。禁止しているのは時刻粒度のサーバー側フィルタだけ。
+- Night window（19:00–05:00）: **店舗 UI** はフロント（`useStorePreviewData.ts`）。**LINE 下書き**は **`insightFromRange.ts`** で取得済み行に対して集計。Flask は時刻粒度の夜窓判定を持たない。
 - `MAX_RANGE_LIMIT` で `limit` を clamp（未指定時は `min(500, MAX_RANGE_LIMIT)`）。
 
 ## Next.js (Vercel) — LINE Webhook
@@ -21,7 +28,8 @@ MEGRIBI の公開契約。**Flask（Render）** と **Next.js（Vercel）の LIN
 - LINE Messaging API の Webhook（`Content-Type: application/json`）。
 - 本番では `x-line-signature` と `LINE_CHANNEL_SECRET` による署名検証（**development のみ** `SKIP_LINE_SIGNATURE_VERIFY=1` でスキップ可。`plan/ENV.md`）。
 - 処理内容（高レベル）: イベント解析 → `BACKEND_URL` 経由で Flask `GET /api/range`（および必要なら `GET /api/forecast_today`）→ インサイト → Gemini 下書き → Supabase `blog_drafts` → LINE 返信。
-- **Flask の `/api/range` 契約は変更しない**（追加クエリを付けない）。窓・集計は Next アプリ層（`insightFromRange.ts`）。
+- **Flask の `/api/range` 契約は変更しない**（`store`/`limit`/`from`/`to` 以外のクエリを勝手に増やさない）。
+  夜窓（時刻粒度）の判定・集計は Next アプリ層（`insightFromRange.ts`）の役割のまま。
 - ブログ配管に **n8n は使わない**。
 
 ## Responses（共通）
@@ -79,14 +87,22 @@ Response: 保存が無い場合は `{}` を返す。
 ## GET /api/range
 生ログを返す。
 
-Query（公開契約）
-- `store` or `store_id`: 店舗識別子
-- `limit`: 返却件数（`MAX_RANGE_LIMIT` で clamp）
+Query（公開契約。実装: `oriental/routes/data_range.py::_parse_range_query`）
+- `store` or `store_id`: 店舗識別子（必須。省略時は `cfg.store_id` にフォールバック）
+- `limit`: 返却件数（`MAX_RANGE_LIMIT` で clamp。未指定時は `min(500, MAX_RANGE_LIMIT)`）
+- `from` / `to`: **任意・日付粒度（`YYYY-MM-DD`）**。2026-08-21 訂正: 旧版は「公開契約に含めない」と
+  書いていたが誤り。実装は `from`/`to` を正式パラメータとして受け付ける：
+  - 両方指定 → その期間（`from` 00:00:00〜`to` 23:59:59、店舗タイムゾーンで解釈しUTCへ変換）。
+  - 片方だけ指定 → その1日分（`from` のみ／`to` のみ、どちらでも同じ日の0時〜24時になる。
+    2026-08-19 修正: 以前は `to` のみ指定すると黙って無視され「最新N件」を返していた）。
+  - 両方省略 → 期間フィルタなし（`limit` 件の最新行）。
+  - `from > to` は `422 invalid-parameters`。
 
 Behavior
 - Supabase には `ts.desc` で問い合わせ、レスポンスは `ts.asc` に整列。
-- サーバ側の時間フィルタは実装しない（夜窓はフロント側）。
-- **`from` / `to` は公開契約に含めない**（バックエンドの legacy 実装に依存しない）。
+- **時刻粒度**のサーバー側フィルタは実装しない（夜窓〈19時境界〉判定はフロント側の役割のまま）。
+  `from`/`to` はあくまで**日付**単位の絞り込みであり、この禁止事項と矛盾しない
+  （禁止していたのは「Flask に夜窓ロジックを持たせること」であって、日付クエリの追加ではなかった）。
 
 Response
 ```json

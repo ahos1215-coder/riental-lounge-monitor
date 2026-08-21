@@ -6,6 +6,8 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
 （/api/* のレート制限・/api/range の総行数上限・スナップショット昇格ガード・監視の全店必須化・週報のJST日付）。
 2026-08-19: 大整理第3弾（Fable棚卸し59件→Sonnet反証→Opus実装・挙動不変）の反映。共通モジュール地図（§7）を新設、
 `/api/range` 契約の実態合わせ、モデル名の正本の移動、vercel.json の実在、テスト規約（conftest / server-only）を追記。
+2026-08-21（第3ラウンド）: §4罠5「GHAのscheduleは間引かれる」を頻度依存の記述に訂正（日次/週次cron5本は
+実測30日間で発火欠落ゼロ。間引きは10分毎などの高頻度cron固有）。
 
 このファイルは「初めてこのリポジトリを開いた AI が3分で全体像を掴み、古いドキュメントに
 騙されないようにする」ためのものです。plan/ 配下の各ファイルより新しく、迷ったときは
@@ -38,7 +40,11 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
 - **バックエンド**: `oriental/`（Flask アプリファクトリ）。`wsgi.py` が `oriental.create_app()` を
   呼ぶだけの薄いエントリポイント。`Procfile`: `env MALLOC_ARENA_MAX=2 gunicorn wsgi:app --timeout 300
   --graceful-timeout 30 --workers ${WEB_CONCURRENCY:-1} --threads ${GUNICORN_THREADS:-8}
-  --max-requests 1500 --max-requests-jitter 200`（2026-07-17 メモリ事件#2で workers 2→1 / threads 4→8。
+  --max-requests 6000 --max-requests-jitter 200`（2026-07-17 メモリ事件#2で workers 2→1 / threads 4→8。
+  2026-08-21 第3ラウンドで `--max-requests` を 1500→6000 に引き上げ:
+  gunicorn は WSGI 呼び出し**前**にカウンタを進めるため `/api/*` レート制限の429もここに乗り、
+  429連打だけで再生成（＝レート制限の記憶とモデルpreloadのやり直し）が速く到達していた
+  （詳細・根拠は `Procfile` 本文コメント）。
   `--preload` は意図的に未使用。fork-after-thread hazard を避けるため）。
 - **収集スクリプト**: リポジトリ直下の `multi_collect.py`（`STORES` / `AISEKIYA_STORES` /
   `PREF_COORDS` を定義。`oriental/routes/tasks.py` が import して使う）。
@@ -160,11 +166,21 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
    UIには表示しない（「※推計値」を免責ページに明記する方針）。
 4. **`frontend/src/data/stores.json` が店舗マスタの唯一の正本。** 店舗の追加・削除はこのファイルと
    `oriental/utils/stores.py`（Python側）の両方に影響する。片方だけ直すと店舗数不整合になる。
-5. **GHAの`schedule:`は間引かれる（信用しすぎない）。** CDN warmingで実測したところ、10分毎・
-   19:00-23:50想定の60回に対し実際の発火は5回（8.3%）だった。これが「主経路をローカルPCの
-   Task Schedulerへ移す」という判断の直接的な根拠になった。ワークフローのコメントに
-   「動くはず」と書いてあっても、実際にどちらが主経路かは `docs/LOCAL_LLM_SETUP.md` /
-   `plan/CDN_WARMING_LOCAL.md` で確認すること。
+5. **GHAの`schedule:`の間引きは高頻度cron固有の問題で、日次/週次cronは間引かれない
+   （2026-08-21・外部レビュー第3ラウンドで訂正。以前この項は「GHAのscheduleは信用しすぎない」と
+   頻度を区別せず一般化していたが、それ自体が事実誤認だった）。**
+   公開Actions APIで直近30日を実測したところ、日次・週次の5本（`train-ml-model` 34/34、
+   `check-daily-published` 30/30、`check-weekly-published` 7/7、`generate-public-facts` 31/31、
+   `forecast-accuracy-track` 30/30）は**発火欠落ゼロ**だった。間引かれるのは10分毎のような
+   **高頻度cron固有**の現象で、`warm-cdn`（10分毎想定）は実測15〜34%（2026-07時点の8.3%からは改善）。
+   自分で確かめ直すには公開Actions APIを叩く
+   （例: `https://api.github.com/repos/<owner>/<repo>/actions/workflows/<file>.yml/runs?per_page=100`
+   を `created_at` でフィルタし、`event=schedule` の run 数を期待回数と比較する）。
+   「日次もGHAは信用できない」という誤った前提で不要なローカル移管を増やさないこと
+   （ただし過去の判断＝CDN warmingやsnapshot保存の主経路をローカルTask Schedulerへ移したこと
+   自体は覆さない。**snapshotをローカルへ移した理由は発火の"欠落"ではなく"遅延"**——GHA schedule
+   の遅延で開店後に撮れて精度計測が汚染したため——であり、ここで訂正した「欠落ゼロ」の実測と
+   矛盾しない。両者を混同しないこと）。
 6. **ドキュメントのピンポイントな値（モデル名等）は最終的にコードで確認すること。**
    実例: 本番モデルは2026-07-08に `gemma4:12b`→`gemma4:e4b` へ変更されたが、
    `docs/LOCAL_LLM_SETUP.md` 本文は2026-07-11まで旧名のままだった（修正済み）。**モデル名の正本は

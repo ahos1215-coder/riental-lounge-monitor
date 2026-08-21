@@ -5,8 +5,8 @@
 > 指示書は `plan/EXTERNAL_REVIEW_2026-08-21.md`。人間（オーナー）とClaudeも状況確認のためにここを読みます。
 
 STATUS: COMPLETE
-UPDATED: 2026-08-21 04:48 JST
-NEXT: `plan/EXTERNAL_REVIEW_ROUND2_FINDINGS.md` をオーナーが確認する
+UPDATED: 2026-08-21 14:51 JST
+NEXT: 第3ラウンド完了。修正後の次回定期実行（snapshot/score、daily/weekly monitor、2026-08-26週報）をオーナー側で確認する
 
 ---
 
@@ -177,11 +177,11 @@ Backend、Frontend、ML/バッチ、監視を静的に追跡し、P1で実見し
 
 ## 第3ラウンド（出荷した12件の修正の検証）
 
-R3_STATUS: NOT_STARTED
-R3_UPDATED: 2026-08-21
-R3_NEXT: `plan/EXTERNAL_REVIEW_ROUND3_2026-08-21.md` を読み、§5 の V1 から順に検証する
-R3_DONE: （まだ無し）
-R3_FINDINGS: （まだ無し）
+R3_STATUS: COMPLETE
+R3_UPDATED: 2026-08-21 14:51 JST
+R3_NEXT: なし（最終レポート `plan/EXTERNAL_REVIEW_ROUND3_FINDINGS.md` を確認待ち）
+R3_DONE: `plan/EXTERNAL_REVIEW_ROUND3_2026-08-21.md` を最初から最後まで全文読了／12件を現行コード・公開本番GET・raw SSR・ハイドレーション後DOM・公開GitHub Actions履歴・一次資料で検証／V1〜V10へ回答／テスト経路と本番経路の差を棚卸し／指定4部構成の最終レポートを作成／`git diff --check` 成功
+R3_FINDINGS: FIXED 3件（F5/F6/F13）、PARTIAL 8件（F1/F4/F7/F8/F10/F11/F14/F15）、NOT FIXED 1件（F3）、REGRESSION 0件。F3は文書化された既定async経路が完了結果を返さない。F4はGunicorn worker再生成でrate bucketが消える。F1/F8/F14は修正後の本番定期実行がまだ0回。F10は19時切替時に旧fetchが新夜stateを再上書きできる。F11はstore-summaryの503を店舗画面が捨て、F15は現役API_CONTRACTに逆の契約が残る。F7は通常本番では線が繋がるが、5分超遅延/bucket境界では同症状が残るため依頼書の定義どおりPARTIAL。
 
 依頼書: `plan/EXTERNAL_REVIEW_ROUND3_2026-08-21.md`
 最終レポートの出力先: `plan/EXTERNAL_REVIEW_ROUND3_FINDINGS.md`

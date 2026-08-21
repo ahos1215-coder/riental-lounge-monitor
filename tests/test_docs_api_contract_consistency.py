@@ -26,11 +26,21 @@ from oriental.routes.data_range import _parse_range_query
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # 「入口」と位置づけている文書（CLAUDE.md は正本なので対象外＝ここだけが詳細を書いてよい）
+#
+# 2026-08-21 追記: 当初この4本だけを見ていたが、`plan/API_CONTRACT.md`（詳細な API 仕様書）と
+# `plan/API_CURRENT.md`（それを参照する補足メモ）はどちらも対象外だった。README 等の
+# 「トップレベルの入口」だけを ENTRY_DOCS と呼んでいたため、その先に読み進めた先にある
+# 詳細仕様書が漏れた——「入口文書を直せば十分」という思い込みの穴で、この2本には
+# 同じ「from/to は公開契約に含めない」という誤った断言が独立に残っており、13件緑のまま
+# すり抜けていた（外部レビュー F15・第3ラウンド）。詳細仕様書ほど誤読の実害が大きい
+# （外部レビュアーが2ラウンド連続でここを引用して誤読した）ため、以後は ENTRY_DOCS に含める。
 ENTRY_DOCS = (
     REPO_ROOT / "README.md",
     REPO_ROOT / "plan" / "INDEX.md",
     REPO_ROOT / "plan" / "CODEx_PROMPTS.md",
     REPO_ROOT / "plan" / "ARCHITECTURE.md",
+    REPO_ROOT / "plan" / "API_CONTRACT.md",
+    REPO_ROOT / "plan" / "API_CURRENT.md",
 )
 
 # 復活してはいけない断言（実装と矛盾する）

@@ -1,7 +1,9 @@
 # `/api/current` の方針メモ
-Last updated: 2026-03-23
+Last updated: 2026-08-21（外部レビュー F15 対応: `/api/range` に触れた1行を実装に合わせて訂正）
 
-> **正本の契約**は引き続き `plan/API_CONTRACT.md` と `plan/DECISIONS.md`。本ファイルは **`/api/current` だけ**の位置づけ・将来案を短く固定する。
+> **契約の正本は `CLAUDE.md` §3「絶対不変リスト」**。`plan/API_CONTRACT.md` と `plan/DECISIONS.md` はその詳細版。
+> 本ファイルは **`/api/current` だけ**の位置づけ・将来案を短く固定する（`/api/range` の契約そのものは
+> `plan/API_CONTRACT.md` を見ること。ここでは `/api/current` の文脈でしか触れない）。
 
 ---
 
@@ -26,7 +28,11 @@ Last updated: 2026-03-23
 
 ## やらないこと
 
-- `/api/range` に引数を足す・サーバ側で夜窓だけ返す（既存 DECISIONS どおり）。
+- `/api/current` にクエリを足す（`/api/range` の末尾行や将来の専用メタ API に寄せる方針）。
+- `/api/range` に**時刻粒度**の引数を足してサーバ側で夜窓だけ返すこと（既存 DECISIONS どおり。
+  2026-08-21 訂正: `/api/range` 自体は `from`/`to`〈日付粒度〉を既に正式サポートしている。
+  ここで「やらない」としているのは時刻粒度の夜窓ロジックをFlaskに持たせることで、
+  日付単位のクエリ追加ではない。詳細は `plan/API_CONTRACT.md`）。
 - Next.js から Supabase 直参照（レイヤ方針どおり）。
 
 ---
