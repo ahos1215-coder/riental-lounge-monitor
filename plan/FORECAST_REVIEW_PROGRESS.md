@@ -11,3 +11,15 @@ DONE: 指示書全文読了。(a)〜(h)をCONFIRMED/OVERSTATED/REFUTED/INCOMPLET
 FINDINGS: 最終結論は、現行予測は方向感の参考にはなるが公開精度根拠は未監査。(1) Aとbaselineのslot集合が異なり39/42勝利とweight入力は無効、(2) `live_mae`は18:10 pre-openで開店後ユーザー予測ではない、(3) valid nightのfilter順とUIのn表示が不正、(4) served/clamp済み値の自己参照を確認、ただし0.167/0.309は一般解でない、(5) `next_morning_rain`は84/84重要度0で主因説を反証、代わりに全84モデルが使う `total_slope_30min` のone-step/full-night時点不一致を高優先で発見、(6) 最初の1日はproduction weight自動更新を凍結し現行値を保持する。
 
 最終レポートの出力先: `plan/FORECAST_REVIEW_FINDINGS.md`
+
+---
+
+## 凍結設計の討議（2026-08-22・両AI突き合わせ）
+
+DEBATE_STATUS: NOT_STARTED
+DEBATE_UPDATED: 2026-08-22
+DEBATE_NEXT: `plan/FORECAST_FREEZE_DEBATE_2026-08-22.md` を読み、§3の批評 → Q1〜Q7 → 最終推奨案の順で回答
+DEBATE_DONE: （まだ無し）
+
+依頼書: `plan/FORECAST_FREEZE_DEBATE_2026-08-22.md`
+回答の出力先: `plan/FORECAST_FREEZE_DEBATE_FINDINGS.md`
