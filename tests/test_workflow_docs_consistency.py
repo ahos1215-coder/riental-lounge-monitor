@@ -95,6 +95,8 @@ MONITOR_WORKFLOWS = {
     "check-daily-published.yml": "scripts/monitor/check_daily_published.py",
     "check-weekly-published.yml": "scripts/monitor/check_weekly_published.py",
     "check-collection-heartbeat.yml": "scripts/monitor/check_collection_heartbeat.py",
+    # 2026-08-22 重み凍結(F-5): hash不変監視。restore は workflow_dispatch 専用
+    "check-blend-weights-freeze.yml": "scripts/monitor/check_blend_weights_freeze.py",
 }
 
 

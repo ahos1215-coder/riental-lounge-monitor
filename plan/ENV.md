@@ -283,3 +283,12 @@ Task Scheduler `MEGRIBI-warm-cdn` が主経路（GHA `warm-cdn.yml` は実測発
   出しているが、いずれも本番ランタイムに影響しないビルド/テストツール側の脆弱性であり、今回の
   指示スコープ（lightgbm/requests/flask/next のみ）に含まれないため未対応。別途 `npm audit fix`
   の影響範囲を確認した上で対応を検討すること。
+
+## BLEND_WEIGHTS_MODE（2026-08-22 追加・重み凍結）
+
+- 読み手: `scripts/score_forecasts.py`（配信重み `accuracy/blend_weights.json` の唯一の書き手）
+- 値: `frozen`（**既定**。未設定・空文字も frozen）/ `legacy_daily`（緊急時のみ：旧来の毎晩自動更新へ戻す）
+- それ以外の値（typo 含む）は fail-closed：配信ファイルに書かず exit 1
+- 配線: `.github/workflows/forecast-accuracy-track.yml` が `vars.BLEND_WEIGHTS_MODE || 'frozen'` で渡す
+  （GitHub の Repository Variable を `legacy_daily` にすると次回 06:10 の run から反映。即時反映は workflow_dispatch）
+- 背景と解除条件の正本: `plan/FORECAST_FREEZE_DEBATE_FINDINGS.md`（F-1〜F-8）

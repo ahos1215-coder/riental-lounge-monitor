@@ -1,0 +1,69 @@
+name: Check blend weights freeze integrity
+
+# 2026-08-22 重み凍結（外部レビュー討議 plan/FORECAST_FREEZE_DEBATE_FINDINGS.md F-5）:
+# blend_weights の自動更新を凍結した後、配信ファイル accuracy/blend_weights.json
+# （oriental/ml/forecast_service.py が読む canonical）が本当に1バイトも変わっていないかを
+# score_forecasts.py 自身の成否とは別経路で監視する。score ジョブが「成功」を返しても、
+# canonical の中身が変わっていれば凍結は破られている——「存在する」だけでは別内容への
+# 上書きが緑になってしまうため、SHA-256 の不変性そのものを見る（判定ロジックは
+# scripts/monitor/check_blend_weights_freeze.py、テストは
+# tests/test_monitor_blend_weights_freeze.py）。
+#
+# 通常実行（schedule）は read-only。復元（--restore）は workflow_dispatch の
+# 明示入力からのみ実行され、schedule からは絶対に渡らない（自動復元はしない設計）。
+#
+# 頻度は6時間毎。CLAUDE.md 罠#5: GitHub Actions の schedule 間引きは10分毎のような
+# 高頻度cron固有の問題で、日次/週次相当の低頻度cronは実測で発火欠落ゼロだった。
+# 6時間毎はその中間だが、間引かれても数時間の遅延で済み、凍結監視としては十分な頻度。
+
+on:
+  schedule:
+    - cron: "23 */6 * * *" # 6時間毎（00:23 / 06:23 / 12:23 / 18:23 UTC）。他cronとの秒単位衝突を避けるためオフセット
+  workflow_dispatch:
+    inputs:
+      restore:
+        description: "true にすると検証付きで canonical を最新バックアップ世代から復元する（通常は false のまま）"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      detail: ${{ steps.check.outputs.detail }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check blend_weights freeze integrity
+        id: check
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          FORECAST_MODEL_BUCKET: ${{ vars.FORECAST_MODEL_BUCKET }}
+        # 判定/復元ロジックの実体は scripts/monitor/check_blend_weights_freeze.py（stdlib のみ）。
+        # --restore は workflow_dispatch で restore=true を明示したときだけ渡す。
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event.inputs.restore }}" = "true" ]; then
+            echo "::notice::--restore で実行します（workflow_dispatch 明示指定）"
+            python3 scripts/monitor/check_blend_weights_freeze.py --restore
+          else
+            python3 scripts/monitor/check_blend_weights_freeze.py
+          fi
+
+  notify-on-failure:
+    needs: [check]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "blend_weights 凍結監視"
+      custom_body: |
+        ⚠️ blend_weights の凍結が破られたか、監視/復元ジョブ自体が失敗した可能性があります。
+        ${{ needs.check.outputs.detail }}

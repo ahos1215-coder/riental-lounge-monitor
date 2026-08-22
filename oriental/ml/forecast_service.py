@@ -277,12 +277,30 @@ class ForecastService:
         return weights
 
     def _blend_weight_for(self, store_id: str) -> float:
-        """店舗の w_ml を返す。ブレンド無効/重み未定義なら 1.0（純ML）。"""
+        """店舗の w_ml を返す。ブレンド無効なら 1.0（純ML）。
+
+        重み未定義時のデフォルトは2通りに分かれる（2026-08-22 重み凍結・F-4、
+        plan/FORECAST_FREEZE_DEBATE_FINDINGS.md）:
+        - weights が非空（Storage取得成功）なのに対象 store_id のキーだけ無い＝新店:
+          0.5 を返す。凍結中は canonical (accuracy/blend_weights.json) に新しいキーが
+          増えないため、このケースを直さないと新店が凍結解除まで恒久的に純MLになる穴が
+          あった。0.5 は scripts/score_forecasts.py の blend_weight() が観測夜ゼロの店に
+          与える事前値と同一で揃えており、かつ新店の最初の約7日は7日前ベースライン自体が
+          無く oriental/ml/postprocess.py の blend が該当スロットを skip して結局MLの
+          ままなので、実挙動への影響は最小（存在しないベースラインを無理に混ぜない）。
+        - weights が空 {}（Storage未作成/取得失敗）＝全店共通のフォールバック:
+          従来どおり 1.0 のまま。Storage 障害時に新店だけ挙動が変わらないよう、
+          ここは変更しない。
+        """
         if os.getenv("FORECAST_BASELINE_BLEND", "1").strip() != "1":
             return 1.0
         weights = self._fetch_blend_weights()
+        if not weights:
+            return 1.0
         try:
-            w = float(weights.get(store_id, 1.0))
+            if store_id not in weights:
+                return 0.5
+            w = float(weights[store_id])
         except (TypeError, ValueError):
             return 1.0
         if not np.isfinite(w):

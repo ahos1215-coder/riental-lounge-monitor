@@ -482,7 +482,9 @@ def test_service_blend_weight_lookup_and_toggle(monkeypatch):
     service._blend_weights = {"ol_gangnam": 0.2}
     service._blend_weights_at = _time.time()
     assert service._blend_weight_for("ol_gangnam") == 0.2
-    assert service._blend_weight_for("ol_unknown") == 1.0  # default fallback
+    # 2026-08-22 F-4: 重み凍結に伴い、weights が非空でキーだけ無い店（=凍結中の新店）は
+    # blend_weight() の n=0 事前値と同じ 0.5 に変更（map 全体が空/取得失敗は従来どおり 1.0）。
+    assert service._blend_weight_for("ol_unknown") == 0.5  # new-store prior under freeze
 
     monkeypatch.setenv("FORECAST_BASELINE_BLEND", "0")
     assert service._blend_weight_for("ol_gangnam") == 1.0  # blend disabled -> pure ML

@@ -35,6 +35,7 @@ Stdlib only. Requires SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY.
 from __future__ import annotations
 
 import functools
+import hashlib
 import json
 import os
 import sys
@@ -50,7 +51,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # シブリングとしてベアインポートする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _ops_notify import notify_ops  # noqa: E402
-from _stores_common import all_slugs, slug_to_store_id  # noqa: E402
+from _stores_common import all_slugs, slug_to_store_id, slug_to_store_id_map  # noqa: E402
 from _supabase_common import _load_env, auth_headers, storage_get, storage_put  # noqa: E402
 
 # ログ接頭辞だけを固定した別名。既存テストの monkeypatch.setattr(sf, "_storage_get", ...)
@@ -437,6 +438,278 @@ def compute_blend_weights(
         bl_mae = sum(a["bl"]) / n
         weights[store_id] = round(blend_weight(ml_mae, bl_mae, n), 4)
     return weights
+
+
+# --------------------------------------------------------------------------- #
+# 重み凍結 (2026-08-22 重み凍結。設計討議: plan/FORECAST_FREEZE_DEBATE_FINDINGS.md F-1/F-3、
+# 統合裁定: plan/FORECAST_FREEZE_DEBATE_2026-08-22.md 末尾【統合裁定】)
+#
+#   従来 compute_blend_weights() の結果（= 上の「legacy candidate」）は毎晩無条件で
+#   配信 canonical (accuracy/blend_weights.json) に上書きされていた。だが score 自身が
+#   汚染された成績（capture汚染・重みの効果そのものが未計測）を翌晩の重みへそのまま
+#   フィードバックする self-flattery loop になっていたため、配信値をいったん凍結する。
+#
+#   BLEND_WEIGHTS_MODE=frozen（既定・未設定/空文字も frozen）では canonical への
+#   PUT は常に 0 回。legacy candidate は毎晩計算はするが、observe 専用の
+#   shadow（accuracy/blend_weights_shadow/legacy.json）へ書くだけ。
+#   legacy_daily は緊急ロールバック専用（正常な解除は将来の weekly writer 実装後に
+#   frozen -> weekly で行う。legacy_daily に戻すことを「解除」とは呼ばない。F-7）。
+#   上記2値以外（"weekly" 含む・typo含む）は fail-closed: canonical には触れず、
+#   shadow 等できる範囲は書いた上で最終的にジョブを RED にする。
+#
+#   compute_blend_weight() / blend_weight() 自体（重みの算出式）はここでは一切変更しない。
+# --------------------------------------------------------------------------- #
+BLEND_WEIGHTS_MODE_DEFAULT = "frozen"
+BLEND_WEIGHTS_MODE_ALLOWED = ("frozen", "legacy_daily")
+
+CANONICAL_BLEND_WEIGHTS_PATH = "accuracy/blend_weights.json"
+SHADOW_BLEND_WEIGHTS_PATH = "accuracy/blend_weights_shadow/legacy.json"
+FREEZE_GENERATIONS_PREFIX = "accuracy/blend_weights_freeze/generations/"
+FREEZE_MANIFEST_PATH = "accuracy/blend_weights_freeze/current.json"
+SHADOW_NIGHTS_KEEP = 60  # summary.json の SUMMARY_KEEP と同じ流儀の直近60夜cap
+
+
+def _resolve_blend_weights_mode(raw: str) -> tuple[str, bool]:
+    """BLEND_WEIGHTS_MODE を解決する。未設定/空文字は既定 "frozen"。
+
+    許可値は "frozen" と "legacy_daily" のみ。それ以外（"weekly"（将来の正常解除先だが
+    今回は未実装）・typo含む）は無効とし、(raw の strip 済み文字列, False) を返す
+    ―― 呼び出し側は False のとき canonical に一切触れず fail-closed する。
+    """
+    stripped = (raw or "").strip()
+    if stripped == "":
+        return BLEND_WEIGHTS_MODE_DEFAULT, True
+    if stripped in BLEND_WEIGHTS_MODE_ALLOWED:
+        return stripped, True
+    return stripped, False
+
+
+def _read_manifest_doc(bucket: str, url: str, key: str) -> dict | None:
+    """freeze manifest (accuracy/blend_weights_freeze/current.json) を読む。
+    無い/壊れていれば None（呼び出し側は「manifest 無し」＝ inactive 相当として扱う）。
+    """
+    raw = _storage_get(bucket, FREEZE_MANIFEST_PATH, url, key)
+    if raw is None:
+        return None
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        return None
+    return doc if isinstance(doc, dict) else None
+
+
+def _read_active_freeze_id(bucket: str, url: str, key: str) -> str | None:
+    """manifest が active なら freeze_id を、そうでなければ None を返す（読み取り専用）。"""
+    manifest = _read_manifest_doc(bucket, url, key)
+    if isinstance(manifest, dict) and manifest.get("state") == "active":
+        fid = manifest.get("freeze_id")
+        return fid if isinstance(fid, str) else None
+    return None
+
+
+def _known_store_ids() -> set[str] | None:
+    """店舗マスタ(stores.json)から既知の store_id 集合を返す。読めなければ None
+    （legacy_daily の candidate 検証はこの場合 fail-closed=無効として扱う）。"""
+    try:
+        return set(slug_to_store_id_map().values())
+    except Exception as exc:  # noqa: BLE001
+        print(f"[score][freeze] warn: store master unavailable for candidate validation ({str(exc)[:120]})")
+        return None
+
+
+def _candidate_valid(weights: dict, known_ids: set[str] | None) -> bool:
+    """legacy candidate が canonical へ書ける状態か: 非空・全キーが既知 store_id・
+    全値が有限で 0..1。店舗マスタが読めない(known_ids is None)場合も fail-closed で
+    無効扱いにする（検証できないものを配信へは出さない）。"""
+    if not isinstance(weights, dict) or not weights:
+        return False
+    if known_ids is None:
+        return False
+    for store_id, v in weights.items():
+        if store_id not in known_ids:
+            return False
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            return False
+        fv = float(v)
+        if fv != fv or fv in (float("inf"), float("-inf")):
+            return False
+        if not (0.0 <= fv <= 1.0):
+            return False
+    return True
+
+
+def _run_frozen_cycle(bucket: str, url: str, key: str) -> tuple[str | None, bool]:
+    """BLEND_WEIGHTS_MODE=frozen の毎晩の状態機械。canonical には一切書き込まない。
+
+    戻り値は (この実行後にactiveなfreeze_id または None, 成功したか)。
+    正常系は3通り: (1) 初回/inactive後の再凍結 -> 新しい世代を作りmanifestをactive化、
+    (2) 既にactiveで同じsha -> 冪等(何もしない)、(3) canonicalがまだ一度も存在しない
+    (bootstrap) -> 何もせず成功扱い(凍結対象自体が無いだけで異常ではない)。
+    異常系は1通り: activeなのにcanonicalのバイト列が変わっていた(凍結中の改変)
+    -> 何も書かずexit1相当で失敗を返す。
+    """
+    manifest = _read_manifest_doc(bucket, url, key)
+    manifest_active = isinstance(manifest, dict) and manifest.get("state") == "active"
+
+    raw = _storage_get(bucket, CANONICAL_BLEND_WEIGHTS_PATH, url, key)
+    if raw is None:
+        if manifest_active:
+            # 一度でも凍結された(=canonicalが存在していたはず)のに今は消えている ->
+            # bootstrap ではなく実害のある異常。
+            print(
+                "[score][freeze][ALERT] frozen: canonical blend_weights.json is missing while a "
+                f"freeze is active (freeze_id={manifest.get('freeze_id')}) — investigate immediately."
+            )
+            return manifest.get("freeze_id"), False
+        print("[score][freeze] frozen: no canonical blend_weights.json yet (bootstrap) — nothing to freeze this cycle.")
+        return None, True
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except Exception:  # noqa: BLE001
+        print("[score][freeze] frozen: canonical blend_weights.json is not valid JSON — refusing to touch it.")
+        return (manifest.get("freeze_id") if manifest_active else None), False
+    if not isinstance(doc, dict) or not isinstance(doc.get("weights"), dict):
+        print("[score][freeze] frozen: canonical blend_weights.json has no dict 'weights' — refusing to touch it.")
+        return (manifest.get("freeze_id") if manifest_active else None), False
+
+    sha = hashlib.sha256(raw).hexdigest()
+
+    if manifest_active:
+        if manifest.get("freeze_id") == sha:
+            print(f"[score][freeze] frozen: idempotent (freeze_id={sha} already active).")
+            return sha, True
+        print(
+            "[score][freeze][ALERT] frozen: canonical blend_weights.json changed while frozen! "
+            f"manifest freeze_id={manifest.get('freeze_id')} but current sha={sha} — refusing to "
+            "overwrite manifest/backup, investigate immediately."
+        )
+        return manifest.get("freeze_id"), False
+
+    # manifest 無し or inactive -> 新しい世代(sha付きpath)を作る。sha が変われば path も
+    # 変わるので、旧世代を誤って掴む(存在したらskipする)ことはない。
+    gen_path = f"{FREEZE_GENERATIONS_PREFIX}{sha}.json"
+    try:
+        _storage_put(bucket, gen_path, raw, url, key)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[score][freeze] frozen: backup PUT failed: {str(exc)[:150]}")
+        return None, False
+    readback = _storage_get(bucket, gen_path, url, key)
+    if readback is None or hashlib.sha256(readback).hexdigest() != sha:
+        print("[score][freeze] frozen: backup read-back hash mismatch — manifest not written, canonical untouched.")
+        return None, False
+
+    store_count = len(doc.get("weights") or {})
+    manifest_payload = {
+        "schema": 1,
+        "state": "active",
+        "freeze_id": sha,
+        "activated_at": datetime.now(timezone.utc).isoformat(),
+        "source_generated_at": doc.get("generated_at"),
+        "backup_path": gen_path,
+        "store_count": store_count,
+    }
+    try:
+        _storage_put(
+            bucket, FREEZE_MANIFEST_PATH,
+            json.dumps(manifest_payload, ensure_ascii=False).encode("utf-8"), url, key,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[score][freeze] frozen: manifest PUT failed after backup succeeded: {str(exc)[:150]}")
+        return None, False
+    print(f"[score][freeze] frozen: activated new freeze_id={sha} (store_count={store_count}).")
+    return sha, True
+
+
+def _run_legacy_daily_cycle(
+    bucket: str, url: str, key: str, weights: dict[str, float], weights_payload: dict,
+) -> tuple[str | None, bool]:
+    """BLEND_WEIGHTS_MODE=legacy_daily（緊急ロールバック専用）。
+
+    candidate が非空・既知store_id・0..1有限のときだけ canonical へ PUT + read-back
+    検証する。無効(空含む)なら canonical には一切触れず失敗を返す
+    （旧実装は重み0件でも空 JSON を書いていた——ここで回帰させない）。
+    有効 PUT に成功したら、freeze manifest が active なら inactive 化する。
+    """
+    manifest = _read_manifest_doc(bucket, url, key)
+    manifest_active = isinstance(manifest, dict) and manifest.get("state") == "active"
+    prior_active_id = manifest.get("freeze_id") if manifest_active else None
+
+    known_ids = _known_store_ids()
+    if not _candidate_valid(weights, known_ids):
+        print("[score][freeze] legacy_daily: candidate is empty/invalid — canonical left untouched, treating as failure.")
+        return prior_active_id, False
+
+    payload_bytes = json.dumps(weights_payload, ensure_ascii=False).encode("utf-8")
+    try:
+        _storage_put(bucket, CANONICAL_BLEND_WEIGHTS_PATH, payload_bytes, url, key)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[score][freeze] legacy_daily: canonical PUT failed: {str(exc)[:150]}")
+        return prior_active_id, False
+    readback = _storage_get(bucket, CANONICAL_BLEND_WEIGHTS_PATH, url, key)
+    try:
+        readback_ok = readback is not None and json.loads(readback.decode("utf-8")) == weights_payload
+    except Exception:  # noqa: BLE001
+        readback_ok = False
+    if not readback_ok:
+        print("[score][freeze] legacy_daily: canonical read-back mismatch after PUT — investigate.")
+        return prior_active_id, False
+    print(f"[score] blend_weights: published to canonical (legacy_daily mode), {len(weights)} stores.")
+
+    if manifest_active:
+        deactivated = dict(manifest)
+        deactivated["state"] = "inactive"
+        try:
+            _storage_put(
+                bucket, FREEZE_MANIFEST_PATH,
+                json.dumps(deactivated, ensure_ascii=False).encode("utf-8"), url, key,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[score][freeze] legacy_daily: manifest deactivate PUT failed: {str(exc)[:150]}")
+            return prior_active_id, False
+        print(f"[score][freeze] legacy_daily: manifest freeze_id={manifest.get('freeze_id')} marked inactive.")
+        return None, True
+    return prior_active_id, True
+
+
+def _write_blend_shadow(
+    bucket: str, url: str, key: str,
+    night_date: str, weights: dict[str, float], nights_used: int,
+    active_freeze_id: str | None,
+) -> bool:
+    """legacy candidate を毎晩 shadow(observe専用)へ書く。全モード共通・
+    publish_eligible は常に false（canonical への昇格材料ではないことを明示する）。
+    同じ night_date は上書き(upsert)し、直近 SHADOW_NIGHTS_KEEP 夜だけ残す。
+    """
+    existing = _storage_get(bucket, SHADOW_BLEND_WEIGHTS_PATH, url, key)
+    nights: dict = {}
+    if existing is not None:
+        try:
+            loaded = json.loads(existing.decode("utf-8"))
+            if isinstance(loaded, dict) and isinstance(loaded.get("nights"), dict):
+                nights = loaded["nights"]
+        except Exception:  # noqa: BLE001
+            nights = {}
+    nights[night_date] = {"weights": weights, "nights_used": nights_used}
+    kept_keys = sorted(nights.keys(), reverse=True)[:SHADOW_NIGHTS_KEEP]
+    nights = {k: nights[k] for k in kept_keys}
+
+    payload = {
+        "schema": 1,
+        "publish_eligible": False,
+        "source_metric": "served_live_mae_legacy",
+        "freeze_id": active_freeze_id,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "nights": nights,
+    }
+    try:
+        _storage_put(
+            bucket, SHADOW_BLEND_WEIGHTS_PATH,
+            json.dumps(payload, ensure_ascii=False).encode("utf-8"), url, key,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(f"[score][freeze] shadow PUT failed: {str(exc)[:150]}")
+        return False
+    return True
 
 
 def _write_step_summary(
@@ -919,9 +1192,13 @@ def main() -> int:
     summary["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
     _storage_put(bucket, "accuracy/scores/summary.json", json.dumps(summary, ensure_ascii=False).encode("utf-8"), supabase_url, key)
 
-    # --- closed-loop feedback: 直近最大7夜の本番スコアから店舗別ブレンド重みを算出し、
-    # serving が取り込む accuracy/blend_weights.json を更新する（本丸③）。
+    # --- closed-loop feedback: 直近最大7夜の本番スコアから店舗別ブレンド重み(legacy
+    # candidate)を算出する（本丸③）。2026-08-22 重み凍結（上のヘルパー群のdocstring参照）
+    # により、これを配信 canonical (accuracy/blend_weights.json) へ書くかどうかは
+    # BLEND_WEIGHTS_MODE 次第で、既定(frozen)では書かない。
     weights: dict[str, float] = {}
+    recent_dates: list[str] = []
+    freeze_ok = True
     try:
         # 汚染夜(contaminated_capture=true)はブレンド重み算出から除外する
         # （self-flattery loop into serving を断つ。モジュールdocstring参照）。
@@ -941,17 +1218,51 @@ def main() -> int:
             "nights_excluded_contaminated": excluded_contaminated,
             "weights": weights,
         }
-        _storage_put(
-            bucket, "accuracy/blend_weights.json",
-            json.dumps(weights_payload, ensure_ascii=False).encode("utf-8"), supabase_url, key,
-        )
         if weights:
             ws = sorted(weights.values())
-            print(f"[score] blend_weights: {len(weights)} stores, w_ml {ws[0]:.2f}..{ws[-1]:.2f} (nights_used={len(recent_dates)})")
+            print(f"[score] blend_weights candidate: {len(weights)} stores, w_ml {ws[0]:.2f}..{ws[-1]:.2f} (nights_used={len(recent_dates)})")
         else:
-            print("[score] blend_weights: no per-store scores yet (wrote empty weights)")
-    except Exception as exc:  # noqa: BLE001 — 重み算出失敗は scoring 本体を落とさない
+            print("[score] blend_weights candidate: no per-store scores yet (empty)")
+    except Exception as exc:  # noqa: BLE001 — 重み算出失敗自体は scoring 本体(score/summary)を
+        # 落とさないが、凍結パイプラインの整合性としては失敗扱いにする(下のexit code配線)。
         print(f"[score] blend_weights compute failed: {str(exc)[:150]}")
+        weights_payload = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "nights_used": 0,
+            "nights_excluded_contaminated": [],
+            "weights": {},
+        }
+        freeze_ok = False
+
+    # --- BLEND_WEIGHTS_MODE 分岐: frozen(既定)は canonical に一切書かない、
+    # legacy_daily は緊急ロールバック専用、未知値は fail-closed。---
+    active_freeze_id: str | None = None
+    mode_raw = os.environ.get("BLEND_WEIGHTS_MODE") or ""
+    mode, mode_valid = _resolve_blend_weights_mode(mode_raw)
+    try:
+        if not mode_valid:
+            print(f"[score][freeze] unknown BLEND_WEIGHTS_MODE={mode_raw!r} — canonical left untouched (fail-closed).")
+            active_freeze_id = _read_active_freeze_id(bucket, supabase_url, key)
+            freeze_ok = False
+        elif mode == "frozen":
+            active_freeze_id, mode_ok = _run_frozen_cycle(bucket, supabase_url, key)
+            freeze_ok = freeze_ok and mode_ok
+        else:  # "legacy_daily"
+            active_freeze_id, mode_ok = _run_legacy_daily_cycle(bucket, supabase_url, key, weights, weights_payload)
+            freeze_ok = freeze_ok and mode_ok
+    except Exception as exc:  # noqa: BLE001 — 凍結パイプラインの想定外failureも exit code へ
+        print(f"[score][freeze] mode={mode!r} pipeline failed: {str(exc)[:150]}")
+        freeze_ok = False
+
+    # --- shadow: 全モード共通、observe専用（publish_eligible=false固定）。---
+    try:
+        shadow_ok = _write_blend_shadow(
+            bucket, supabase_url, key, night_date, weights, len(recent_dates), active_freeze_id,
+        )
+        freeze_ok = freeze_ok and shadow_ok
+    except Exception as exc:  # noqa: BLE001
+        print(f"[score][freeze] shadow write failed: {str(exc)[:150]}")
+        freeze_ok = False
 
     # --- Act (close the PDCA loop): alert on production degradation ---
     stores_scored = len(per_store)
@@ -981,8 +1292,7 @@ def main() -> int:
     # GitHub Actions のジョブ画面に艦隊サマリを表示（PDCAの可視化）。
     # nights_used は blend_weights が実際に使った夜数（汚染夜を除いた recent_dates）と揃える。
     _write_step_summary(
-        night_date, overall, overall_baseline, per_store, weights,
-        len(recent_dates) if "recent_dates" in locals() else len(summary["nights"][:7]),
+        night_date, overall, overall_baseline, per_store, weights, len(recent_dates),
     )
     # 追加: A vs v2 vs baseline の夜次スコアカード + 直近7夜のローリング集計。
     _write_scorecard_summary(
@@ -1002,6 +1312,12 @@ def main() -> int:
     if baseline_loss and fail_on_loss:
         print(f"[score] FAIL: fleet ML lost to baseline (live {overall} > baseline {overall_baseline}). "
               "Set ACCURACY_FAIL_ON_BASELINE_LOSS=0 to silence.")
+        return 1
+    # 重み凍結パイプライン(mode分岐/backup世代/manifest/shadow)のintegrity失敗は、
+    # 広い except で握りつぶさずここで最終戻り値に反映する
+    # （plan/FORECAST_FREEZE_DEBATE_FINDINGS.md F-1 §4 exit code配線）。
+    if not freeze_ok:
+        print("[score] FAIL: blend-weight freeze/shadow/backup integrity check failed (see [score][freeze] logs above).")
         return 1
     return 0
 

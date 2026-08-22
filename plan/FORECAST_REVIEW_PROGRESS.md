@@ -16,10 +16,11 @@ FINDINGS: 最終結論は、現行予測は方向感の参考にはなるが公�
 
 ## 凍結設計の討議（2026-08-22・両AI突き合わせ）
 
-DEBATE_STATUS: NOT_STARTED
+DEBATE_STATUS: COMPLETE（統合裁定=相違5件すべてCodex案採用 → オーナー承認済み 2026-08-22 → F-1〜F-6実装済み）
 DEBATE_UPDATED: 2026-08-22
-DEBATE_NEXT: `plan/FORECAST_FREEZE_DEBATE_2026-08-22.md` を読み、§3の批評 → Q1〜Q7 → 最終推奨案の順で回答
-DEBATE_DONE: （まだ無し）
+DEBATE_NEXT: 完了済み。追加作業なし。
+DEBATE_DONE: 討議文書全文と前回依頼書末尾の訂正を確認。Claude案3-1〜3-6を静的コードに突き合わせ、Q1〜Q7、1日PRの最終推奨、相違点3行を `plan/FORECAST_FREEZE_DEBATE_FINDINGS.md` に作成。診断は蒸し返さず、秘密値・Python/import/pytest・禁止スクリプト・git・外部書き込みなし。
+DEBATE_FINDINGS: Claude案の現値固定＋shadow継続は採用。ただし (1) booleanをfail-closedな `frozen|legacy_daily|weekly` modeへ、(2) backupをSHA-256世代＋manifestへ、(3)存在監視をcanonical/backup hash不変＋独立shadow鮮度監視へ、(4)空candidateのcanonical上書きを禁止、(5)新店だけ条件付き0.5、(6)正常解除は旧dailyでなくpaired weekly、とする。schema v8はfrozen weight込みcomposite shadow後に別releaseし、v7夜をv8 weightへ流用しない。
 
 依頼書: `plan/FORECAST_FREEZE_DEBATE_2026-08-22.md`
 回答の出力先: `plan/FORECAST_FREEZE_DEBATE_FINDINGS.md`

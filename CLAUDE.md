@@ -78,6 +78,7 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
 `SUPABASE_SERVICE_ROLE_KEY`（Next.jsサーバー側のみで使用、ブラウザからは直叩きしない）／
 `FORECAST_MODEL_BUCKET`(既定`ml-models`)+`FORECAST_MODEL_PREFIX`(既定`forecast/latest`)+
 `FORECAST_MODEL_SCHEMA_VERSION`(既定`v7`)／`ENABLE_FORECAST`／`GEMINI_API_KEY`（Editorial・GHA緊急時用）。
+`BLEND_WEIGHTS_MODE`(既定`frozen`。2026-08-22に重み自動更新を凍結、`legacy_daily`は緊急用のみ)／
 `API_RATE_LIMIT_PER_MIN`(既定300)+`API_RATE_LIMIT_ENABLED`(既定1。`0`で即停止＝キルスイッチ)／
 `MAX_RANGE_TOTAL_ROWS`(既定12000)／`SNAPSHOT_MIN_STORES`系の昇格ガード／`STRICT_ALL_STORES`(既定1)+
 `ALLOWED_MISSING_SLUGS`(監視の逃がし弁)／`DAILY_EXIT_NONZERO`(既定1)。
@@ -136,7 +137,11 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
   `/api/holiday_status`, `/tasks/*`。既存互換性を維持すること。
 - **Storage レイアウト**（bucket既定値 `ml-models`）: `forecast/latest/*`（モデル本体+`metadata.json`、
   `schema_version`必須一致）/ `accuracy/snapshots/*.json`・`accuracy/scores/*.json`・
-  `accuracy/scores/summary.json`・`accuracy/blend_weights.json`（v2 shadow）/ `forecast/templates_v2.json`。
+  `accuracy/scores/summary.json`・`accuracy/blend_weights.json`（**2026-08-22に凍結**。書き手は
+  `BLEND_WEIGHTS_MODE=frozen`（既定）では一切書かず、旧計算は `accuracy/blend_weights_shadow/legacy.json` へ、
+  凍結時点の同一バイト列は `accuracy/blend_weights_freeze/generations/<sha256>.json` + `current.json`(manifest) へ。
+  hash不変は `check-blend-weights-freeze.yml`（6時間毎）が監視。解除の設計は
+  `plan/FORECAST_FREEZE_DEBATE_FINDINGS.md` F-7 が正本＝週次方式へ移行するまで恒久固定しない）/ `forecast/templates_v2.json`。
 - **フロントの動的ルート**: `/store/[id]`, `/reports/daily/[store_slug]`,
   `/reports/weekly/[store_slug]`, `/blog/[slug]`, `/area/[area]`。
 - **店舗マスタの単一ソース**: `oriental/utils/stores.py::ALL_STORE_IDS`（Python側の店舗解決・ML

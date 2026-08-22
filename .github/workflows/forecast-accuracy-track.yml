@@ -50,6 +50,14 @@ on:
 permissions:
   contents: read
 
+# 2026-08-22 重み凍結（外部レビュー討議 plan/FORECAST_FREEZE_DEBATE_FINDINGS.md F-2）:
+# 旧commitで既に開始した run が、新しい凍結設定（下の BLEND_WEIGHTS_MODE）を知らないまま
+# canonical(accuracy/blend_weights.json) を書けてしまう競合を防ぐ。同一 group で直列化し、
+# 実行中の run を打ち切らない（score は答え合わせなので、走っている採点を潰さない）。
+concurrency:
+  group: forecast-accuracy-track
+  cancel-in-progress: false
+
 jobs:
   track:
     runs-on: ubuntu-latest
@@ -103,6 +111,15 @@ jobs:
           OPS_NOTIFY_WEBHOOK_TYPE: ${{ vars.OPS_NOTIFY_WEBHOOK_TYPE }}
           TIMEZONE: Asia/Tokyo
           MODE: ${{ steps.decide.outputs.mode }}
+          # 2026-08-22 重み凍結（plan/FORECAST_FREEZE_DEBATE_FINDINGS.md F-1/F-2）:
+          # 許可値は frozen（既定）/ legacy_daily のみ。未設定・空文字は frozen として扱う
+          # （score_forecasts.py 側にも同じ既定を持たせる二重防御）。
+          # 教訓（ML_OBJECTIVE, plan/FORECAST_REVIEW_2026-08-22.md:373）: Repository Variable が
+          # 管理画面にあっても yml に ${{ vars.X }} の配線が無ければコード既定のまま動く
+          # 死に設定になる（train-ml-model.yml で実際に起きていた）。同じ事故を繰り返さないよう
+          # ここで明示配線する。ロールバック（frozen→legacy_daily）は Repository Variable の
+          # 変更1操作だが、反映は次回 06:10 run から（即時反映には workflow_dispatch が要る）。
+          BLEND_WEIGHTS_MODE: ${{ vars.BLEND_WEIGHTS_MODE || 'frozen' }}
         run: |
           set -euo pipefail
           if [ "$MODE" = "snapshot" ]; then
