@@ -47,12 +47,23 @@ jobs:
             exit 0
           fi
 
-          # /user を叩いてレスポンスヘッダーの github-authentication-token-expiration を取得
-          EXPIRY_HEADER=$(curl -sS -D - -o /dev/null \
+          # /user を叩いてレスポンスヘッダーの github-authentication-token-expiration を取得。
+          # 2026-08-22 総合レビュー対応: 従来は HTTP ステータスを見ずヘッダーの有無だけで
+          # 判定していたため、401/403（PAT失効・権限不足）や通信失敗時にヘッダーが空になり
+          # 「無期限トークン」と誤判定して警告を出さないまま緑で終わっていた（fail-open）。
+          # 110-126行目の LINE Push 呼び出しが既に持つ「-w で status を取り、非2xxはエラー」
+          # パターンをここにも適用し、失敗はジョブ失敗として可視化する（fail-closed）。
+          HTTP_CODE=$(curl -sS -D /tmp/pat_headers.txt -o /dev/null -w "%{http_code}" \
             -H "Authorization: token ${GH_PAT}" \
             -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/user \
-            | grep -i "github-authentication-token-expiration" \
+            https://api.github.com/user)
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::GET /user failed: HTTP ${HTTP_CODE}（PAT失効・権限不足・通信失敗の可能性。'無期限'ではなくジョブ失敗として扱う）"
+            exit 1
+          fi
+
+          EXPIRY_HEADER=$(grep -i "github-authentication-token-expiration" /tmp/pat_headers.txt \
             | sed 's/github-authentication-token-expiration: //i' \
             | tr -d '\r\n')
 

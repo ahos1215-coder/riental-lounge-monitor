@@ -83,12 +83,28 @@ jobs:
             [ -z "$STORE" ] && continue
 
             # --- 安全ガード: ローカルgemmaの公開済みレポートを誤って上書きしないか確認 ---
+            # 2026-08-22 総合レビュー対応: 従来は照会が失敗すると `|| echo '[]'` で
+            # 「該当行なし」に丸められ、実際には保護対象（公開済みの良品）が存在するのに
+            # 「存在しない」と誤認して上書きしてしまう恐れがあった（fail-open）。
+            # すぐ下の本番呼び出し(102-114行付近)が既に持つ -f/--retry 群をここにも適用し、
+            # それでも失敗したら「照会できなかった＝保護対象か不明」として当該店舗を
+            # スキップする（fail-closed。「存在しない」と「照会できなかった」を区別する）。
             FACTS_ID="auto_${STORE}_${EDITION}"
-            ROW_JSON="$(curl -sS -G "${SUPABASE_URL%/}/rest/v1/blog_drafts" \
+            if ! ROW_JSON="$(curl -sS -f -G \
+              --retry 3 \
+              --retry-delay 5 \
+              --retry-all-errors \
+              --connect-timeout 20 \
+              --max-time 60 \
+              "${SUPABASE_URL%/}/rest/v1/blog_drafts" \
               --data-urlencode "facts_id=eq.${FACTS_ID}" \
               --data-urlencode "select=source,is_published" \
               -H "apikey: ${SUPABASE_SERVICE_ROLE_KEY}" \
-              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}" || echo '[]')"
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_ROLE_KEY}")"; then
+              echo "::error::store=${STORE} は上書きガードの照会に失敗しました（保護対象か不明のためスキップ。'存在しない'とは区別する）。"
+              FAILURES="${FAILURES} ${STORE}(guard-query-failed)"
+              continue
+            fi
             SOURCE="$(echo "$ROW_JSON" | jq -r '.[0].source // ""' 2>/dev/null || echo "")"
             IS_PUB="$(echo "$ROW_JSON" | jq -r '.[0].is_published // false' 2>/dev/null || echo "false")"
             if [[ "$SOURCE" == local_gemma* && "$IS_PUB" == "true" && "$CONFIRM_OVERWRITE" != "yes" ]]; then

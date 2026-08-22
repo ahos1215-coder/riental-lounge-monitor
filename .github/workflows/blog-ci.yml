@@ -1,5 +1,10 @@
 name: blog-ci
 
+# 2026-08-22 総合レビュー対応（検証記録は memory/general-review-2026-08-22.md）:
+# next.config.ts / tsconfig.json / vercel.json / 自身のパスを paths に追加。
+# これらだけを変更した過去のコミット（例: vercel.json 単独コミット）は実際にこの CI が
+# 非発火だった（実害はたまたま無し）。python-ci.yml は既に自身のパスを含めており
+# 非対称だったので揃える。
 on:
   pull_request:
     paths:
@@ -8,6 +13,10 @@ on:
       - 'frontend/src/**'
       - 'frontend/package.json'
       - 'frontend/package-lock.json'
+      - 'frontend/next.config.ts'
+      - 'frontend/tsconfig.json'
+      - 'frontend/vercel.json'
+      - '.github/workflows/blog-ci.yml'
   push:
     paths:
       - 'frontend/content/blog/**'
@@ -15,6 +24,10 @@ on:
       - 'frontend/src/**'
       - 'frontend/package.json'
       - 'frontend/package-lock.json'
+      - 'frontend/next.config.ts'
+      - 'frontend/tsconfig.json'
+      - 'frontend/vercel.json'
+      - '.github/workflows/blog-ci.yml'
 
 # 最小権限（診断④ 2026-08-20・W-3）: このWFはリポジトリへ書き込まない。
 permissions:

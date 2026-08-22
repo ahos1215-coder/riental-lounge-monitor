@@ -48,4 +48,18 @@ jobs:
           else
             PAYLOAD=$(jq -n --arg t "$MSG" '{text: $t}')
           fi
-          curl -sS -X POST -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL"
+          # 2026-08-22 総合レビュー対応: 従来は POST の結果を見ておらず、Webhook 側の
+          # エラー（URL失効・レート制限・形式不一致等）が起きても本 WF は緑のまま終わり、
+          # 「失敗通知が届いていない」ことに誰も気付けなかった（fail-open）。
+          # URL 未設定時の skip（直上の分岐、exit 0）は意図的な opt-in 設計として現状維持し、
+          # ここでは「設定済みだが送信に失敗した」場合だけを検問する（fail-closed）。
+          HTTP_CODE=$(curl -sS -o /tmp/notify_resp.txt -w "%{http_code}" -X POST \
+            -H "Content-Type: application/json" -d "$PAYLOAD" "$WEBHOOK_URL")
+          case "$HTTP_CODE" in
+            2??) echo "notify webhook ok (HTTP ${HTTP_CODE})" ;;
+            *)
+              cat /tmp/notify_resp.txt 2>/dev/null || true
+              echo "::error::notify webhook failed: HTTP ${HTTP_CODE}"
+              exit 1
+              ;;
+          esac
