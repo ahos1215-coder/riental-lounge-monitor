@@ -19,6 +19,13 @@ Usage:
     LOGS_MAX_ROWS                 行数上限（デフォルト 3000000）
     LOGS_DOWNSAMPLE_AFTER_DAYS    ダウンサンプリング対象（デフォルト 365日）
     LOGS_DOWNSAMPLE_MINUTES       間引き間隔（デフォルト 30分）
+    LOGS_DOWNSAMPLE_SCAN_PAGE     ダウンサンプリング候補探索の1ページ行数
+                                   （デフォルト 1000 = PostgREST の db-max-rows と同じ。
+                                    backup_logs.py の --page と同じ理由でこれより大きくしても
+                                    実際には1000行しか返らない）
+    LOGS_DOWNSAMPLE_MAX_SCAN_ROWS 候補探索で1回の実行あたりに走査する行数の上限
+                                   （デフォルト 200000。週次cronで複数回に分けて収束させる
+                                    安全弁。2026-08-22 総合レビュー対応、詳細は下記コメント参照）
     LOGS_EMERGENCY_DELETE_BATCH   緊急削除のバッチサイズ（デフォルト 10000）
     LOGS_PROTECT_DAYS             緊急削除で絶対に消さない直近日数
                                    （デフォルト 200 = ML_TRAIN_DAYS(180) + 余裕20日。
@@ -54,6 +61,19 @@ SUPABASE_URL, SUPABASE_KEY = _CONF if _CONF else ("", "")
 MAX_ROWS = int(os.getenv("LOGS_MAX_ROWS", "3000000"))
 DOWNSAMPLE_AFTER_DAYS = int(os.getenv("LOGS_DOWNSAMPLE_AFTER_DAYS", "365"))
 DOWNSAMPLE_MINUTES = int(os.getenv("LOGS_DOWNSAMPLE_MINUTES", "30"))
+# PostgREST はサーバー側上限（db-max-rows、既定1000）で1リクエストの応答行数を頭打ちに
+# するため、旧実装の limit=50000 一発 GET は実際には cutoff より古い最古1000行しか
+# 見えていなかった（2026-08-22 総合レビュー対応。検証記録は
+# memory/general-review-2026-08-22.md）。scripts/backup_logs.py が2026-07-06の同型事故
+# （107万行中1000行しか取れていなかった）の教訓で実装したkeysetページング
+# （id.asc + id=gt.<cursor>）をこちらにも移植する（find_downsample_candidates() 参照）。
+DOWNSAMPLE_SCAN_PAGE = int(os.getenv("LOGS_DOWNSAMPLE_SCAN_PAGE", "1000"))
+# 1回の実行でダウンサンプリング候補探索のために走査する行数の上限（安全弁）。
+# ダウンサンプリング対象（365日超）が積み上がり始めるのは2026年11月下旬からの見込みで、
+# このスクリプトは週次cronのため、1回で全件を捌けなくても複数回の実行で収束すればよい。
+# 既定20万行 = ページ1000行×200回程度のREST呼び出し（backup_logs.py の1回のフル
+# バックアップが約1300回のページングであることと比べて十分小さい）。
+DOWNSAMPLE_MAX_SCAN_ROWS = int(os.getenv("LOGS_DOWNSAMPLE_MAX_SCAN_ROWS", "200000"))
 EMERGENCY_DELETE_BATCH = int(os.getenv("LOGS_EMERGENCY_DELETE_BATCH", "10000"))
 # train_ml_model.py の ML_TRAIN_DAYS 既定値(180) + 20日の安全マージン。
 # train_ml_model.py は numpy/xgboost/lightgbm/optuna 等の重い依存を持つため、
@@ -174,21 +194,55 @@ def get_row_count_before(cutoff_iso: str) -> int:
 
 
 def find_downsample_candidates(cutoff_iso: str) -> list[dict]:
-    """cutoff より古い行で、同じ store_id + 30分スロットに複数行あるものを検出。"""
+    """cutoff より古い行で、同じ store_id + 30分スロットに複数行あるものを検出。
+
+    keyset ページング（id.asc + id=gt.<cursor>、1ページ DOWNSAMPLE_SCAN_PAGE 行）で
+    cutoff より古い行を漏れなく走査する。PostgREST の db-max-rows（既定1000）を
+    超える limit を1回で投げても頭打ちになって黙って一部しか返らない
+    （旧実装 limit=50000 の実害）ため、backup_logs.py と同じ「空ページで終了判定」
+    方式を使う。DOWNSAMPLE_MAX_SCAN_ROWS で1回の実行あたりの走査量に上限を設け、
+    それを超えて対象が残っている場合は警告した上で今回分だけ処理する（週次cronで
+    複数回に分けて収束させる前提。詳細はモジュール先頭のコメント参照）。
+    """
     # Supabase REST API では複雑な GROUP BY が直接できないため、
-    # 古い行を日付バッチで取得して Python 側で判定する
-    rows = _rest_get("logs", {
-        "select": "id,ts,store_id",
-        "ts": f"lt.{cutoff_iso}",
-        "order": "ts.asc",
-        "limit": "50000",
-    })
+    # 古い行をページングで取得して Python 側で判定する
+    rows: list[dict] = []
+    cursor: str | None = None
+    scanned = 0
+    while True:
+        params: dict[str, str] = {
+            "select": "id,ts,store_id",
+            "ts": f"lt.{cutoff_iso}",
+            "order": "id.asc",
+            "limit": str(DOWNSAMPLE_SCAN_PAGE),
+        }
+        if cursor is not None:
+            params["id"] = f"gt.{cursor}"
+        page = _rest_get("logs", params)
+        if not page:
+            break
+        rows.extend(page)
+        scanned += len(page)
+        cursor = page[-1]["id"]
+        if scanned >= DOWNSAMPLE_MAX_SCAN_ROWS:
+            print(
+                f"  [downsample][WARNING] hit scan cap ({DOWNSAMPLE_MAX_SCAN_ROWS:,} rows); "
+                "more candidates older than cutoff may remain unscanned. Re-run this "
+                "script again (next weekly cron, or manually) to continue, or raise "
+                "LOGS_DOWNSAMPLE_MAX_SCAN_ROWS."
+            )
+            break
+
+    print(f"  [downsample] scanned {scanned:,} rows older than cutoff")
     if not rows:
         return []
 
-    # 30分スロットごとにグループ化し、各スロットの最初の行だけ残す
+    # 30分スロットごとにグループ化し、各スロットの最初の行（ts昇順で最も早い行）
+    # だけ残す。id.asc でページングした行の集合をここで改めて ts でソートするため、
+    # ページ境界（=id順）と店内の実データ順（=ts順、通常はほぼ一致）がズレていても
+    # 「スロット内で最初に記録された行を残す」という旧実装の意図は変わらない。
     slots: dict[str, list[dict]] = {}
-    for row in rows:
+    for row in sorted(rows, key=lambda r: r.get("ts", "")):
         ts = datetime.fromisoformat(row["ts"].replace("Z", "+00:00"))
         slot_minute = (ts.minute // DOWNSAMPLE_MINUTES) * DOWNSAMPLE_MINUTES
         slot_key = f"{row['store_id']}_{ts.strftime('%Y%m%d%H')}{slot_minute:02d}"

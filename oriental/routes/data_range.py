@@ -376,9 +376,25 @@ def api_range_multi():
     by_slug: dict[str, dict] = {}
     cache_counts: dict[str, int] = {}
     with ThreadPoolExecutor(max_workers=min(12, len(slugs))) as pool:
-        futures = [pool.submit(_fetch_slug, s) for s in slugs]
+        futures = {pool.submit(_fetch_slug, s): s for s in slugs}
         for fut in as_completed(futures):
-            slug_key, data, cache_status = fut.result()
+            # 1店舗の想定外例外（_deduplicate_by_ts / _trim_range_rows のデータ異常、
+            # SingleFlightTTLCache の raise 経路など）で fut.result() が例外を投げても
+            # /api/range_multi 全体を Flask 500 にしない。forecast.py の
+            # forecast_today_multi に既にある店舗別 try/except 隔離と同じ契約に揃える
+            # （2026-08-22 総合レビュー対応。検証記録は
+            #   memory/general-review-2026-08-22.md、/stores 一覧の主データ経路が
+            #   丸ごと落ちていたのが最優先の実害だった）。
+            slug_key = futures[fut]
+            try:
+                slug_key, data, cache_status = fut.result()
+            except Exception as exc:  # noqa: BLE001 - 店舗別に隔離して他店舗は返す
+                logger.warning(
+                    "api_range_multi.unexpected_error slug=%s detail=%s", slug_key, exc
+                )
+                by_slug[slug_key] = {"ok": False, "error": "internal-error", "rows": []}
+                cache_counts["error"] = cache_counts.get("error", 0) + 1
+                continue
             by_slug[slug_key] = data
             cache_counts[cache_status] = cache_counts.get(cache_status, 0) + 1
 
