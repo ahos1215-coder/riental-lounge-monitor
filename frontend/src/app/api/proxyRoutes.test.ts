@@ -206,6 +206,44 @@ describe.each(ROUTES)("$name プロキシの契約", (spec) => {
     expect(await res.text()).toBe(payload);
   });
 
+  it("HTTP 200 だが本文が ok:false（小さい本文）: cache-control は付かない", async () => {
+    // 2026-08-22 総合レビュー対応: backend が 200 のまま ok:false を返す実在経路
+    // （/api/second_venues の設定不備時など）を CDN に焼き付けないための番犬。
+    const payload = JSON.stringify({ ok: false, error: "not-configured" });
+    installFetch(
+      () => new Response(payload, { status: 200, headers: { "content-type": "application/json" } }),
+    );
+
+    const res = await callRoute(spec);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBeNull();
+    expect(await res.text()).toBe(payload);
+  });
+
+  it("HTTP 200 かつ本文が大きい（4KB以上）: ok:false 形でもパースせず通常通りキャッシュする", async () => {
+    // /api/range_multi の大量行応答を毎回パースしない、という性能上のトレードオフを固定する。
+    const payload = JSON.stringify({ ok: false, data: "x".repeat(5000) }); // 4KB超になる想定
+    expect(payload.length).toBeGreaterThanOrEqual(4096);
+    installFetch(
+      () => new Response(payload, { status: 200, headers: { "content-type": "application/json" } }),
+    );
+
+    const res = await callRoute(spec);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe(spec.expectedCacheHeader);
+  });
+
+  it("HTTP 200 かつ本文が JSON でない（小さい）: パース失敗しても通常通りキャッシュする", async () => {
+    installFetch(() => new Response("not json", { status: 200, headers: { "content-type": "text/plain" } }));
+
+    const res = await callRoute(spec);
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe(spec.expectedCacheHeader);
+  });
+
   it("fetch 例外: 502 と {ok:false,error:'proxy-error',detail}", async () => {
     vi.stubGlobal("fetch", () => Promise.reject(new Error("ECONNREFUSED")));
 

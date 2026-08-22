@@ -68,7 +68,32 @@ export async function proxyBackendGet(
       headers.set("content-type", opts.defaultContentType);
     }
     // エラー応答をCDNに焼き付けないため、cache-control は ok のときだけ付ける。
-    if (backendRes.ok) {
+    // 2026-08-22 総合レビュー対応（検証記録は memory/general-review-2026-08-22.md）:
+    // backend には HTTP 200 のまま本文で ok:false を返す実在経路がある（/api/second_venues の
+    // 設定不備時など）。従来は backendRes.ok（=HTTPステータスのみ）しか見ていなかったため、
+    // この種の「200だが失敗」応答にも s-maxage が付いて CDN に焼き付いていた。
+    // 本文が小さいとき（4KB未満）だけ JSON として試しにパースして ok:false を検出する。
+    // /api/range_multi の 12000 行応答のような大きい本文は成功データとみなし、
+    // 常時パースするコストは払わない（毎リクエストで数千行をJSON.parseするのは無駄が大きい）。
+    let cacheableOk = backendRes.ok;
+    if (cacheableOk && buf.byteLength > 0 && buf.byteLength < 4096) {
+      try {
+        const parsed: unknown = JSON.parse(new TextDecoder().decode(buf));
+        if (
+          parsed !== null &&
+          typeof parsed === "object" &&
+          (parsed as { ok?: unknown }).ok === false
+        ) {
+          cacheableOk = false;
+        }
+      } catch {
+        // JSON でない本文（例: second_venues が content-type 未設定でテキストを返すテスト経路）は
+        // 判定不能として cacheableOk を書き換えず素通しする（＝従来通りキャッシュされる）。
+        // 実運用でバックエンドが200で返す本文は基本JSONなので、ここに落ちるのは想定外系のみ。
+      }
+    }
+
+    if (cacheableOk) {
       headers.set(
         "cache-control",
         `public, s-maxage=${opts.ttlSeconds}, stale-while-revalidate=${opts.swrSeconds}`,

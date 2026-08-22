@@ -1,31 +1,9 @@
-import fs from "node:fs";
-import path from "node:path";
 import type { MetadataRoute } from "next";
 import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { getAllPostMetas } from "@/lib/blog/content";
 import { fetchAllPublishedEditorialSlugs } from "@/lib/supabase/blogDrafts";
 import { STORES } from "./config/stores";
 import { AREAS } from "./config/areas";
-
-/**
- * frontend/content/insights/weekly/{slug}/{YYYY-MM-DD}.json のうち最新のファイル名を
- * lastModified に使う（ファイル一覧の読み取りのみで中身はパースしないため安価）。
- * ディレクトリ/該当ファイルが無い店舗は null を返し、呼び出し側で now にフォールバックする。
- */
-function latestWeeklyInsightDate(slug: string): Date | null {
-  try {
-    const dir = path.join(process.cwd(), "content", "insights", "weekly", slug);
-    if (!fs.existsSync(dir)) return null;
-    const files = fs.readdirSync(dir).filter((f) => /^\d{4}-\d{2}-\d{2}\.json$/.test(f));
-    if (files.length === 0) return null;
-    files.sort();
-    const latest = files[files.length - 1]!.replace(/\.json$/, "");
-    const d = new Date(`${latest}T00:00:00Z`);
-    return Number.isNaN(d.getTime()) ? null : d;
-  } catch {
-    return null;
-  }
-}
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = getMetadataBaseUrl().toString().replace(/\/+$/, "");
@@ -84,24 +62,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // SEO Phase2 でも sitemap には追加しない（robots 側の方針を優先）。
   // Daily を indexable にする場合は、まず reports/daily の robots 指定を見直すのが先。
 
-  // Weekly Report: 毎週水曜更新の固定URL。
-  // 2026-07-03 時点でローカル gemma 生成が相席屋(aisekiya)にも対応し、全42店舗で published 行が存在するため
-  // ブランドによる絞り込みは不要（以前は oriental のみ対応で aisekiya は notFound() になっていた）。
-  // lastModified は content/insights/weekly/{slug} 配下の最新日付ファイルがあればそれを使い、
-  // 無ければ now にフォールバックする（Supabase 側の実データを毎回叩くのは高コストなため）。
-  const weeklyReportRoutes: MetadataRoute.Sitemap = STORES.map((s) => ({
-    url: `${base}/reports/weekly/${encodeURIComponent(s.slug)}`,
-    lastModified: latestWeeklyInsightDate(s.slug) ?? now,
-    changeFrequency: "weekly" as const,
-    priority: 0.8,
-  }));
+  // Weekly Report は reports/weekly/[store_slug]/page.tsx で Daily と同じく
+  // `robots: { index: false, follow: true }` を設定している（速報・店舗ページに評価を集約する
+  // ための意図的な設計。Daily 側の説明と同じ理由）。
+  // 2026-08-20 の 17e815f で Weekly を noindex 化した際、この sitemap.ts を直し忘れて
+  // 「noindex なのに sitemap に載っている」矛盾状態のまま2026-08-22の外部レビューまで
+  // 気付かれずに残っていた（GSCの「noindexタグによって除外されました」エラーの原因）。
+  // Daily と同じ扱いに揃え、sitemap には載せない。
 
-  return [
-    ...staticRoutes,
-    ...storeRoutes,
-    ...areaRoutes,
-    ...blogRoutes,
-    ...editorialRoutes,
-    ...weeklyReportRoutes,
-  ];
+  return [...staticRoutes, ...storeRoutes, ...areaRoutes, ...blogRoutes, ...editorialRoutes];
 }
