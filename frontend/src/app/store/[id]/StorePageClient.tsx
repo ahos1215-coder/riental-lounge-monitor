@@ -68,20 +68,13 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
   const mainReady = initialSnapshot !== null;
   const canFireDeferred = useDeferredFetchGate(mainReady);
 
-  useEffect(() => {
-    if (!slug) return;
-
-    const current = searchParams.get("store");
-    if (current === slug) return;
-
-    const sp = new URLSearchParams(searchParams.toString());
-    sp.set("store", slug);
-    const qs = sp.toString();
-
-    router.replace(qs ? `/store/${slug}?${qs}` : `/store/${slug}`, {
-      scroll: false,
-    });
-  }, [router, searchParams, slug]);
+  // 2026-08-26 計測レビュー対応: 従来ここで mount 直後に ?store= をURLへ自動付与していたが、
+  // 読み手を全数確認したところ実際に消費している箇所が無かった（このページ自体は
+  // slugFromPath を優先、MeguribiDashboardPreview も pathSlug を優先し ?store= は
+  // フォールバックとしてしか読まない＝ pathSlug が常に渡るこの経路では到達しない）。
+  // 無駄な router.replace（履歴書き換え・非正規URL化）だけが残っていたため削除した。
+  // StoreCard.tsx 等の内部リンクに残る ?store= 付与はリンク先の後方互換のためそのまま
+  // （付いていても読まれないだけで実害は無い）。
 
   useEffect(() => {
     if (!slug) return;
@@ -214,7 +207,8 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
       onClick={() => {
         const next = toggleFavoriteStore(slug);
         setFavorite(next);
-        sendEvent(next ? "favorite_add" : "favorite_remove", { slug });
+        // 2026-08-26 計測レビュー対応: 識別子を store_slug に統一（他イベントと揃える）。
+        sendEvent(next ? "favorite_add" : "favorite_remove", { store_slug: slug });
       }}
       className="rounded-full border border-amber-400/35 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-100 transition hover:border-amber-300/60 hover:bg-amber-500/20"
       aria-pressed={favorite}

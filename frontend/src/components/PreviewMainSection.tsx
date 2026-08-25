@@ -72,14 +72,16 @@ export default function PreviewMainSection(props: PreviewMainSectionProps) {
 
   // 日付レンジ（今日/昨日/先週/カスタム）の切替を GA に記録する。実際にモードが変わった時だけ
   // 1回だけ計測し、元の onChangeRangeMode の挙動はそのまま呼ぶ（UI・挙動への影響ゼロ）。
+  // 2026-08-26 計測レビュー対応: store_slug を追加（従来 mode のみで、どの店舗の切替か
+  // 追えていなかった）。
   const handleChangeRangeMode = useCallback(
     (mode: PreviewRangeMode) => {
       if (mode !== activeRangeMode) {
-        track("range_mode_change", { mode });
+        track("range_mode_change", { mode, store_slug: storeSlug });
       }
       onChangeRangeMode?.(mode);
     },
-    [activeRangeMode, onChangeRangeMode],
+    [activeRangeMode, onChangeRangeMode, storeSlug],
   );
 
   // 鮮度・ピーク進捗の時刻依存表示を最大1分遅延で更新する now（データ再取得はしない）。

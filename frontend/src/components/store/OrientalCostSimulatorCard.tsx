@@ -299,8 +299,11 @@ export function OrientalCostSimulatorCard({
   const markCostSimInteract = useCallback(() => {
     if (costSimInteractedRef.current) return;
     costSimInteractedRef.current = true;
-    track("cost_sim_interact", { brand: "oriental" });
-  }, []);
+    // 2026-08-26 計測レビュー対応: store_slug を追加（従来 brand のみで、どの店の試算か
+    // 追えていなかった）。pricing.storeSlug は PricingTableBase の必須フィールドで、
+    // 表示中の店舗と1:1に対応する（新規 props を増やさずに済む）。
+    track("cost_sim_interact", { brand: "oriental", store_slug: pricing.storeSlug });
+  }, [pricing.storeSlug]);
 
   const recommendation = useMemo(
     () => (hasForecast ? recommendEntryTime(series, pricing, { dayType }) : null),

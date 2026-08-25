@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { isProductionHostname, shouldEnableAnalytics } from "./analytics";
+import { ANALYTICS_EVENT_NAMES, isProductionHostname, shouldEnableAnalytics } from "./analytics";
+import type { AnalyticsEventName } from "./analytics";
+import { shouldSendPageView } from "@/components/GoogleAnalytics";
 
 // ────────────────────────────────────────────────────────────────────────────
 // 純粋関数（window / 測定 ID 非依存）— GA を発火してよいかの判定ロジックの網羅テスト。
@@ -153,5 +155,81 @@ describe("runtime guard: track() / opt-out / ga-disable", () => {
     expect(storage.getItem("meguribi:ga-dev-optout")).toBeNull();
     expect(win[`ga-disable-${TEST_ID}`]).toBe(false);
     expect(mod.analyticsEnabled()).toBe(true);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 2026-08-26 計測レビュー対応: イベント名SSOTの網羅性 + PV重複防止ガードの純粋関数テスト。
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("ANALYTICS_EVENT_NAMES (SSOT)", () => {
+  it("contains exactly the known 10 event names, with no duplicates", () => {
+    const expected = [
+      "store_view",
+      "report_view",
+      "favorite_add",
+      "favorite_remove",
+      "compare_add_store",
+      "range_mode_change",
+      "cost_sim_interact",
+      "related_store_click",
+      "official_site_click",
+      "second_venue_click",
+    ];
+    expect([...ANALYTICS_EVENT_NAMES].sort()).toEqual([...expected].sort());
+    expect(new Set(ANALYTICS_EVENT_NAMES).size).toBe(ANALYTICS_EVENT_NAMES.length);
+  });
+
+  it("type-level: AnalyticsEventName stays exhaustively covered (compile-time guard)", () => {
+    // 実行時のアサーションは無いが、AnalyticsEventName の union に増減があれば
+    // 下のswitchが型エラーになりビルド/型チェックが落ちる＝配列と型のズレを検知する仕掛け。
+    const assertExhaustive = (name: AnalyticsEventName): void => {
+      switch (name) {
+        case "store_view":
+        case "report_view":
+        case "favorite_add":
+        case "favorite_remove":
+        case "compare_add_store":
+        case "range_mode_change":
+        case "cost_sim_interact":
+        case "related_store_click":
+        case "official_site_click":
+        case "second_venue_click":
+          return;
+        default: {
+          const _exhaustive: never = name;
+          void _exhaustive;
+        }
+      }
+    };
+    expect(typeof assertExhaustive).toBe("function");
+  });
+});
+
+describe("shouldSendPageView (PVの重複防止ガード)", () => {
+  it("sends on the first run for a given pathname (lastSentPath is null)", () => {
+    expect(
+      shouldSendPageView({ enabled: true, pathname: "/reports", lastSentPath: null }),
+    ).toBe(true);
+  });
+
+  it("does NOT send again when pathname is unchanged (query-only navigation)", () => {
+    // /reports の検索文字入力や /compare の ?stores= 変更のような query-only な
+    // router.replace を模している。ここが true に戻るとPV水増しバグが再発する。
+    expect(
+      shouldSendPageView({ enabled: true, pathname: "/reports", lastSentPath: "/reports" }),
+    ).toBe(false);
+  });
+
+  it("sends again once pathname actually changes", () => {
+    expect(
+      shouldSendPageView({ enabled: true, pathname: "/stores", lastSentPath: "/reports" }),
+    ).toBe(true);
+  });
+
+  it("never sends when GA is not enabled, regardless of pathname", () => {
+    expect(
+      shouldSendPageView({ enabled: false, pathname: "/reports", lastSentPath: null }),
+    ).toBe(false);
   });
 });

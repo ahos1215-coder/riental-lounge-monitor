@@ -42,6 +42,45 @@ export function shouldEnableAnalytics(input: {
   );
 }
 
+/**
+ * カスタムイベント名の唯一の正本（SSOT）。2026-08-26 計測レビュー対応: 実発火していた8種 +
+ * このレビューで新規追加する2種（official_site_click / second_venue_click）。
+ * `report_read` は `report_view` に改名した（mount 時に発火する実態に名前を合わせた。
+ * 呼び出し側の書き換えは frontend/src/components/ReportViewTracker.tsx で別班が対応）。
+ * ここに無い名前は track() の型エラーになる＝「イベント名は union で閉じる」を強制する。
+ * Python 週報 `scripts/analytics_weekly_report.py` の `KNOWN_CUSTOM_EVENTS` と手動同期すること
+ * （あちらは `report_read` のままなら要更新。テスト側でこの配列の中身を固定し、ズレに気づけるようにする）。
+ */
+export const ANALYTICS_EVENT_NAMES = [
+  "store_view",
+  "report_view",
+  "favorite_add",
+  "favorite_remove",
+  "compare_add_store",
+  "range_mode_change",
+  "cost_sim_interact",
+  "related_store_click",
+  "official_site_click",
+  "second_venue_click",
+] as const;
+
+export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
+
+/**
+ * 全イベント共通で使われうるコンテキストパラメータ。店舗識別子は `store_slug` に統一する
+ * （現状 呼び出し側で slug / from / to に分裂しているが、書き換えは別班。ここでは型だけ用意）。
+ * 移行中に既存の緩い呼び出し（例: `{ slug }` や `{ from, to }`）が型エラーで壊れないよう、
+ * 既知キーは型で明示しつつ index signature で任意の string/number/boolean キーも許容する
+ * （段階的な型。イベント"名"だけは union で閉じ、パラメータは緩めに保つ設計判断）。
+ */
+export type AnalyticsEventParams = {
+  store_slug?: string;
+  brand?: "oriental" | "aisekiya";
+  surface?: string;
+  mode?: string;
+  [key: string]: string | number | boolean | undefined;
+};
+
 type GtagWindow = Window & {
   gtag?: (...args: unknown[]) => void;
   dataLayer?: unknown[];
@@ -131,15 +170,12 @@ function gtag(...args: unknown[]): void {
  * すべてのカスタムイベントの唯一の入口。GA 不在/無効時（非本番ホスト・開発者オプトアウト・
  * 測定 ID 未設定・SSR）は完全 no-op。コンポーネント側は gtag を直接触らずこの関数だけを呼ぶ。
  */
-export function track(
-  name: string,
-  params?: Record<string, string | number | boolean>,
-): void {
+export function track(name: AnalyticsEventName, params?: AnalyticsEventParams): void {
   if (!analyticsEnabled()) return;
   gtag("event", name, params);
 }
 
-/** 後方互換エイリアス（既存の store_view / report_read / favorite_* もこの guarded 経路を通る）。 */
+/** 後方互換エイリアス（既存の store_view / report_view / favorite_* もこの guarded 経路を通る）。 */
 export const sendEvent = track;
 
 /** 仮想ページビュー（SPA 遷移）を送る。無効時は no-op。 */

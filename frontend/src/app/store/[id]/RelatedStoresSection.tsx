@@ -40,7 +40,9 @@ export function RelatedStoresSection({
             sparklineWomen={relatedRealtime[store.slug]?.sparklineWomen}
             isLoading={relatedLoading && !relatedRealtime[store.slug]}
             onNavigate={() =>
-              track("related_store_click", { from: fromSlug ?? "", to: store.slug })
+              // 2026-08-26 計測レビュー対応: 識別子を store_slug（遷移先）+ from_slug（元の店舗）に
+              // 統一（従来 from/to で、他イベントの store_slug と揃っていなかった）。
+              track("related_store_click", { store_slug: store.slug, from_slug: fromSlug ?? "" })
             }
           />
         ))}

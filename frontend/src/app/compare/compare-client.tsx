@@ -158,7 +158,8 @@ export default function CompareClient() {
     (slug: string) => {
       // 比較ページでの店舗追加を GA に記録する。ピッカーは未選択かつ上限未満の店舗にしか
       // 追加ボタンを出さないため、ここは常に実追加のイベントハンドラ（副作用は計測のみ）。
-      track("compare_add_store", { slug });
+      // 2026-08-26 計測レビュー対応: 識別子を store_slug に統一（他イベントと揃える）。
+      track("compare_add_store", { store_slug: slug });
       setSelectedSlugs((prev) => {
         if (prev.includes(slug) || prev.length >= MAX_COMPARE) return prev;
         const next = [...prev, slug];
