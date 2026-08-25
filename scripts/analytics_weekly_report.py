@@ -73,10 +73,37 @@ GSC_SCOPE = "https://www.googleapis.com/auth/webmasters.readonly"
 # ダイジェストの上限（LINE の 1 通は 5000 字だが、可読性のため 2000 字で切る）。
 DIGEST_MAX_CHARS = 2000
 
-# frontend 側で送っているカスタムイベント（frontend/src/lib/analytics.ts の sendEvent 呼び出し）。
+# frontend 側で送っているカスタムイベント（frontend/src/lib/analytics.ts の track/sendEvent 呼び出し）。
 # GA4 の eventCount by eventName から拾って表示する。GA4 自動収集イベント
 # （page_view / session_start / first_visit / scroll ...）と区別するための参照リスト。
-KNOWN_CUSTOM_EVENTS = ["store_view", "report_read", "favorite_add", "favorite_remove"]
+# 2026-08-26 計測レビュー対応: 旧リストは4種のみで、実際に発火中の compare_add_store /
+# range_mode_change / cost_sim_interact / related_store_click（frontend/src/app/compare/compare-client.tsx
+# 等で `track()` 済み）が週報に一度も出ていなかった（実データで確認済みの欠落）。実発火中の全8種に加え、
+# report_view / official_site_click / second_venue_click（現時点ではまだ frontend 側に実装が無い予定名。
+# 実装され次第、変更不要でこの一覧経由で拾われる）を先取りで追加。report_read は report_view への
+# 移行期の互換名として残す（片方だけ在っても消えない）。
+KNOWN_CUSTOM_EVENTS = [
+    "store_view",
+    "report_read",
+    "report_view",
+    "favorite_add",
+    "favorite_remove",
+    "compare_add_store",
+    "range_mode_change",
+    "cost_sim_interact",
+    "related_store_click",
+    "official_site_click",
+    "second_venue_click",
+]
+
+# 閉店済み店舗の slug（frontend/src/proxy.ts::CLOSED_STORE_SLUGS と同じ集合。あちらが
+# リダイレクト判定の正本で、ここは検索流入レポートのページ分類用に写した小さな複製。
+# 閉店店舗が増えたら両方を直すこと）。
+CLOSED_STORE_SLUGS = frozenset({"ay_niigata", "sapporo_ag"})
+
+# 「有効検索クリック」の対象カテゴリ（非noindexの一覧・詳細ページ群）。
+# report は noindex（frontend/src/app/reports/daily・weekly/[store_slug]/page.tsx）なので対象外。
+QUALIFIED_PAGE_CATEGORIES = frozenset({"home", "store", "area", "stores", "blog"})
 
 FRIENDLY_SETUP_HINT = (
     "[analytics] 週次アナリティクスの認証情報が見つかりません（未セットアップ）。\n"
@@ -121,6 +148,28 @@ def last_full_week(now_jst: datetime) -> WeekWindows:
     return WeekWindows(cur_start, cur_end, prev_start, prev_end)
 
 
+def last_confirmed_week(now_jst: datetime, min_lag_days: int = 3) -> WeekWindows:
+    """GSC 用：「完全に確定した」直近の月〜日週を返す（前週比の相方も同じだけ遡る）。
+
+    2026-08-26 計測レビュー対応（修正1d）: GSC は月曜朝実行だと直前の日曜まで含む週の
+    データがまだ確定しておらず、実測で 8/24 時点228件→8/26確定328件と大きくブレることを
+    確認済み（「未確定週問題」）。`last_full_week()` が返す週の終端（日曜）から実行日までの
+    日数が `min_lag_days` 未満なら、確定するまで週単位でまるごと1週遡る。月曜09:00実行なら
+    直近完結週（日曜終端、実行日との差1日）はまだ足りず、1週遡った前々週（差8日）で確定と
+    判定する。cur/prev を同じ週数だけ遡らせるので、前週比も常に「確定週同士」の比較になる。
+    """
+    w = last_full_week(now_jst)
+    today = now_jst.date()
+    while (today - w.cur_end).days < min_lag_days:
+        w = WeekWindows(
+            cur_start=w.cur_start - timedelta(days=7),
+            cur_end=w.cur_end - timedelta(days=7),
+            prev_start=w.prev_start - timedelta(days=7),
+            prev_end=w.prev_end - timedelta(days=7),
+        )
+    return w
+
+
 # --------------------------------------------------------------------------
 # 前週比の計算・整形（純粋関数・テスト対象）
 # --------------------------------------------------------------------------
@@ -149,11 +198,32 @@ def wow_str(cur, prev) -> str:
     return f"{sign}{pct:.1f}% {arrow}"
 
 
+def fmt_metric_or_na(value, failed: bool) -> str:
+    """取得に失敗した指標は "0" ではなく "取得失敗" と表示する（修正1c）。"""
+    return "取得失敗" if failed else fmt_int(value)
+
+
+def wow_str_or_na(cur, prev, cur_failed: bool, prev_failed: bool) -> str:
+    """前週比版。cur/prev のどちらかが取得失敗なら、誤った%を出さず "取得失敗" にする（修正1c）。"""
+    if cur_failed or prev_failed:
+        return "取得失敗"
+    return wow_str(cur, prev)
+
+
+def format_md(iso_date: str) -> str:
+    """ISO 日付文字列 "YYYY-MM-DD" を "M/D" 表記へ（先頭ゼロなし）。"""
+    d = date.fromisoformat(iso_date)
+    return f"{d.month}/{d.day}"
+
+
 def top_growth(cur_list, prev_list, key_field: str, value_field: str):
     """cur/prev のリストを突き合わせ、最も伸びた要素 (item, 差分) を返す。
 
-    伸びが無ければ（全て横ばい/減少）、伸び最大（=減少最小）の要素を返す。
-    リストが空なら None。
+    2026-08-26 計測レビュー対応（修正1b）: 以前は伸びが無く全て横ばい/減少のときも
+    「伸び最大（＝減少最小）」の要素を +0 や負の値のまま返しており、ダイジェストに
+    「最も伸びたクエリ: 〜（+0クリック）」という誤解を招く行が実データで出ていた
+    （実質「伸びていない」のに「伸びた」と表示していた）。差分が正のものが1つも無ければ
+    None を返し、呼び出し側（compose_digest）はその行自体を出さない。
     """
     if not cur_list:
         return None
@@ -166,6 +236,8 @@ def top_growth(cur_list, prev_list, key_field: str, value_field: str):
         if best_delta is None or delta > best_delta:
             best_delta = delta
             best = row
+    if best_delta is None or best_delta <= 0:
+        return None
     return (best, best_delta)
 
 
@@ -195,10 +267,16 @@ def ga4_dim_body(start: str, end: str, dimension: str, metric: str, limit: int =
     }
 
 
-def gsc_body(start: str, end: str, dimensions: list[str], row_limit: int = 10) -> dict:
+def gsc_body(
+    start: str, end: str, dimensions: list[str], row_limit: int = 10, data_state: str | None = None
+) -> dict:
     body: dict = {"startDate": start, "endDate": end, "rowLimit": row_limit}
     if dimensions:
         body["dimensions"] = dimensions
+    # data_state 省略時は GSC 側の既定 "final"（＝確定データのみ）になる（確認済み）。
+    # analytics_report.py（最新分析CLI）は直近日も見たいので "all" を明示的に渡す。
+    if data_state:
+        body["dataState"] = data_state
     return body
 
 
@@ -260,52 +338,155 @@ def parse_gsc_rows(resp: dict) -> list[dict]:
     return out
 
 
+def parse_gsc_query_page_rows(resp: dict) -> list[dict]:
+    """dimensions=["query","page"] のレスポンスを [{query, page, clicks, ...}] へ。
+
+    2026-08-26 計測レビュー対応（修正2）。keys の並びは dimensions の指定順（query→page）
+    に対応する GSC API の仕様どおり。
+    """
+    out: list[dict] = []
+    for r in (resp or {}).get("rows") or []:
+        keys = r.get("keys") or []
+        out.append(
+            {
+                "query": keys[0] if len(keys) > 0 else "",
+                "page": keys[1] if len(keys) > 1 else "",
+                "clicks": float(r.get("clicks") or 0),
+                "impressions": float(r.get("impressions") or 0),
+                "ctr": float(r.get("ctr") or 0),
+                "position": float(r.get("position") or 0),
+            }
+        )
+    return out
+
+
+# --------------------------------------------------------------------------
+# ページ分類・指名判定・順位帯・有効検索クリック（純粋関数・テスト対象）
+# 2026-08-26 計測レビュー対応（修正2）。scripts/analytics_report.py（最新分析CLI）とも共有する。
+# --------------------------------------------------------------------------
+
+
+def classify_page_path(page_or_url: str) -> str:
+    """URL またはパスを home/store/area/stores/blog/report/closed/other に分類する。
+
+    GSC の "page" ディメンションはフル URL（https://www.meguribi.jp/...）で返るが、
+    パスだけの文字列を渡しても urlparse はそのまま path として扱うので同じ関数で両方さばける。
+    閉店店舗（CLOSED_STORE_SLUGS）の /store/<slug> は「store」ではなく「closed」に分ける
+    （検索結果に残っている閉店ページのクリックを、現役店舗の実績と混ぜないため）。
+    """
+    path = urllib.parse.urlparse(page_or_url or "").path
+    segments = [s for s in path.split("/") if s]
+    if not segments:
+        return "home"
+    head = segments[0].lower()
+    if head == "store" and len(segments) >= 2:
+        slug = urllib.parse.unquote(segments[1]).lower()
+        return "closed" if slug in CLOSED_STORE_SLUGS else "store"
+    if head == "area":
+        return "area"
+    if head == "stores":
+        return "stores"
+    if head == "blog":
+        return "blog"
+    if head == "reports":
+        return "report"
+    return "other"
+
+
+def is_branded_query(query: str) -> bool:
+    """検索語に指名（サイト名）が含まれるか。
+
+    表記ゆれ: 「めぐりび」/ ドメインの "meguribi"(.jp) / ブランド表記の "megribi"(MEGRIBI)。
+    実データで「megribi」という検索が一般扱いになっていたのを 2026-08-26 の実CLI smoke で発見し追加。
+    """
+    q = (query or "").lower()
+    return "めぐりび" in q or "meguribi" in q or "megribi" in q
+
+
+def position_bucket(position) -> str:
+    """GSC の平均掲載順位を 1-3 / 4-10 / 11-20 / 21+ の順位帯へ丸める。"""
+    p = float(position or 0)
+    if p <= 3:
+        return "1-3"
+    if p <= 10:
+        return "4-10"
+    if p <= 20:
+        return "11-20"
+    return "21+"
+
+
+def qualified_clicks_total(page_rows: list[dict], page_field: str = "page") -> tuple[float, float]:
+    """(有効クリック, 全クリック) を返す。有効 = QUALIFIED_PAGE_CATEGORIES に分類されるページへのクリック。
+
+    page_rows は {page_field: URL/パス, "clicks": 数値} を持つ行のリスト（GSC の page ディメンション
+    行を想定）。report（noindex）・closed（閉店）・other（mypage 等）は対象外。
+    """
+    total = 0.0
+    qualified = 0.0
+    for row in page_rows or []:
+        clicks = float(row.get("clicks") or 0)
+        total += clicks
+        if classify_page_path(row.get(page_field) or "") in QUALIFIED_PAGE_CATEGORIES:
+            qualified += clicks
+    return qualified, total
+
+
 # --------------------------------------------------------------------------
 # 指標の取得（ネットワーク境界は ga4_call / gsc_call に注入 → テストは fake を渡す）
 # --------------------------------------------------------------------------
 
 
-def fetch_metrics(weeks: WeekWindows, ga4_call, gsc_call) -> dict:
+def fetch_metrics(ga4_weeks: WeekWindows, gsc_weeks: WeekWindows, ga4_call, gsc_call) -> dict:
     """GA4 / GSC を叩いて metrics dict を組む。個々の失敗は握りつぶし warnings に残す
-    （1 種類のクエリが落ちても他は出す）。ga4_call(body)->resp, gsc_call(body)->resp。"""
-    warnings: list[str] = []
+    （1 種類のクエリが落ちても他は出す）。ga4_call(body)->resp, gsc_call(body)->resp。
 
-    def safe(fn, *args, default=None, label=""):
+    2026-08-26 計測レビュー対応（修正1d）: GA4 と GSC で「対象週」が異なる（GSC は確定に
+    数日かかるため、より過去の週を見る）ので、週の窓を2つ別々に受け取る。
+    """
+    warnings: list[str] = []
+    failed_labels: list[str] = []
+
+    def safe(fn, *args, label=""):
+        # 2026-08-26 計測レビュー対応（修正1c）: 以前は失敗時に default={} を返しており、
+        # parse_ga4_totals({}) と「本当にゼロ件だった」を区別できず、digest に偽の「0」が
+        # 出ていた（fmt_int(None)="0"）。ここでは None を返し、呼び出し側で「取得失敗」と
+        # 明示できるよう failed_labels に label を積む。
         try:
             return fn(*args)
         except Exception as exc:  # noqa: BLE001 - best-effort, digest は部分データでも成立させる
             warnings.append(f"{label}: {str(exc)[:120]}")
-            return default
+            failed_labels.append(label)
+            return None
 
-    cs, ce = weeks.cur_start.isoformat(), weeks.cur_end.isoformat()
-    ps, pe = weeks.prev_start.isoformat(), weeks.prev_end.isoformat()
+    cs, ce = ga4_weeks.cur_start.isoformat(), ga4_weeks.cur_end.isoformat()
+    ps, pe = ga4_weeks.prev_start.isoformat(), ga4_weeks.prev_end.isoformat()
+    gcs, gce = gsc_weeks.cur_start.isoformat(), gsc_weeks.cur_end.isoformat()
+    gps, gpe = gsc_weeks.prev_start.isoformat(), gsc_weeks.prev_end.isoformat()
 
     # ---- GA4 ----
-    ga4_totals_cur = parse_ga4_totals(safe(ga4_call, ga4_totals_body(cs, ce), default={}, label="ga4.totals.cur"))
-    ga4_totals_prev = parse_ga4_totals(safe(ga4_call, ga4_totals_body(ps, pe), default={}, label="ga4.totals.prev"))
+    raw_totals_cur = safe(ga4_call, ga4_totals_body(cs, ce), label="ga4.totals.cur")
+    raw_totals_prev = safe(ga4_call, ga4_totals_body(ps, pe), label="ga4.totals.prev")
+    ga4_totals_cur = parse_ga4_totals(raw_totals_cur) if raw_totals_cur is not None else None
+    ga4_totals_prev = parse_ga4_totals(raw_totals_prev) if raw_totals_prev is not None else None
 
     top_pages_cur = [
         {"path": k, "views": v}
         for k, v in parse_ga4_rows(
-            safe(ga4_call, ga4_dim_body(cs, ce, "pagePath", "screenPageViews", 10), default={}, label="ga4.pages.cur")
+            safe(ga4_call, ga4_dim_body(cs, ce, "pagePath", "screenPageViews", 10), label="ga4.pages.cur")
         )
     ]
     top_pages_prev = [
         {"path": k, "views": v}
         for k, v in parse_ga4_rows(
-            safe(ga4_call, ga4_dim_body(ps, pe, "pagePath", "screenPageViews", 10), default={}, label="ga4.pages.prev")
+            safe(ga4_call, ga4_dim_body(ps, pe, "pagePath", "screenPageViews", 10), label="ga4.pages.prev")
         )
     ]
 
     events_cur = dict(
-        parse_ga4_rows(
-            safe(ga4_call, ga4_dim_body(cs, ce, "eventName", "eventCount", 25), default={}, label="ga4.events.cur")
-        )
+        parse_ga4_rows(safe(ga4_call, ga4_dim_body(cs, ce, "eventName", "eventCount", 25), label="ga4.events.cur"))
     )
     events_prev = dict(
-        parse_ga4_rows(
-            safe(ga4_call, ga4_dim_body(ps, pe, "eventName", "eventCount", 25), default={}, label="ga4.events.prev")
-        )
+        parse_ga4_rows(safe(ga4_call, ga4_dim_body(ps, pe, "eventName", "eventCount", 25), label="ga4.events.prev"))
     )
 
     channels_cur = [
@@ -314,32 +495,41 @@ def fetch_metrics(weeks: WeekWindows, ga4_call, gsc_call) -> dict:
             safe(
                 ga4_call,
                 ga4_dim_body(cs, ce, "sessionDefaultChannelGroup", "sessions", 10),
-                default={},
                 label="ga4.channels.cur",
             )
         )
     ]
 
-    # ---- GSC ----
-    gsc_totals_cur = parse_gsc_totals(safe(gsc_call, gsc_body(cs, ce, [], 1), default={}, label="gsc.totals.cur"))
-    gsc_totals_prev = parse_gsc_totals(safe(gsc_call, gsc_body(ps, pe, [], 1), default={}, label="gsc.totals.prev"))
+    # ---- GSC（確定済みの週 = gsc_weeks を使う。修正1d） ----
+    raw_gsc_totals_cur = safe(gsc_call, gsc_body(gcs, gce, [], 1), label="gsc.totals.cur")
+    raw_gsc_totals_prev = safe(gsc_call, gsc_body(gps, gpe, [], 1), label="gsc.totals.prev")
+    gsc_totals_cur = parse_gsc_totals(raw_gsc_totals_cur) if raw_gsc_totals_cur is not None else None
+    gsc_totals_prev = parse_gsc_totals(raw_gsc_totals_prev) if raw_gsc_totals_prev is not None else None
 
     gsc_queries_cur = [
         {"query": r["key"], "clicks": r["clicks"], "impressions": r["impressions"]}
-        for r in parse_gsc_rows(safe(gsc_call, gsc_body(cs, ce, ["query"], 10), default={}, label="gsc.queries.cur"))
+        for r in parse_gsc_rows(safe(gsc_call, gsc_body(gcs, gce, ["query"], 10), label="gsc.queries.cur"))
     ]
     gsc_queries_prev = [
         {"query": r["key"], "clicks": r["clicks"], "impressions": r["impressions"]}
-        for r in parse_gsc_rows(safe(gsc_call, gsc_body(ps, pe, ["query"], 10), default={}, label="gsc.queries.prev"))
+        for r in parse_gsc_rows(safe(gsc_call, gsc_body(gps, gpe, ["query"], 10), label="gsc.queries.prev"))
     ]
+    # rowLimit 200: 小規模サイト（直近28日37ユーザー実測）ではページ数がこれで尽きるため、
+    # 有効検索クリック（qualified_clicks_total）の合計がほぼ全ページ網羅になる。
     gsc_pages_cur = [
         {"page": r["key"], "clicks": r["clicks"], "impressions": r["impressions"]}
-        for r in parse_gsc_rows(safe(gsc_call, gsc_body(cs, ce, ["page"], 10), default={}, label="gsc.pages.cur"))
+        for r in parse_gsc_rows(safe(gsc_call, gsc_body(gcs, gce, ["page"], 200), label="gsc.pages.cur"))
     ]
+    # 修正2: query×page（検索語→ページ）。ダイジェストには上位3行だけ出すが、生JSONには全件残す。
+    gsc_query_page_cur = parse_gsc_query_page_rows(
+        safe(gsc_call, gsc_body(gcs, gce, ["query", "page"], 200), label="gsc.query_page.cur")
+    )
+
+    qualified_clicks, qualified_clicks_page_total = qualified_clicks_total(gsc_pages_cur)
 
     return {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "weeks": weeks.as_dict(),
+        "weeks": {"ga4": ga4_weeks.as_dict(), "gsc": gsc_weeks.as_dict()},
         "ga4": {
             "totals": {"cur": ga4_totals_cur, "prev": ga4_totals_prev},
             "top_pages": {"cur": top_pages_cur, "prev": top_pages_prev},
@@ -350,8 +540,11 @@ def fetch_metrics(weeks: WeekWindows, ga4_call, gsc_call) -> dict:
             "totals": {"cur": gsc_totals_cur, "prev": gsc_totals_prev},
             "top_queries": {"cur": gsc_queries_cur, "prev": gsc_queries_prev},
             "top_pages": {"cur": gsc_pages_cur},
+            "query_page": {"cur": gsc_query_page_cur},
+            "qualified_clicks": {"cur": qualified_clicks, "page_total": qualified_clicks_page_total},
         },
         "warnings": warnings,
+        "data_quality": {"failed": failed_labels},
     }
 
 
@@ -362,10 +555,14 @@ def fetch_metrics(weeks: WeekWindows, ga4_call, gsc_call) -> dict:
 
 def compose_digest(metrics: dict) -> str:
     weeks = metrics.get("weeks", {})
-    cur_w = weeks.get("cur", {})
-    prev_w = weeks.get("prev", {})
+    ga4_w = weeks.get("ga4", {})
+    gsc_w = weeks.get("gsc", {})
+    cur_w = ga4_w.get("cur", {})
+    prev_w = ga4_w.get("prev", {})
+    gsc_cur_w = gsc_w.get("cur", {})
     ga4 = metrics.get("ga4", {})
     gsc = metrics.get("gsc", {})
+    failed = set((metrics.get("data_quality") or {}).get("failed") or [])
 
     lines: list[str] = []
     lines.append("【めぐりび 週次アナリティクス】")
@@ -375,56 +572,89 @@ def compose_digest(metrics: dict) -> str:
 
     # --- GA4 サイト全体 ---
     gt = ga4.get("totals", {})
-    gc = gt.get("cur", {})
-    gp = gt.get("prev", {})
+    gc = gt.get("cur") or {}
+    gp = gt.get("prev") or {}
+    ga4_cur_failed = "ga4.totals.cur" in failed
+    ga4_prev_failed = "ga4.totals.prev" in failed
     lines.append("■ サイト全体（GA4）")
     lines.append(
-        f"・アクティブユーザー: {fmt_int(gc.get('activeUsers'))}"
-        f"（前週比 {wow_str(gc.get('activeUsers'), gp.get('activeUsers'))}）"
+        f"・アクティブユーザー: {fmt_metric_or_na(gc.get('activeUsers'), ga4_cur_failed)}"
+        f"（前週比 {wow_str_or_na(gc.get('activeUsers'), gp.get('activeUsers'), ga4_cur_failed, ga4_prev_failed)}）"
     )
     lines.append(
-        f"・セッション: {fmt_int(gc.get('sessions'))}"
-        f"（前週比 {wow_str(gc.get('sessions'), gp.get('sessions'))}）"
+        f"・セッション: {fmt_metric_or_na(gc.get('sessions'), ga4_cur_failed)}"
+        f"（前週比 {wow_str_or_na(gc.get('sessions'), gp.get('sessions'), ga4_cur_failed, ga4_prev_failed)}）"
     )
     lines.append(
-        f"・ページビュー: {fmt_int(gc.get('screenPageViews'))}"
-        f"（前週比 {wow_str(gc.get('screenPageViews'), gp.get('screenPageViews'))}）"
+        f"・ページビュー: {fmt_metric_or_na(gc.get('screenPageViews'), ga4_cur_failed)}"
+        f"（前週比 "
+        f"{wow_str_or_na(gc.get('screenPageViews'), gp.get('screenPageViews'), ga4_cur_failed, ga4_prev_failed)}）"
     )
     lines.append("")
 
     # --- Search Console ---
     st = gsc.get("totals", {})
-    sc = st.get("cur", {})
-    sp = st.get("prev", {})
+    sc = st.get("cur") or {}
+    sp = st.get("prev") or {}
+    gsc_cur_failed = "gsc.totals.cur" in failed
+    gsc_prev_failed = "gsc.totals.prev" in failed
     lines.append("■ 検索流入（Search Console）")
-    lines.append(f"・クリック: {fmt_int(sc.get('clicks'))}（前週比 {wow_str(sc.get('clicks'), sp.get('clicks'))}）")
     lines.append(
-        f"・表示回数: {fmt_int(sc.get('impressions'))}"
-        f"（前週比 {wow_str(sc.get('impressions'), sp.get('impressions'))}）"
+        f"・クリック: {fmt_metric_or_na(sc.get('clicks'), gsc_cur_failed)}"
+        f"（前週比 {wow_str_or_na(sc.get('clicks'), sp.get('clicks'), gsc_cur_failed, gsc_prev_failed)}）"
     )
-    cur_ctr = float(sc.get("ctr") or 0) * 100.0
-    prev_ctr = float(sp.get("ctr") or 0) * 100.0
-    lines.append(f"・平均CTR: {cur_ctr:.2f}%（前週 {prev_ctr:.2f}%）")
-    lines.append(f"・平均掲載順位: {float(sc.get('position') or 0):.1f}位（前週 {float(sp.get('position') or 0):.1f}位）")
+    lines.append(
+        f"・表示回数: {fmt_metric_or_na(sc.get('impressions'), gsc_cur_failed)}"
+        f"（前週比 {wow_str_or_na(sc.get('impressions'), sp.get('impressions'), gsc_cur_failed, gsc_prev_failed)}）"
+    )
+    if gsc_cur_failed:
+        lines.append("・平均CTR: 取得失敗")
+        lines.append("・平均掲載順位: 取得失敗")
+    else:
+        cur_ctr = float(sc.get("ctr") or 0) * 100.0
+        prev_ctr = 0.0 if gsc_prev_failed else float(sp.get("ctr") or 0) * 100.0
+        prev_ctr_str = "取得失敗" if gsc_prev_failed else f"{prev_ctr:.2f}%"
+        lines.append(f"・平均CTR: {cur_ctr:.2f}%（前週 {prev_ctr_str}）")
+        prev_pos_str = "取得失敗" if gsc_prev_failed else f"{float(sp.get('position') or 0):.1f}位"
+        lines.append(f"・平均掲載順位: {float(sc.get('position') or 0):.1f}位（前週 {prev_pos_str}）")
+    # 修正2: 有効検索クリック（home/store/area/stores/blog への非noindexページのクリック合計）。
+    qc = gsc.get("qualified_clicks") or {}
+    lines.append(
+        f"・有効クリック: {fmt_int(qc.get('cur'))}（全クリック {fmt_metric_or_na(sc.get('clicks'), gsc_cur_failed)}）"
+    )
+    # 修正1d: GSC は確定に数日かかるため対象週が GA4 とズレる。ここで明記する。
+    lines.append(
+        f"・GSC確定週: {format_md(gsc_cur_w.get('start', cur_w.get('start', '')))}"
+        f"〜{format_md(gsc_cur_w.get('end', cur_w.get('end', '')))}"
+        "（検索データは数日遅れで確定するため、GA4の週とはズレます）"
+    )
     lines.append("")
 
     # --- 今週のハイライト ---
     lines.append("■ 今週のハイライト")
     pg = top_growth(ga4.get("top_pages", {}).get("cur"), ga4.get("top_pages", {}).get("prev"), "path", "views")
-    if pg and pg[0]:
+    if pg:
         item, delta = pg
-        sign = "+" if delta >= 0 else ""
-        lines.append(f"・最も伸びたページ: {item.get('path')}（{sign}{fmt_int(delta)}PV）")
+        lines.append(f"・最も伸びたページ: {item.get('path')}（+{fmt_int(delta)}PV）")
     qg = top_growth(
         gsc.get("top_queries", {}).get("cur"), gsc.get("top_queries", {}).get("prev"), "query", "clicks"
     )
-    if qg and qg[0]:
+    if qg:
         item, delta = qg
-        sign = "+" if delta >= 0 else ""
-        lines.append(f"・最も伸びた検索クエリ: 「{item.get('query')}」（{sign}{fmt_int(delta)}クリック）")
-    if not (pg and pg[0]) and not (qg and qg[0]):
-        lines.append("・（比較可能なデータがまだありません）")
+        lines.append(f"・最も伸びた検索クエリ: 「{item.get('query')}」（+{fmt_int(delta)}クリック）")
+    if not pg and not qg:
+        lines.append("・（今週伸びたページ/クエリはありませんでした）")
     lines.append("")
+
+    # --- 検索語→ページ TOP3（修正2） ---
+    query_page_cur = gsc.get("query_page", {}).get("cur") or []
+    top_query_page = sorted(query_page_cur, key=lambda r: r.get("clicks") or 0, reverse=True)[:3]
+    if top_query_page:
+        lines.append("■ 検索語→ページ TOP3")
+        for row in top_query_page:
+            page_path = urllib.parse.urlparse(row.get("page") or "").path or row.get("page") or ""
+            lines.append(f"・「{row.get('query')}」→ {page_path}（{fmt_int(row.get('clicks'))}クリック）")
+        lines.append("")
 
     # --- 人気ページ TOP5 ---
     top_pages = (ga4.get("top_pages", {}).get("cur") or [])[:5]
@@ -454,7 +684,10 @@ def compose_digest(metrics: dict) -> str:
 
     # --- 注記 ---
     if metrics.get("warnings"):
-        lines.append("※ 一部データの取得に失敗しました（詳細はログを参照）。")
+        if failed:
+            lines.append(f"※ 一部データの取得に失敗しました（対象: {', '.join(sorted(failed))}）。詳細はログを参照。")
+        else:
+            lines.append("※ 一部データの取得に失敗しました（詳細はログを参照）。")
     lines.append("※ Search Console の直近2日は集計途中の場合があります。")
     lines.append("※ 本レポートは非公開（数値は private バケットに保存）。")
 
@@ -597,7 +830,16 @@ def main(argv: list[str] | None = None) -> int:
         print(FRIENDLY_SETUP_HINT)
         return 0
 
-    token = google_access_token(sa_path, [GA4_SCOPE, GSC_SCOPE])
+    try:
+        token = google_access_token(sa_path, [GA4_SCOPE, GSC_SCOPE])
+    except Exception as exc:  # noqa: BLE001 - 2026-08-26 計測レビュー対応（修正1c）:
+        # 以前は creds.refresh() の失敗（鍵が不正・失効・ネットワーク断など）が未捕捉のまま
+        # 生の traceback で落ちていた。Task Scheduler の「前回の結果」欄で異常に気付けるよう、
+        # 分かりやすい日本語メッセージ + 非ゼロ終了にする（google-auth 未インストールの場合と
+        # 違い、これは「設定ミス/一時障害」なので exit 0 の graceful no-op にはしない）。
+        print(f"[analytics][error] Google 認証に失敗しました: {exc}")
+        print("  鍵ファイル(secrets/ga-service-account.json)の有効期限・内容を確認してください。")
+        return 1
     if token is None:
         print(
             "[analytics] google-auth が未インストールのため認証できません。\n"
@@ -607,10 +849,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     now_jst = datetime.now(JST)
-    weeks = last_full_week(now_jst)
+    ga4_weeks = last_full_week(now_jst)
+    gsc_weeks = last_confirmed_week(now_jst)
     print(
-        f"[analytics] 対象週 {weeks.cur_start}〜{weeks.cur_end}"
-        f"（前週 {weeks.prev_start}〜{weeks.prev_end}）を集計します。"
+        f"[analytics] GA4対象週 {ga4_weeks.cur_start}〜{ga4_weeks.cur_end}"
+        f"（前週 {ga4_weeks.prev_start}〜{ga4_weeks.prev_end}）、"
+        f"GSC確定週 {gsc_weeks.cur_start}〜{gsc_weeks.cur_end}"
+        f"（前週 {gsc_weeks.prev_start}〜{gsc_weeks.prev_end}）を集計します。"
     )
 
     def ga4_call(body: dict) -> dict:
@@ -619,7 +864,7 @@ def main(argv: list[str] | None = None) -> int:
     def gsc_call(body: dict) -> dict:
         return _gsc_query(token, site_url, body)
 
-    metrics = fetch_metrics(weeks, ga4_call, gsc_call)
+    metrics = fetch_metrics(ga4_weeks, gsc_weeks, ga4_call, gsc_call)
     digest = compose_digest(metrics)
 
     if args.dry_run:
@@ -629,9 +874,9 @@ def main(argv: list[str] | None = None) -> int:
             print("\n[warn] " + " / ".join(metrics["warnings"]))
         return 0
 
-    # 生 JSON を private バケットへ、ダイジェストをローカルへ。
-    upload_metrics(metrics, weeks)
-    log_path = write_local_log(digest, weeks)
+    # 生 JSON を private バケットへ、ダイジェストをローカルへ（保存先ファイル名は GA4 週基準、従来どおり）。
+    upload_metrics(metrics, ga4_weeks)
+    log_path = write_local_log(digest, ga4_weeks)
 
     # LINE 送信（未配線でも失敗にしない）。
     if send_line_push(digest):
