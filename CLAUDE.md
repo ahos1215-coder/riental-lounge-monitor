@@ -218,6 +218,7 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
 - `plan/README.md` — `plan/` フォルダ全体のナビ・推奨読了順
 - `plan/FORECAST_V2.md` / `plan/FORECAST_ACCURACY.md` — v2 shadow パイプラインの設計・答え合わせ運用
 - `plan/CDN_WARMING_LOCAL.md` — CDN warmingのローカル移行の経緯・Task Scheduler登録手順
+- `docs/ANALYTICS_AGENT_RUNBOOK.md` — GA4/Search Console分析をAIエージェントが行う手順（SSOT）
 
 ---
 
@@ -272,5 +273,6 @@ python app.py                # Flask ローカル起動（.env に環境変数�
 | 相席屋の %換算・時間帯ロールアップ | `frontend/src/app/config/stores.ts`（`seatFullnessPercent` 等）/ `frontend/src/lib/store/nightHourlyRollup.ts` |
 | 料金計算（オリエンタル/相席屋） | `frontend/src/lib/pricing/computeCost.ts`（相席屋は `computeCostAisekiya.ts`、共有は `computeCostShared.ts`） |
 | 退役スクリプト | リポジトリ直下 `archive/`（README に理由）。`scripts/experiments/` は実験専用（本番は依存しない） |
+| GA4/GSC の最新値を読む | `scripts/analytics_report.py`（read-only。手順は `docs/ANALYTICS_AGENT_RUNBOOK.md`） |
 
 このファイルの記述と実際のコードが食い違っていたら、コードを信じて `CLAUDE.md` を更新してください。

@@ -114,6 +114,7 @@ npm run dev
 | Daily Report（深夜版） | 毎日 21:30 JST | `MEGRIBI-daily-late` | `scripts/local_report_job.py --edition late_update` |
 | Weekly Report | 毎週水曜 06:30 JST | `MEGRIBI-weekly` | `scripts/run_weekly_local.ps1 -Stores all` |
 | CDN warming | 19:00〜23:50 JST・10分毎 | `MEGRIBI-warm-cdn` | `scripts/warm_cdn_local.py` |
+| 週次アナリティクス・ダイジェスト（任意・オーナー専用） | 毎週月曜 09:00 JST | `MEGRIBI-analytics-weekly` | `scripts/analytics_weekly_report.py`（`ahos1`/Interactive。手順は `docs/ANALYTICS_SETUP.md`） |
 
 ### GitHub Actions（リポジトリ管理）
 | 内容 | スケジュール | Workflow ファイル |

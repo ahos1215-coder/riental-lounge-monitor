@@ -336,14 +336,22 @@ LINE_USER_ID=Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ## 7. 定期実行の登録（Task Scheduler・最後の仕上げ）
 
 **この登録はオーナー（統括）が最後に行います。** 上の手順1〜5が終わって `--dry-run`
-が成功したら、**管理者権限の PowerShell**で次を実行します（既存の
-`MEGRIBI-warm-cdn` と同じ流儀＝ `/RU SYSTEM` の「ログオン状態に関わらず実行」）。
+が成功したら、**通常の（管理者権限でない）PowerShell**で次を実行します。
+
+> 訂正（2026-08-26）: 以前ここには「`MEGRIBI-warm-cdn` と同じ `/RU SYSTEM`」と
+> 書いてありましたが、実際に登録されている `MEGRIBI-analytics-weekly` タスクの
+> `Logon Mode` は **`Interactive only`**、`Run As User` は **`ahos1`**（あなたの
+> Windows ログインアカウント）でした（他の `MEGRIBI-daily-*` / `MEGRIBI-weekly` /
+> `MEGRIBI-snapshot` も同様に `ahos1` / `Interactive only`。`SYSTEM` で動いているのは
+> `MEGRIBI-warm-cdn` だけの例外）。つまり**あなたが PC にログインしている間しか
+> 動きません**（ログオフ・再起動後は再ログインが必要）。以下のコマンドは
+> 実態に合わせた `ahos1` / Interactive 版です。
 
 ```powershell
 $py   = "C:\Users\ahos1\AppData\Local\Programs\Python\Python314\python.exe"
 $root = "C:\Users\Public\共有データ系\ORIENTAL\ORIENTAL\riental-lounge-monitor-main"
 
-schtasks /Create /TN "MEGRIBI-analytics-weekly" /SC WEEKLY /D MON /ST 09:00 /RU SYSTEM /F `
+schtasks /Create /TN "MEGRIBI-analytics-weekly" /SC WEEKLY /D MON /ST 09:00 /RU ahos1 /F `
   /TR "$py $root\scripts\analytics_weekly_report.py"
 
 # PC がスリープ等で 09:00 を逃しても、起動後すぐ実行されるようにする
@@ -353,9 +361,26 @@ Set-ScheduledTask -TaskName "MEGRIBI-analytics-weekly" -Settings $s
 ```
 
 - `/SC WEEKLY /D MON /ST 09:00` = 毎週月曜の 09:00 に実行。
-- `/RU SYSTEM` = ログオンしていなくても実行（`MEGRIBI-warm-cdn` と同じ理由。
-  詳細は `plan/CDN_WARMING_LOCAL.md`）。
+- `/RU ahos1` = あなたのログインアカウントで実行（**ログオフ中・PCシャットダウン中は
+  動かない**。常時ログイン運用が前提）。パスワード入力を求められた場合はあなたの
+  Windows ログインパスワードを入力してください（`/RP` は付けていないので初回登録時に
+  プロンプトが出ることがあります）。
 - 手動で今すぐ1回テスト実行するには: `schtasks /Run /TN "MEGRIBI-analytics-weekly"`
+
+### ログオン不要（SYSTEM）に変えたい場合
+
+「ログインしていなくても動かしたい」場合は、`MEGRIBI-warm-cdn` と同じ `SYSTEM` 実行に
+変更できます。ただし SYSTEM アカウントはあなたのユーザー環境（`.env.local` の展開・
+`secrets\ga-service-account.json` への相対パス解決など）を前提にしないほうが安全なため、
+**必要になったときだけ**、管理者権限の PowerShell で次を実行してください（このドキュメント
+はこのコマンドを自動実行しません。オーナーが手動で判断・実行してください）:
+
+```powershell
+schtasks /Change /TN "MEGRIBI-analytics-weekly" /RU SYSTEM
+```
+
+- 逆に `ahos1` 実行に戻す場合は `schtasks /Change /TN "MEGRIBI-analytics-weekly" /RU ahos1`。
+- 変更後は一度 `schtasks /Run /TN "MEGRIBI-analytics-weekly"` で正常終了することを確認する。
 
 ---
 
