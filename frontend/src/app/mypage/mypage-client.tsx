@@ -296,8 +296,9 @@ export default function MyPageClient() {
                   {/* Store info + score */}
                   <div className="flex items-start justify-between gap-2 pr-8">
                     <div>
+                      {/* 2026-08-26 計測レビューR2対応(§5-5): 内部リンクの ?store= を除去 */}
                       <Link
-                        href={`/store/${card.slug}?store=${card.slug}`}
+                        href={`/store/${card.slug}`}
                         className="text-sm font-bold text-white group-hover:text-indigo-200"
                       >
                         {card.meta.label}
@@ -371,8 +372,9 @@ export default function MyPageClient() {
 
                   {/* Action links */}
                   <div className="mt-auto flex gap-3 pt-3 text-[11px]">
+                    {/* 2026-08-26 計測レビューR2対応(§5-5): 内部リンクの ?store= を除去 */}
                     <Link
-                      href={`/store/${card.slug}?store=${card.slug}`}
+                      href={`/store/${card.slug}`}
                       className="font-medium text-indigo-300 hover:text-indigo-200"
                     >
                       店舗詳細 →
@@ -423,9 +425,10 @@ export default function MyPageClient() {
           ) : (
             <div className="flex flex-wrap gap-2">
               {historyMetas.map(({ slug, meta }) => (
+                // 2026-08-26 計測レビューR2対応(§5-5): 内部リンクの ?store= を除去
                 <Link
                   key={slug}
-                  href={`/store/${slug}?store=${slug}`}
+                  href={`/store/${slug}`}
                   className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1.5 text-xs text-white/70 transition hover:border-indigo-400/30 hover:text-indigo-200"
                 >
                   {meta.label}

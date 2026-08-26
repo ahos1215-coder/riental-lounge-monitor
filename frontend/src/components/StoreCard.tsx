@@ -103,8 +103,11 @@ function StoreCardImpl({
   latestActualTs,
   onNavigate,
 }: StoreCardProps) {
+  // 2026-08-26 計測レビューR2対応(§5-5): 内部リンクの ?store= を除去。/store/[id] は
+  // path slug を優先し query は読まれない。canonical は既に /store/<slug> のため非正規URLを
+  // 内部から作り続ける理由がない（外部の古いURLは query が無視されるだけでフォールバック不要）。
   const resolvedHref = useMemo(
-    () => href ?? `/store/${slug}?store=${slug}`,
+    () => href ?? `/store/${slug}`,
     [href, slug],
   );
 

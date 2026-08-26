@@ -63,9 +63,10 @@ export function HomeTonightTop5({
                 {topStores.map((item, idx) => {
                   const meta = getStoreMetaBySlugOrDefault(item.slug);
                   return (
+                    // 2026-08-26 計測レビューR2対応(§5-5): 内部リンクの ?store= を除去
                     <Link
                       key={item.slug}
-                      href={`/store/${item.slug}?store=${item.slug}`}
+                      href={`/store/${item.slug}`}
                       className="group flex flex-col items-center rounded-xl border border-slate-800 bg-slate-950/80 px-3 py-3 text-center transition hover:border-emerald-500/50 hover:bg-slate-900/80"
                     >
                       <span className="text-[10px] font-bold text-emerald-300/70">

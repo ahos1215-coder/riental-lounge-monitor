@@ -39,8 +39,9 @@ export function HomeLastVisitedSection({
                         店舗ページを開くと、あとからここへワンタップで戻れます。
                       </p>
                       <div className="mt-3">
+                        {/* 2026-08-26 計測レビューR2対応(§5-5): 内部リンクの ?store= を除去 */}
                         <Link
-                          href={`/store/${lastStore.slug}?store=${lastStore.slug}`}
+                          href={`/store/${lastStore.slug}`}
                           className="inline-flex items-center justify-center rounded-md bg-indigo-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-400"
                         >
                           店舗ページへ

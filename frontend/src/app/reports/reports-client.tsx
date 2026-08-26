@@ -437,9 +437,10 @@ export function ReportsPageClient() {
               </h2>
               <div className="flex flex-wrap gap-2">
                 {storesWithoutReport.map((s) => (
+                  // 2026-08-26 計測レビューR2対応(§5-5): 内部リンクの ?store= を除去
                   <Link
                     key={s.slug}
-                    href={`/store/${s.slug}?store=${s.slug}`}
+                    href={`/store/${s.slug}`}
                     className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] text-white/50 transition hover:border-white/25 hover:text-white/70"
                   >
                     {s.label}

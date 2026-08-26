@@ -12,6 +12,9 @@
  * 測定 ID（`NEXT_PUBLIC_GA_MEASUREMENT_ID`）は HTML に載る性質の公開情報であり秘密ではない。
  */
 
+import type { PreviewRangeMode } from "@/lib/forecast/types";
+import type { SecondVenuePurpose } from "@/app/config/secondVenueMapLinks";
+
 export const GA_MEASUREMENT_ID = process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID ?? "";
 
 /** GA を有効化してよい唯一のホスト名（本番）。 */
@@ -43,13 +46,16 @@ export function shouldEnableAnalytics(input: {
 }
 
 /**
- * カスタムイベント名の唯一の正本（SSOT）。2026-08-26 計測レビュー対応: 実発火していた8種 +
- * このレビューで新規追加する2種（official_site_click / second_venue_click）。
+ * カスタムイベント名の唯一の正本（SSOT）。2026-08-26 計測レビューR2対応: 実発火していた8種 +
+ * 前ラウンドで追加した2種（official_site_click / second_venue_click）+ 本ラウンドで追加する
+ * 露出2種（official_site_view / second_venue_view。レビュー§4-2: 送客クリックには露出分母が
+ * 無く「表示されていない」のか「表示されたが押されない」のか区別できなかったため、この2面だけに
+ * 追加する。広範な decision_card_view 群は見送り）。
  * `report_read` は `report_view` に改名した（mount 時に発火する実態に名前を合わせた。
  * 呼び出し側の書き換えは frontend/src/components/ReportViewTracker.tsx で別班が対応）。
  * ここに無い名前は track() の型エラーになる＝「イベント名は union で閉じる」を強制する。
  * Python 週報 `scripts/analytics_weekly_report.py` の `KNOWN_CUSTOM_EVENTS` と手動同期すること
- * （あちらは `report_read` のままなら要更新。テスト側でこの配列の中身を固定し、ズレに気づけるようにする）。
+ * （あちらは12種 + legacy alias `report_read`。テスト側でこの配列の中身を固定し、ズレに気づけるようにする）。
  */
 export const ANALYTICS_EVENT_NAMES = [
   "store_view",
@@ -62,23 +68,43 @@ export const ANALYTICS_EVENT_NAMES = [
   "related_store_click",
   "official_site_click",
   "second_venue_click",
+  "official_site_view",
+  "second_venue_view",
 ] as const;
 
 export type AnalyticsEventName = (typeof ANALYTICS_EVENT_NAMES)[number];
 
 /**
- * 全イベント共通で使われうるコンテキストパラメータ。店舗識別子は `store_slug` に統一する
- * （現状 呼び出し側で slug / from / to に分裂しているが、書き換えは別班。ここでは型だけ用意）。
- * 移行中に既存の緩い呼び出し（例: `{ slug }` や `{ from, to }`）が型エラーで壊れないよう、
- * 既知キーは型で明示しつつ index signature で任意の string/number/boolean キーも許容する
- * （段階的な型。イベント"名"だけは union で閉じ、パラメータは緩めに保つ設計判断）。
+ * イベント別の必須パラメータ型（2026-08-26 計測レビューR2対応）。
+ *
+ * 旧型は `[key: string]: string | number | boolean | undefined` という index signature を
+ * 持っており、必須パラメータの欠落・旧キー（`slug` 等）・typo が全て型チェックを素通りしていた
+ * （レビュー2-2「index signatureは移行後も誤キーを許す」）。実呼び出し側の store_slug 統一移行は
+ * 完了しているため、緩い型を残す理由がなくなった。イベント名ごとに必須パラメータを固定する。
+ * 値は「現在の実発火」に合わせて定義する（例: cost_sim_interact / official_site_click の
+ * brand は現状 oriental|aisekiya の2値しか送っていないため、その2値で閉じる）。
  */
-export type AnalyticsEventParams = {
-  store_slug?: string;
-  brand?: "oriental" | "aisekiya";
-  surface?: string;
-  mode?: string;
-  [key: string]: string | number | boolean | undefined;
+export type AnalyticsEventParamsByName = {
+  store_view: { store_slug: string; store_label: string };
+  report_view: { store_slug: string; report_type: "daily" | "weekly" };
+  favorite_add: { store_slug: string };
+  favorite_remove: { store_slug: string };
+  compare_add_store: { store_slug: string };
+  range_mode_change: { store_slug: string; mode: PreviewRangeMode };
+  cost_sim_interact: { store_slug: string; brand: "oriental" | "aisekiya" };
+  related_store_click: { store_slug: string; from_slug: string };
+  official_site_click: {
+    store_slug: string;
+    brand: "oriental" | "aisekiya";
+    destination_domain: string;
+  };
+  second_venue_click: {
+    store_slug: string;
+    venue_kind: SecondVenuePurpose;
+    destination_domain: string;
+  };
+  official_site_view: { store_slug: string; brand: "oriental" | "aisekiya" };
+  second_venue_view: { store_slug: string };
 };
 
 type GtagWindow = Window & {
@@ -169,8 +195,15 @@ function gtag(...args: unknown[]): void {
 /**
  * すべてのカスタムイベントの唯一の入口。GA 不在/無効時（非本番ホスト・開発者オプトアウト・
  * 測定 ID 未設定・SSR）は完全 no-op。コンポーネント側は gtag を直接触らずこの関数だけを呼ぶ。
+ *
+ * 2026-08-26 計測レビューR2対応: イベント名 `name` に応じて `params` の型を
+ * `AnalyticsEventParamsByName` から引く generic にした。必須パラメータの欠落・旧キー・typo は
+ * ここでコンパイルエラーになる（呼び出し側を直接見る必要はない）。
  */
-export function track(name: AnalyticsEventName, params?: AnalyticsEventParams): void {
+export function track<K extends AnalyticsEventName>(
+  name: K,
+  params: AnalyticsEventParamsByName[K],
+): void {
   if (!analyticsEnabled()) return;
   gtag("event", name, params);
 }
@@ -178,8 +211,23 @@ export function track(name: AnalyticsEventName, params?: AnalyticsEventParams): 
 /** 後方互換エイリアス（既存の store_view / report_view / favorite_* もこの guarded 経路を通る）。 */
 export const sendEvent = track;
 
-/** 仮想ページビュー（SPA 遷移）を送る。無効時は no-op。 */
+/**
+ * 仮想ページビュー（SPA 遷移）を送る。無効時は no-op。
+ *
+ * 2026-08-26 計測レビューR2対応: 従来は `gtag("config", ID, { page_path: url })` を使っていたが、
+ * GA4 公式の gtag config が受け付けるパラメータは `page_title` / `page_location` /
+ * `send_page_view` のみで `page_path` は非公式（ドキュメントに存在しない）。公式の手動送信方式
+ * である `gtag("event", "page_view", { page_location, page_title })` に変更する。
+ * 初回PVは従来どおり GoogleAnalytics.tsx の `<Script id="ga4-init">` 内の
+ * `gtag('config', ID)` が送る設計を変えない（初回=config、以後=event page_view、の
+ * 2経路構成は維持。検証済みの単一送信設計＝初回はgtag未定義でno-opになりconfigのみが送る）。
+ */
 export function sendPageView(url: string): void {
   if (!analyticsEnabled()) return;
-  gtag("config", GA_MEASUREMENT_ID, { page_path: url });
+  const w = getBrowserWindow();
+  const origin = w ? w.location.origin : "";
+  gtag("event", "page_view", {
+    page_location: origin + url,
+    page_title: typeof document !== "undefined" ? document.title : undefined,
+  });
 }

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANALYTICS_EVENT_NAMES, isProductionHostname, shouldEnableAnalytics } from "./analytics";
 import type { AnalyticsEventName } from "./analytics";
 import { shouldSendPageView } from "@/components/GoogleAnalytics";
+import { shouldFireExposure } from "@/app/hooks/useExposureOnce";
 
 // ────────────────────────────────────────────────────────────────────────────
 // 純粋関数（window / 測定 ID 非依存）— GA を発火してよいかの判定ロジックの網羅テスト。
@@ -112,14 +113,20 @@ describe("runtime guard: track() / opt-out / ga-disable", () => {
   it("track() fires gtag on production host (not opted out)", async () => {
     const { gtagSpy } = installWindow({ hostname: "meguribi.jp" });
     const mod = await loadModule();
-    mod.track("range_mode_change", { mode: "yesterday" });
-    expect(gtagSpy).toHaveBeenCalledWith("event", "range_mode_change", { mode: "yesterday" });
+    mod.track("range_mode_change", { store_slug: "shibuya", mode: "yesterday" });
+    expect(gtagSpy).toHaveBeenCalledWith("event", "range_mode_change", {
+      store_slug: "shibuya",
+      mode: "yesterday",
+    });
   });
 
   it("track() is a no-op on a non-production host (even with a valid id)", async () => {
     const { gtagSpy } = installWindow({ hostname: "localhost" });
     const mod = await loadModule();
-    mod.track("compare_add_store", { slug: "shibuya" });
+    // 2026-08-26 計測レビューR2対応: 型を index signature からイベント別型へ移行したため、
+    // 旧キー `{ slug }` はもう型チェックを通らない（レビュー2-2で指摘された穴）。
+    // ここは現行の必須パラメータ `store_slug` で呼ぶ。
+    mod.track("compare_add_store", { store_slug: "shibuya" });
     expect(gtagSpy).not.toHaveBeenCalled();
   });
 
@@ -130,7 +137,7 @@ describe("runtime guard: track() / opt-out / ga-disable", () => {
     });
     const mod = await loadModule();
     expect(mod.isDevOptedOut()).toBe(true);
-    mod.track("favorite_add", { slug: "ebisu" });
+    mod.track("favorite_add", { store_slug: "ebisu" });
     expect(gtagSpy).not.toHaveBeenCalled();
   });
 
@@ -163,7 +170,10 @@ describe("runtime guard: track() / opt-out / ga-disable", () => {
 // ────────────────────────────────────────────────────────────────────────────
 
 describe("ANALYTICS_EVENT_NAMES (SSOT)", () => {
-  it("contains exactly the known 10 event names, with no duplicates", () => {
+  it("contains exactly the known 12 event names, with no duplicates", () => {
+    // 2026-08-26 計測レビューR2対応: 露出2種（official_site_view / second_venue_view）を追加し
+    // 10種→12種になった。scripts/analytics_weekly_report.py の KNOWN_CUSTOM_EVENTS
+    // （= この12種 + legacy alias "report_read"）と一致させること。
     const expected = [
       "store_view",
       "report_view",
@@ -175,6 +185,8 @@ describe("ANALYTICS_EVENT_NAMES (SSOT)", () => {
       "related_store_click",
       "official_site_click",
       "second_venue_click",
+      "official_site_view",
+      "second_venue_view",
     ];
     expect([...ANALYTICS_EVENT_NAMES].sort()).toEqual([...expected].sort());
     expect(new Set(ANALYTICS_EVENT_NAMES).size).toBe(ANALYTICS_EVENT_NAMES.length);
@@ -195,6 +207,8 @@ describe("ANALYTICS_EVENT_NAMES (SSOT)", () => {
         case "related_store_click":
         case "official_site_click":
         case "second_venue_click":
+        case "official_site_view":
+        case "second_venue_view":
           return;
         default: {
           const _exhaustive: never = name;
@@ -230,6 +244,77 @@ describe("shouldSendPageView (PVの重複防止ガード)", () => {
   it("never sends when GA is not enabled, regardless of pathname", () => {
     expect(
       shouldSendPageView({ enabled: false, pathname: "/reports", lastSentPath: null }),
+    ).toBe(false);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 2026-08-26 計測レビューR2対応: sendPageView が公式の page_view イベント方式で送ることを固定する。
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("sendPageView (公式 page_view イベント方式)", () => {
+  afterEach(() => {
+    delete (globalThis as { window?: unknown }).window;
+    delete (globalThis as { document?: unknown }).document;
+  });
+
+  it("SPA遷移では gtag('event','page_view',{page_location,page_title}) を送る（config の page_path は非公式）", async () => {
+    const { gtagSpy, win } = installWindow({ hostname: "meguribi.jp" });
+    // getBrowserWindow() が window.location.origin / document.title を読むため両方用意する。
+    win.location = { hostname: "meguribi.jp", origin: "https://meguribi.jp" };
+    (globalThis as { document?: unknown }).document = { title: "テストページ" };
+    const mod = await loadModule();
+    mod.sendPageView("/stores?tab=area");
+    expect(gtagSpy).toHaveBeenCalledWith("event", "page_view", {
+      page_location: "https://meguribi.jp/stores?tab=area",
+      page_title: "テストページ",
+    });
+    // 非公式パラメータ page_path や config 方式を使っていないことも確認する。
+    expect(gtagSpy).not.toHaveBeenCalledWith(
+      "config",
+      expect.anything(),
+      expect.objectContaining({ page_path: expect.anything() }),
+    );
+  });
+
+  it("GA無効時は sendPageView も no-op", async () => {
+    const { gtagSpy } = installWindow({ hostname: "localhost" });
+    const mod = await loadModule();
+    mod.sendPageView("/stores");
+    expect(gtagSpy).not.toHaveBeenCalled();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// 2026-08-26 計測レビューR2対応: official_site_view / second_venue_view の露出判定
+// （shouldFireExposure）の境界値テスト。50%以上・1000ms以上・未発火、の全てを満たす時だけ true。
+// ────────────────────────────────────────────────────────────────────────────
+
+describe("shouldFireExposure (露出2面の発火条件)", () => {
+  it("50%かつ1000ms以上・未発火なら true", () => {
+    expect(
+      shouldFireExposure({ intersectionRatio: 0.5, visibleMs: 1000, alreadyFired: false }),
+    ).toBe(true);
+    expect(
+      shouldFireExposure({ intersectionRatio: 1, visibleMs: 5000, alreadyFired: false }),
+    ).toBe(true);
+  });
+
+  it("交差率が49%（しきい値未満）なら false", () => {
+    expect(
+      shouldFireExposure({ intersectionRatio: 0.49, visibleMs: 1000, alreadyFired: false }),
+    ).toBe(false);
+  });
+
+  it("表示継続が999ms（しきい値未満）なら false", () => {
+    expect(
+      shouldFireExposure({ intersectionRatio: 1, visibleMs: 999, alreadyFired: false }),
+    ).toBe(false);
+  });
+
+  it("条件を満たしていても既発火なら false（1回きり）", () => {
+    expect(
+      shouldFireExposure({ intersectionRatio: 1, visibleMs: 5000, alreadyFired: true }),
     ).toBe(false);
   });
 });

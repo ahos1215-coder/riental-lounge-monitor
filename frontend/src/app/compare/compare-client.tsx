@@ -530,8 +530,9 @@ export default function CompareClient() {
                             ? "席の埋まり具合（人数非公開）"
                             : `女性比率: ${data.genderRatio}`}
                         </span>
+                        {/* 2026-08-26 計測レビューR2対応(§5-5): 内部リンクの ?store= を除去 */}
                         <Link
-                          href={`/store/${slug}?store=${slug}`}
+                          href={`/store/${slug}`}
                           className="text-indigo-300/80 hover:text-indigo-200"
                         >
                           詳細 →

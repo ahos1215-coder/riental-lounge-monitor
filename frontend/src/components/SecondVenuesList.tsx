@@ -1,4 +1,6 @@
+import { useCallback } from "react";
 import { useSecondVenues, type SecondVenue } from "../app/hooks/useSecondVenues";
+import { useExposureOnce } from "../app/hooks/useExposureOnce";
 import { track } from "@/lib/analytics";
 
 type SecondVenuesListProps = {
@@ -36,8 +38,16 @@ export function secondVenueClickParams(
 export default function SecondVenuesList({ storeSlug }: SecondVenuesListProps) {
   const { data, loading, error } = useSecondVenues(storeSlug);
 
+  // 2026-08-26 計測レビューR2対応: second_venue_click には露出分母が無かった（レビュー§4-2）。
+  // リスト全体（4リンクまとめて）で50%以上・1000ms以上表示されたら一度だけ second_venue_view を送る
+  // （venue別には分けない＝指示書どおり）。
+  const handleExpose = useCallback(() => {
+    track("second_venue_view", { store_slug: storeSlug });
+  }, [storeSlug]);
+  const exposureRef = useExposureOnce<HTMLDivElement>(handleExpose);
+
   return (
-    <div className="space-y-2">
+    <div ref={exposureRef} className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-xs font-semibold text-slate-100">

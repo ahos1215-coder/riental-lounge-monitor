@@ -13,9 +13,15 @@
  * 追えていなかった）。GA4 に official_site_click を発火する onClick を追加したため、
  * このファイル自体が client boundary になる必要があり "use client" を付けた
  * （呼び出し元の日報/週報ページは Server Component のまま変更していない）。
+ *
+ * 2026-08-26 計測レビューR2対応: official_site_click には露出分母が無く「表示されていない」のか
+ * 「表示されたが押されない」のかを区別できなかった（レビュー§4-2）。このカード自体を
+ * useExposureOnce で監視し、50%以上・1000ms以上表示されたら一度だけ official_site_view を送る。
  */
 
+import { useCallback } from "react";
 import { track } from "@/lib/analytics";
+import { useExposureOnce } from "@/app/hooks/useExposureOnce";
 import { BRAND_DISPLAY_LABEL, type BrandId } from "@/app/config/stores";
 
 type Props = {
@@ -48,7 +54,7 @@ function buildUtmUrl(base: string, params: Record<string, string>): string {
  * destination_domain は officialUrl（UTM付与前のベースURL）のホスト名。href は毎回 UTM
  * クエリ付きで値が変わるため、集計しやすい安定した値としてホスト名だけを渡す。
  *
- * brand は analytics.ts（T1班のSSOT）の AnalyticsEventParams 型では "oriental"|"aisekiya" の
+ * brand は analytics.ts（T1班のSSOT）の AnalyticsEventParamsByName 型では "oriental"|"aisekiya" の
  * 2値のみ（cost_sim_interact も同じ2値しか送っていない前例）。このカードの brand prop は
  * BrandId（"jis" を含む3値）を受け取りうるが、stores.json に brand="jis" の店舗は
  * 2026-08-26時点で0件のため、型上だけ存在する "jis" は "oriental" にフォールバックする。
@@ -82,8 +88,15 @@ export function ReservationLinkCard({
     utm_content: storeSlug,
   });
 
+  // official_site_click と同じ brand 正規化（"jis" は型上だけ存在し、2値のみ送る）。
+  const normalizedBrand: "oriental" | "aisekiya" = brand === "aisekiya" ? "aisekiya" : "oriental";
+  const handleExpose = useCallback(() => {
+    track("official_site_view", { store_slug: storeSlug, brand: normalizedBrand });
+  }, [storeSlug, normalizedBrand]);
+  const exposureRef = useExposureOnce<HTMLDivElement>(handleExpose);
+
   return (
-    <div className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-4">
+    <div ref={exposureRef} className="rounded-2xl border border-indigo-500/20 bg-indigo-950/20 p-4">
       <div className="flex items-center justify-between gap-4">
         <div>
           <p className="text-xs font-medium text-indigo-300/70">外部サイトで詳細を確認</p>

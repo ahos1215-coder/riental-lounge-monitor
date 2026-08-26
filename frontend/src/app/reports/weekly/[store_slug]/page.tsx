@@ -229,8 +229,9 @@ export default async function WeeklyReportStorePage({ params }: Props) {
           <span aria-hidden>←</span>
           AI予測レポート一覧
         </Link>
+        {/* 2026-08-26 計測レビューR2対応(§5-5): 内部リンクの ?store= を除去 */}
         <Link
-          href={`/store/${store.slug}?store=${store.slug}`}
+          href={`/store/${store.slug}`}
           className="text-sm text-white/50 transition hover:text-white"
         >
           店舗ページ →
