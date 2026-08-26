@@ -7,7 +7,8 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+import json
+from datetime import date, datetime
 
 import pytest
 
@@ -510,3 +511,283 @@ def test_credentials_present_helper(tmp_path):
     assert awr._credentials_present("493123456", key) is True
     assert awr._credentials_present("", key) is False
     assert awr._credentials_present("493123456", tmp_path / "missing.json") is False
+
+
+# --------------------------------------------------------------------------
+# 2026-08-26 計測レビュー対応（第2ラウンド）: ページ分類の穴（修正5）
+# --------------------------------------------------------------------------
+
+
+def test_classify_page_path_separates_reports_hub_and_compare():
+    # 以前は "/reports"（ハブ・indexable）と "/reports/daily|weekly/<slug>"（noindex詳細）が
+    # 同じ "report" に混ざり、"/compare" は "other" に埋もれていた。
+    assert awr.classify_page_path("/reports") == "reports_hub"
+    assert awr.classify_page_path("https://www.meguribi.jp/reports") == "reports_hub"
+    assert awr.classify_page_path("/reports/daily/shibuya") == "report"
+    assert awr.classify_page_path("/reports/weekly/shibuya") == "report"
+    assert awr.classify_page_path("/compare") == "compare"
+    assert awr.classify_page_path("https://www.meguribi.jp/compare") == "compare"
+    # 既存分類は維持。
+    assert awr.classify_page_path("/mypage") == "other"
+
+
+# --------------------------------------------------------------------------
+# 2026-08-26 計測レビュー対応（第2ラウンド）: 指名判定の三分類（修正5）
+# --------------------------------------------------------------------------
+
+
+def test_classify_query_brand_three_way():
+    assert awr.classify_query_brand("めぐりび 渋谷") == "site"
+    assert awr.classify_query_brand("MEGURIBI") == "site"
+    assert awr.classify_query_brand("megribi") == "site"
+    assert awr.classify_query_brand("オリエンタルラウンジ 渋谷") == "chain"
+    assert awr.classify_query_brand("相席屋 新宿") == "chain"
+    assert awr.classify_query_brand("aisekiya shinjuku") == "chain"
+    assert awr.classify_query_brand("oriental lounge 池袋") == "chain"
+    assert awr.classify_query_brand("渋谷 相席ラウンジ") == "generic"  # チェーン名そのものではない
+    assert awr.classify_query_brand("") == "generic"
+
+
+def test_classify_query_brand_normalizes_fullwidth_and_case():
+    # NFKC正規化 + casefold で全角英数・大文字小文字のゆれを吸収する。
+    assert awr.classify_query_brand("ＭＥＧＵＲＩＢＩ") == "site"
+    assert awr.classify_query_brand("ＡＩＳＥＫＩＹＡ　渋谷") == "chain"
+
+
+def test_is_branded_query_still_wraps_site_only():
+    # 既存の後方互換: is_branded_query は site 判定のラッパー。チェーン名は False のまま。
+    assert awr.is_branded_query("めぐりび 渋谷") is True
+    assert awr.is_branded_query("オリエンタルラウンジ 渋谷") is False
+    assert awr.is_branded_query("渋谷 相席ラウンジ") is False
+
+
+# --------------------------------------------------------------------------
+# 2026-08-26 計測レビュー対応（第2ラウンド）: position_bucket の unknown（修正5）
+# --------------------------------------------------------------------------
+
+
+def test_position_bucket_unknown_for_missing_zero_nonfinite():
+    assert awr.position_bucket(None) == "unknown"
+    assert awr.position_bucket(0) == "unknown"
+    assert awr.position_bucket(0.0) == "unknown"
+    assert awr.position_bucket(float("nan")) == "unknown"
+    assert awr.position_bucket(float("inf")) == "unknown"
+    assert awr.position_bucket(-1.0) == "unknown"
+    # 正常値は従来どおり。
+    assert awr.position_bucket(2.0) == "1-3"
+
+
+# --------------------------------------------------------------------------
+# 2026-08-26 計測レビュー対応（第2ラウンド）: report_view_canonical 合算（修正6）
+# --------------------------------------------------------------------------
+
+
+def test_canonical_events_for_display_merges_report_read_into_report_view():
+    merged = awr.canonical_events_for_display({"report_read": 300, "store_view": 900})
+    assert merged["report_view"] == 300
+    assert "report_read" not in merged
+    assert merged["store_view"] == 900
+
+
+def test_canonical_events_for_display_sums_when_both_present():
+    merged = awr.canonical_events_for_display({"report_read": 100, "report_view": 50})
+    assert merged["report_view"] == 150
+    assert "report_read" not in merged
+
+
+def test_canonical_events_for_display_noop_when_no_legacy_key():
+    merged = awr.canonical_events_for_display({"report_view": 50, "store_view": 10})
+    assert merged == {"report_view": 50, "store_view": 10}
+
+
+def test_compose_digest_canonicalizes_report_read_into_report_view():
+    m = _fixture_metrics()
+    # フィクスチャは report_read のみを持つ（改名前の状態を模す）。
+    digest = awr.compose_digest(m)
+    assert "・report_view: 300" in digest
+    assert "・report_read:" not in digest
+
+
+# --------------------------------------------------------------------------
+# 2026-08-26 計測レビュー対応（第2ラウンド）: PV計測定義変更(8/26)の境界（修正6）
+# --------------------------------------------------------------------------
+
+
+def test_pv_delta_crosses_boundary():
+    # 対象週も前週も8/26より前 → またがない。
+    assert (
+        awr.pv_delta_crosses_boundary(date(2026, 8, 10), date(2026, 8, 16), date(2026, 8, 3), date(2026, 8, 9))
+        is False
+    )
+    # 対象週が8/26をまたぐ。
+    assert (
+        awr.pv_delta_crosses_boundary(date(2026, 8, 24), date(2026, 8, 30), date(2026, 8, 17), date(2026, 8, 23))
+        is True
+    )
+    # 対象週が新epoch・前週が旧epoch（週境界そのものは跨がないが前週比自体がepochをまたぐ）。
+    assert (
+        awr.pv_delta_crosses_boundary(date(2026, 8, 31), date(2026, 9, 6), date(2026, 8, 24), date(2026, 8, 30))
+        is True
+    )
+    # 両方とも8/26以降 → またがない。
+    assert (
+        awr.pv_delta_crosses_boundary(date(2026, 9, 7), date(2026, 9, 13), date(2026, 8, 31), date(2026, 9, 6))
+        is False
+    )
+
+
+def test_compose_digest_blocks_pv_delta_when_crossing_epoch_boundary():
+    m = _fixture_metrics()
+    m["weeks"]["ga4"]["cur"] = {"start": "2026-08-24", "end": "2026-08-30"}
+    m["weeks"]["ga4"]["prev"] = {"start": "2026-08-17", "end": "2026-08-23"}
+    digest = awr.compose_digest(m)
+    assert "・ページビュー: 4,200（前期間比 比較不可: 8/26にPV計測定義を変更したため）" in digest
+    # 他の指標（アクティブユーザー）は通常どおり前週比が出る。
+    assert "アクティブユーザー: 1,234（前週比 +12.2% ↑）" in digest
+
+
+# --------------------------------------------------------------------------
+# 2026-08-26 計測レビュー対応（第2ラウンド）: qualified 偽ゼロ（修正3）
+# --------------------------------------------------------------------------
+
+
+def test_fetch_metrics_qualified_clicks_none_when_pages_fetch_fails():
+    def flaky_gsc(body: dict) -> dict:
+        if body.get("dimensions") == ["page"]:
+            raise RuntimeError("boom")
+        return _fake_gsc(body)
+
+    now = datetime(2026, 7, 13, 9, 0, tzinfo=JST)
+    m = awr.fetch_metrics(awr.last_full_week(now), awr.last_confirmed_week(now), _fake_ga4, flaky_gsc)
+    assert m["gsc"]["qualified_clicks"]["cur"] is None
+    assert "gsc.pages.cur" in m["data_quality"]["failed"]
+    digest = awr.compose_digest(m)
+    assert "・有効クリック: 取得失敗" in digest
+
+
+# --------------------------------------------------------------------------
+# 2026-08-26 計測レビュー対応（第2ラウンド）: meta ブロック（修正5）
+# --------------------------------------------------------------------------
+
+
+def test_fetch_metrics_includes_meta_block():
+    now = datetime(2026, 7, 13, 9, 0, tzinfo=JST)
+    m = awr.fetch_metrics(awr.last_full_week(now), awr.last_confirmed_week(now), _fake_ga4, _fake_gsc)
+    meta = m["meta"]
+    assert meta["schema_version"] == 2
+    assert meta["timezone"] == "Asia/Tokyo"
+    assert meta["row_limits"]["gsc_top_pages"] == 200
+    assert meta["source_status"] == {"ga4": "ok", "gsc": "ok"}
+
+
+def test_compute_source_status_partial_vs_failed():
+    assert awr.compute_source_status([], "ga4.", got_anything=True) == "ok"
+    assert awr.compute_source_status(["ga4.channels.cur"], "ga4.", got_anything=True) == "partial"
+    assert awr.compute_source_status(["ga4.totals.cur"], "ga4.", got_anything=False) == "failed"
+    # 別ソースの失敗はprefixが違うので影響しない。
+    assert awr.compute_source_status(["gsc.totals.cur"], "ga4.", got_anything=True) == "ok"
+
+
+# --------------------------------------------------------------------------
+# 2026-08-26 計測レビュー対応（第2ラウンド）: 週報 exit code と正本保護（修正4）
+# --------------------------------------------------------------------------
+
+
+def _weeks() -> awr.WeekWindows:
+    return awr.WeekWindows(date(2026, 7, 6), date(2026, 7, 12), date(2026, 6, 29), date(2026, 7, 5))
+
+
+def test_upload_metrics_skips_canonical_path_on_partial_failure(monkeypatch):
+    monkeypatch.setattr(awr, "_supabase_conf", lambda: ("https://example.supabase.co", "svc-key"))
+    monkeypatch.setattr(awr, "_anon_storage_get_status", lambda bucket, path, url: 404)  # 私設
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        awr, "_storage_put", lambda bucket, path, payload, url, key, *a, **kw: calls.append((bucket, path))
+    )
+    metrics = {"data_quality": {"failed": ["ga4.totals.cur"]}, "warnings": ["ga4.totals.cur: boom"], "gsc": {}}
+    dest = awr.upload_metrics(metrics, _weeks())
+    assert calls[0][1] == "analytics/weekly/2026-07-06_partial.json"
+    assert dest == "ml-models/analytics/weekly/2026-07-06_partial.json"
+
+
+def test_upload_metrics_uses_canonical_path_on_full_success(monkeypatch):
+    monkeypatch.setattr(awr, "_supabase_conf", lambda: ("https://example.supabase.co", "svc-key"))
+    monkeypatch.setattr(awr, "_anon_storage_get_status", lambda bucket, path, url: 404)
+    calls: list[str] = []
+    monkeypatch.setattr(awr, "_storage_put", lambda bucket, path, payload, url, key, *a, **kw: calls.append(path))
+    metrics = {"data_quality": {"failed": []}, "warnings": [], "gsc": {}}
+    dest = awr.upload_metrics(metrics, _weeks())
+    assert calls[0] == "analytics/weekly/2026-07-06.json"
+    assert dest == "ml-models/analytics/weekly/2026-07-06.json"
+
+
+def test_upload_metrics_redacts_search_terms_when_bucket_appears_public(monkeypatch):
+    monkeypatch.setattr(awr, "_supabase_conf", lambda: ("https://example.supabase.co", "svc-key"))
+    monkeypatch.setattr(awr, "_anon_storage_get_status", lambda bucket, path, url: 200)  # 公開の疑い
+    captured: dict = {}
+
+    def fake_put(bucket, path, payload, url, key, *a, **kw):
+        captured["payload"] = json.loads(payload)
+
+    monkeypatch.setattr(awr, "_storage_put", fake_put)
+    metrics = {
+        "data_quality": {"failed": []},
+        "warnings": [],
+        "gsc": {
+            "top_queries": {"cur": [{"query": "渋谷 相席", "clicks": 1}], "prev": []},
+            "query_page": {"cur": [{"query": "渋谷 相席", "page": "/store/shibuya", "clicks": 1}]},
+        },
+    }
+    awr.upload_metrics(metrics, _weeks())
+    assert captured["payload"]["gsc"]["top_queries"] == "[redacted: public bucket probe returned 200]"
+    assert captured["payload"]["gsc"]["query_page"] == "[redacted: public bucket probe returned 200]"
+    # 元の metrics 側にも警告が積まれ、main() の exit code 判定(修正4)に反映される。
+    assert any("public_bucket_probe" in w for w in metrics["warnings"])
+
+
+def test_bucket_appears_public_true_only_on_200(monkeypatch):
+    monkeypatch.setattr(awr, "_anon_storage_get_status", lambda bucket, path, url: 200)
+    assert awr.bucket_appears_public("ml-models", "https://example.supabase.co") is True
+    for status in (401, 403, 404, None, 500):
+        monkeypatch.setattr(awr, "_anon_storage_get_status", lambda bucket, path, url, s=status: s)
+        assert awr.bucket_appears_public("ml-models", "https://example.supabase.co") is False
+
+
+def test_main_dry_run_exit_code_reflects_partial_failure(monkeypatch, tmp_path):
+    key = tmp_path / "ga.json"
+    key.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("GA4_PROPERTY_ID", "493123456")
+    monkeypatch.setenv("GA_SERVICE_ACCOUNT_JSON", str(key))
+    monkeypatch.setattr(awr, "google_access_token", lambda sa_path, scopes: "fake-token")
+
+    def flaky_ga4(token, property_id, body):
+        raise RuntimeError("boom")
+
+    def fake_gsc(token, site_url, body):
+        return {"rows": [{"clicks": 1, "impressions": 1, "ctr": 0.1, "position": 1.0}]}
+
+    monkeypatch.setattr(awr, "_ga4_run_report", flaky_ga4)
+    monkeypatch.setattr(awr, "_gsc_query", fake_gsc)
+
+    rc = awr.main(["--dry-run"])
+    assert rc == 3  # 2026-08-26 計測レビュー対応（第2ラウンド・修正4）: 部分失敗はexit 3
+
+
+def test_main_dry_run_exit_code_zero_on_full_success(monkeypatch, tmp_path):
+    key = tmp_path / "ga.json"
+    key.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("GA4_PROPERTY_ID", "493123456")
+    monkeypatch.setenv("GA_SERVICE_ACCOUNT_JSON", str(key))
+    monkeypatch.setattr(awr, "google_access_token", lambda sa_path, scopes: "fake-token")
+
+    def fake_ga4(token, property_id, body):
+        return _fake_ga4(body)
+
+    def fake_gsc(token, site_url, body):
+        return _fake_gsc(body)
+
+    monkeypatch.setattr(awr, "_ga4_run_report", fake_ga4)
+    monkeypatch.setattr(awr, "_gsc_query", fake_gsc)
+
+    rc = awr.main(["--dry-run"])
+    assert rc == 0

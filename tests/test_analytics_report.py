@@ -136,8 +136,16 @@ def test_compute_deltas_shape():
 def test_position_bucket_counts():
     rows = [{"position": 1.5}, {"position": 5.0}, {"position": 5.5}, {"position": 30.0}]
     counts = ar.position_bucket_counts(rows)
-    assert counts == {"1-3": 1, "4-10": 2, "11-20": 0, "21+": 1}
-    assert ar.position_bucket_counts([]) == {"1-3": 0, "4-10": 0, "11-20": 0, "21+": 0}
+    assert counts == {"1-3": 1, "4-10": 2, "11-20": 0, "21+": 1, "unknown": 0}
+    assert ar.position_bucket_counts([]) == {"1-3": 0, "4-10": 0, "11-20": 0, "21+": 0, "unknown": 0}
+
+
+def test_position_bucket_counts_treats_missing_zero_nonfinite_as_unknown():
+    # 2026-08-26 計測レビュー対応（第2ラウンド・修正5）: 欠損・0・非有限は unknown へ。
+    # 以前は float(position or 0) 経由で "1-3" に誤分類されていた。
+    rows = [{"position": None}, {"position": 0}, {"position": float("nan")}, {}]
+    counts = ar.position_bucket_counts(rows)
+    assert counts == {"1-3": 0, "4-10": 0, "11-20": 0, "21+": 0, "unknown": 4}
 
 
 # --------------------------------------------------------------------------
@@ -242,7 +250,7 @@ def test_compose_markdown_snippets():
     assert "アクティブユーザー: 50" in md
     assert "直近日を含みます" in md  # provisional 注記
     assert "有効クリック: 10（全クリック 20）" in md
-    assert "「めぐりび 渋谷」（指名）" in md
+    assert "「めぐりび 渋谷」（指名(サイト)）" in md  # 修正5: 三分類（サイト/チェーン/一般）
     assert "→ /store/shibuya" in md
 
 
@@ -270,6 +278,238 @@ def test_main_no_credentials_exits_one(monkeypatch, tmp_path, capsys):
     assert rc == 1
     assert "docs/ANALYTICS_SETUP.md" in out
     assert "未セットアップ" in out
+
+
+def _fake_gsc_with_freshness_metadata(body: dict) -> dict:
+    dims = body.get("dimensions")
+    if dims == ["date"]:
+        return {"metadata": {"first_incomplete_date": "2026-08-24"}, "rows": []}
+    return _fake_gsc(body)
+
+
+# --------------------------------------------------------------------------
+# 2026-08-26 計測レビュー対応（第2ラウンド・修正1）: GSC確定日の専用プローブ
+# --------------------------------------------------------------------------
+
+
+def test_gsc_freshness_probe_body_shape():
+    body = ar.gsc_freshness_probe_body(date(2026, 8, 26), lookback_days=10)
+    assert body["dimensions"] == ["date"]
+    assert body["dataState"] == "all"
+    assert body["startDate"] == "2026-08-16"
+    assert body["endDate"] == "2026-08-26"
+    assert body["rowLimit"] == 11
+
+
+def test_fetch_report_uses_freshness_probe_for_availability_metadata():
+    period = (date(2026, 7, 30), date(2026, 8, 26))
+    report = ar.fetch_report(period, date(2026, 8, 26), False, _fake_ga4, _fake_gsc_with_freshness_metadata)
+    assert report["gsc"]["availability_source"] == "metadata"
+    assert report["gsc"]["available_through"] == "2026-08-23"
+
+
+def test_fetch_report_ignores_metadata_leaked_into_dimensionless_totals_response():
+    # 修正1: 以前は dimension無しの totals レスポンスの metadata から確定日を読もうとしていたが、
+    # 公式仕様上そこにはほぼ返らない。totals応答にmetadataが紛れていても無視され、
+    # date dimension 専用プローブの応答だけが使われることを固定する。
+    def fake_gsc(body: dict) -> dict:
+        dims = body.get("dimensions")
+        if not dims:
+            resp = dict(_fake_gsc(body))
+            resp["metadata"] = {"first_incomplete_date": "2026-01-01"}  # 罠: totalsに紛れたmetadata
+            return resp
+        if dims == ["date"]:
+            return {"rows": []}  # プローブはmetadataを返さない → rule fallback
+        return _fake_gsc(body)
+
+    period = (date(2026, 7, 30), date(2026, 8, 26))
+    report = ar.fetch_report(period, date(2026, 8, 26), False, _fake_ga4, fake_gsc)
+    assert report["gsc"]["availability_source"] == "rule"
+    assert report["gsc"]["available_through"] == "2026-08-23"  # as_of - 3日
+
+
+def test_compose_markdown_shows_availability_source_label():
+    period = (date(2026, 7, 30), date(2026, 8, 26))
+    report = ar.fetch_report(period, date(2026, 8, 26), False, _fake_ga4, _fake_gsc)
+    md = ar.compose_markdown(report)
+    assert "判定方法: 推定（規約ベース）" in md
+    report2 = ar.fetch_report(period, date(2026, 8, 26), False, _fake_ga4, _fake_gsc_with_freshness_metadata)
+    md2 = ar.compose_markdown(report2)
+    assert "判定方法: APIメタデータ" in md2
+
+
+# --------------------------------------------------------------------------
+# 2026-08-26 計測レビュー対応（第2ラウンド・修正2）: 確定分同士の前期間比較
+# --------------------------------------------------------------------------
+
+
+def test_stable_subperiod_no_trim_when_fully_confirmed():
+    assert ar.stable_subperiod(date(2026, 8, 1), date(2026, 8, 10), date(2026, 8, 20)) == (
+        date(2026, 8, 1),
+        date(2026, 8, 10),
+    )
+
+
+def test_stable_subperiod_trims_tail_when_partially_confirmed():
+    assert ar.stable_subperiod(date(2026, 8, 1), date(2026, 8, 26), date(2026, 8, 20)) == (
+        date(2026, 8, 1),
+        date(2026, 8, 20),
+    )
+
+
+def test_stable_subperiod_none_when_fully_unconfirmed():
+    assert ar.stable_subperiod(date(2026, 8, 21), date(2026, 8, 26), date(2026, 8, 20)) is None
+
+
+def _stable_safe(fn, *args, label=""):
+    return fn(*args)
+
+
+def test_stable_comparison_reuses_raw_when_period_fully_confirmed():
+    calls: list[dict] = []
+
+    def call(body: dict) -> dict:
+        calls.append(body)
+        return {"rows": [{"clicks": 1}]}
+
+    def totals_body(s: str, e: str) -> dict:
+        return {"start": s, "end": e}
+
+    def parse(resp: dict | None) -> dict:
+        rows = (resp or {}).get("rows") or [{}]
+        return {"clicks": float(rows[0].get("clicks", 0))}
+
+    result = ar.stable_comparison(
+        start=date(2026, 8, 1),
+        end=date(2026, 8, 7),
+        available_through=date(2026, 8, 20),
+        full_period_cur_raw={"rows": [{"clicks": 10}]},
+        full_period_prev_raw={"rows": [{"clicks": 8}]},
+        call=call,
+        totals_body_fn=totals_body,
+        parse_fn=parse,
+        label_prefix="x",
+        safe=_stable_safe,
+    )
+    assert calls == []  # 期間全体が確定済みなので追加リクエストなし（既取得のraw値を再利用）
+    assert result["totals"]["clicks"] == 10.0
+    assert result["previous_totals"]["clicks"] == 8.0
+    assert result["note"] is None
+    assert result["period"] == {"start": "2026-08-01", "end": "2026-08-07"}
+    assert result["deltas"]["clicks"]["pct"] == pytest.approx(25.0)
+
+
+def test_stable_comparison_fetches_trimmed_period_when_tail_is_provisional():
+    calls: list[dict] = []
+
+    def call(body: dict) -> dict:
+        calls.append(body)
+        return {"rows": [{"clicks": 5}]}
+
+    def totals_body(s: str, e: str) -> dict:
+        return {"start": s, "end": e}
+
+    def parse(resp: dict | None) -> dict:
+        rows = (resp or {}).get("rows") or [{}]
+        return {"clicks": float(rows[0].get("clicks", 0))}
+
+    result = ar.stable_comparison(
+        start=date(2026, 8, 1),
+        end=date(2026, 8, 26),
+        available_through=date(2026, 8, 20),
+        full_period_cur_raw={"rows": [{"clicks": 999}]},  # 速報込みの生値。stable計算には使わない
+        full_period_prev_raw={"rows": [{"clicks": 999}]},
+        call=call,
+        totals_body_fn=totals_body,
+        parse_fn=parse,
+        label_prefix="x",
+        safe=_stable_safe,
+    )
+    assert len(calls) == 2  # トリム後の確定期間・その直前期間を新たに取得
+    assert result["period"] == {"start": "2026-08-01", "end": "2026-08-20"}
+    assert result["note"] and "確定分同士" in result["note"]
+    assert result["totals"]["clicks"] == 5.0  # 速報込みraw値(999)は使われない
+
+
+def test_stable_comparison_none_period_when_fully_unconfirmed():
+    result = ar.stable_comparison(
+        start=date(2026, 8, 21),
+        end=date(2026, 8, 26),
+        available_through=date(2026, 8, 20),
+        full_period_cur_raw=None,
+        full_period_prev_raw=None,
+        call=lambda body: {},
+        totals_body_fn=lambda s, e: {},
+        parse_fn=lambda r: {},
+        label_prefix="x",
+        safe=_stable_safe,
+    )
+    assert result["period"] is None
+    assert result["deltas"] is None
+    assert "比較保留" in result["note"]
+
+
+def test_fetch_report_deltas_come_from_stable_comparison_note_in_markdown():
+    # as_of=8/26, 期間の終端が8/26（GA4確定境界は as_of-2=8/24）なのでトリムされる。
+    period = (date(2026, 7, 30), date(2026, 8, 26))
+    report = ar.fetch_report(period, date(2026, 8, 26), True, _fake_ga4, _fake_gsc)
+    assert report["ga4"]["comparison"]["note"] and "確定分同士" in report["ga4"]["comparison"]["note"]
+    md = ar.compose_markdown(report)
+    assert "確定分同士" in md
+
+
+# --------------------------------------------------------------------------
+# 2026-08-26 計測レビュー対応（第2ラウンド・修正3）: qualified 偽ゼロ
+# --------------------------------------------------------------------------
+
+
+def test_fetch_report_qualified_none_when_pages_fetch_fails():
+    def flaky_gsc(body: dict) -> dict:
+        if body.get("dimensions") == ["page"]:
+            raise RuntimeError("boom")
+        return _fake_gsc(body)
+
+    period = (date(2026, 7, 30), date(2026, 8, 26))
+    report = ar.fetch_report(period, date(2026, 8, 26), False, _fake_ga4, flaky_gsc)
+    assert report["gsc"]["qualified_clicks"]["qualified"] is None
+    md = ar.compose_markdown(report)
+    assert "有効クリック: N/A" in md
+
+
+# --------------------------------------------------------------------------
+# 2026-08-26 計測レビュー対応（第2ラウンド・修正5）: メタデータブロック
+# --------------------------------------------------------------------------
+
+
+def test_fetch_report_includes_meta_block():
+    period = (date(2026, 7, 30), date(2026, 8, 26))
+    report = ar.fetch_report(period, date(2026, 8, 26), False, _fake_ga4, _fake_gsc)
+    meta = report["meta"]
+    assert meta["schema_version"] == 2
+    assert meta["timezone"] == "Asia/Tokyo"
+    assert meta["row_limits"]["gsc_pages"] == 200
+    assert meta["source_status"] == {"ga4": "ok", "gsc": "ok"}
+
+
+# --------------------------------------------------------------------------
+# 2026-08-26 計測レビュー対応（第2ラウンド・修正6）: PV計測定義変更(8/26)の境界
+# --------------------------------------------------------------------------
+
+
+def test_fetch_report_blocks_pv_delta_when_comparison_crosses_epoch_boundary():
+    period = (date(2026, 8, 24), date(2026, 8, 30))
+    report = ar.fetch_report(period, date(2026, 8, 30), True, _fake_ga4, _fake_gsc)
+    assert report["ga4"]["pv_delta_blocked_by_epoch_change"] is True
+    md = ar.compose_markdown(report)
+    assert "前期間比 ページビュー: 比較不可（8/26にPV計測定義を変更したため）" in md
+    # 他の指標（アクティブユーザー）は通常どおり%が出る。
+    assert "前期間比 アクティブユーザー:" in md
+
+
+def test_fetch_report_pv_delta_not_blocked_when_both_periods_before_epoch():
+    period = (date(2026, 7, 1), date(2026, 7, 7))
+    report = ar.fetch_report(period, date(2026, 8, 26), True, _fake_ga4, _fake_gsc)
+    assert report["ga4"]["pv_delta_blocked_by_epoch_change"] is False
 
 
 def test_main_bad_as_of_format_exits_one(monkeypatch, tmp_path):

@@ -37,10 +37,15 @@ from __future__ import annotations
 import argparse
 import functools
 import json
+import math
 import os
+import re
 import sys
 import tempfile
+import unicodedata
+import urllib.error
 import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -56,6 +61,12 @@ from _supabase_common import _load_env, _supabase_conf, storage_put  # noqa: E40
 _storage_put = functools.partial(storage_put, log_prefix="[analytics]")
 
 JST = timezone(timedelta(hours=9))
+
+# 2026-08-26 に手動PVの発火条件（searchParams変更を手動PVから除外・?store=自動付与の削除等）を
+# 変更した。この日より前のPV(screenPageViews)には旧ロジックの水増しが混じるため、この日を
+# またぐ前期間比は意味を持たない（計測レビューR2 修正6）。他の指標（activeUsers/sessions/GSC等）
+# には適用しない — PVという値の定義そのものが変わったことへの対処であり、確定/未確定の話とは別。
+PV_DEFINITION_CHANGE_AT = date(2026, 8, 26)
 
 # 既定値（すべて env で上書き可能）。
 DEFAULT_SA_PATH = REPO_ROOT / "secrets" / "ga-service-account.json"
@@ -76,15 +87,15 @@ DIGEST_MAX_CHARS = 2000
 # frontend 側で送っているカスタムイベント（frontend/src/lib/analytics.ts の track/sendEvent 呼び出し）。
 # GA4 の eventCount by eventName から拾って表示する。GA4 自動収集イベント
 # （page_view / session_start / first_visit / scroll ...）と区別するための参照リスト。
-# 2026-08-26 計測レビュー対応: 旧リストは4種のみで、実際に発火中の compare_add_store /
-# range_mode_change / cost_sim_interact / related_store_click（frontend/src/app/compare/compare-client.tsx
-# 等で `track()` 済み）が週報に一度も出ていなかった（実データで確認済みの欠落）。実発火中の全8種に加え、
-# report_view / official_site_click / second_venue_click（現時点ではまだ frontend 側に実装が無い予定名。
-# 実装され次第、変更不要でこの一覧経由で拾われる）を先取りで追加。report_read は report_view への
-# 移行期の互換名として残す（片方だけ在っても消えない）。
+#
+# 2026-08-26 計測レビュー対応（第2ラウンド）: このリストは
+# frontend/src/lib/analytics.ts::ANALYTICS_EVENT_NAMES（TS側SSOT・12種）と一字一句一致させる
+# こと。ここは12種 + report_read（report_view への改名前の互換名。旧データの前週比較のため
+# 残す）の合計13種。TS/Python の乖離は tests/test_analytics_event_parity.py が固定する
+# （TS配列を正規表現で読み取り、この一覧 - {"report_read"} と集合一致を検証）。
+# report_view と report_read は表示時に合算する（canonical_events_for_display / 修正6）。
 KNOWN_CUSTOM_EVENTS = [
     "store_view",
-    "report_read",
     "report_view",
     "favorite_add",
     "favorite_remove",
@@ -94,6 +105,9 @@ KNOWN_CUSTOM_EVENTS = [
     "related_store_click",
     "official_site_click",
     "second_venue_click",
+    "official_site_view",
+    "second_venue_view",
+    "report_read",
 ]
 
 # 閉店済み店舗の slug（frontend/src/proxy.ts::CLOSED_STORE_SLUGS と同じ集合。あちらが
@@ -130,6 +144,21 @@ class WeekWindows:
             "cur": {"start": self.cur_start.isoformat(), "end": self.cur_end.isoformat()},
             "prev": {"start": self.prev_start.isoformat(), "end": self.prev_end.isoformat()},
         }
+
+
+def pv_epoch(d: date) -> str:
+    """指定日が PV_DEFINITION_CHANGE_AT を境にどちらのepochかを返す（計測レビューR2 修正6）。"""
+    return "new" if d >= PV_DEFINITION_CHANGE_AT else "old"
+
+
+def pv_delta_crosses_boundary(cur_start: date, cur_end: date, prev_start: date, prev_end: date) -> bool:
+    """前期間比較に使う4つの日付が PV_DEFINITION_CHANGE_AT をまたぐか。
+
+    またぐ場合、PV(screenPageViews)の前期間比は新旧の計測ロジックが混じり比較不能になる
+    （計測レビューR2 修正6）。activeUsers/sessions/GSC指標には適用しない。
+    """
+    epochs = {pv_epoch(cur_start), pv_epoch(cur_end), pv_epoch(prev_start), pv_epoch(prev_end)}
+    return len(epochs) > 1
 
 
 def last_full_week(now_jst: datetime) -> WeekWindows:
@@ -367,12 +396,16 @@ def parse_gsc_query_page_rows(resp: dict) -> list[dict]:
 
 
 def classify_page_path(page_or_url: str) -> str:
-    """URL またはパスを home/store/area/stores/blog/report/closed/other に分類する。
+    """URL またはパスを home/store/area/stores/blog/compare/reports_hub/report/closed/other に分類する。
 
     GSC の "page" ディメンションはフル URL（https://www.meguribi.jp/...）で返るが、
     パスだけの文字列を渡しても urlparse はそのまま path として扱うので同じ関数で両方さばける。
     閉店店舗（CLOSED_STORE_SLUGS）の /store/<slug> は「store」ではなく「closed」に分ける
     （検索結果に残っている閉店ページのクリックを、現役店舗の実績と混ぜないため）。
+
+    2026-08-26 計測レビュー対応（第2ラウンド・修正5）: 以前は "/reports"（ハブ・indexable）と
+    "/reports/daily|weekly/<slug>"（noindex詳細）を同じ "report" に混ぜ、"/compare" は
+    「その他」扱いだった。ハブとdetail、compareを分離する。
     """
     path = urllib.parse.urlparse(page_or_url or "").path
     segments = [s for s in path.split("/") if s]
@@ -388,24 +421,78 @@ def classify_page_path(page_or_url: str) -> str:
         return "stores"
     if head == "blog":
         return "blog"
+    if head == "compare":
+        return "compare"
     if head == "reports":
-        return "report"
+        return "reports_hub" if len(segments) == 1 else "report"
     return "other"
 
 
+# チェーン（業態ブランド）名の指名判定に使う定数リスト。2026-08-26 計測レビュー対応（修正5）:
+# frontend/src/data/stores.json（店舗マスタ）は読まない — ここで見たいのは店舗個別の来店意図
+# ではなく「業態ブランド名そのもの」への検索意図（一般語との切り分け）なので、店舗一覧との
+# 結合は不要。語彙は実データで確認できた表記ゆれのみ（過剰な誤字辞書は作らない）。
+# 正規化（_normalize_query）後の比較のため、ここも小文字/全角スペース等のゆれは気にせず書ける。
+CHAIN_BRAND_TERMS = (
+    "オリエンタルラウンジ",
+    "オリエンタル ラウンジ",
+    "oriental lounge",
+    "相席屋",
+    "aisekiya",
+)
+
+
+def _normalize_query(q: str) -> str:
+    """NFKC正規化 + casefold + 空白/ハイフン類の正規化。全角/半角・大文字小文字の表記ゆれを吸収する
+    （2026-08-26 計測レビュー対応・修正5。実測に無い大量の誤字辞書は作らず、この範囲に留める）。
+    """
+    n = unicodedata.normalize("NFKC", q or "")
+    n = n.casefold()
+    n = re.sub(r"[\s\-‐-―ー]+", " ", n).strip()
+    return n
+
+
+def classify_query_brand(query: str) -> str:
+    """検索語を site（サイト名指名）/ chain（チェーン業態名指名）/ generic（一般語）へ三分する。
+
+    2026-08-26 計測レビュー対応（第2ラウンド・修正5）: 従来の is_branded_query はサイト名だけを
+    「指名」とし、「オリエンタルラウンジ」「相席屋」等のチェーン名を含むナビゲーショナル検索を
+    「一般」に混ぜていた。それだと generic SEO の実力を過大評価するため三分する。
+    """
+    q = _normalize_query(query)
+    if "めぐりび" in q or "meguribi" in q or "megribi" in q:
+        return "site"
+    for term in CHAIN_BRAND_TERMS:
+        if _normalize_query(term) in q:
+            return "chain"
+    return "generic"
+
+
 def is_branded_query(query: str) -> bool:
-    """検索語に指名（サイト名）が含まれるか。
+    """検索語に指名（サイト名）が含まれるか。classify_query_brand の site 判定のラッパー
+    （既存呼び出しとの後方互換のため維持）。
 
     表記ゆれ: 「めぐりび」/ ドメインの "meguribi"(.jp) / ブランド表記の "megribi"(MEGRIBI)。
     実データで「megribi」という検索が一般扱いになっていたのを 2026-08-26 の実CLI smoke で発見し追加。
     """
-    q = (query or "").lower()
-    return "めぐりび" in q or "meguribi" in q or "megribi" in q
+    return classify_query_brand(query) == "site"
 
 
 def position_bucket(position) -> str:
-    """GSC の平均掲載順位を 1-3 / 4-10 / 11-20 / 21+ の順位帯へ丸める。"""
-    p = float(position or 0)
+    """GSC の平均掲載順位を 1-3 / 4-10 / 11-20 / 21+ / unknown の順位帯へ丸める。
+
+    2026-08-26 計測レビュー対応（第2ラウンド・修正5）: 欠損(None)・0・非有限(NaN/Inf)は、
+    以前は "1-3" に落ちてしまっていた（`float(position or 0)` が 0 を経由するため）。
+    実際に掲載順位が測れていない行を「1〜3位」という良い順位に誤分類しないよう "unknown" にする。
+    """
+    if position is None:
+        return "unknown"
+    try:
+        p = float(position)
+    except (TypeError, ValueError):
+        return "unknown"
+    if not math.isfinite(p) or p <= 0:
+        return "unknown"
     if p <= 3:
         return "1-3"
     if p <= 10:
@@ -429,6 +516,30 @@ def qualified_clicks_total(page_rows: list[dict], page_field: str = "page") -> t
         if classify_page_path(row.get(page_field) or "") in QUALIFIED_PAGE_CATEGORIES:
             qualified += clicks
     return qualified, total
+
+
+def compute_source_status(failed_labels: list[str], prefix: str, got_anything: bool) -> str:
+    """ソース単位の取得状態を ok/partial/failed の3値へ要約する（2026-08-26 計測レビュー対応・
+    修正5。metadata.source_status で使う）。`prefix` 始まりの失敗が1つも無ければ ok。失敗が
+    あっても他のクエリで何か取れていれば partial、何も取れていなければ failed。
+    analytics_report.py（最新分析CLI）とロジックを共有し、実装が2箇所でズレないようにする。
+    """
+    source_failed = [label for label in failed_labels if label.startswith(prefix)]
+    if not source_failed:
+        return "ok"
+    return "partial" if got_anything else "failed"
+
+
+def canonical_events_for_display(events: dict) -> dict:
+    """表示専用: 旧名 report_read を report_view へ合算したコピーを返す（2026-08-26 計測レビュー
+    対応・修正6）。改名直後は旧実績を前週値として使えず report_view が偽の「新規」に見えるため、
+    表示・比較のときだけ canonicalize する。生の events dict（JSON出力側）は変更しない。
+    """
+    out = dict(events or {})
+    if "report_read" in out:
+        legacy = out.pop("report_read")
+        out["report_view"] = out.get("report_view", 0) + legacy
+    return out
 
 
 # --------------------------------------------------------------------------
@@ -514,18 +625,38 @@ def fetch_metrics(ga4_weeks: WeekWindows, gsc_weeks: WeekWindows, ga4_call, gsc_
         {"query": r["key"], "clicks": r["clicks"], "impressions": r["impressions"]}
         for r in parse_gsc_rows(safe(gsc_call, gsc_body(gps, gpe, ["query"], 10), label="gsc.queries.prev"))
     ]
-    # rowLimit 200: 小規模サイト（直近28日37ユーザー実測）ではページ数がこれで尽きるため、
-    # 有効検索クリック（qualified_clicks_total）の合計がほぼ全ページ網羅になる。
+    # rowLimit 200: 小規模サイト（直近28日37ユーザー実測）では取得できるページ数がこれで尽きる
+    # ことが多いが、Search Analytics API は仕様上「上位N件」を返すのみで全行を保証しない
+    # （API が返した上位行の snapshot であり、「全件」ではない）。
+    raw_gsc_pages_cur = safe(gsc_call, gsc_body(gcs, gce, ["page"], 200), label="gsc.pages.cur")
     gsc_pages_cur = [
         {"page": r["key"], "clicks": r["clicks"], "impressions": r["impressions"]}
-        for r in parse_gsc_rows(safe(gsc_call, gsc_body(gcs, gce, ["page"], 200), label="gsc.pages.cur"))
+        for r in parse_gsc_rows(raw_gsc_pages_cur)
     ]
-    # 修正2: query×page（検索語→ページ）。ダイジェストには上位3行だけ出すが、生JSONには全件残す。
+    # 修正2: query×page（検索語→ページ）。ダイジェストには上位3行だけ出すが、JSONには取得できた
+    # 上位200行（rowLimit）を保持する（API が保証するのは上位N件までで、全件ではない）。
     gsc_query_page_cur = parse_gsc_query_page_rows(
         safe(gsc_call, gsc_body(gcs, gce, ["query", "page"], 200), label="gsc.query_page.cur")
     )
 
-    qualified_clicks, qualified_clicks_page_total = qualified_clicks_total(gsc_pages_cur)
+    # 2026-08-26 計測レビュー対応（第2ラウンド・修正3）: gsc.pages.cur の取得自体が失敗した場合、
+    # parse 後は空リストになり qualified_clicks_total([]) が偽の 0.0 を返してしまう
+    # （「取得失敗」と「実際に0件だった」を区別できない確定バグ）。raw レスポンスの成否で分岐する。
+    if raw_gsc_pages_cur is not None:
+        qualified_clicks, qualified_clicks_page_total = qualified_clicks_total(gsc_pages_cur)
+    else:
+        qualified_clicks, qualified_clicks_page_total = None, None
+
+    ga4_status = compute_source_status(
+        failed_labels,
+        "ga4.",
+        got_anything=bool(ga4_totals_cur is not None or top_pages_cur or events_cur or channels_cur),
+    )
+    gsc_status = compute_source_status(
+        failed_labels,
+        "gsc.",
+        got_anything=bool(gsc_totals_cur is not None or gsc_queries_cur or gsc_pages_cur),
+    )
 
     return {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -545,6 +676,21 @@ def fetch_metrics(ga4_weeks: WeekWindows, gsc_weeks: WeekWindows, ga4_call, gsc_
         },
         "warnings": warnings,
         "data_quality": {"failed": failed_labels},
+        # 2026-08-26 計測レビュー対応（第2ラウンド・修正5）: 保存JSON/CLI出力の解釈に必要な
+        # メタデータ。schema_version は破壊的変更時にインクリメントする。
+        "meta": {
+            "schema_version": 2,
+            "timezone": "Asia/Tokyo",
+            "period": {"ga4": ga4_weeks.as_dict(), "gsc": gsc_weeks.as_dict()},
+            "row_limits": {
+                "ga4_top_pages": 10,
+                "ga4_events": 25,
+                "gsc_top_queries": 10,
+                "gsc_top_pages": 200,
+                "gsc_query_page": 200,
+            },
+            "source_status": {"ga4": ga4_status, "gsc": gsc_status},
+        },
     }
 
 
@@ -585,11 +731,28 @@ def compose_digest(metrics: dict) -> str:
         f"・セッション: {fmt_metric_or_na(gc.get('sessions'), ga4_cur_failed)}"
         f"（前週比 {wow_str_or_na(gc.get('sessions'), gp.get('sessions'), ga4_cur_failed, ga4_prev_failed)}）"
     )
-    lines.append(
-        f"・ページビュー: {fmt_metric_or_na(gc.get('screenPageViews'), ga4_cur_failed)}"
-        f"（前週比 "
-        f"{wow_str_or_na(gc.get('screenPageViews'), gp.get('screenPageViews'), ga4_cur_failed, ga4_prev_failed)}）"
-    )
+    # 2026-08-26 計測レビュー対応（第2ラウンド・修正6）: PV(screenPageViews)は8/26に計測定義を
+    # 変更したため、対象週と前週がその日をまたぐ場合は前期間比を出さない（水増しが混じるため）。
+    pv_blocked = False
+    try:
+        cur_s = date.fromisoformat(cur_w["start"])
+        cur_e = date.fromisoformat(cur_w["end"])
+        prev_s = date.fromisoformat(prev_w["start"])
+        prev_e = date.fromisoformat(prev_w["end"])
+        pv_blocked = pv_delta_crosses_boundary(cur_s, cur_e, prev_s, prev_e)
+    except (KeyError, ValueError):
+        pv_blocked = False
+    if pv_blocked:
+        lines.append(
+            f"・ページビュー: {fmt_metric_or_na(gc.get('screenPageViews'), ga4_cur_failed)}"
+            "（前期間比 比較不可: 8/26にPV計測定義を変更したため）"
+        )
+    else:
+        lines.append(
+            f"・ページビュー: {fmt_metric_or_na(gc.get('screenPageViews'), ga4_cur_failed)}"
+            f"（前週比 "
+            f"{wow_str_or_na(gc.get('screenPageViews'), gp.get('screenPageViews'), ga4_cur_failed, ga4_prev_failed)}）"
+        )
     lines.append("")
 
     # --- Search Console ---
@@ -618,9 +781,13 @@ def compose_digest(metrics: dict) -> str:
         prev_pos_str = "取得失敗" if gsc_prev_failed else f"{float(sp.get('position') or 0):.1f}位"
         lines.append(f"・平均掲載順位: {float(sc.get('position') or 0):.1f}位（前週 {prev_pos_str}）")
     # 修正2: 有効検索クリック（home/store/area/stores/blog への非noindexページのクリック合計）。
+    # 2026-08-26 計測レビュー対応（第2ラウンド・修正3）: qc.get('cur') は gsc.pages.cur の取得が
+    # 失敗すると None になる（実際の0件と区別するため）。fmt_int(None) の偽の "0" を出さない。
     qc = gsc.get("qualified_clicks") or {}
+    qualified_failed = qc.get("cur") is None
     lines.append(
-        f"・有効クリック: {fmt_int(qc.get('cur'))}（全クリック {fmt_metric_or_na(sc.get('clicks'), gsc_cur_failed)}）"
+        f"・有効クリック: {fmt_metric_or_na(qc.get('cur'), qualified_failed)}"
+        f"（全クリック {fmt_metric_or_na(sc.get('clicks'), gsc_cur_failed)}）"
     )
     # 修正1d: GSC は確定に数日かかるため対象週が GA4 とズレる。ここで明記する。
     lines.append(
@@ -650,7 +817,9 @@ def compose_digest(metrics: dict) -> str:
     query_page_cur = gsc.get("query_page", {}).get("cur") or []
     top_query_page = sorted(query_page_cur, key=lambda r: r.get("clicks") or 0, reverse=True)[:3]
     if top_query_page:
-        lines.append("■ 検索語→ページ TOP3")
+        # 2026-08-26 計測レビュー対応（第2ラウンド・修正5）: Search Analytics API は上位N件
+        # （rowLimit）を返すのみで全行を保証しない。「全件」ではなく上位からの抜粋と明記する。
+        lines.append("■ 検索語→ページ TOP3（APIの取得上位行からの抜粋。全件ではありません）")
         for row in top_query_page:
             page_path = urllib.parse.urlparse(row.get("page") or "").path or row.get("page") or ""
             lines.append(f"・「{row.get('query')}」→ {page_path}（{fmt_int(row.get('clicks'))}クリック）")
@@ -673,8 +842,11 @@ def compose_digest(metrics: dict) -> str:
         lines.append("")
 
     # --- カスタムイベント利用状況 ---
-    events_cur = ga4.get("events", {}).get("cur", {}) or {}
-    events_prev = ga4.get("events", {}).get("prev", {}) or {}
+    # 2026-08-26 計測レビュー対応（第2ラウンド・修正6）: report_read（旧名）は表示専用で
+    # report_view へ合算する（生JSON側の events dict はここでは変更しない、上の metrics には
+    # 内訳がそのまま残る）。
+    events_cur = canonical_events_for_display(ga4.get("events", {}).get("cur", {}) or {})
+    events_prev = canonical_events_for_display(ga4.get("events", {}).get("prev", {}) or {})
     shown = [(name, events_cur[name]) for name in KNOWN_CUSTOM_EVENTS if name in events_cur]
     if shown:
         lines.append("■ イベント利用状況（サイト内アクション）")
@@ -738,18 +910,86 @@ def _gsc_query(token: str, site_url: str, body: dict) -> dict:
 # --------------------------------------------------------------------------
 
 
+def _anon_storage_get_status(bucket: str, path: str, supabase_url: str) -> int | None:
+    """認証ヘッダ無しで Storage の public URL 形式へ1回だけ GET する。2026-08-26 計測レビュー
+    対応（第2ラウンド・修正4）。ネットワーク例外・タイムアウトは None（判定不能）を返す。
+    """
+    url = f"{supabase_url}/storage/v1/object/public/{bucket}/{path}"
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.getcode()
+    except urllib.error.HTTPError as exc:
+        return exc.code
+    except Exception:  # noqa: BLE001 - ネットワーク断・DNS失敗等。判定不能として扱う。
+        return None
+
+
+def bucket_appears_public(bucket: str, supabase_url: str, probe_path: str = "forecast/latest/metadata.json") -> bool:
+    """バケットが匿名GETで200を返すか（＝公開設定の疑い）を判定する。
+
+    2026-08-26 計測レビュー対応（第2ラウンド・修正4）: 検索語を含むデータをアップロードする前に、
+    同バケットの匿名GET（Authorization無しの public URL 形式）を1回試みる。200＝公開設定の疑い、
+    401/403/404、または判定不能（例外）は私設と判断して続行する（依頼どおりの判定基準）。
+    probe_path は分析データではなく、常時存在する既知オブジェクト（forecast モデルの
+    metadata.json、CLAUDE.md §1 記載のStorageレイアウトを参照）を使う。分析データ自体を
+    プローブに使うと「まだアップロードしていないので当然404」になり判定できないため。
+    """
+    status = _anon_storage_get_status(bucket, probe_path, supabase_url)
+    return status == 200
+
+
+def _redact_search_terms(metrics: dict) -> dict:
+    """検索語を含む部分（GSC top_queries / query_page）を除いたコピーを返す。公開バケット疑いの
+    ときだけ使う（fail-closed。2026-08-26 計測レビュー対応・修正4）。"""
+    redacted = json.loads(json.dumps(metrics, ensure_ascii=False))
+    gsc = redacted.get("gsc")
+    if isinstance(gsc, dict):
+        if "top_queries" in gsc:
+            gsc["top_queries"] = "[redacted: public bucket probe returned 200]"
+        if "query_page" in gsc:
+            gsc["query_page"] = "[redacted: public bucket probe returned 200]"
+    return redacted
+
+
 def upload_metrics(metrics: dict, weeks: WeekWindows) -> str | None:
-    """生 JSON を private バケットへ。SUPABASE 未設定なら None（警告のみ、失敗にしない）。"""
+    """生 JSON を private バケットへ。SUPABASE 未設定なら None（警告のみ、失敗にしない）。
+
+    2026-08-26 計測レビュー対応（第2ラウンド・修正4）:
+    - バケットが匿名GETで200を返す（公開設定の疑い）場合、検索語を含む部分をredactしてから
+      アップロードする（fail-closed）。redactした旨を metrics["warnings"] にも積み、
+      呼び出し側（main）の exit code 判定に反映させる。
+    - `data_quality.failed` が非空（部分失敗）のときは、正本パス
+      `analytics/weekly/<週初>.json` を上書きせず `<週初>_partial.json` へ保存する
+      （壊れた/欠けた成果物で良品を上書きしない）。
+    """
     conf = _supabase_conf()
     bucket = (os.environ.get("FORECAST_MODEL_BUCKET") or DEFAULT_BUCKET).strip()
     if conf is None:
         print("[analytics] SUPABASE 未設定のため生JSONの保存をスキップしました。")
         return None
     supabase_url, key = conf
-    path = f"analytics/weekly/{weeks.cur_start.isoformat()}.json"
-    _storage_put(bucket, path, json.dumps(metrics, ensure_ascii=False).encode("utf-8"), supabase_url, key)
+
+    payload_metrics = metrics
+    if bucket_appears_public(bucket, supabase_url):
+        print(
+            f"[analytics][warn] Storage bucket '{bucket}' が匿名GETで200を返しました"
+            "（公開設定の疑い）。検索語を含む部分をredactしてアップロードします（修正4）。"
+        )
+        payload_metrics = _redact_search_terms(metrics)
+        metrics.setdefault("warnings", []).append(
+            f"public_bucket_probe: bucket '{bucket}' returned 200 on anonymous GET; search terms redacted"
+        )
+
+    is_partial = bool((metrics.get("data_quality") or {}).get("failed"))
+    week_key = weeks.cur_start.isoformat()
+    path = f"analytics/weekly/{week_key}{'_partial' if is_partial else ''}.json"
+    _storage_put(bucket, path, json.dumps(payload_metrics, ensure_ascii=False).encode("utf-8"), supabase_url, key)
     dest = f"{bucket}/{path}"
-    print(f"[analytics] 生JSONを保存しました -> {dest}")
+    if is_partial:
+        print(f"[analytics][warn] 部分失敗のため正本パスへは保存せず、{dest} に保存しました。")
+    else:
+        print(f"[analytics] 生JSONを保存しました -> {dest}")
     return dest
 
 
@@ -872,9 +1112,12 @@ def main(argv: list[str] | None = None) -> int:
         print(digest)
         if metrics.get("warnings"):
             print("\n[warn] " + " / ".join(metrics["warnings"]))
+            return 3
         return 0
 
     # 生 JSON を private バケットへ、ダイジェストをローカルへ（保存先ファイル名は GA4 週基準、従来どおり）。
+    # upload_metrics は失敗時に metrics["warnings"] へ追記しうる（公開バケット疑いのredact等・修正4）
+    # ため、必ず終了コード判定の前に呼ぶ。
     upload_metrics(metrics, ga4_weeks)
     log_path = write_local_log(digest, ga4_weeks)
 
@@ -884,8 +1127,12 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print(f"[analytics] LINE未配線（LINE_USER_ID 未設定）— digestは {log_path} に保存しました。")
 
+    # 2026-08-26 計測レビュー対応（第2ラウンド・修正4）: 0=完全成功のみ、3=部分取得失敗または
+    # 公開バケット疑いでのredact等（生成はできたが完全ではない）、1=認証・依存・主要ソース全滅
+    # （既存どおり、この関数より前で return 済み）。
     if metrics.get("warnings"):
         print("[warn] " + " / ".join(metrics["warnings"]))
+        return 3
     return 0
 
 

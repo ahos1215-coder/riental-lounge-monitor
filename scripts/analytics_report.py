@@ -28,11 +28,21 @@ LINE送信）とは別に、オーナーが手元で好きなタイミングで 
 
 GA4 は当日を含む期間もそのまま取得するが、直近2日（today/yesterday）を含む期間には
 `provisional: true` を明示する（GA4 の直近データは後から数値が動くことがあるため）。
-GSC は `dataState="all"`（速報込み）で取得し、レスポンスの metadata から確定日が読めれば
-それを使い、読めなければ「実行日の3日前より新しい日は未確定」という規約ベースの推定に
-フォールバックする（`scripts/analytics_weekly_report.py::last_confirmed_week` の
+GSC は `dataState="all"`（速報込み）で取得する。確定日は totals レスポンスの metadata では
+なく、`dimensions=["date"]` + `dataState="all"` の専用プローブ（`gsc_freshness_probe_body`）
+から読む（公式仕様上、確定日メタデータは date dimension 付きのレスポンスでしか返らないため。
+2026-08-26 計測レビュー第2ラウンド 修正1）。プローブが失敗/読めなければ「実行日の3日前より
+新しい日は未確定」という規約ベースの推定にフォールバックする（`available_through_source` に
+`metadata`/`rule` を明示。`scripts/analytics_weekly_report.py::last_confirmed_week` の
 `min_lag_days=3` と同じ規約）。未確定日を 0 件と表示することはしない
 （`provisional_dates` に列挙し、markdown 上も「未確定」と明記する）。
+
+前期間比（`--compare previous`）は、速報を含む現在期間をそのまま前期間と%比較しない。
+確定分同士（現在期間の確定部分 vs 同じ長さの直前期間）で別途「確定ベースの比較」を計算し
+（`stable_comparison`）、markdown/JSON の `deltas` はこちらを使う（生の totals は速報込みの
+まま別途表示。2026-08-26 計測レビュー第2ラウンド 修正2）。PV(screenPageViews) は 8/26 に
+計測定義を変更したため、比較対象の期間がこの日をまたぐ場合は screenPageViews の delta だけ
+「比較不可」と明示する（他の指標には適用しない。修正6）。
 
 終了コード
 ----------
@@ -153,6 +163,31 @@ def provisional_dates_in_period(start: date, end: date, available_through: date)
     return out
 
 
+def gsc_freshness_probe_body(as_of: date, lookback_days: int = 10) -> dict:
+    """GSC の確定日メタデータを読むための専用プローブのリクエストボディ。
+
+    2026-08-26 計測レビュー対応（第2ラウンド・修正1）: 公式仕様では `metadata.first_incomplete_date`
+    は `dataState="all"` かつ `dimensions=["date"]` のレスポンスでしか返らない。以前は dimension
+    無しの totals リクエストへ `dataState="all"` を付けるだけで metadata を読もうとしており、
+    本番ではほぼ常に rule フォールバックしか効いていなかった（本当の意味でのバグ）。ここで
+    totals とは別に date dimension 専用のプローブを1回追加リクエストする。直近 lookback_days
+    日だけを見れば十分（それより古い日はどのみち確定済みのため）。
+    """
+    start = as_of - timedelta(days=lookback_days)
+    return awr.gsc_body(start.isoformat(), as_of.isoformat(), ["date"], lookback_days + 1, data_state="all")
+
+
+def stable_subperiod(start: date, end: date, available_through: date) -> tuple[date, date] | None:
+    """要求期間 `start`〜`end` のうち確定済みの部分だけを返す。全部未確定なら None。
+
+    2026-08-26 計測レビュー対応（第2ラウンド・修正2）。
+    """
+    trimmed_end = min(end, available_through)
+    if trimmed_end < start:
+        return None
+    return start, trimmed_end
+
+
 def compute_deltas(cur: dict | None, prev: dict | None) -> dict | None:
     """cur/prev（同じキーを持つ totals dict）から {key: {delta, pct}} を作る。片方が無ければ None。"""
     if cur is None or prev is None:
@@ -164,9 +199,76 @@ def compute_deltas(cur: dict | None, prev: dict | None) -> dict | None:
     return out
 
 
+def stable_comparison(
+    *,
+    start: date,
+    end: date,
+    available_through: date,
+    full_period_cur_raw,
+    full_period_prev_raw,
+    call,
+    totals_body_fn,
+    parse_fn,
+    label_prefix: str,
+    safe,
+) -> dict:
+    """確定分同士の前期間比較を組み立てる（2026-08-26 計測レビュー対応・第2ラウンド修正2）。
+
+    「速報を含む現在期間」と「確定済みの前期間」をそのまま%比較すると、母数の小さいサイトでは
+    数件の未反映だけで割合が大きく動く。ここでは要求期間 `start`〜`end` のうち確定済みの部分
+    （`stable_subperiod`）だけを使い、同じ長さの直前期間と比較する。
+
+    要求期間が丸ごと確定済み（トリムなし）なら、既に呼び出し側が取得済みの
+    `full_period_cur_raw`/`full_period_prev_raw`（fetch_report の raw_totals 相当）をそのまま
+    再利用し、無駄な追加リクエストを避ける。トリムが必要なときだけ確定部分に絞った totals を
+    新たに取得する。
+    """
+    stable = stable_subperiod(start, end, available_through)
+    if stable is None:
+        return {
+            "period": None,
+            "previous_period": None,
+            "totals": None,
+            "previous_totals": None,
+            "deltas": None,
+            "note": "比較保留（確定分が無いため計算できません）",
+        }
+    stable_start, stable_end = stable
+    if stable_end == end:
+        # 期間全体が既に確定済み。追加リクエストせず、呼び出し側が既に取得済みの生レスポンスを使う。
+        prev_start, prev_end = previous_period(start, end)
+        cur_raw, prev_raw = full_period_cur_raw, full_period_prev_raw
+        note = None
+    else:
+        prev_start, prev_end = previous_period(stable_start, stable_end)
+        cur_raw = safe(
+            call, totals_body_fn(stable_start.isoformat(), stable_end.isoformat()), label=f"{label_prefix}.stable_cur"
+        )
+        prev_raw = safe(
+            call,
+            totals_body_fn(prev_start.isoformat(), prev_end.isoformat()),
+            label=f"{label_prefix}.stable_prev",
+        )
+        note = f"比較は確定分同士（〜{awr.format_md(stable_end.isoformat())}）"
+    cur_totals = parse_fn(cur_raw) if cur_raw is not None else None
+    prev_totals = parse_fn(prev_raw) if prev_raw is not None else None
+    return {
+        "period": {"start": stable_start.isoformat(), "end": stable_end.isoformat()},
+        "previous_period": {"start": prev_start.isoformat(), "end": prev_end.isoformat()},
+        "totals": cur_totals,
+        "previous_totals": prev_totals,
+        "deltas": compute_deltas(cur_totals, prev_totals),
+        "note": note,
+    }
+
+
 def position_bucket_counts(rows: list[dict]) -> dict[str, int]:
-    """GSC クエリ行のリストを順位帯(1-3/4-10/11-20/21+)ごとのクエリ数に集計する。"""
-    counts = {"1-3": 0, "4-10": 0, "11-20": 0, "21+": 0}
+    """GSC クエリ行のリストを順位帯(1-3/4-10/11-20/21+/unknown)ごとのクエリ数に集計する。
+
+    2026-08-26 計測レビュー対応（第2ラウンド・修正5）: 欠損・0・非有限の position は
+    awr.position_bucket が "unknown" を返す（以前は "1-3" に誤分類されていた）。
+    """
+    counts = {"1-3": 0, "4-10": 0, "11-20": 0, "21+": 0, "unknown": 0}
     for row in rows or []:
         counts[awr.position_bucket(row.get("position"))] += 1
     return counts
@@ -217,6 +319,7 @@ def fetch_report(period: tuple[date, date], as_of: date, compare: bool, ga4_call
     )
 
     ga4_prev_totals = None
+    raw_prev = None
     if compare:
         ps, pe = previous_period(start, end)
         raw_prev = safe(
@@ -224,13 +327,47 @@ def fetch_report(period: tuple[date, date], as_of: date, compare: bool, ga4_call
         )
         ga4_prev_totals = awr.parse_ga4_totals(raw_prev) if raw_prev is not None else None
 
+    # 修正2: 「速報込みの現在期間」と「確定済みの前期間」をそのまま%比較しない。確定分同士の
+    # 比較を別途 stable_comparison で計算し、deltas はそちらを使う（totals は速報込みの生値のまま表示）。
+    # GA4 の確定境界: today/yesterday は速報（ga4_provisional_flag と同じ規約）なので、
+    # 確定は as_of の2日前まで。
+    ga4_available_through = as_of - timedelta(days=2)
+    ga4_stable = (
+        stable_comparison(
+            start=start,
+            end=end,
+            available_through=ga4_available_through,
+            full_period_cur_raw=raw_totals,
+            full_period_prev_raw=raw_prev,
+            call=ga4_call,
+            totals_body_fn=awr.ga4_totals_body,
+            parse_fn=awr.parse_ga4_totals,
+            label_prefix="ga4.totals",
+            safe=safe,
+        )
+        if compare
+        else None
+    )
+    # 修正6: PV(screenPageViews)は8/26に計測定義を変更したため、比較に使う4つの日付
+    # （確定分同士の比較期間・前期間）がその日をまたぐ場合は screenPageViews の delta だけ
+    # 表示側で N/A にする（他の指標には適用しない）。
+    ga4_pv_blocked = False
+    if ga4_stable and ga4_stable.get("period") and ga4_stable.get("previous_period"):
+        cs = date.fromisoformat(ga4_stable["period"]["start"])
+        ce = date.fromisoformat(ga4_stable["period"]["end"])
+        ps2 = date.fromisoformat(ga4_stable["previous_period"]["start"])
+        pe2 = date.fromisoformat(ga4_stable["previous_period"]["end"])
+        ga4_pv_blocked = awr.pv_delta_crosses_boundary(cs, ce, ps2, pe2)
+
     ga4_section = {
         "requested_period": {"start": s, "end": e},
         "provisional": ga4_provisional_flag(end, as_of),
         "provisional_dates": ga4_provisional_dates(start, end, as_of),
         "totals": ga4_totals,
         "previous": ga4_prev_totals,
-        "deltas": compute_deltas(ga4_totals, ga4_prev_totals) if compare else None,
+        "deltas": ga4_stable["deltas"] if ga4_stable else None,
+        "comparison": ga4_stable,
+        "pv_delta_blocked_by_epoch_change": ga4_pv_blocked,
         "landing_pages": ga4_landing,
         "channels": ga4_channels,
         "events": ga4_events,
@@ -239,7 +376,11 @@ def fetch_report(period: tuple[date, date], as_of: date, compare: bool, ga4_call
     # ---- GSC（dataState="all" = 速報込み。修正2/analytics_report固有） ----
     raw_gsc_totals = safe(gsc_call, awr.gsc_body(s, e, [], 1, data_state="all"), label="gsc.totals")
     gsc_totals = awr.parse_gsc_totals(raw_gsc_totals) if raw_gsc_totals is not None else None
-    availability = gsc_availability(raw_gsc_totals, as_of)
+    # 修正1: 確定日は date dimension 専用のプローブから読む（totals レスポンスの metadata では
+    # 公式仕様上ほぼ返らない）。プローブが失敗しても safe() が None を返すので、
+    # gsc_availability は従来どおり rule フォールバックする。
+    raw_gsc_probe = safe(gsc_call, gsc_freshness_probe_body(as_of), label="gsc.freshness_probe")
+    availability = gsc_availability(raw_gsc_probe, as_of)
     available_through = date.fromisoformat(availability["available_through"])
     prov_dates = provisional_dates_in_period(start, end, available_through)
 
@@ -247,16 +388,23 @@ def fetch_report(period: tuple[date, date], as_of: date, compare: bool, ga4_call
         {"query": r["key"], "clicks": r["clicks"], "impressions": r["impressions"], "position": r["position"]}
         for r in awr.parse_gsc_rows(safe(gsc_call, awr.gsc_body(s, e, ["query"], 25, data_state="all"), label="gsc.queries"))
     ]
+    raw_gsc_pages = safe(gsc_call, awr.gsc_body(s, e, ["page"], 200, data_state="all"), label="gsc.pages")
     gsc_pages = [
         {"page": r["key"], "clicks": r["clicks"], "impressions": r["impressions"]}
-        for r in awr.parse_gsc_rows(safe(gsc_call, awr.gsc_body(s, e, ["page"], 200, data_state="all"), label="gsc.pages"))
+        for r in awr.parse_gsc_rows(raw_gsc_pages)
     ]
     gsc_query_page = awr.parse_gsc_query_page_rows(
         safe(gsc_call, awr.gsc_body(s, e, ["query", "page"], 200, data_state="all"), label="gsc.query_page")
     )
-    qualified, page_total = awr.qualified_clicks_total(gsc_pages)
+    # 修正3: gsc.pages の取得自体が失敗したときは qualified を None にする（parse後は空リストに
+    # なるため、raw レスポンスの成否で分岐しないと「取得失敗」が偽の0クリックとして出てしまう）。
+    if raw_gsc_pages is not None:
+        qualified, page_total = awr.qualified_clicks_total(gsc_pages)
+    else:
+        qualified, page_total = None, None
 
     gsc_prev_totals = None
+    raw_gsc_prev = None
     if compare:
         ps, pe = previous_period(start, end)
         raw_gsc_prev = safe(
@@ -266,14 +414,36 @@ def fetch_report(period: tuple[date, date], as_of: date, compare: bool, ga4_call
         )
         gsc_prev_totals = awr.parse_gsc_totals(raw_gsc_prev) if raw_gsc_prev is not None else None
 
+    def _gsc_totals_body(bs: str, be: str) -> dict:
+        return awr.gsc_body(bs, be, [], 1, data_state="all")
+
+    gsc_stable = (
+        stable_comparison(
+            start=start,
+            end=end,
+            available_through=available_through,
+            full_period_cur_raw=raw_gsc_totals,
+            full_period_prev_raw=raw_gsc_prev,
+            call=gsc_call,
+            totals_body_fn=_gsc_totals_body,
+            parse_fn=awr.parse_gsc_totals,
+            label_prefix="gsc.totals",
+            safe=safe,
+        )
+        if compare
+        else None
+    )
+
     gsc_section = {
         "requested_period": {"start": s, "end": e},
         "available_through": availability["available_through"],
+        "availability_source": availability["source"],
         "provisional": bool(prov_dates),
         "provisional_dates": prov_dates,
         "totals": gsc_totals,
         "previous": gsc_prev_totals,
-        "deltas": compute_deltas(gsc_totals, gsc_prev_totals) if compare else None,
+        "deltas": gsc_stable["deltas"] if gsc_stable else None,
+        "comparison": gsc_stable,
         "top_queries": gsc_queries,
         "top_pages": gsc_pages,
         "query_page": gsc_query_page,
@@ -282,15 +452,23 @@ def fetch_report(period: tuple[date, date], as_of: date, compare: bool, ga4_call
     }
 
     # ソースごとの状態: 何かひとつでも取れていれば partial、主要データ(totals)すら
-    # 全滅していれば failed、失敗が無ければ ok。
-    def _status(prefix: str, got_anything: bool) -> str:
-        source_failed = [label for label in failed if label.startswith(prefix)]
-        if not source_failed:
-            return "ok"
-        return "partial" if got_anything else "failed"
+    # 全滅していれば failed、失敗が無ければ ok（scripts/analytics_weekly_report.py と共通実装）。
+    ga4_status = awr.compute_source_status(
+        failed, "ga4.", got_anything=bool(ga4_landing or ga4_channels or ga4_events or ga4_totals is not None)
+    )
+    gsc_status = awr.compute_source_status(
+        failed, "gsc.", got_anything=bool(gsc_queries or gsc_pages or gsc_totals is not None)
+    )
 
-    ga4_status = _status("ga4.", bool(ga4_landing or ga4_channels or ga4_events or ga4_totals is not None))
-    gsc_status = _status("gsc.", bool(gsc_queries or gsc_pages or gsc_totals is not None))
+    row_limits = {
+        "ga4_landing_pages": 10,
+        "ga4_channels": 10,
+        "ga4_events": 30,
+        "gsc_queries": 25,
+        "gsc_pages": 200,
+        "gsc_query_page": 200,
+        "gsc_freshness_probe_days": 10,
+    }
 
     return {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -301,6 +479,15 @@ def fetch_report(period: tuple[date, date], as_of: date, compare: bool, ga4_call
             "source_status": {"ga4": ga4_status, "gsc": gsc_status},
             "warnings": warnings,
             "partial_failures": failed,
+        },
+        # 2026-08-26 計測レビュー対応（第2ラウンド・修正5）: 出力の解釈に必要なメタデータ。
+        # schema_version は破壊的変更時にインクリメントする。
+        "meta": {
+            "schema_version": 2,
+            "timezone": "Asia/Tokyo",
+            "period": {"start": s, "end": e},
+            "row_limits": row_limits,
+            "source_status": {"ga4": ga4_status, "gsc": gsc_status},
         },
     }
 
@@ -335,20 +522,30 @@ def compose_markdown(report: dict) -> str:
         lines.append(f"- アクティブユーザー: {_fmt_or_na(totals.get('activeUsers'))}")
         lines.append(f"- セッション: {_fmt_or_na(totals.get('sessions'))}")
         lines.append(f"- ページビュー: {_fmt_or_na(totals.get('screenPageViews'))}")
+    # 修正2: deltas は「確定分同士」の比較（fetch_report::stable_comparison）。速報込みの生値
+    # は上の totals にそのまま出す一方、判断に使う%はここでは確定分だけを使う。
+    comparison = ga4.get("comparison") or {}
     deltas = ga4.get("deltas")
+    if comparison.get("note"):
+        lines.append(f"  ※ {comparison['note']}")
     if deltas:
         for key, label in (
             ("activeUsers", "アクティブユーザー"),
             ("sessions", "セッション"),
             ("screenPageViews", "ページビュー"),
         ):
+            # 修正6: PVは8/26に計測定義を変更したため、比較対象がその日をまたぐ場合は
+            # screenPageViews の delta だけ比較不可として明示する（他指標には適用しない）。
+            if key == "screenPageViews" and ga4.get("pv_delta_blocked_by_epoch_change"):
+                lines.append(f"  - 前期間比 {label}: 比較不可（8/26にPV計測定義を変更したため）")
+                continue
             d = deltas.get(key)
             if d and d.get("pct") is not None:
                 sign = "+" if d["delta"] >= 0 else ""
                 lines.append(f"  - 前期間比 {label}: {sign}{d['pct']:.1f}%")
     if ga4.get("landing_pages"):
         lines.append("")
-        lines.append("### ランディングページ TOP10")
+        lines.append("### ランディングページ TOP10（API取得上位10件。全件ではありません）")
         for i, row in enumerate(ga4["landing_pages"][:10], 1):
             lines.append(f"{i}. {row.get('page')} … {_fmt_or_na(row.get('sessions'))}")
     if ga4.get("channels"):
@@ -357,7 +554,9 @@ def compose_markdown(report: dict) -> str:
         for row in ga4["channels"]:
             lines.append(f"- {row.get('channel')}: {_fmt_or_na(row.get('sessions'))}")
     if ga4.get("events"):
-        shown = [(name, ga4["events"][name]) for name in awr.KNOWN_CUSTOM_EVENTS if name in ga4["events"]]
+        # 修正6: report_read（旧名）は表示だけ report_view へ合算する。
+        events_display = awr.canonical_events_for_display(ga4["events"])
+        shown = [(name, events_display[name]) for name in awr.KNOWN_CUSTOM_EVENTS if name in events_display]
         if shown:
             lines.append("")
             lines.append("### イベント（サイト内アクション）")
@@ -368,7 +567,11 @@ def compose_markdown(report: dict) -> str:
     gsc = report.get("gsc", {})
     gperiod = gsc.get("requested_period", {})
     lines.append(f"## Search Console（{gperiod.get('start')}〜{gperiod.get('end')}）")
-    lines.append(f"- 確定済み: 〜{gsc.get('available_through')}")
+    # 修正1: 確定日の出所（date dimension プローブから読めた"metadata" か、規約フォールバックの
+    # "rule" か）を明記する。以前はどちらで求めたか区別できず「確定日を取得した」と誤読されがちだった。
+    avail_source = gsc.get("availability_source")
+    avail_source_label = {"metadata": "APIメタデータ", "rule": "推定（規約ベース）"}.get(avail_source, avail_source)
+    lines.append(f"- 確定済み: 〜{gsc.get('available_through')}（判定方法: {avail_source_label}）")
     if gsc.get("provisional_dates"):
         lines.append(f"※ 未確定の可能性がある日（参考値）: {', '.join(gsc['provisional_dates'])}")
     gtotals = gsc.get("totals")
@@ -381,7 +584,11 @@ def compose_markdown(report: dict) -> str:
         lines.append(f"- 平均CTR: {'N/A' if ctr is None else f'{ctr * 100:.2f}%'}")
         pos = gtotals.get("position")
         lines.append(f"- 平均掲載順位: {'N/A' if pos is None else f'{pos:.1f}位'}")
+    # 修正2: deltas は「確定分同士」の比較。
+    gcomparison = gsc.get("comparison") or {}
     gdeltas = gsc.get("deltas")
+    if gcomparison.get("note"):
+        lines.append(f"  ※ {gcomparison['note']}")
     if gdeltas:
         for key, label in (("clicks", "クリック"), ("impressions", "表示回数")):
             d = gdeltas.get(key)
@@ -389,31 +596,38 @@ def compose_markdown(report: dict) -> str:
                 sign = "+" if d["delta"] >= 0 else ""
                 lines.append(f"  - 前期間比 {label}: {sign}{d['pct']:.1f}%")
     # 「全クリック」は正確な合計値（totals クエリ由来）を使う。qualified_clicks.total は
-    # ページ内訳（rowLimit 200 でキャップ）の合計で、長い尾を持つサイトだと totals よりわずかに
-    # 少なくなりうるため、表示上の分母には使わない（週報 compose_digest と揃えた挙動）。
+    # ページ内訳（rowLimit 200 でキャップ、API が返した上位N行の範囲。全件ではない）の合計で、
+    # 長い尾を持つサイトだと totals よりわずかに少なくなりうるため、表示上の分母には使わない
+    # （週報 compose_digest と揃えた挙動）。
+    # 修正3: gsc.pages 取得自体が失敗すると qualified は None（実際の0件と区別するため）。
     qc = gsc.get("qualified_clicks") or {}
     lines.append(
         f"- 有効クリック: {_fmt_or_na(qc.get('qualified'))}（全クリック {_fmt_or_na((gtotals or {}).get('clicks'))}）"
     )
     buckets = gsc.get("position_buckets") or {}
     if buckets:
+        # 修正5: これは全クエリではなく「クリック上位25検索語」内の非加重件数（gsc.queries の
+        # rowLimit=25 が母集団）。position が欠損/0/非有限だった行は unknown。
         lines.append(
-            "- 順位帯（クエリ数）: "
+            "- 順位帯（クリック上位25検索語の集計）: "
             f"1-3={buckets.get('1-3', 0)} / 4-10={buckets.get('4-10', 0)} / "
-            f"11-20={buckets.get('11-20', 0)} / 21+={buckets.get('21+', 0)}"
+            f"11-20={buckets.get('11-20', 0)} / 21+={buckets.get('21+', 0)} / "
+            f"unknown={buckets.get('unknown', 0)}"
         )
     top_queries = gsc.get("top_queries") or []
     if top_queries:
         lines.append("")
-        lines.append("### 検索クエリ TOP10")
+        lines.append("### 検索クエリ TOP10（API取得上位25件のうち上位10件。全件ではありません）")
+        brand_labels = {"site": "指名(サイト)", "chain": "指名(チェーン)", "generic": "一般"}
         for i, row in enumerate(top_queries[:10], 1):
-            branded = "指名" if awr.is_branded_query(row.get("query") or "") else "一般"
+            brand_kind = awr.classify_query_brand(row.get("query") or "")
+            branded = brand_labels[brand_kind]
             lines.append(f"{i}. 「{row.get('query')}」（{branded}） … {_fmt_or_na(row.get('clicks'))}クリック")
     query_page = gsc.get("query_page") or []
     if query_page:
         top_qp = sorted(query_page, key=lambda r: r.get("clicks") or 0, reverse=True)[:5]
         lines.append("")
-        lines.append("### 検索語→ページ TOP5")
+        lines.append("### 検索語→ページ TOP5（API取得上位行からの抜粋。全件ではありません）")
         for row in top_qp:
             page_path = urllib.parse.urlparse(row.get("page") or "").path or (row.get("page") or "")
             lines.append(f"- 「{row.get('query')}」→ {page_path}（{_fmt_or_na(row.get('clicks'))}クリック）")
