@@ -1,6 +1,7 @@
 # アナリティクス分析 runbook（AIエージェント向け・SSOT）
 
-最終更新: 2026-08-26（計測レビュー対応で新設）
+最終更新: 2026-08-26（計測レビューR2対応でUTM命名規約・計測契約の節を追加。
+前回の実装報告書が「記載済み」と誤って書いていたUTM規約を、今回実際に書いた）
 
 このファイルは、オーナーが「最新のアクセスを分析して」「検索クリックを見て」のように
 依頼したときに、Claude / Codex どちらのエージェントが対応しても同じ手順・同じ読み方に
@@ -58,6 +59,39 @@ python scripts/analytics_report.py --mode latest --days 28 --compare previous --
   「観測継続中」として扱い、断定的な効果判定をしない。現在のクリーン観測期間（直前の
   SEO変更の影響が出そろう期間）は **2026-08-24〜2026-09-20頃**。この期間中に発生した
   変動は、それ以前の施策の効果切り分けができない可能性があることを踏まえて報告する。
+- **順位帯・検索語リストは「APIが返した上位N件」であり全件ではない**。GSCの
+  `fetch_metrics`（query×page 含む）は `rowLimit` を指定して取得しており、それを超える
+  順位帯・検索語は集計に含まれない。「上位N件で見た限り」という前提を付けずに
+  「全クエリの傾向」であるかのように報告しないこと。
+
+---
+
+## UTM命名規約
+
+現状、UTMは**アウトバウンド**（予約リンク先への付与）にのみ使われています。インバウンド
+UTM（広告・提携送客などの能動的キャンペーン）は**現状打っていません**。キャンペーンを
+打つときに使う命名規約は次のとおりです。
+
+- `utm_source=x`（送客元。例: `line`, `x`, `instagram`）
+- `utm_medium=social`（媒体区分）
+- `utm_campaign=<施策名>`（例: `autumn_promo`）
+- `utm_content=<店舗slug_YYYYMM>`（例: `shibuya_202609`）
+
+---
+
+## 計測契約（measurement contract）
+
+分析結果を報告するときに前提として踏まえること。
+
+- **PV定義変更日 = 2026-08-26（JST）**。この日を境にPVの計測方式が変わったため、
+  **この日を跨ぐPV比較はできない（N/A として扱う）**。ユーザー数・セッション数は
+  この変更の影響を受けないため、跨いでの比較は可能。
+- **`report_view_canonical` = `report_view` + `report_read`**（旧イベント名からの移行互換）。
+  表示・分析時にレポート閲覧数を数えるときはこの合算値を使う。**送信側は二重化しない**
+  （`report_read` は過去分のみに存在し、新規発火は `report_view` に一本化済み）。
+- **GA4拡張計測の「履歴イベントに基づくページビュー」OFF確認（`docs/GA4_ADMIN_CHECKLIST.md` §1）
+  が完了するまで、SPA遷移PVに二重計上の可能性が残る**。この確認が未完了の期間のPVは
+  参考値として扱い、断定的な増減判断に使わないこと。
 
 ---
 
@@ -79,6 +113,6 @@ python scripts/analytics_report.py --mode latest --days 28 --compare previous --
 ## 関連ドキュメント
 
 - `docs/ANALYTICS_SETUP.md` — GA4/Search Console 連携の初回セットアップ手順（オーナー向け）
-- `docs/GA4_ADMIN_CHECKLIST.md` — GA4 管理画面の確認事項（任意・各5分）
+- `docs/GA4_ADMIN_CHECKLIST.md` — GA4 管理画面の確認事項（§1は出荷条件・1回だけの受入確認、§2-3は任意）
 - `plan/RUNBOOK.md` — 定期処理一覧（`MEGRIBI-analytics-weekly` 等）
 - `CLAUDE.md` §7 共通モジュール地図 — `scripts/analytics_report.py` の位置づけ

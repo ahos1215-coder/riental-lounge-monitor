@@ -35,8 +35,8 @@ git push 済み（オーナーの明示的な承認のもと。指示書の「pu
 | report_read が mount 時発火で読了ではない | **CONFIRMED** | ReportViewTracker.tsx:14-16。スクロール・滞在・可視性の判定ゼロ |
 | 店舗識別子が store_slug/slug/from/to に分裂 | **CONFIRMED（あなたより深刻）** | さらに cost_sim_interact（両カード）と range_mode_change は**店舗識別子そのものが無い**。「どの店の料金試算が使われたか」がGA4上で一切追えない状態でした |
 | 週報のイベント一覧が古い4種のみ | **CONFIRMED** | KNOWN_CUSTOM_EVENTS が4種。実発火は8種で、compare_add_store / range_mode_change / cost_sim_interact / related_store_click の**4種が週報に一度も出ていなかった** |
-| GSCが月曜朝の未確定データを比較 | **CONFIRMED（実ログで裏付け）** | %TEMP% に残っていた 8/24 09:00 の実タスク生成ログが **228表示/2クリック**。8/26 再取得で **328表示/3クリック**。あなたの主張の数字と完全一致 |
-| 「最も伸びたクエリ」が +0 でも出る | **CONFIRMED（実データで再現）** | dry-run で実際に「oriental lounge rigo 宮崎（+0クリック）」が出力されました |
+| GSCが月曜朝の未確定データを比較 | **CONFIRMED（実ログで裏付け）** | %TEMP% に残っていた 8/24 09:00 の実タスク生成ログの表示数が、8/26 再取得で N→M に増加（実数は plan/_local 参照）。あなたの主張の数字と完全一致 |
+| 「最も伸びたクエリ」が +0 でも出る | **CONFIRMED（実データで再現）** | dry-run で実際に（実在の店舗名を含む検索語・詳細は plan/_local 参照）が +0クリックで出力されました |
 | query×page が無い / CTR・positionを行から捨てている | **CONFIRMED** | fetch_metrics L327-338。query と page の複合次元呼び出しはファイル内に皆無。行別の ctr/position はパース後に破棄 |
 | 外部送客が測れない | **CONFIRMED** | ReservationLinkCard.tsx（公式サイト）・SecondVenuesList.tsx（地図）とも**クリック計測ゼロ** |
 | Task Scheduler が SYSTEM でない | **CONFIRMED（ただし文脈が違う）** | 実タスクは ahos1 / Interactive only。ただし**他の MEGRIBI-* タスクも大半が同じ**（SYSTEM は warm-cdn のみ）。つまり analytics 固有の欠陥ではなく、**ドキュメント側の記述が実態と乖離**していた |
@@ -319,7 +319,7 @@ PV 解釈時に、この不連続を必ず考慮してください。
    （リンク先で読まれないだけ）。これらも消して正規URLに統一すべきか、実害が無いので放置でよいか
 3. **有効検索クリックの定義**: 「現役 indexable ページへのクリック」としましたが、
    /blog を含めるのは妥当か。/reports/*（noindex）を除外した結果、
-   過去90日の83クリックのうち約54件が「有効」になります。この定義で意思決定してよいか
+   過去90日のクリックのうち約6割が「有効」になります（実数は plan/_local 参照）。この定義で意思決定してよいか
 4. **"megribi" 綴りの発見**のように、**分類ロジックに他の見落としが無いか**
    （ページ種別・順位帯・指名判定）
 
@@ -344,3 +344,8 @@ PV 解釈時に、この不連続を必ず考慮してください。
 - 実データ確認は read-only モードのみ。LINE送信・Supabase書き込み・ファイル書き込みは発生していません
 - Task Scheduler の**変更はしていません**（読み取り schtasks /query のみ）
 - テスト fixture は合成データのみ
+
+---
+
+**2026-08-26 追記**: 本文書の実測値・実検索語は `plan/_local` へ移動しました（git履歴には残るが、
+集計値のみで認証情報は含まれないため履歴書き換えは行わない）。
