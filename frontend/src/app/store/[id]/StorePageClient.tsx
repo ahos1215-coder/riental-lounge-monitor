@@ -73,8 +73,11 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
   // slugFromPath を優先、MeguribiDashboardPreview も pathSlug を優先し ?store= は
   // フォールバックとしてしか読まない＝ pathSlug が常に渡るこの経路では到達しない）。
   // 無駄な router.replace（履歴書き換え・非正規URL化）だけが残っていたため削除した。
-  // StoreCard.tsx 等の内部リンクに残る ?store= 付与はリンク先の後方互換のためそのまま
-  // （付いていても読まれないだけで実害は無い）。
+  // 2026-09-06 訂正: ここには「StoreCard.tsx 等の内部リンクには ?store= 付与が残っている」と
+  // 書いてあったが、StoreCard は同じ 2026-08-26 の作業で素の /store/<slug> に直されており
+  // （StoreCard.tsx:110）事実に反していた。内部リンクの ?store= は全経路で除去済みで、
+  // 最後に残っていたプログラム的な組み立て1箇所も 2026-09-06 に潰した。
+  // 再発は frontend/src/lib/internalLinks.test.ts が検問している。
 
   useEffect(() => {
     if (!slug) return;
