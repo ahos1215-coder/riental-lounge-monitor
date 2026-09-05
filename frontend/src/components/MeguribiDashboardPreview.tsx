@@ -85,17 +85,24 @@ export default function MeguribiDashboardPreview({ headerActions, initialSnapsho
     selectedBaseDate,
   } = useStorePreviewData(meta.slug, initialSnapshot);
 
+  // 2026-09-06 計測レビュー追跡: ここは URLSearchParams に store キーを毎回入れてクエリを
+  // 組み立てていたため、遷移先が必ず `/store/<slug>?store=<slug>`（非正規URL）になっていた。
+  // 2026-08-26 の「内部リンクの ?store= 全除去」はリテラル `?store=` の文字列検索で直したので、
+  // このプログラム的な組み立てだけが取り残された（番犬テスト internalLinks.test.ts も
+  // リテラル形しか見ていなかったため素通りした）。/store/[id] は path slug を優先して query を
+  // 読まず、canonical も `/store/<slug>` なので、クエリを付ける理由が無い。
+  //
+  // 他のクエリを引き継がないのは意図的: utm_* / gclid を内部遷移に持ち回すと、pathname が
+  // 変わる＝GoogleAnalytics.tsx が PV を送る際の page_location に混入し、GA4 上で流入元が
+  // 再帰属されてしまう。`?dev=` は syncDevOptOutFromQuery が既に localStorage へ保存済みなので
+  // 引き継ぎ不要。結果として他の内部 /store/ リンク（StoreCard 等）と同じ素の形に揃う。
+  //
+  // 注意: 現在 PreviewMainSection は onSelectStore を props 型に持つだけで呼んでいない
+  // （店舗切替スイッチャーのUIが無い）ため、この関数は今は発火しない＝今回の変更は挙動不変。
+  // 将来スイッチャーを復活させた時に非正規URLが一緒に復活しないよう、URL側を先に直しておく。
   const handleSelectStore = (nextSlug: string) => {
     if (!nextSlug || nextSlug === meta.slug) return;
-
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("store", nextSlug);
-    const query = params.toString();
-
-    router.push(
-      query ? `/store/${nextSlug}?${query}` : `/store/${nextSlug}`,
-      { scroll: false },
-    );
+    router.push(`/store/${encodeURIComponent(nextSlug)}`, { scroll: false });
   };
 
   return (

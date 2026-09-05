@@ -23,6 +23,17 @@ const SRC_ROOT = path.resolve(__dirname, "..");
 // 誤検知するため、スラグに現れうる語構成文字（`\w` とハイフン）だけに絞る。
 const STORE_QUERY_PATTERN = /\/store\/(?:\$\{[^}]*\}|[\w-]+)\?store=/;
 
+// 2026-09-06 追加。上の STORE_QUERY_PATTERN は「リテラルに `?store=` と書かれた形」しか見ない。
+// そのため MeguribiDashboardPreview の店舗切替が `params.set("store", nextSlug)` →
+// `` `/store/${nextSlug}?${query}` `` とプログラム的に組み立てていた1件を取りこぼしていた
+// （2026-08-26 の全除去でも、その後の grep 確認でも見つからなかったのはこれが理由）。
+// 遷移URL用に store クエリを組み立てること自体を禁止して、同じ抜け方の再発を塞ぐ。
+const STORE_PARAM_SET_PATTERN = /\.set\(\s*["'`]store["'`]/;
+
+// `/api/*` のクエリ組み立て（proxyBackend の buildQuery 等）は正常な用途なので除外する。
+// 対象はあくまで「利用者のブラウザのURLになる遷移先」を作るコードだけ。
+const API_QUERY_BUILDER_DIRS = [path.join("app", "api"), path.join("lib", "api")];
+
 function collectSourceFiles(dir: string, acc: string[] = []): string[] {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
@@ -49,5 +60,22 @@ describe("internal /store/ links never append ?store=", () => {
     expect(offenders, `?store= 付きの内部 /store/ リンクが見つかった: ${offenders.join(", ")}`).toEqual(
       [],
     );
+  });
+
+  it("遷移URL用に store クエリを組み立てているコードが無い（リテラルでない ?store= の抜け道を塞ぐ）", () => {
+    const files = collectSourceFiles(SRC_ROOT).filter((file) => {
+      const rel = path.relative(SRC_ROOT, file);
+      return !API_QUERY_BUILDER_DIRS.some((dir) => rel.startsWith(dir + path.sep));
+    });
+    const offenders: string[] = [];
+    for (const file of files) {
+      if (STORE_PARAM_SET_PATTERN.test(fs.readFileSync(file, "utf-8"))) {
+        offenders.push(path.relative(SRC_ROOT, file));
+      }
+    }
+    expect(
+      offenders,
+      `遷移先URLに store クエリを付けているコードが見つかった（/store/<slug> をそのまま使うこと）: ${offenders.join(", ")}`,
+    ).toEqual([]);
   });
 });
