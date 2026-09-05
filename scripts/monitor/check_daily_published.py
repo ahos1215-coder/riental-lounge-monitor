@@ -14,7 +14,8 @@ target_date のまま残るので、読者には古い記事が出続ける）�
 
 環境変数:
   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY  必須
-  INPUT_DATE     チェック対象日 YYYY-MM-DD（空欄 = UTC の今日 = JST 23:30 時点の今日）
+  INPUT_DATE     チェック対象日 YYYY-MM-DD（空欄 = JST の現在時刻から18時間引いた日付。
+                 理由は resolve_target_date() のコメント）
   MIN_PUBLISHED  各エディションの最低公開数（既定 30）。**下限フロアとして残す**。
                  ワークフローが常に値を渡すため既定値を変えても効かないので、
                  全店必須の判定は下の STRICT_ALL_STORES 側で行う。
@@ -35,7 +36,7 @@ import sys
 import time
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -47,6 +48,34 @@ EDITIONS = ("evening_preview", "late_update")
 FETCH_ATTEMPTS = 3
 FETCH_BACKOFF_CAP = 30.0
 FETCH_TIMEOUT = 30
+
+JST = timezone(timedelta(hours=9))
+# 対象日を決めるときに「現在のJST時刻から差し引く」時間数。18 の根拠は resolve_target_date()。
+TARGET_DATE_LOOKBACK_HOURS = 18
+
+
+def resolve_target_date(now: datetime) -> str:
+    """チェック対象の「JST の日付」を決める（INPUT_DATE 未指定時）。
+
+    cron は 14:30 UTC（= 23:30 JST）。見たいのは「その日の JST 日付」の日次レポートで、
+    GitHub の cron 遅延は必ず後ろへずれる。したがって "遅延しても対象日が翌日へ飛ばない"
+    ことが要件になる。
+
+    なぜ18時間引くのか:
+      - 定刻 23:30 JST から18時間引くと 05:30 JST（同日）。対象日は当日のまま。
+      - 遅延して翌 17:30 JST に走っても、18時間引けば 23:30 JST（当日）でまだ当日を見る。
+        つまり **18.5時間の遅延まで対象日が正しい**（境界は翌 18:00 JST）。
+      - 手動 workflow_dispatch を翌朝 09:00 JST に打った場合は 15:00 JST（前日）＝前日を
+        見る。前夜のレポートを確認したいという意図に沿う。
+
+    旧実装は `datetime.now(timezone.utc)` の UTC 日付をそのまま使っていた。UTC 日付は
+    00:00 UTC（= 09:00 JST）で変わるため、許容できる遅延が **9時間30分しかなかった**。
+    2026-08-27 に実測で 9時間23分の遅延が起きており、あと7分で対象日が翌日へずれて
+    「まだ生成されていない翌日分」を 0/42 と誤検知するところだった（2026-09-06 修正）。
+    （さらに旧々実装は UTC+9h だったため、15:00 UTC 以降の遅延実行で日付が翌日へ飛び、
+      未生成の当日を 0 件と誤検知していた。2026-07-06 実測）
+    """
+    return (now.astimezone(JST) - timedelta(hours=TARGET_DATE_LOOKBACK_HOURS)).strftime("%Y-%m-%d")
 
 
 def expected_slugs() -> list[str]:
@@ -146,13 +175,9 @@ def main() -> int:
 
     target = (os.environ.get("INPUT_DATE") or "").strip()
     if not target:
-        # 対象は「JST のその日」の日次レポート。cron は 14:30 UTC(=23:30 JST) で、
-        # その瞬間は UTC 日付 == JST 日付。GitHub の cron 遅延は後ろにしかずれず、
-        # UTC 日付は翌 00:00 UTC(=09:00 JST) まで変わらないので、UTC 日付をそのまま
-        # 使えば深夜跨ぎの遅延でも「まだ生成前の翌日」を誤って対象にしない。
-        # (旧実装は UTC+9h だったため、15:00 UTC 以降に遅延実行されると日付が翌日へ
-        #  飛び、未生成の当日を 0 件と誤検知して誤アラートを出していた。2026-07-06 実測)
-        target = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        # INPUT_DATE が明示されていればそちらを尊重する。空欄のときだけ、
+        # GHA の遅延に強い「JST 現在時刻 - 18時間」の日付を使う（根拠は resolve_target_date）。
+        target = resolve_target_date(datetime.now(timezone.utc))
     floor = int(os.environ.get("MIN_PUBLISHED") or "30")
     strict = (os.environ.get("STRICT_ALL_STORES") or "1").strip() != "0"
 
