@@ -4,15 +4,19 @@
 --------------------
 先週（月〜日, JST）と前週の GA4 / Search Console の数値を取得し、日本語の
 週次ダイジェスト（LINE 向け・約2000字上限）を組み立てる。生の指標 JSON は
-Supabase Storage の *private* バケット（`ml-models/analytics/weekly/<週初の月曜>.json`）へ
-アップロードし、ダイジェスト本文は %TEMP% にローカル保存する。LINE の宛先
+Supabase Storage（`ml-models/analytics/weekly/<週初の月曜>.json`）へアップロードし、
+ダイジェスト本文は %TEMP% にローカル保存する。LINE の宛先
 （`LINE_USER_ID`）が設定されていれば、既存の相席屋アラートと同じ Push 経路で
 オーナーへ送信する。
 
 公開リポジトリのため数値・鍵は一切コミットしない
 ------------------------------------------------
 - サービスアカウント鍵は `secrets/ga-service-account.json`（.gitignore 済み）。
-- 認証情報・数値は env / .env.local（.gitignore 済み）と private バケットのみ。
+- 認証情報・数値は env / .env.local（.gitignore 済み）と Supabase Storage のみ。
+  ⚠️ 2026-09-06 訂正: `ml-models` バケットは実測で**匿名 GET に 200 を返す＝公開設定**。
+  「private バケットだから安全」と書いていたのは事実誤りだった。URL を知る第三者は保存済みの
+  生 JSON を読めるため、`bucket_appears_public()` で公開を検知したときは検索語を伏字にして
+  アップロードする（fail-closed）。private 化の手順は docs/ANALYTICS_SETUP.md §9。
 - **セットアップ未完了でも安全に no-op する**: 認証情報が無ければ日本語の案内
   （docs/ANALYTICS_SETUP.md を参照）を出して exit 0。GHA の `schedule:` ではなく
   オーナー PC の Task Scheduler（MEGRIBI-analytics-weekly）で毎週月曜 09:00 に回す前提。
@@ -26,7 +30,8 @@ Supabase Storage の *private* バケット（`ml-models/analytics/weekly/<週�
     GA4_PROPERTY_ID            GA4 プロパティ ID（数字のみ）
     GA_SERVICE_ACCOUNT_JSON    サービスアカウント鍵のパス（既定: secrets/ga-service-account.json）
     GSC_SITE_URL              Search Console のプロパティ URL（既定: https://www.meguribi.jp/）
-    SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY   生 JSON の保存先（private バケット）
+    SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY   生 JSON の保存先（Storage バケット。
+                               2026-09-06 時点で公開設定＝匿名 GET 可。docs/ANALYTICS_SETUP.md §9 参照）
     LINE_CHANNEL_ACCESS_TOKEN / LINE_USER_ID   ダイジェストの LINE 送信（任意）
 
 依存: 標準ライブラリ + requests（既存依存）+ google-auth（新規・認証時のみ遅延 import）。
@@ -861,7 +866,11 @@ def compose_digest(metrics: dict) -> str:
         else:
             lines.append("※ 一部データの取得に失敗しました（詳細はログを参照）。")
     lines.append("※ Search Console の直近2日は集計途中の場合があります。")
-    lines.append("※ 本レポートは非公開（数値は private バケットに保存）。")
+    # 2026-09-06 訂正: 以前ここは「本レポートは非公開（private バケットに保存）」と断言していたが、
+    # `ml-models` バケットは実測で匿名 GET に 200 を返す＝公開設定であり事実誤りだった。オーナーが
+    # 週次で実際に読むのはこの digest だけなので、ここが嘘だと誰も気づけない。LINE 向けに短く、
+    # かつ「何をすればよいか」（private 化の手順の在り処）まで書く。
+    lines.append("※ 数値は Supabase Storage に保存。バケットは公開設定のため匿名で読めます（private 化: docs/ANALYTICS_SETUP.md §9）。")
 
     text = "\n".join(lines)
     if len(text) > DIGEST_MAX_CHARS:
@@ -953,7 +962,7 @@ def _redact_search_terms(metrics: dict) -> dict:
 
 
 def upload_metrics(metrics: dict, weeks: WeekWindows) -> str | None:
-    """生 JSON を private バケットへ。SUPABASE 未設定なら None（警告のみ、失敗にしない）。
+    """生 JSON を Storage バケットへ。SUPABASE 未設定なら None（警告のみ、失敗にしない）。
 
     2026-08-26 計測レビュー対応（第2ラウンド・修正4）:
     - バケットが匿名GETで200を返す（公開設定の疑い）場合、検索語を含む部分をredactしてから
@@ -1115,7 +1124,7 @@ def main(argv: list[str] | None = None) -> int:
             return 3
         return 0
 
-    # 生 JSON を private バケットへ、ダイジェストをローカルへ（保存先ファイル名は GA4 週基準、従来どおり）。
+    # 生 JSON を Storage バケットへ、ダイジェストをローカルへ（保存先ファイル名は GA4 週基準、従来どおり）。
     # upload_metrics は失敗時に metrics["warnings"] へ追記しうる（公開バケット疑いのredact等・修正4）
     # ため、必ず終了コード判定の前に呼ぶ。
     upload_metrics(metrics, ga4_weeks)

@@ -44,6 +44,13 @@ GSC は `dataState="all"`（速報込み）で取得する。確定日は totals
 計測定義を変更したため、比較対象の期間がこの日をまたぐ場合は screenPageViews の delta だけ
 「比較不可」と明示する（他の指標には適用しない。修正6）。
 
+2026-09-06 表示修正: 上記の設計（確定分同士で比べる）は正しいが、markdown 上で
+「要求期間の合計値」と「確定期間どうしの増減率」が注記だけを挟んで隣り合っており、
+実際に読み手が「28日の合計と、その28日の前期間比」と誤読する事故が起きた（横ばいのものを
+「増えた」と読んだ）。設計は変えず、**増減率の行そのものに実際の比較期間と日数を必ず併記**し
+（`comparison_span_label`）、`※` の注記も「上の合計と下の増減率は期間が異なる」と明示する
+文言に変えた。GA4/GSC 両方に同じ対応を入れている。
+
 終了コード
 ----------
     0 = 全ソース取得成功
@@ -188,6 +195,39 @@ def stable_subperiod(start: date, end: date, available_through: date) -> tuple[d
     return start, trimmed_end
 
 
+def format_period_span(period: dict | None) -> str:
+    """`{"start": "...", "end": "..."}` を「2026-08-09〜09-03 の26日」形式にする。作れなければ空文字。
+
+    2026-09-06 表示修正: 増減率がどの期間どうしの比較なのかを、%の隣に必ず書けるようにするための
+    共通整形。日数まで書くのは「28日の合計 vs 26日の比較」という取り違えが実際に起きたため
+    （日数が違うことが一目で分かれば、同じ誤読はもう起きない）。年をまたぐときだけ終端も
+    フル ISO で出す（"09-03" だけだと何年の 9/3 か判断できなくなるため）。
+    """
+    if not period or not period.get("start") or not period.get("end"):
+        return ""
+    try:
+        s = date.fromisoformat(period["start"])
+        e = date.fromisoformat(period["end"])
+    except (TypeError, ValueError):
+        return ""
+    days = (e - s).days + 1
+    end_text = e.isoformat() if e.year != s.year else f"{e.month:02d}-{e.day:02d}"
+    return f"{s.isoformat()}〜{end_text} の{days}日"
+
+
+def comparison_span_label(comparison: dict | None) -> str:
+    """増減率の行末に併記する「（現在期間 vs 前期間）」。期間が揃わなければ空文字。
+
+    2026-09-06 表示修正: 合計値と増減率が別期間の数字なのに隣り合っていたため誤読が発生した。
+    %だけを裸で出さず、必ずこのラベルを付けて「何と何を比べた数字か」を行内で完結させる。
+    """
+    cur = format_period_span((comparison or {}).get("period"))
+    prev = format_period_span((comparison or {}).get("previous_period"))
+    if not cur or not prev:
+        return ""
+    return f"（{cur} vs {prev}）"
+
+
 def compute_deltas(cur: dict | None, prev: dict | None) -> dict | None:
     """cur/prev（同じキーを持つ totals dict）から {key: {delta, pct}} を作る。片方が無ければ None。"""
     if cur is None or prev is None:
@@ -249,7 +289,20 @@ def stable_comparison(
             totals_body_fn(prev_start.isoformat(), prev_end.isoformat()),
             label=f"{label_prefix}.stable_prev",
         )
-        note = f"比較は確定分同士（〜{awr.format_md(stable_end.isoformat())}）"
+        # 2026-09-06 表示修正: 以前は「比較は確定分同士（〜M/D）」とだけ書いていたため、すぐ上の
+        # 「要求期間の合計」とすぐ下の「確定期間どうしの増減率」が別の期間の数字だと読み取れず、
+        # 実際に「要求した日数ぶんの合計と、その同じ日数どうしの前期間比」だと誤読する事故が起きた
+        # （増減率は速報分を切り落とした、より短い期間どうしの比較。横ばいの指標を「増えた」と読んだ）。
+        # 合計側・増減率側それぞれの期間と日数を注記本文に書き切って、取り違えを防ぐ。
+        # このリポジトリは public なので、事故時の実数値はここに書かない
+        # （docs/ANALYTICS_AGENT_RUNBOOK.md の禁止事項。数字は plan/_local/ 側に置く）。
+        note = (
+            f"上の合計は {format_period_span({'start': start.isoformat(), 'end': end.isoformat()})}の値、"
+            f"下の増減率は確定分同士"
+            f"（{format_period_span({'start': stable_start.isoformat(), 'end': stable_end.isoformat()})}"
+            f" vs {format_period_span({'start': prev_start.isoformat(), 'end': prev_end.isoformat()})}）"
+            f"の比較で、期間が異なります"
+        )
     cur_totals = parse_fn(cur_raw) if cur_raw is not None else None
     prev_totals = parse_fn(prev_raw) if prev_raw is not None else None
     return {
@@ -529,6 +582,9 @@ def compose_markdown(report: dict) -> str:
     if comparison.get("note"):
         lines.append(f"  ※ {comparison['note']}")
     if deltas:
+        # 2026-09-06 表示修正: %だけを裸で出すと、すぐ上の「要求期間の合計」と同じ期間の比較だと
+        # 誤読される（実際に起きた）。増減率の行ごとに実際の比較期間と日数を併記する。
+        span = comparison_span_label(comparison)
         for key, label in (
             ("activeUsers", "アクティブユーザー"),
             ("sessions", "セッション"),
@@ -542,7 +598,7 @@ def compose_markdown(report: dict) -> str:
             d = deltas.get(key)
             if d and d.get("pct") is not None:
                 sign = "+" if d["delta"] >= 0 else ""
-                lines.append(f"  - 前期間比 {label}: {sign}{d['pct']:.1f}%")
+                lines.append(f"  - 前期間比 {label}: {sign}{d['pct']:.1f}%{span}")
     if ga4.get("landing_pages"):
         lines.append("")
         lines.append("### ランディングページ TOP10（API取得上位10件。全件ではありません）")
@@ -590,11 +646,13 @@ def compose_markdown(report: dict) -> str:
     if gcomparison.get("note"):
         lines.append(f"  ※ {gcomparison['note']}")
     if gdeltas:
+        # 2026-09-06 表示修正: GA4 側と同じ理由で比較期間を併記する（GA4だけ直してGSCを放置しない）。
+        gspan = comparison_span_label(gcomparison)
         for key, label in (("clicks", "クリック"), ("impressions", "表示回数")):
             d = gdeltas.get(key)
             if d and d.get("pct") is not None:
                 sign = "+" if d["delta"] >= 0 else ""
-                lines.append(f"  - 前期間比 {label}: {sign}{d['pct']:.1f}%")
+                lines.append(f"  - 前期間比 {label}: {sign}{d['pct']:.1f}%{gspan}")
     # 「全クリック」は正確な合計値（totals クエリ由来）を使う。qualified_clicks.total は
     # ページ内訳（rowLimit 200 でキャップ、API が返した上位N行の範囲。全件ではない）の合計で、
     # 長い尾を持つサイトだと totals よりわずかに少なくなりうるため、表示上の分母には使わない

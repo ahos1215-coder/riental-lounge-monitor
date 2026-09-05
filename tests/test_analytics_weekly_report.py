@@ -791,3 +791,33 @@ def test_main_dry_run_exit_code_zero_on_full_success(monkeypatch, tmp_path):
 
     rc = awr.main(["--dry-run"])
     assert rc == 0
+
+
+# --------------------------------------------------------------------------
+# 2026-09-06: digest 本文が保存先を「非公開」と偽らないこと（番犬）
+# --------------------------------------------------------------------------
+
+
+def test_compose_digest_does_not_claim_report_is_private():
+    """digest はオーナーが週次で実際に読む唯一の経路。ここが「本レポートは非公開
+    （数値は private バケットに保存）」と断言していると、実態（`ml-models` バケットは
+    匿名 GET に 200 を返す＝公開設定）と食い違ったまま誰も気づけない。docs/ 側だけ
+    訂正して本文が取り残される再発を防ぐため、文言を固定する。
+    """
+    for metrics in (_fixture_metrics(), _fixture_metrics_without_gsc()):
+        digest = awr.compose_digest(metrics)
+        assert "非公開" not in digest
+        assert "private バケット" not in digest
+        # 「読める可能性がある」ことと、対処手順の在り処（= オーナーが取れる行動）を必ず示す。
+        assert "docs/ANALYTICS_SETUP.md" in digest
+        # LINE 送信の上限内に収まったまま注記が残っている（末尾切り捨てで消えていない）。
+        assert len(digest) <= awr.DIGEST_MAX_CHARS
+
+
+def _fixture_metrics_without_gsc() -> dict:
+    """GSC が空でも注記行は同じ（注記は無条件に付く）ことを番犬でも押さえる。"""
+    m = _fixture_metrics()
+    m["gsc"]["totals"]["cur"] = {"clicks": 0.0, "impressions": 0.0, "ctr": 0.0, "position": 0.0}
+    m["gsc"]["totals"]["prev"] = {"clicks": 0.0, "impressions": 0.0, "ctr": 0.0, "position": 0.0}
+    m["gsc"]["top_queries"] = {"cur": [], "prev": []}
+    return m

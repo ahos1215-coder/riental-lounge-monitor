@@ -512,6 +512,111 @@ def test_fetch_report_pv_delta_not_blocked_when_both_periods_before_epoch():
     assert report["ga4"]["pv_delta_blocked_by_epoch_change"] is False
 
 
+# --------------------------------------------------------------------------
+# 2026-09-06 表示修正: 増減率には必ず「実際に比較した期間」を併記する
+#
+# 背景: 要求期間（例:28日）の合計値と、確定分同士（例:26日）の増減率が注記だけを挟んで
+# 隣り合っていたため、実際に読み手が「28日の合計と、その28日の前期間比」と誤読した。
+# 設計（確定分同士で比べる）は正しいので、表示だけを直している。
+# --------------------------------------------------------------------------
+
+
+def test_format_period_span_includes_bounds_and_day_count():
+    assert ar.format_period_span({"start": "2026-08-09", "end": "2026-09-03"}) == "2026-08-09〜09-03 の26日"
+    # 1日だけの期間も「の1日」と出る（0日にならない）。
+    assert ar.format_period_span({"start": "2026-08-09", "end": "2026-08-09"}) == "2026-08-09〜08-09 の1日"
+
+
+def test_format_period_span_spells_out_year_when_period_crosses_new_year():
+    # 年をまたぐと "01-05" だけでは何年か分からないので終端もフル ISO にする。
+    assert ar.format_period_span({"start": "2026-12-20", "end": "2027-01-05"}) == "2026-12-20〜2027-01-05 の17日"
+
+
+def test_format_period_span_empty_for_missing_or_broken_period():
+    assert ar.format_period_span(None) == ""
+    assert ar.format_period_span({}) == ""
+    assert ar.format_period_span({"start": "2026-08-09", "end": None}) == ""
+    assert ar.format_period_span({"start": "not-a-date", "end": "2026-08-09"}) == ""
+
+
+def test_comparison_span_label_shape_and_empty_fallback():
+    label = ar.comparison_span_label(
+        {
+            "period": {"start": "2026-08-09", "end": "2026-09-03"},
+            "previous_period": {"start": "2026-07-14", "end": "2026-08-08"},
+        }
+    )
+    assert label == "（2026-08-09〜09-03 の26日 vs 2026-07-14〜08-08 の26日）"
+    # 比較保留（確定分なし）のときは何も付けない。
+    assert ar.comparison_span_label({"period": None, "previous_period": None}) == ""
+    assert ar.comparison_span_label(None) == ""
+
+
+def _pct_lines(markdown_chunk: str) -> list[str]:
+    return [ln for ln in markdown_chunk.splitlines() if "前期間比" in ln and "%" in ln]
+
+
+def test_compose_markdown_pct_lines_always_carry_their_comparison_period():
+    """番犬: 増減率(%)が出る行には、必ずその比較期間の日付が同じ行に含まれる（GA4もGSCも）。"""
+    period = (date(2026, 7, 30), date(2026, 8, 26))  # 終端が as_of なので確定分にトリムされる
+    report = ar.fetch_report(period, date(2026, 8, 26), True, _fake_ga4, _fake_gsc)
+    md = ar.compose_markdown(report)
+    ga4_md, _, gsc_md = md.partition("## Search Console")
+
+    for chunk, comparison in ((ga4_md, report["ga4"]["comparison"]), (gsc_md, report["gsc"]["comparison"])):
+        span = ar.comparison_span_label(comparison)
+        assert span  # 前提: 比較期間が確定している
+        lines = _pct_lines(chunk)
+        assert lines  # 前提: %の行が実際に出ている
+        for line in lines:
+            assert span in line, line
+            # 比較の両端（現在期間・前期間の開始日）が行内に必ず載っていること。
+            assert comparison["period"]["start"] in line, line
+            assert comparison["previous_period"]["start"] in line, line
+
+    # GA4(確定〜as_of-2日)と GSC(確定〜as_of-3日)は境界が違うので、同じ文字列を使い回していない。
+    assert ar.comparison_span_label(report["ga4"]["comparison"]) != ar.comparison_span_label(
+        report["gsc"]["comparison"]
+    )
+
+
+def test_compose_markdown_pct_lines_carry_period_even_when_nothing_was_trimmed():
+    # 期間全体が確定済み（トリムなし・note は None）でも、%の行だけを切り取って読まれるため併記する。
+    period = (date(2026, 7, 1), date(2026, 7, 7))
+    report = ar.fetch_report(period, date(2026, 8, 26), True, _fake_ga4, _fake_gsc)
+    assert report["ga4"]["comparison"]["note"] is None
+    md = ar.compose_markdown(report)
+    ga4_md, _, gsc_md = md.partition("## Search Console")
+    for chunk, comparison in ((ga4_md, report["ga4"]["comparison"]), (gsc_md, report["gsc"]["comparison"])):
+        lines = _pct_lines(chunk)
+        assert lines
+        for line in lines:
+            assert ar.comparison_span_label(comparison) in line, line
+
+
+def test_stable_comparison_note_states_that_totals_and_deltas_use_different_periods():
+    period = (date(2026, 7, 30), date(2026, 8, 26))
+    report = ar.fetch_report(period, date(2026, 8, 26), True, _fake_ga4, _fake_gsc)
+    note = report["ga4"]["comparison"]["note"]
+    assert "上の合計は" in note
+    assert "下の増減率は確定分同士" in note
+    assert "期間が異なります" in note
+    # 合計側は要求期間（28日）、増減率側は確定期間（26日）と、両方の日数が書かれている。
+    assert "2026-07-30〜08-26 の28日" in note
+    assert "2026-07-30〜08-24 の26日" in note
+    assert note in ar.compose_markdown(report)
+
+
+def test_json_comparison_keeps_period_and_previous_period():
+    # markdown の併記はこの2キーから作る。JSON 側の構造は変えていないことを固定する。
+    period = (date(2026, 7, 30), date(2026, 8, 26))
+    report = ar.fetch_report(period, date(2026, 8, 26), True, _fake_ga4, _fake_gsc)
+    for source in ("ga4", "gsc"):
+        comparison = report[source]["comparison"]
+        assert set(comparison["period"]) == {"start", "end"}
+        assert set(comparison["previous_period"]) == {"start", "end"}
+
+
 def test_main_bad_as_of_format_exits_one(monkeypatch, tmp_path):
     key = tmp_path / "ga.json"
     key.write_text("{}", encoding="utf-8")
