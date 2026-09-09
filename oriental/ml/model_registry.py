@@ -61,7 +61,7 @@ class ForecastModelRegistry:
         download_retry: int,
         logger,
         cache_max_age_sec: int = 7 * 86400,
-        refresh_batch: int = 10,
+        refresh_batch: int = 14,  # 既定値の根拠は from_app のコメント（42店 / 14 = 3窓）
     ) -> None:
         self.supabase_url = supabase_url.rstrip("/")
         self.service_role_key = service_role_key
@@ -86,6 +86,11 @@ class ForecastModelRegistry:
         self._bundles: dict[str, LoadedModelBundle] = {}
         self._next_refresh_unix = 0.0
         self._metadata: dict[str, Any] | None = None
+        # `_metadata` の内容を最後に Storage から確認できた時刻。この2つは必ず
+        # 対で更新する (_download_metadata_unlocked)。単店ロード経路 (_load_single_unlocked) は
+        # この時刻が refresh_sec 以内なら metadata.json を落とし直さず使い回す
+        # (2026-09-09 egress 削減。詳細は _reusable_metadata の docstring)。
+        self._metadata_fetched_at_unix = 0.0
         self._last_error: str | None = None
         self._last_error_at_unix: float | None = None
         self._last_refresh_ok_unix: float | None = None
@@ -102,7 +107,14 @@ class ForecastModelRegistry:
             os.getenv("FORECAST_MODEL_CACHE_MAX_AGE_SEC"),
             fallback=7 * 86400,
         )
-        refresh_batch = _safe_int(os.getenv("MODEL_REFRESH_BATCH"), fallback=10)
+        # 既定 14（旧 10）。2026-09-09 に FORECAST_MODEL_REFRESH_SEC を 900→10800秒 に
+        # 延ばした（egress 削減。config.py の該当コメント参照）ため、1窓あたりの伝播量を
+        # 上げないと全店伝播が遅れすぎる:
+        #   ceil(42店 / 10) = 5窓 × 3時間 = 15時間 → 05:30 学習が 20:30 着＝19時のピークに食い込む
+        #   ceil(42店 / 14) = 3窓 × 3時間 =  9時間 → 遅くとも 14:30 着＝ピーク前に必ず終わる
+        # 1窓の再パースが 10→14 店に増えるぶん CPU スパイクは 1.4倍だが、窓自体が
+        # 96回/日→8回/日 に減るので 0.5vCPU への総負荷はむしろ軽くなる。
+        refresh_batch = _safe_int(os.getenv("MODEL_REFRESH_BATCH"), fallback=14)
         return cls(
             supabase_url=cfg.supabase_url,
             service_role_key=cfg.supabase_service_role_key,
@@ -242,10 +254,9 @@ class ForecastModelRegistry:
         """
         self._validate_basic_config()
 
-        metadata_path = self.cache_dir / "metadata.json"
-        self._download_to_cache("metadata.json", metadata_path)
-        metadata = self._load_metadata(metadata_path)
-        self._validate_metadata(metadata)
+        # sweep は「このウィンドウの最新 metadata」を確定させる役目なので、
+        # 常に Storage から取り直す（使い回しは単店経路だけ）。
+        metadata = self._download_metadata_unlocked()
 
         with self._lock:
             existing_snapshot = dict(self._bundles)
@@ -308,20 +319,88 @@ class ForecastModelRegistry:
 
         return metadata, updates, trigger_error
 
+    def _download_metadata_unlocked(self) -> dict[str, Any]:
+        """metadata.json を Storage から取得・検証し、`_metadata` として公開する。
+
+        ロックは公開の瞬間だけ握る（ダウンロード中は非保持＝lock-free download を維持）。
+        `_metadata` と `_metadata_fetched_at_unix` は必ずここで**対**にして更新する。
+        片方だけ進むと「古い内容なのに新しい取得時刻」になり、単店経路の使い回しが
+        いつまでも古い metadata を返し続ける穴になる。
+
+        disk cache fallback で読めた場合も「取得成功」として扱う（従来から sweep は
+        その内容をそのまま metadata として使っているので挙動は同じ）。
+        """
+        metadata_path = self.cache_dir / "metadata.json"
+        self._download_to_cache("metadata.json", metadata_path)
+        metadata = self._load_metadata(metadata_path)
+        self._validate_metadata(metadata)
+        with self._lock:
+            # 内容が前回と同一なら既存オブジェクトを共有する（get_bundle 側の
+            # メタデータ重複排除と同じ方針。42店ぶんのコピー常駐を避ける）。
+            if self._metadata is not None and metadata == self._metadata:
+                metadata = self._metadata
+            else:
+                self._metadata = metadata
+            self._metadata_fetched_at_unix = time.time()
+        return metadata
+
+    def _reusable_metadata(self) -> dict[str, Any] | None:
+        """同じ refresh ウィンドウ内で既に取得済みの metadata.json があれば返す（無ければ None）。
+
+        2026-09-09 egress 削減。起動時 preload は 42 店を順に get_bundle するが、
+        1店目だけが sweep 経路に入って `_next_refresh_unix` を先へ進めるため、
+        残り41店はこの単店経路に落ちる。旧実装は店舗ごとに無条件で metadata.json を
+        落としており、実測 320,848 B を42回（うち41回＝12.5 MiB が完全な無駄。
+        42回ぶんの合計は 12.85 MiB）取っていた。これは **Flask 起動1回あたりの
+        最大の無駄**であって、2026-09-05〜09 の egress 枯渇事故（全リクエストが 402、
+        サイトが3日半「男性0/女性0」）の最大要因と決めつけられる材料は無い:
+        この修正が触っていない sweep 経路は、同じ 320,848 B を refresh ウィンドウ
+        （`FORECAST_MODEL_REFRESH_SEC`）ごとに取り直し続けるため、トラフィックが
+        あれば旧既定の 900 秒で最大 96回/日 ≒ 29.4 MiB/日 になり、起動1回ぶんの
+        12.5 MiB より大きい可能性が高い（そちらは既定を 10800 秒＝8回/日 ≒ 2.4 MiB/日
+        へ延ばして別途潰した。`oriental/config.py` の該当コメント参照）。
+        再起動回数と本番トラフィックの実測が無いため、どちらが「最大」かは断定しない。
+
+        使い回しの有効期限は `refresh_sec`（＝レジストリ自身が「この間は最新とみなす」と
+        宣言している窓）と同じにする。窓を跨げば従来どおり sweep が取り直すので、
+        モデル更新の伝播タイミングは変わらない。
+        """
+        with self._lock:
+            metadata = self._metadata
+            fresh = (time.time() - self._metadata_fetched_at_unix) < self.refresh_sec
+        if metadata is None or not fresh:
+            return None
+        # 使い回すときも schema_version / feature_columns の検証は毎回通す
+        # （検証の挙動を変えないため。純粋な dict 比較でネットワーク I/O は無い）。
+        self._validate_metadata(metadata)
+        return metadata
+
     def _load_single_unlocked(self, store_id: str) -> tuple[dict[str, Any], LoadedModelBundle]:
         """まだ一度もロードされていない店舗向けの単独ロード（refresh ウィンドウ未到来時）。
 
         sweep とは異なり他店舗のチェックは行わず、`refresh_batch` の対象にもならない
         （新規店舗の初回ロードを他店舗の再構築予算で遅らせるべきではないため）。
+
+        metadata.json は同じウィンドウ内に取得済みならそれを使い回す。ただし手持ちの
+        metadata でその店舗のモデル名が解決できないときだけ取り直す: 「metadata が古くて
+        新店舗がまだ載っていない」ケースを最長1ウィンドウ足止めしないため（＝新店舗の
+        初回ロードに関しては旧挙動をそのまま維持する）。
         """
         self._validate_basic_config()
 
-        metadata_path = self.cache_dir / "metadata.json"
-        self._download_to_cache("metadata.json", metadata_path)
-        metadata = self._load_metadata(metadata_path)
-        self._validate_metadata(metadata)
+        metadata = self._reusable_metadata()
+        names: tuple[str, str, str] | None = None
+        if metadata is not None:
+            try:
+                names = self._resolve_model_names(metadata, store_id)
+            except Exception:  # noqa: BLE001 — 手持ちの metadata で解決できない = 取り直して再挑戦
+                metadata = None
 
-        men_name, women_name, source = self._resolve_model_names(metadata, store_id)
+        if metadata is None or names is None:
+            metadata = self._download_metadata_unlocked()
+            names = self._resolve_model_names(metadata, store_id)
+
+        men_name, women_name, source = names
         bundle = self._load_store_bundle(store_id, metadata, men_name, women_name, source)
         return metadata, bundle
 
@@ -367,8 +446,17 @@ class ForecastModelRegistry:
         あればそれを使い続ける（一過性の Supabase Storage 障害でユーザーの
         予測グラフが消えるのを防ぐ）。次の refresh は早めに再試行する。
         """
-        self._last_error = str(exc)
+        # 2026-09-09 情報漏れの修正: 以前は str(exc) をそのまま保持していたが、この値は
+        # current_status() 経由で public・無認証の /healthz と /api/meta に丸ごと載る。
+        # requests 系の例外文字列は Storage の完全なURL
+        # （https://<project-ref>.supabase.co/storage/v1/object/ml-models/forecast/latest/...）を
+        # 含むため、誰でも叩ける口に「Storage の在り処」を公開していた。2026-09-05 の停止が
+        # cached egress の枯渇だったことを踏まえると、枯渇させられる相手先を晒すのは筋が悪い。
+        # 診断に必要な「何が起きたか」は型名で足りる（HTTPError / Timeout / ValueError 等）。
+        # 完全な例外文字列は Render のログにだけ残す（health.py の upstream_message と同じ方針）。
+        self._last_error = type(exc).__name__
         self._last_error_at_unix = time.time()
+        self.logger.warning("model_registry.load_failed store=%s error=%s", store_key, str(exc)[:300])
         with self._lock:
             stale = self._bundles.get(store_key)
         if stale is not None:

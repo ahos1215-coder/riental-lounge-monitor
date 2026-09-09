@@ -12,7 +12,9 @@ refresh ウィンドウが来た時にリクエストをトリガーした「1�
   1. refresh ウィンドウ到来時、metadata は既に手元にあるので既知の全店舗に
      対して名前チェック(安価)をループし、実体が変わった店舗だけ再ダウン
      ロード/再パースする。0.5vCPU での CPU スパイクを避けるため、実際の
-     再パースは MODEL_REFRESH_BATCH (既定10) 件/ウィンドウに制限する。
+     再パースは MODEL_REFRESH_BATCH (既定14。2026-09-09 に refresh ウィンドウを
+     15分→3時間へ延ばしたのに合わせて 10 から引き上げた。既定値の釣り合いは
+     tests/test_model_refresh_defaults.py が固定する) 件/ウィンドウに制限する。
   2. ダウンロード/パースはロックを保持せずに行う (lock-free download)。
   3. current_status() は trained_at_min/trained_at_max + ロード済み店舗数を
      追加で返す (既存キーは維持)。

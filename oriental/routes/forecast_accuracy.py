@@ -10,13 +10,15 @@ Blueprint `bp`（url_prefix="/api"）にそのまま生えるため、URL / エ�
 from __future__ import annotations
 
 import re
+import threading
 
-from flask import current_app, jsonify, request
+from flask import current_app, has_app_context, jsonify, request
 
 from ..clients.supabase import storage_get_bytes
 from ..config import AppConfig
-from ..ml._num import is_finite_number
+from ..ml._num import env_float, is_finite_number
 from ..utils.stores import SLUG_TO_ID
+from ._cache import SingleFlightTTLCache
 from .common import get_config as _config
 from .forecast import bp
 
@@ -24,14 +26,135 @@ from .forecast import bp
 _NIGHT_DATE_RE = re.compile(r"^\d{8}$")
 
 
+# --------------------------------------------------------------------------- #
+# プロセス内 TTL キャッシュ（Supabase Storage の egress 削減）
+#
+# 2026-09-09: Supabase 無料枠の egress を使い切って全リクエストが HTTP 402 になり、
+# サイトが3日半「男性0/女性0」を表示し続けた事故の再発防止。この答え合わせ系は
+# 転送量の3番目に大きい消費者だった:
+#   - /api/forecast_snapshot は accuracy/snapshots/<date>.json（全42店ぶん）を
+#     毎回まるごと落として1店ぶんだけ返す。scripts/warm_cdn_local.py が毎晩
+#     42店ぶん叩くので、同じファイルを42回落としていた。
+#   - /api/forecast_accuracy も summary.json + scores/<date>.json を毎回落とす
+#     （このエンドポイントは Cache-Control を付けていないので CDN で止まらない）。
+# 削減量は **推定 13〜17 MiB/日**（1ファイルあたり ~350-400KB × 42 回の積算。
+# Supabase が 402 のため本番のファイルサイズは*未実測*）。キャッシュにより
+# 同じ夜のスナップショットは TTL 内で1回しか落ちない。
+#
+# 仕組みは routes/_cache.py の SingleFlightTTLCache をそのまま使う（forecast.py /
+# data_range.py と同じ道具。CLAUDE.md §7「同じ処理を手書きしない」）。TTL キャッシュを
+# ここに手書きすると single-flight が無いため、同じオブジェクトへ同時にミスした
+# スレッドの数だけ（gunicorn --threads 8 なら最大8本）Storage 取得が並走し、
+# **まさに減らしたかった転送が漏れる**（2026-09-09 レビュー指摘）。
+# キャッシュはプロセス内のみ（ディスクにも Supabase にも書かない）。
+# 障害時のキルスイッチ: FORECAST_ACCURACY_CACHE_TTL=0 と FORECAST_ACCURACY_PAST_CACHE_TTL=0
+# を入れれば毎回取りに行く＝修正前と同じ挙動に戻る。
+#
+# 保持先をモジュールグローバルではなく app.config にしているのは、テストが
+# create_app() ごとに別の Storage モックを差すため（グローバルだとキャッシュが
+# テストを跨いで漏れ、別テストのデータを拾ってしまう）。
+# --------------------------------------------------------------------------- #
+
+# TTL が2種類（終わった夜＝もう書き換わらない / それ以外）必要なので、
+# SingleFlightTTLCache のインスタンスを2つ持つ（TTL はインスタンス単位のため）。
+_CACHE_CONFIG_KEY = "_FORECAST_ACCURACY_STORAGE_CACHE"  # 短TTL側
+_PAST_CACHE_CONFIG_KEY = "_FORECAST_ACCURACY_PAST_STORAGE_CACHE"  # 長TTL側
+_CACHE_LOCK = threading.Lock()  # インスタンス生成の競合防止のみ（本体は自前でロックする）
+
+_DEFAULT_CACHE_TTL = 300.0
+_DEFAULT_PAST_CACHE_TTL = 3600.0
+# 合流待ちを諦めるまでの秒数。Storage 取得の timeout が 10 秒なので、leader は
+# 通常それ以内に必ず決着する。余裕を見て 15 秒で fail-open（自分でも取りに行く）。
+_CACHE_WAIT_TIMEOUT = 15.0
+
+# 同時に保持するオブジェクト数の上限（**2インスタンスの合計**）。date は利用者が自由に
+# 指定できる（8桁なら何でも通る）ので、上限なしだとクローラ1本でメモリを食い潰せる。
+# 1本 ~350KB のスナップショットが載るため、合計 16 本 ≒ 5.6MB を上限とする。
+# 実際に必要な日付は warm_cdn_local.py の「今夜」「昨夜」＋利用者が見る数日ぶん。
+_CACHE_MAX_ENTRIES = 16
+_PAST_CACHE_MAX_ENTRIES = 10  # 終わった夜の実在ファイル（重い・長命）
+_SHORT_CACHE_MAX_ENTRIES = 6  # summary.json / 今夜ぶん / 未作成(404)の記憶
+
+# accuracy/{snapshots,scores}/<YYYYMMDD>.json = 特定の夜に紐づくファイル。
+_DATED_OBJECT_RE = re.compile(r"^accuracy/(?:snapshots|scores)/(\d{8})\.json$")
+
+
+def _current_night_date() -> str:
+    """いまが属する「夜」の JST 日付 (YYYYMMDD)。
+
+    -6h シフト規約の単一ソースである oriental/ml/night_type.py を使う（ここで
+    独自に日付境界を書くと 2026-07-11 に潰した1時間ズレの罠が再発する）。
+    """
+    from datetime import datetime
+
+    from ..ml.night_type import JST, night_date_of
+
+    return night_date_of(datetime.now(JST)).strftime("%Y%m%d")
+
+
+def _cache_instance(
+    config_key: str, ttl: float, max_entries: int
+) -> SingleFlightTTLCache | None:
+    """app.config 上のキャッシュ本体（無ければ作る）。無効なときは None。
+
+    TTL<=0 はキルスイッチ（毎回 Storage を取りに行く＝修正前の挙動）。env は
+    呼び出しのたびに読むので、既にインスタンスが出来た後でも 0 を入れれば止まる。
+    """
+    if ttl <= 0 or not has_app_context():
+        return None
+    config = current_app.config
+    with _CACHE_LOCK:
+        cache = config.get(config_key)
+        if cache is None:
+            cache = SingleFlightTTLCache(
+                ttl=ttl, max_entries=max_entries, wait_timeout=_CACHE_WAIT_TIMEOUT
+            )
+            config[config_key] = cache
+        return cache
+
+
+def _short_cache() -> SingleFlightTTLCache | None:
+    """短TTL側。summary.json（毎晩上書き）・今夜ぶん・未作成(404)の記憶を置く。"""
+    return _cache_instance(
+        _CACHE_CONFIG_KEY,
+        env_float("FORECAST_ACCURACY_CACHE_TTL", _DEFAULT_CACHE_TTL),
+        _SHORT_CACHE_MAX_ENTRIES,
+    )
+
+
+def _past_cache(path: str) -> SingleFlightTTLCache | None:
+    """長TTL側。「終わった夜」に紐づくファイルだけが対象（対象外の path では None）。
+
+    日付が「今夜」より前のスナップショット/スコアはもう書き換わらないので長めに持てる。
+    """
+    matched = _DATED_OBJECT_RE.match(path)
+    if not matched or matched.group(1) >= _current_night_date():
+        return None
+    return _cache_instance(
+        _PAST_CACHE_CONFIG_KEY,
+        env_float("FORECAST_ACCURACY_PAST_CACHE_TTL", _DEFAULT_PAST_CACHE_TTL),
+        _PAST_CACHE_MAX_ENTRIES,
+    )
+
+
 def _storage_get(cfg: AppConfig, path: str) -> bytes | None:
-    """Supabase Storage から生バイト列を取得する共通ヘルパー。
+    """Supabase Storage から生バイト列を取得する共通ヘルパー（プロセス内 TTL キャッシュ付き）。
 
     `_fetch_live_accuracy`（/api/forecast_accuracy）と `_fetch_forecast_snapshot`
     （/api/forecast_snapshot）の両方から使う。オブジェクトが存在しない場合
     （404、または Supabase が返す 400 の "not found" 系エラー）は None を返し、
     それ以外の HTTP エラーは呼び出し側に伝播させる（呼び出し側で握りつぶす）。
     Storage 未設定（URL / キーが無い）のときも None（＝実測精度なし）。
+
+    キャッシュするのは**生バイト列**であって解析済みオブジェクトではない。呼び出し側は
+    毎回 json.loads で自分用の dict を作るため、`_augment_relative_fields` の in-place
+    更新がキャッシュを汚す事故が起きない。エラー（例外）はキャッシュしないので、
+    402/5xx から復帰したら次のリクエストですぐ取りに行く（SingleFlightTTLCache は
+    例外を投げた計算結果を保存せず、合流していたスレッドにも同じ例外を伝える）。
+
+    キャッシュ値を1要素タプル `(bytes|None,)` で包むのは、`SingleFlightTTLCache.get()`
+    が「エントリ無し」を None で表すため。素の None を入れると「未作成と分かっている」と
+    「まだ引いていない」を区別できない。
     """
     supabase_url = cfg.supabase_url or ""
     key = cfg.supabase_service_role_key or ""
@@ -39,7 +162,35 @@ def _storage_get(cfg: AppConfig, path: str) -> bytes | None:
     if not supabase_url or not key:
         return None
 
-    return storage_get_bytes(supabase_url, key, bucket, path, timeout=10)
+    past = _past_cache(path)
+    short = _short_cache()
+    for cache in (past, short):
+        if cache is not None:
+            hit = cache.get(path)
+            if hit is not None:
+                return hit[0]
+
+    # single-flight の担当は長TTL側があればそちら（無ければ短TTL側）。
+    leader = past or short
+
+    def _fetch() -> tuple[tuple[bytes | None], bool]:
+        value = storage_get_bytes(supabase_url, key, bucket, path, timeout=10)
+        # 取得できなかったもの（404/未作成）は長TTL側に載せない。あとから書かれるため
+        # （例: 昨夜のスコアは翌 06:10 の score_forecasts.py で初めて書かれる）。
+        cacheable = value is not None or leader is short
+        return (value,), cacheable
+
+    if leader is None:  # キルスイッチ / app context 外
+        (fetched,), _cacheable = _fetch()
+        return fetched
+
+    cached, _status = leader.get_or_compute(path, _fetch)
+    value = cached[0]
+    if value is None and leader is past and short is not None:
+        # 「終わった夜だが、まだ書かれていない」は短TTL側に置き直す。連打で毎回
+        # Storage を叩かせない一方、あとから書かれても最大 TTL 秒で拾える。
+        short.set(path, cached)
+    return value
 
 
 # 数値判定は oriental/ml/_num.py が単一の定義（bool も NaN/inf も除外）。
@@ -321,14 +472,20 @@ def api_forecast_snapshot():
             "api_forecast_snapshot.missing store=%s date=%s", store, date
         )
         resp = jsonify({"ok": False, "date": date, "data": []})
+        # ok:false は「まだ書かれていない夜」と「Storage 取得に失敗した」（2026-09 の
+        # 402 事故がまさにこれ）を区別できない —— `_fetch_forecast_snapshot` が例外を
+        # 握りつぶして同じ形にするため。ここに長い s-maxage を付けると、障害中に
+        # 一度叩かれただけで CDN が「記録なし」を24時間（SWR で7日）固定してしまい、
+        # プロセス内キャッシュ側で守っている「エラーはキャッシュしない＝復旧したら
+        # 即反映」が1段上で台無しになる。よって ok:false は短命にする。
+        resp.headers["Cache-Control"] = "public, s-maxage=60"
     else:
         current_app.logger.info(
             "api_forecast_snapshot.success store=%s date=%s points=%d",
             store, date, len(data),
         )
         resp = jsonify({"ok": True, "date": date, "data": data})
+        # 記録が実在する夜のスナップショットは不変（もう書き換わらない）→ 長め CDN キャッシュ。
+        resp.headers["Cache-Control"] = "public, s-maxage=86400, stale-while-revalidate=604800"
 
-    # 過去の夜のスナップショットは不変（もう書き換わらない）→ 長め CDN キャッシュ。
-    # ok:false（未記録）も含め、同じ date は将来も同じ結果になるため一緒に長くキャッシュしてよい。
-    resp.headers["Cache-Control"] = "public, s-maxage=86400, stale-while-revalidate=604800"
     return resp

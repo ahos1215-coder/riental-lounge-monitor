@@ -122,6 +122,29 @@ def test_success_sets_long_immutable_cache_header(app_client, monkeypatch):
     assert "stale-while-revalidate=604800" in cache_control
 
 
+def test_ok_false_is_not_burned_into_the_cdn(app_client, monkeypatch):
+    """ok:false（記録なし）は CDN に長く焼き付けない。
+
+    2026-09-05〜09、Supabase の egress 枯渇で全リクエストが 402 になった。
+    `_fetch_forecast_snapshot` は「まだ書かれていない夜」も「取得失敗」も同じ
+    ok:false に潰すため、障害中に一度叩かれただけで s-maxage=86400（SWR で7日）が
+    付き、CDN が「記録なし」を24時間固定してしまう。プロセス内キャッシュ側で
+    「エラーはキャッシュしない＝復旧したら即反映」を守っている
+    （tests/test_forecast_accuracy_storage_cache.py）意味が無くなるので、
+    ok:false は短命（60秒）に留める。
+    """
+    _mock_urlopen_returns(monkeypatch, payload=None, http_error_code=404)
+    resp = app_client.get("/api/forecast_snapshot?store=nagasaki&date=20260101")
+    assert resp.get_json()["ok"] is False
+
+    cache_control = resp.headers.get("Cache-Control", "")
+    assert "s-maxage=60" in cache_control
+    assert "86400" not in cache_control
+    assert "stale-while-revalidate" not in cache_control, (
+        "SWR を付けると 60秒を過ぎても古い『記録なし』を配り続ける"
+    )
+
+
 def test_malformed_json_falls_back_to_ok_false(app_client, monkeypatch):
     def _fake_urlopen(req, timeout=10):
         return _FakeHTTPResponse(b"not valid json{{{")

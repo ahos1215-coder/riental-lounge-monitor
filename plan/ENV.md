@@ -1,5 +1,7 @@
 # ENV
-Last updated: 2026-07-11（Batch G: 2026-03-28 以降にコードへ追加された環境変数を棚卸しして追記。
+Last updated: 2026-09-09（`MODEL_RETENTION_GENERATIONS` の背景に書いてあった「2026-09-05 利用制限予告」が
+**実際に執行された**ことを追記し、予告を見つけたときにやるべき3点を明記した）
+2026-07-11（Batch G: 2026-03-28 以降にコードへ追加された環境変数を棚卸しして追記。
 既存セクションの記述は当時のまま。差分は各セクションの新規箇条書きを参照）
 Target commit: (see git)
 
@@ -130,13 +132,33 @@ Forecast:
 - `FORECAST_MODEL_BUCKET`（Supabase Storage のモデル配置バケット名。例: `ml-models`）
 - `FORECAST_MODEL_PREFIX`（バケット内のモデル配置 prefix。例: `forecast/latest`）
 - `FORECAST_MODEL_SCHEMA_VERSION`（`metadata.json` の `schema_version` と一致必須。不一致時は 503）
-- `FORECAST_MODEL_REFRESH_SEC`（モデル再取得の TTL 秒。既定 900）
-- `MODEL_REFRESH_BATCH`（新規, `oriental/ml/model_registry.py`。int, 既定 `10`（下限1）。TTL到来時に
+- `FORECAST_MODEL_REFRESH_SEC`（モデル再取得の TTL 秒。**既定 10800＝3時間**。
+  2026-09-09 に 900（15分）から変更。モデルは日次学習（05:30 JST）で1日1回しか変わらないのに、
+  sweep が窓ごとに `metadata.json`（実測 320,848 B）を取り直しており、900秒では
+  86400/900＝96窓/日 ≒ 29.4 MiB/日 の egress を使っていた。10800秒なら 8窓/日 ≒ 2.4 MiB/日（-92%）。
+  短く戻したいときはこの env で上書きできる。副作用として取得失敗後の再試行間隔が
+  `max(60, refresh_sec//4)`＝225秒→2700秒になるが、失敗中は in-memory の stale bundle で
+  予測を返し続ける（graceful degradation）ため表示は壊れない）
+- `MODEL_REFRESH_BATCH`（新規, `oriental/ml/model_registry.py`。int, **既定 `14`**（下限1）。TTL到来時に
   実際に再ダウンロード＋再パース（LightGBMロード）する店舗数の上限。軽量なメタデータ変更チェック
   自体は毎回全店舗に対して走る。再学習直後に全42店舗のモデルを一斉に再ロードするとRender Starter
   の0.5vCPUでCPUスパイクが起きるため段階的に反映する（B5修正。全店伝播が45時間→約75分に短縮された
-  施策の一部）
+  施策の一部）。2026-09-09 に 10→14: 上の `FORECAST_MODEL_REFRESH_SEC` を3時間へ延ばしたため、
+  10 のままだと全店伝播が `ceil(42/10)=5窓 × 3時間 = 15時間`＝05:30 学習が 20:30 着で
+  19時のピークに食い込む。14 なら `ceil(42/14)=3窓 × 3時間 = 9時間`＝遅くとも 14:30 にはピーク前に
+  伝播完了する（釣り合いは `tests/test_model_refresh_defaults.py` が固定）
 - `FORECAST_MODEL_CACHE_DIR`（Render ローカルキャッシュ先。既定 `data/ml_models`）
+- `FORECAST_ACCURACY_CACHE_TTL`（新規 2026-09-09, `oriental/routes/forecast_accuracy.py`。float 秒, 既定 `300`。
+  `/api/forecast_accuracy` と `/api/forecast_snapshot` が読む Supabase Storage オブジェクトの
+  プロセス内キャッシュ TTL（短命側）。`accuracy/scores/summary.json`（毎晩上書き）・今夜ぶんのファイル・
+  **まだ書かれていない（404）オブジェクトの記憶**がこちらに入る。`0` を入れるとキャッシュを完全に
+  無効化＝毎回 Storage を取りに行く（障害時のキルスイッチ）。実装は `routes/_cache.py` の
+  `SingleFlightTTLCache` を共有（同じオブジェクトへの同時ミスは1回の取得に合流する））
+- `FORECAST_ACCURACY_PAST_CACHE_TTL`（新規 2026-09-09, 同上。float 秒, 既定 `3600`。
+  **終わった夜**（日付が「今夜」より前）の `accuracy/snapshots|scores/<YYYYMMDD>.json` 用の長命側 TTL。
+  もう書き換わらないので長く持てる。未作成（404）だけは「あとから書かれる」ため長命側には載せず
+  短命側に入る（例: 昨夜のスコアは翌 06:10 の `score_forecasts.py` が初めて書く）。`0` で無効化。
+  2つのキャッシュの合計保持数は 16 本まで（date は利用者が自由に指定できるため上限必須））
 - `FORECAST_MODEL_CACHE_MAX_AGE_SEC`（int, 既定 `604800` = 7 日。Supabase Storage からの DL が失敗した際、`FORECAST_MODEL_CACHE_DIR` 上の既存ファイルを fallback として採用できる最大有効期限。これを超えた古いキャッシュは fallback として使わず、本来の例外を伝播させる）
 - `ML_TRAIN_LIMIT`（int, 既定 `120000`。学習で使用する最大ログ件数。大きいほど網羅性は上がるが、学習時間・メモリ使用量も増える）
 - `ML_TRAIN_WEIGHT_PEAK`（float, 既定 `1.8`。金・土・祝前日の 20:00-25:00 セグメントの学習重み）
@@ -159,7 +181,16 @@ Forecast:
   （既定 dry-run、`--execute` で実際に削除）。関連: `MODEL_CLEANUP_RETRIES` / `MODEL_CLEANUP_BACKOFF_MAX_SEC`
   / `MODEL_CLEANUP_DELETE_BATCH_SIZE` / `MODEL_CLEANUP_MAX_DELETE_FRACTION`（既定 `0.95`、削除率
   サニティ上限）。背景: 2026-08-18 に `forecast/latest` が 9,000+オブジェクト/1.4GB超まで肥大し
-  Supabase Storage 無料プラン1GBクォータを超過（2026-09-05利用制限予告）していたことの根治）
+  Supabase Storage 無料プラン1GBクォータを超過（2026-09-05利用制限予告）していたことの根治。
+  **【2026-09-09 追記】この予告は予告どおり執行された。** 2026-09-05T22:06Z に制限が発動し、以後
+  全リクエストが HTTP 402（`exceed_cached_egress_quota`）。収集が 2026-09-06 07:00 JST に停止して
+  3夜分の混雑データが恒久欠損し、利用者には「全42店0人」の誤情報が3日半表示された
+  （全文: `docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md`）。**この cleanup は容量側だけの是正で、
+  egress（転送量）側は手つかずのまま18日間放置された**——予告の文面が「容量」だったので容量だけ見た、
+  というのが空白の中身。**期限つきの予告を見つけたら、期限までに①どの枠が問題かを3本
+  （cached egress 5GB/月・uncached egress 5GB/月・Storage 容量1GB）全部確認し、②是正後に
+  実際に枠内へ戻ったかを Supabase 管理画面で確認し、③期限日を普段読む場所に控えること。**
+  今回は①〜③のどれもやっていなかった）
 
 重み付け・HPO 運用の注意:
 - `ML_TRAIN_WEIGHT_PEAK` / `ML_TRAIN_WEIGHT_RAIN` を上げすぎると、ピーク・雨天以外（平常時）の予測精度が低下する可能性がある。まずは `1.5-1.8` で評価し、店舗別 MAE/RMSE（overall と weekend_night_segment）を見ながら段階調整する。

@@ -74,7 +74,25 @@ class AppConfig:
         # 誤爆時は Render の環境変数 API_RATE_LIMIT_ENABLED=0 だけで完全停止できる。
         api_rate_limit_enabled = os.getenv("API_RATE_LIMIT_ENABLED", "1").strip() != "0"
         api_rate_limit_per_min = _as_int(os.getenv("API_RATE_LIMIT_PER_MIN", "300"), fallback=300)
-        forecast_model_refresh_sec = _as_int(os.getenv("FORECAST_MODEL_REFRESH_SEC", "900"), fallback=900)
+        # 既定 10800秒=3時間（旧 900秒=15分）。2026-09-09 egress 削減。
+        # モデルは日次学習（GHA train-ml-model.yml, 05:30 JST）で **1日1回しか変わらない**のに、
+        # sweep は窓が来るたびに metadata.json（実測 320,848 B）を取り直していた:
+        #   900秒 → 86400/900 = 96窓/日 × 320,848 B ≒ 29.4 MiB/日
+        #   10800秒 → 86400/10800 = 8窓/日 × 320,848 B ≒ 2.4 MiB/日（-92%）
+        # ＝ Supabase 無料枠を焼き切った 2026-09-05〜09 の事故で、起動時 preload の
+        # 重複（12.5 MiB/起動1回）より大きかった可能性が高い側。
+        #
+        # 伝播（学習済みモデルが全42店に行き渡るまで）の計算:
+        #   1窓あたりの再パース上限 = MODEL_REFRESH_BATCH（model_registry.py, 既定14）。
+        #   ceil(42 / 14) = 3窓 → 最悪 3 × 3時間 = 9時間。
+        #   05:30 の学習に対し、遅くとも 14:30 JST には全店が新モデルになる。
+        #   サイトのピークは 19:00 以降（夜窓）なので、ピーク前に必ず伝播が終わる＝実害なし。
+        #   （batch を旧既定の 10 のままにすると ceil(42/10)=5窓＝15時間で 20:30 になり、
+        #     ピークに食い込むため、batch 側も 10→14 に上げた。model_registry.py 参照）
+        # 副作用: 取得失敗後の再試行は max(60, refresh_sec//4) なので 225秒 → 2700秒。
+        # 失敗中は in-memory の stale bundle で予測を返し続ける（graceful degradation）ため
+        # 表示は壊れず、むしろ 402 障害中に取りに行く回数が減る。
+        forecast_model_refresh_sec = _as_int(os.getenv("FORECAST_MODEL_REFRESH_SEC", "10800"), fallback=10800)
         enable_forecast = os.getenv("ENABLE_FORECAST", "0").strip() == "1"
         supabase_url = os.getenv("SUPABASE_URL", "")
         supabase_service_role_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY") or os.getenv("SUPABASE_SERVICE_KEY", "")
