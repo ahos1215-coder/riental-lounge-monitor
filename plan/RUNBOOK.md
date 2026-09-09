@@ -1,5 +1,10 @@
 # RUNBOOK
-Last updated: 2026-03-30 (Round 9 整合) / 2026-07-18 追記（店舗数42店(37+5)表記統一・
+Last updated: 2026-09-09（Troubleshooting に「全APIが402＝Supabase無料枠超過」の入口を追加。
+オーナーの課金操作でしか直らない障害なので、切り分けの一番上に置いた。
+同日中に見直し: `/healthz` は改修で**本文**が402を名指しするようになったため「使えない」を撤回し
+「本文を見る／ステータスでは判定しない」に書き換え、復旧後レポートの戻り方を追記、
+定期処理一覧に `site-down-watch.yml` を追加）
+2026-03-30 (Round 9 整合) / 2026-07-18 追記（店舗数42店(37+5)表記統一・
 `MAX_RANGE_LIMIT` 実値6000へ修正・weekly `index.json` 廃止の反映。Fable監査docs修正）
 Target commit: (see git)
 
@@ -132,6 +137,8 @@ npm run dev
 | PAT 期限チェック | 月曜 `0 0` UTC = JST 09:00 | `check-pat-expiry.yml` |
 | Daily/Weekly 公開監視（ローカル生成の保険） | 各種 | `check-daily-published.yml` / `check-weekly-published.yml` |
 | 収集の生存監視 | 各種 | `check-collection-heartbeat.yml` |
+| ブレンド重み凍結の hash 不変監視 | `23 */6 * * *`（6時間毎） | `check-blend-weights-freeze.yml` |
+| **サイト停止の外形監視**（利用者と同じ公開 API を認証なしで1回叩き、2回連続で非200なら赤） | `*/30 * * * *`（30分毎。高頻度 cron なので間引かれる前提で見る） | `site-down-watch.yml`（2026-09-09 新設。`docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md`） |
 | logs バックアップ / 古いログ削除 | 週次 / 手動 | `backup-logs.yml` / `cleanup-old-logs.yml` |
 | Blog CI / Python CI | push / PR（schedule なし） | `blog-ci.yml` / `python-ci.yml` |
 | E2E テスト | PR + dispatch | `e2e.yml` |
@@ -177,6 +184,20 @@ npm run dev
 ---
 
 ## Troubleshooting
+- **全APIが 402 / サイトの全42店が「男性0・女性0・計0」/ レポートが全部404 か「今だけ表示できません」**:
+  **Supabase 無料枠の超過**。
+  枠は cached egress 5GB/月・uncached egress 5GB/月・Storage 容量1GB の3本。**コード側では直せない**——
+  オーナーが Supabase 管理画面→Billing でプラン変更 or Spend Cap 解除をするか、次の請求サイクルを待つしかない。
+  経緯・復旧後の確認順序は **`docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md`**（2026-09-05 に実際に発生）。
+  **切り分けは `/healthz` の「本文」を1回 GET するのが最短**。HTTP ステータスは暖機兼用のため
+  意図的に常に200なので**ステータスでは判定しない**（2026-09-09 改修）。本文の `ok` が実際の診断結果で、
+  402 なら `problems` に `data_upstream_payment_required`、`problem_detail` に
+  `Supabase /rest/v1/logs が HTTP 402 (...)` が名指しで載る。ステータスで判定したいときは
+  `/readyz`（壊れていれば503）、利用者と同じ経路の裏取りは `/api/current?store=<1店>`。
+- **402 から復旧したのにレポートだけ戻らない**: 復旧後 **1〜5分**（`revalidate` は daily=60秒 /
+  weekly=300秒）で**日付が障害前のままの本文**が戻るのが正常（carry-over で行は消えていない）。
+  5分待っても戻らなければ**別の異常**。日付が最新になるのは次の生成便（daily 18:00/21:30、
+  weekly 水曜 06:30 JST）なので、そこまでは古い日付のままで正常。
 - `/api/range` が空: Supabase `logs` と `/tasks/multi_collect` を確認
 - Forecast 503: `ENABLE_FORECAST=1`
 - DNS エラー: URL を安易に変えず、ログで確認

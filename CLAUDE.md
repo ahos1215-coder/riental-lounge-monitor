@@ -1,5 +1,7 @@
 CLAUDE.md — MEGRIBI（Oriental Lounge Monitor）3分マップ
-最終更新: 2026-07-11（Batch B3: 新規作成。全ての記述は実コードを確認して書いた。詳細な根拠・過去の設計判断は plan/*.md を参照。
+最終更新: 2026-09-09（§4に罠11「Supabase無料プランの枠が実運用の制約になっている」を追加＋
+§5に障害記録2本へのリンクを追加。2026-09-05の全停止を受けたもの）。
+2026-07-11（Batch B3: 新規作成。全ての記述は実コードを確認して書いた。詳細な根拠・過去の設計判断は plan/*.md を参照。
 Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追記 + sapporo_ag閉店で店舗数42（37+5）に更新）。
 2026-07-18: weekly `index.json` 廃止（別バッチ）の反映 + コメント/ENV.md/e2e/依存関係の修正（Fable監査分）
 2026-08-21: 外部レビュー(ChatGPT/Codex)第1〜2ラウンドの指摘15件のうち12件を修正した反映
@@ -204,11 +206,18 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
 10. **ML学習は日次（05:30・Optunaなし）と週次（月曜07:00・Optuna HPOあり）の2スケジュールが
     同じ `train-ml-model.yml` に同居している。** 「日次学習」とだけ書いてある古い記述を見ても、
     週次のOptuna実行を見落とさないこと。
+11. **Supabase 無料プランの枠（cached egress 5GB/月・uncached egress 5GB/月・Storage 容量1GB）が
+    実運用の制約になっている。** 2026-09-05 に超過して全リクエストが402になり、サイトが3日半
+    誤情報を出した（経緯・復旧手順は `docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md`）。
+    Supabase からのダウンロードを増やす変更（Storage の読み足し・キャッシュの撤去）は、
+    転送量への影響を見積もってから入れること。
 
 ---
 
 ## 5. 深掘りリンク
 
+- `docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md` — 2026-09-05 の全停止（Supabase無料枠超過）の記録・復旧手順
+- `docs/FAILURE_MAP.md` — 壊れ方マップ（何が止まると何が止まり、気づけるか）
 - `plan/ARCHITECTURE.md` — データフロー全量・並列化パターン・Key Files一覧（本ファイルより詳細）
 - `docs/LOCAL_LLM_SETUP.md` — ローカルLLMレポート生成のセットアップ・復旧手順（正本）
 - `plan/BLOG_CRON_GHA.md` — GHA緊急時手順・Secrets一覧（通常運用の正本ではない点に注意）

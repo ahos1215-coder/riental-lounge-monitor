@@ -1,5 +1,7 @@
 # ARCHITECTURE
 Last updated: 2026-07-11（Batch B3: 店舗数43・Daily/Weekly のローカル Ollama 移行・schema v7・LightGBM表記を実コードに合わせて修正。ML v6 本番反映当時の記述はそのまま履歴として残し、末尾に 2026-07 時点の差分を追記。Batch G: B7/B8 route split の Key Files 反映 + sapporo_ag閉店で店舗数42（37+5）に更新）
+2026-09-09 追記: 監視ワークフローの一覧を実態に合わせた（`site-down-watch.yml` 新設 +
+`check-blend-weights-freeze.yml` が一覧から漏れていたのを補完）。
 Target commit: (see git)
 
 ## Overview
@@ -144,6 +146,16 @@ Public Facts（毎日 09:30 JST — GHA schedule。これは移行対象外）:
   generate-public-facts.yml
   └─ frontend/scripts/generate-public-facts.mjs
      └─ frontend/content/facts/public/ に JSON 出力 → git commit
+
+監視（GHA schedule。判定ロジックは scripts/monitor/*.py 側。WF は1行で呼ぶだけ）:
+  check-collection-heartbeat.yml   : 収集の生存（logs の最新 ts）
+  check-daily-published.yml / check-weekly-published.yml : ローカル生成レポートの公開状況
+  check-blend-weights-freeze.yml   : ブレンド重み凍結の hash 不変（6時間毎 `23 */6 * * *`）
+  site-down-watch.yml              : 30分毎。公開 /api/range を認証なしで1回叩き、
+                                     2回連続で非200なら LINE + 失敗メール。
+                                     → 内側（Supabase 認証あり）の監視が全部緑でも
+                                       「利用者にデータが出ていない」を拾うための唯一の外形経路。
+                                       2026-09-09 新設（docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md）
 ```
 
 ### 5) LINE 承認フロー（Editorial）
@@ -279,8 +291,10 @@ trigger-blog-cron.yml (Daily Report) 完了
 - `.github/workflows/retry-blog-draft-stores.yml`（Daily 失敗再実行, workflow_dispatch）
 - `.github/workflows/check-daily-published.yml` / `check-weekly-published.yml`（ローカル生成の公開監視。PCが落ちていても検知可能にする保険）
 - `.github/workflows/check-collection-heartbeat.yml`（収集の生存監視）
+- `.github/workflows/site-down-watch.yml`（**サイト停止の外形監視**, 30分毎。公開 `/api/range` を認証なしで叩き、2回連続で非200なら LINE + 失敗メール。2026-09-09 新設 — `/healthz` が常に200を返していたため Supabase 402 の3日半を外形監視5経路が全部緑で見逃した反省。`docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md`）
 - `.github/workflows/backup-logs.yml` / `cleanup-old-logs.yml`（Supabase logs のバックアップ・古いログ削除）
 - `.github/workflows/blog-ci.yml` / `python-ci.yml`（CI）
+- `.github/workflows/check-blend-weights-freeze.yml`（ブレンド重み凍結の hash 不変監視, 6時間毎。restore は `workflow_dispatch` 専用）
 - `.github/workflows/check-pat-expiry.yml`（GitHub PAT 期限チェック + LINE 通知, 週次月曜 09:00 JST）
 - `.github/workflows/e2e.yml`（Playwright E2E スモークテスト, PR + dispatch）
 - `.github/workflows/notify-on-failure.yml`（失敗通知, 再利用ワークフロー）
