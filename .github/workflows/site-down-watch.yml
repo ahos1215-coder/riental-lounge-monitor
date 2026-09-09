@@ -1,0 +1,326 @@
+# サイト停止の外形監視（利用者と同じ経路を外側から1回だけ叩く）。
+#
+# なぜ作ったか（2026-09-09 / Supabase egress 超過事故の反省）:
+#   2026-09-05 に Supabase が全リクエストへ HTTP 402（exceed_cached_egress_quota）を
+#   返し始め、/stores の全42店が「男性0 / 女性0 / 計0」、レポート84URLが404という
+#   **誤情報**を3日半出し続けた。それでも既存の外形監視5経路は全部緑だった。
+#   `/healthz` は payload を jsonify して返すだけなので、下流が全滅していても常に200を返す。
+#   つまり「サーバのプロセスが生きているか」しか見ておらず、
+#   「利用者に本物のデータが出ているか」を見る監視が1本も無かった。
+#
+# ここで見るもの:
+#   公開されている /api/range を、ブラウザと同じく認証なしで1回叩き、
+#     (a) HTTP 200 が返るか
+#     (b) 本文が {"ok":true, ...} か
+#     (c) rows が空でないか
+#   の3つを見る。(b)(c) を足したのは 2026-09-09 の見直しで、200 と
+#   `{"ok":true,"rows":[]}` を緑にしていたら**このワークフローの名前が嘘になる**ため。
+#   実際 2026-09-06 07:00 に収集だけが止まり Supabase は生きている、という状態が起きた。
+#   その形は HTTP だけ見ていると素通りする。
+#   経路は Vercel(CDN + プロキシ) → Render(Flask) → Supabase。この監視自身は
+#   Supabase の認証情報も PC も Ollama も使わないので、**それらが全部死んでいても動く**。
+#   2026-09-05 の状態なら /api/range は 502 と
+#   {"ok":false,"error":"upstream-supabase","detail":"supabase returned status 402 ..."}
+#   を返すので、HTTPステータスと応答本文の両方が通知に載る（＝原因が1通で分かる）。
+#
+# CDN キャッシュとの関係（2026-09-09 訂正）:
+#   以前ここには「リクエストに Cache-Control: no-cache を付けて素通しで見ている」と
+#   読めるコメントがあったが、**それは事実ではない**。Vercel のエッジキャッシュは
+#   クライアントが送る Cache-Control を無視するので、あのヘッダは何もしていなかった。
+#   そのうえで意図的に素通しにはしていない。理由は2つ:
+#     1) この監視の目的は「利用者が実際に受け取るもの」を見ることで、利用者は CDN 越しに見る。
+#     2) 古さの上限が短い。frontend/src/app/api/range/route.ts は成功応答にだけ
+#        `s-maxage=240, stale-while-revalidate=300` を付ける（失敗応答にキャッシュ指示は
+#        付けない）ので、キャッシュが隠せるのは最長でも 240+300 秒＝9分強。毎時の監視から
+#        見れば実質素通しで、「何日も古い成功応答で緑が続く」ことは起きない。
+#   本当に origin だけを見たくなったら、ヘッダではなくクエリに時刻を足すこと（例 `&_cb=<epoch>`）。
+#
+# ワークフロー名について:
+#   GitHub の失敗メールは件名にワークフロー名しか載せない。今回の事故では
+#   「check-...」「warm-...」といった名前の失敗メールが9ワークフロー49通に増幅され、
+#   件名だけでは何が起きたのか分からず埋もれた。そこでこの1本だけは
+#   **件名だけで意味が通る日本語**にしてある（"check" や "warm" は使わない）。
+#
+# 誤報対策:
+#   Render は無料枠ではないが、デプロイ直後などに一時的な502を返しうる。1回の異常では
+#   落とさず、60秒あけて2回目を叩き、2回連続で異常のときだけ赤にする。
+#
+# fail-closed（2026-09-09 に追加した番人）:
+#   probe ステップは curl の失敗を握りつぶしてログに残すため `set +e` している。その結果、
+#   停止を検知したのに outputs を書けずステップが終わると**ジョブが緑で終わる**穴があった。
+#   これは CLAUDE.md §3 の fail-closed 方針と逆で、「監視が黙る」＝今回直したい失敗そのもの。
+#   そこで最終ステップを `always()` で必ず走らせ、down が true/false のどちらでもない
+#   ＝「判定できなかった」ときも赤にする。分からないときは騒ぐ方を選ぶ。
+#
+# 必要な Secrets（無くても壊れない）:
+#   LINE_CHANNEL_ACCESS_TOKEN / LINE_USER_ID — 未設定なら LINE 通知だけスキップして続行する。
+#     （通知基盤は check-pat-expiry.yml と同じ LINE Messaging API push を流用。新設していない）
+#   OPS_NOTIFY_WEBHOOK_URL — notify-on-failure.yml 側で未設定ならスキップされる。
+#   いずれも無くても、ジョブが赤くなれば GitHub の失敗メールは届く。
+
+name: "🔴 サイト停止（利用者にデータが出ていません）"
+
+on:
+  schedule:
+    # 毎時 :17。*/30 から毎時へ落とした理由（2026-09-09 見直し）:
+    #   停止が続くと1回の発火ごとに LINE + Slack/Discord + GitHub失敗メールの3経路が鳴る。
+    #   30分毎だと最大48回/日 × 3経路。3日半なら約500通で、今回の事故で通知を埋もれさせた
+    #   「9ワークフロー49通」を桁違いに超える。直そうとしている問題を別の形で再生産する。
+    #   毎時なら24回/日に半減し、検知の遅れは最大1時間（+ LINE の間引きは下のステップ参照）。
+    #   「3日半気づかない」に比べれば無視できる差。
+    #   頻度の根拠（CLAUDE.md §4 罠5）: GHA schedule の間引きは**高頻度 cron 固有**の現象で、
+    #   日次/週次の5本は実測30日で欠落ゼロ、10分毎の warm-cdn は実測15〜34%。毎時はその間だが
+    #   10分毎よりは確実に発火する側で、仮に1回間引かれても次の1時間で拾える。
+    #   分を :00 でなく :17 にしているのは、毎正時に集中する他リポジトリの cron を避けて
+    #   遅延を減らすため（GitHub 公式が推奨している回避策）。
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "叩く公開URL（空欄=本番の /api/range?store=shibuya&limit=1）"
+        required: false
+        default: ""
+
+# 最小権限: このWFはリポジトリへ書き込まない（checkout もしない）。
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: 公開APIが本物のデータを返すか
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    outputs:
+      down: ${{ steps.probe.outputs.down }}
+      status: ${{ steps.probe.outputs.status }}
+      reason: ${{ steps.probe.outputs.reason }}
+      body: ${{ steps.probe.outputs.body }}
+      url: ${{ steps.probe.outputs.url }}
+    steps:
+      - name: Probe public API as a visitor
+        id: probe
+        env:
+          # 入力はシェル本文に埋め込まず env 経由で渡す（スクリプトインジェクション対策）。
+          PROBE_URL: ${{ github.event.inputs.url || 'https://www.meguribi.jp/api/range?store=shibuya&limit=1' }}
+        run: |
+          # GHA の既定シェルは `bash -e` なので明示的に外す。curl が非0で終わっただけで
+          # ステップが中断すると「何が起きたか」を出す前に死んでしまう（今回直したい失敗の形）。
+          # ただし `set +e` はエラー伝播も切るので、このステップだけでは緑/赤を決めない。
+          # 最終ステップ（fail-closed の番人）が down の値を見て必ず judgement を下す。
+          set +e
+          set -uo pipefail
+
+          # 1回だけ叩いて HTTP ステータスを標準出力に、本文を $1 のファイルに落とす。
+          # `-f` は付けない。付けると 502 の応答本文が捨てられて「原因」が読めなくなるため
+          # （本文の中に supabase returned status 402 のような一次情報が入っている）。
+          probe_once() {
+            local out="$1"
+            local code rc
+            code=$(curl -sS --max-time 25 \
+              -H 'User-Agent: megribi-site-down-watch/1.0 (+github-actions)' \
+              -o "$out" -w '%{http_code}' "$PROBE_URL")
+            rc=$?
+            if [ "$rc" -ne 0 ]; then
+              # curl 自体の失敗（DNS解決不可・接続不能・タイムアウト等）。応答を最後まで
+              # 受け取れていないので、ステータスが取れていても「取れなかった」扱いにする。
+              echo "curl exited ${rc}（transport error）" >&2
+              code="000"
+            fi
+            printf '%s' "$code"
+          }
+
+          # 本文の中身を見る。200 でも「データが無い」なら緑にしない
+          # （このワークフローの名前は「利用者にデータが出ていません」であって
+          #   「HTTPが200ではありません」ではない）。成功応答の形は
+          #   oriental/routes/data_range.py の {"ok": True, "rows": [...]} が正。
+          body_verdict() {
+            local out="$1"
+            if ! jq -e '.ok == true' "$out" >/dev/null 2>&1; then
+              printf '%s' 'NG:本文が ok:true ではない（JSONでない場合も含む）'
+              return
+            fi
+            if ! jq -e '((.rows | type) == "array") and ((.rows | length) > 0)' "$out" >/dev/null 2>&1; then
+              printf '%s' 'NG:rows が空（収集が止まっている疑い。2026-09-06 07:00 に実際に起きた形）'
+              return
+            fi
+            printf '%s' 'OK'
+          }
+
+          # 「応答が届かなかった」を「本文が ok:true ではない」と言わないための分岐。
+          # 通知に出す原因を取り違えさせない（調べる先がネットワークか中身かで正反対になる）。
+          judge() {
+            if [ "$1" = "000" ]; then
+              printf '%s' 'NG:応答が届かない（DNS・接続不能・タイムアウト）'
+              return
+            fi
+            body_verdict "$2"
+          }
+
+          BODY_FILE=/tmp/probe_1.txt
+          CODE=$(probe_once "$BODY_FILE")
+          REASON=$(judge "$CODE" "$BODY_FILE")
+          echo "1回目: HTTP ${CODE} / 本文judge: ${REASON}"
+
+          if [ "$CODE" != "200" ] || [ "$REASON" != "OK" ]; then
+            # Render のコールドスタート等による一時的な502や、収集の1周期ぶんの空振りを
+            # 拾わないため、60秒あけて再確認する。
+            echo "異常だったので60秒後に再試行します（2回連続のときだけ赤にする）"
+            sleep 60
+            BODY_FILE=/tmp/probe_2.txt
+            CODE=$(probe_once "$BODY_FILE")
+            REASON=$(judge "$CODE" "$BODY_FILE")
+            echo "2回目: HTTP ${CODE} / 本文judge: ${REASON}"
+          fi
+
+          # 通知に載せる応答本文の先頭200バイト。改行は GITHUB_OUTPUT を壊すので畳む。
+          # これは**公開URLを誰でも叩けば得られる本文**なので、ステップサマリ（公開リポジトリ
+          # では誰でも読める）に出しても新たに漏れるものは無い。認証付きの照会結果を扱う
+          # scripts/monitor/_query_failure.py 側とは扱いが違う（あちらは通知にだけ載せる）。
+          BODY=$(head -c 200 "$BODY_FILE" 2>/dev/null | tr '\r\n' '  ' || true)
+
+          if [ "$CODE" = "200" ] && [ "$REASON" = "OK" ]; then
+            DOWN=false
+          else
+            DOWN=true
+          fi
+
+          {
+            echo "down=${DOWN}"
+            echo "status=${CODE}"
+            echo "reason=${REASON}"
+            echo "body=${BODY}"
+            echo "url=${PROBE_URL}"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## サイト外形監視"
+            echo ""
+            echo "- URL: ${PROBE_URL}"
+            echo "- HTTP ステータス: ${CODE}"
+            echo "- 本文judge: ${REASON}"
+            echo "- 応答本文(先頭200字): ${BODY}"
+            echo "- 判定: $([ "$DOWN" = "false" ] && echo 'OK（利用者にデータが出ています）' || echo 'NG（2回連続で異常）')"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Notify LINE
+        # 停止しているときだけ送る。Secret 未設定ならスキップして続行する（壊さない）。
+        if: steps.probe.outputs.down == 'true'
+        env:
+          LINE_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER: ${{ secrets.LINE_USER_ID }}
+          STATUS: ${{ steps.probe.outputs.status }}
+          REASON: ${{ steps.probe.outputs.reason }}
+          BODY: ${{ steps.probe.outputs.body }}
+          PROBE_URL: ${{ steps.probe.outputs.url }}
+        run: |
+          # GHA の既定シェルは `bash -e` なので明示的に外す。curl が非0で終わっただけで
+          # ステップが中断すると「何が起きたか」を出す前に死んでしまう（今回直したい失敗の形）。
+          set +e
+          set -uo pipefail
+
+          # 【LINE だけ間引く】2026-09-09。
+          # 停止が何日も続くと、毎時の発火ごとに LINE が鳴り続ける。LINE はブログ承認フロー
+          # （frontend/src/app/api/line/route.ts）と**同じチャネル**なので、障害中は承認
+          # メッセージが押し流されて仕事が止まる。そこで LINE だけ6時間おきに絞る。
+          # 方式は「実行時刻の UTC 時が 6 で割った余り 0 か 1 のときだけ送る」＝状態を持たない
+          # 最も単純な形。cache/artifact に最終送信時刻を持つ案より壊れる部品が少ない。
+          # 余りを 0 だけでなく 1 も許すのは、cron が遅延して次の時へずれたときに
+          # その回の送信枠を丸ごと落とさないため（枠を1時間幅にすると 43 分の遅延で穴が開く）。
+          # 結果: 停止中の LINE は最大 8 通/日（30分毎×毎回送信の 48 通から 6 分の1）。
+          # 代償: 初報が最大5時間遅れる。ただし Slack/Discord と GitHub 失敗メールは毎時
+          # そのまま出るので「誰も気づけない」にはならない。うるさい方の経路だけを静める。
+          HOUR_UTC=$(date -u +%-H)
+          if [ "$(( HOUR_UTC % 6 ))" -gt 1 ]; then
+            echo "LINE は約6時間に1回だけ送ります（現在 ${HOUR_UTC} 時 UTC のためスキップ）。"
+            echo "Slack/Discord と GitHub の失敗メールは毎時そのまま出ています。"
+            exit 0
+          fi
+
+          if [ -z "${LINE_TOKEN:-}" ] || [ -z "${LINE_USER:-}" ]; then
+            echo "::warning::LINE_CHANNEL_ACCESS_TOKEN or LINE_USER_ID is not set. Skipping LINE notification."
+            exit 0
+          fi
+
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          TEXT=$(printf '%s\n' \
+            "[めぐりび] 🔴 サイト停止" \
+            "利用者にデータが出ていません。" \
+            "" \
+            "URL: ${PROBE_URL}" \
+            "HTTP: ${STATUS}" \
+            "判定: ${REASON}" \
+            "応答: ${BODY}" \
+            "" \
+            "run: ${RUN_URL}" \
+            "" \
+            "※この通知は障害中も約6時間に1回だけ送ります（承認メッセージを流さないため）。")
+
+          # check-pat-expiry.yml の LINE Push と同じ API・同じ Secrets。本文だけ jq で組む
+          # （応答本文に " や \ が混ざっても壊れないようにするため。手書きJSONだと壊れる）。
+          PAYLOAD=$(jq -n --arg to "$LINE_USER" --arg t "$TEXT" \
+            '{to: $to, messages: [{type: "text", text: $t}]}')
+
+          HTTP_CODE=$(curl -sS -o /tmp/line_resp.json -w "%{http_code}" \
+            -X POST \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${LINE_TOKEN}" \
+            -d "$PAYLOAD" \
+            "https://api.line.me/v2/bot/message/push")
+
+          cat /tmp/line_resp.json 2>/dev/null || true
+          echo ""
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ LINE notification sent"
+          else
+            # ここで exit 1 しても次の番人ステップと結果は同じ（ジョブは赤くなる）。
+            # LINE が送れなかったこと自体をログに残すだけにして、後続の失敗表示を優先する。
+            echo "::error::LINE push failed: HTTP ${HTTP_CODE}"
+          fi
+
+      - name: Decide the verdict (fail-closed)
+        # `always()` がこのステップの要点。probe ステップは `set +e` でエラー伝播を切って
+        # いるため、「停止を検知したのに outputs を書けなかった」「途中で死んだ」場合に
+        # ジョブが緑で終わる穴があった（＝監視が黙る。今回直したい失敗そのもの）。
+        # ここを必ず走らせ、down が true/false のどちらでもない＝「判定できなかった」ときも
+        # 赤にする。分からないときは緑で見逃すより赤で騒ぐ方を選ぶ（CLAUDE.md §3 fail-closed）。
+        if: always()
+        env:
+          DOWN: ${{ steps.probe.outputs.down }}
+          STATUS: ${{ steps.probe.outputs.status }}
+          REASON: ${{ steps.probe.outputs.reason }}
+          BODY: ${{ steps.probe.outputs.body }}
+          PROBE_URL: ${{ steps.probe.outputs.url }}
+        run: |
+          # `:-` を付けているのは probe が途中で死んで outputs が1つも無い経路を通るため
+          # （`set -u` で「未定義だから落ちた」になると、番人が番人の役目を果たせない）。
+          set -uo pipefail
+          case "${DOWN:-}" in
+            false)
+              echo "OK: 利用者にデータが出ています（HTTP ${STATUS:-} / ${REASON:-}）"
+              ;;
+            true)
+              echo "::error::利用者にデータが出ていません。${PROBE_URL:-} が2回連続で異常でした（HTTP ${STATUS:-} / ${REASON:-}）: ${BODY:-}"
+              exit 1
+              ;;
+            *)
+              echo "::error::監視自身が判定できませんでした（down='${DOWN:-}' ＝ probe ステップが outputs を書けていない）。上の probe ステップのログを確認してください。"
+              exit 1
+              ;;
+          esac
+
+  notify:
+    needs: [probe]
+    if: failure()
+    uses: ./.github/workflows/notify-on-failure.yml
+    secrets: inherit
+    with:
+      workflow_label: "サイト停止（公開APIが本物のデータを返していません）"
+      # down が空＝probe が判定できずに終わった場合も、ここへ来る（fail-closed の番人が赤にする）。
+      # そのときは値が全部空になるので、何が空なのか読めるように既定文を入れておく。
+      custom_body: |
+        ${{ needs.probe.outputs.down == 'true' && '🔴 利用者にデータが出ていません（公開APIが2回連続で異常）。' || '🔴 サイト監視自身が判定できませんでした（probe ステップのログを確認してください）。' }}
+        - URL: ${{ needs.probe.outputs.url || '(取得できず)' }}
+        - HTTP ステータス: ${{ needs.probe.outputs.status || '(取得できず)' }}
+        - 判定: ${{ needs.probe.outputs.reason || '(取得できず)' }}
+        - 応答本文(先頭200字): ${{ needs.probe.outputs.body || '(取得できず)' }}

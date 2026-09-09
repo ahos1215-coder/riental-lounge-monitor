@@ -56,6 +56,9 @@ jobs:
     timeout-minutes: 10
     outputs:
       detail: ${{ steps.check.outputs.detail }}
+      # 推定原因。スクリプトが「Supabase が 402 を返している」等と特定できたときだけ埋まる。
+      # 空のときは notify 側の `||` が従来の固定文にフォールバックする。
+      cause: ${{ steps.check.outputs.cause }}
     steps:
       - name: Checkout（店舗マスタ stores.json を読むため）
         uses: actions/checkout@v4
@@ -78,6 +81,11 @@ jobs:
     secrets: inherit
     with:
       workflow_label: "収集ハートビートチェック"
+      # 【2026-09-09 修正】1行目は固定文ではなくスクリプトが特定した原因を優先する。
+      # 2026-09-05 の Supabase 402（egress クォータ超過）では、ここに書いてあった
+      # 「PC停止 / Render障害 / cron-job.org障害」が3つとも外れで、しかも照会失敗時は
+      # detail が空だったため、通知に本当の原因が一文字も載らなかった（気づくまで3日半）。
+      # cause が空（＝原因を特定できていない通常の停止）のときだけ従来の固定文に戻る。
       custom_body: |
-        ⚠️ 収集プロセス（/tasks/multi_collect）が長時間停止している可能性があります（PC停止 / Render障害 / cron-job.org障害など）。
+        ${{ needs.check-heartbeat.outputs.cause || '⚠️ 収集プロセス（/tasks/multi_collect）が長時間停止している可能性があります（PC停止 / Render障害 / cron-job.org障害など）。' }}
         ${{ needs.check-heartbeat.outputs.detail }}

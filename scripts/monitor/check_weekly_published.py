@@ -31,6 +31,13 @@ MAX_STALENESS_DAYS（既定8日）と比べるだけなので、GHA の cron が
   GITHUB_STEP_SUMMARY / GITHUB_OUTPUT  あれば書き込む（GHA 外では書かずに続行）
 
 終了コード: 0 = 基準を満たす / 1 = 欠落・陳腐化・不足・設定不備・照会失敗。
+
+【2026-09-09 修正】照会に失敗したときは、落ちる前に必ず detail と cause を出す。
+以前は fetch_rows の中で detail を出さないまま sys.exit(1) していたため、
+ワークフローの `outputs.detail` が空になり、通知に残るのは固定文の
+「ローカル生成(MEGRIBI-weekly)の失敗 / PC停止 / Ollama不調」だけだった。
+2026-09-05 の Supabase 402（egress クォータ超過）ではその3つが全部ハズレで、
+原因が一文字も通知に出なかった。詳細は _query_failure.py の docstring。
 """
 
 from __future__ import annotations
@@ -45,9 +52,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _query_failure import QueryFailed, describe, is_billing_error  # noqa: E402
 from _retry_common import backoff_delay  # noqa: E402
 from _stores_common import all_slugs  # noqa: E402
 from _supabase_common import auth_headers  # noqa: E402
+
+# 照会に失敗したとき、課金・認証起因でなければ通知の1行目に出す推定原因。
+# ワークフローの custom_body に書いてあった固定文をここへ持ってきた（原因を1箇所で持つ）。
+GENERIC_CAUSE = (
+    "⚠️ 週次レポートが公開されていない、または古い可能性があります"
+    "（ローカル生成(MEGRIBI-weekly)の失敗 / PC停止 / Ollama不調）。"
+)
 
 FETCH_ATTEMPTS = 3
 FETCH_BACKOFF_CAP = 30.0
@@ -82,19 +98,23 @@ def fetch_rows(url: str, key: str) -> list[dict]:
         f"{url}/rest/v1/blog_drafts?{q}",
         headers=auth_headers(key),
     )
-    last_err: Exception | None = None
     for attempt in range(1, FETCH_ATTEMPTS + 1):
         try:
             with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT) as r:
                 return json.loads(r.read().decode("utf-8"))
         except Exception as e:  # noqa: BLE001
-            last_err = e
+            # 401/402/403 は再試行しても直らないので、待たずに理由を持って戻る。
+            if is_billing_error(e):
+                raise QueryFailed(describe(e)) from e
             # 2026-08-18 の Supabase 飽和（544/429）は即時リトライでは抜けられなかったため、
             # 試行の間に指数バックオフを挟む。
             if attempt < FETCH_ATTEMPTS:
                 time.sleep(backoff_delay(attempt, FETCH_BACKOFF_CAP))
-    print(f"::error::Supabase 照会に失敗: {last_err}")
-    sys.exit(1)
+            else:
+                # 【2026-09-09】以前はここで sys.exit(1) しており、main の
+                # 「detail / cause を GITHUB_OUTPUT へ書く」処理に到達できず通知が空になっていた。
+                raise QueryFailed(describe(e)) from e
+    raise QueryFailed(describe(None))  # 到達しない（ループは必ず return か raise で抜ける）
 
 
 def _parse_dt(raw: object) -> datetime | None:
@@ -223,6 +243,18 @@ def _append_env_file(env_name: str, text: str) -> None:
         fh.write(text)
 
 
+def _emit(detail: str, cause: str = "") -> None:
+    """通知に載る2つの値を GHA へ渡す。
+
+    `cause` は通知の1行目に置く推定原因。ワークフロー側は
+    `outputs.cause || '<従来の固定文>'` の形で受けるので、ここが空でも従来どおりになる。
+    """
+    _append_env_file("GITHUB_STEP_SUMMARY", detail + "\n")
+    _append_env_file("GITHUB_OUTPUT", "detail<<EOF\n" + detail + "\nEOF\n")
+    if cause:
+        _append_env_file("GITHUB_OUTPUT", "cause<<EOF\n" + cause + "\nEOF\n")
+
+
 def main() -> int:
     url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or ""
@@ -234,7 +266,16 @@ def main() -> int:
     max_staleness_days = float(os.environ.get("MAX_STALENESS_DAYS") or "8")
     strict = (os.environ.get("STRICT_ALL_STORES") or "1").strip() != "0"
 
-    rows = fetch_rows(url, key)
+    try:
+        rows = fetch_rows(url, key)
+    except QueryFailed as exc:
+        # 【2026-09-09】ここが「3日半気づけなかった」穴の直し。落ちる前に必ず理由を出す。
+        failure = exc.failure
+        detail = failure.detail()
+        _emit(detail, failure.cause_line(GENERIC_CAUSE))
+        print(detail)
+        print(f"::error::Supabase 照会に失敗: {failure.message}")
+        return 1
     if not isinstance(rows, list):
         print(f"::error::予期しないレスポンス形式: {rows!r}")
         return 1
@@ -248,8 +289,7 @@ def main() -> int:
         strict=strict,
     )
 
-    _append_env_file("GITHUB_STEP_SUMMARY", detail + "\n")
-    _append_env_file("GITHUB_OUTPUT", "detail<<EOF\n" + detail + "\nEOF\n")
+    _emit(detail)
     print(detail)
 
     if problems:

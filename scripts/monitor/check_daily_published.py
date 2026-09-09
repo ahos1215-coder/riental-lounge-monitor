@@ -26,6 +26,20 @@ target_date のまま残るので、読者には古い記事が出続ける）�
   GITHUB_STEP_SUMMARY / GITHUB_OUTPUT  あれば書き込む（GHA 外では書かずに続行）
 
 終了コード: 0 = 全エディションで期待集合が揃っている / 1 = 欠落・不足・設定不備・照会失敗。
+
+【2026-09-09 修正】照会に失敗したときは、落ちる前に必ず detail と cause を出す。
+以前は fetch_published_slugs の中で detail を出さないまま sys.exit(1) していたため、
+ワークフローの `outputs.detail` が空になり、通知に残るのは固定文の
+「ローカル生成の失敗 / PC停止 / Ollama不調」だけだった。2026-09-05 の Supabase 402
+（egress クォータ超過）ではその3つが全部ハズレで、原因が一文字も通知に出なかった。
+詳細は _query_failure.py の docstring。
+
+【2026-09-09 追記】さらに2点:
+  - レスポンス本文が想定外だった場合を「通信失敗」と混ぜない（UnexpectedBody）。
+    通信は成功しているのに「HTTP ステータス: （なし＝通信失敗）」と通知していたため、
+    読む人がネットワークを疑って調べる先を間違えていた。
+  - **このリポジトリは公開**なので、レスポンス本文200字はステップサマリ・標準出力
+    （どちらもログインなしで読める）に出さず、通知（LINE/Slack＝非公開）にだけ載せる。
 """
 
 from __future__ import annotations
@@ -40,9 +54,18 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _query_failure import QueryFailed, UnexpectedBody, describe, is_billing_error  # noqa: E402
 from _retry_common import backoff_delay  # noqa: E402
 from _stores_common import all_slugs  # noqa: E402
 from _supabase_common import auth_headers  # noqa: E402
+
+# 照会に失敗したとき、課金・認証起因でなければ通知の1行目に出す推定原因。
+# ワークフローの custom_body に書いてあった固定文をここへ持ってきた（原因を1箇所で持つ）。
+GENERIC_CAUSE = (
+    "⚠️ 日次レポートが公開されていない可能性があります"
+    "（ローカル生成の失敗 / PC停止 / Ollama不調）。"
+)
 
 EDITIONS = ("evening_preview", "late_update")
 FETCH_ATTEMPTS = 3
@@ -107,22 +130,45 @@ def fetch_published_slugs(url: str, key: str, target: str, edition: str) -> set[
         f"{url}/rest/v1/blog_drafts?{q}",
         headers=auth_headers(key, accept_json=True),
     )
-    last_err: Exception | None = None
     for attempt in range(1, FETCH_ATTEMPTS + 1):
         try:
             with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT) as r:
-                rows = json.loads(r.read().decode("utf-8"))
+                # ステータスを掴んでおく。本文が想定外だったときの通知に
+                # 「HTTP は成功している」ことを書けるようにするため（下の UnexpectedBody）。
+                http_status = getattr(r, "status", None)
+                raw = r.read().decode("utf-8")
+            try:
+                rows = json.loads(raw)
+            except ValueError as e:
+                # 200 なのに JSON でない＝間に入った proxy のエラーページ等。通信失敗ではない。
+                raise UnexpectedBody(
+                    "JSON として読めない応答が返りました", status=http_status, body=raw
+                ) from e
             if not isinstance(rows, list):
-                raise ValueError(f"unexpected response shape: {rows!r}")
+                # 【2026-09-09】以前は素の ValueError を投げており、describe() が
+                # ステータスを拾えず通知に「（なし＝通信失敗・タイムアウト）」と出ていた。
+                # 実際は通信できていて中身だけが想定外なので、調べる先が変わってしまう。
+                # 本文は message に入れず body へ渡す（message は公開ログにも出るため）。
+                raise UnexpectedBody(
+                    "配列ではない応答が返りました", status=http_status, body=raw
+                ) from None
             return {row.get("store_slug") for row in rows if row.get("store_slug")}
         except Exception as e:  # noqa: BLE001
-            last_err = e
+            # 401/402/403 は再試行しても直らないので、待たずに理由を持って戻る。
+            if is_billing_error(e):
+                raise QueryFailed(describe(e)) from e
+            # UnexpectedBody（本文が想定外）はここで弾かず、通常どおり再試行する。
+            # 間に入った proxy が一度だけエラーページを返すことは実際にあり、
+            # 「一度きりの揺らぎ」と「ずっと壊れている」を区別できる方が通知として役に立つ。
             # 2026-08-18 の Supabase 飽和（544/429）は即時リトライでは抜けられなかったため、
             # 試行の間に指数バックオフを挟む。
             if attempt < FETCH_ATTEMPTS:
                 time.sleep(backoff_delay(attempt, FETCH_BACKOFF_CAP))
-    print(f"::error::Supabase 照会に失敗: {last_err}")
-    sys.exit(1)
+            else:
+                # 【2026-09-09】以前はここで sys.exit(1) しており、main の
+                # 「detail / cause を GITHUB_OUTPUT へ書く」処理に到達できず通知が空になっていた。
+                raise QueryFailed(describe(e)) from e
+    raise QueryFailed(describe(None))  # 到達しない（ループは必ず return か raise で抜ける）
 
 
 def build_detail(
@@ -166,6 +212,26 @@ def _append_env_file(env_name: str, text: str) -> None:
         fh.write(text)
 
 
+def _emit(detail: str, cause: str = "", public_detail: str | None = None) -> None:
+    """通知に載る2つの値を GHA へ渡す。
+
+    `cause` は通知の1行目に置く推定原因。ワークフロー側は
+    `outputs.cause || '<従来の固定文>'` の形で受けるので、ここが空でも従来どおりになる。
+
+    `public_detail` は「誰でも読める場所に出す版」（2026-09-09）。**このリポジトリは公開**で、
+    GITHUB_STEP_SUMMARY はログインなしで読める。一方 GITHUB_OUTPUT は通知
+    （LINE / Slack＝非公開）へ渡るだけでログには出ない。したがって Supabase の
+    レスポンス本文のような内部情報は GITHUB_OUTPUT にだけ載せ、サマリには出さない。
+    省略時は従来どおり同じ文面を両方へ書く（正常系は店舗名しか含まないため）。
+    """
+    _append_env_file(
+        "GITHUB_STEP_SUMMARY", (detail if public_detail is None else public_detail) + "\n"
+    )
+    _append_env_file("GITHUB_OUTPUT", "detail<<EOF\n" + detail + "\nEOF\n")
+    if cause:
+        _append_env_file("GITHUB_OUTPUT", "cause<<EOF\n" + cause + "\nEOF\n")
+
+
 def main() -> int:
     url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or ""
@@ -182,11 +248,21 @@ def main() -> int:
     strict = (os.environ.get("STRICT_ALL_STORES") or "1").strip() != "0"
 
     expected = expected_slugs()
-    results = {e: fetch_published_slugs(url, key, target, e) for e in EDITIONS}
+    try:
+        results = {e: fetch_published_slugs(url, key, target, e) for e in EDITIONS}
+    except QueryFailed as exc:
+        # 【2026-09-09】ここが「3日半気づけなかった」穴の直し。落ちる前に必ず理由を出す。
+        failure = exc.failure
+        detail = failure.detail()  # 通知（LINE/Slack＝非公開）用。レスポンス本文200字を含む。
+        # ステップサマリと標準出力は公開リポジトリの Actions ログ＝誰でも読めるので本文は伏せる。
+        public_detail = failure.detail(include_body=False)
+        _emit(detail, failure.cause_line(GENERIC_CAUSE), public_detail=public_detail)
+        print(public_detail)
+        print(f"::error::Supabase 照会に失敗: {failure.message}")
+        return 1
     detail, missing = build_detail(target, floor, results, expected, strict=strict)
 
-    _append_env_file("GITHUB_STEP_SUMMARY", detail + "\n")
-    _append_env_file("GITHUB_OUTPUT", "detail<<EOF\n" + detail + "\nEOF\n")
+    _emit(detail)
     print(detail)
 
     if missing:

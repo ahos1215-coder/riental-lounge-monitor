@@ -21,6 +21,13 @@ YAML ヒアドキュメントに直書きされていて、テストから触れ
   GITHUB_STEP_SUMMARY / GITHUB_OUTPUT  あれば書き込む（GHA 外では書かずに続行）
 
 終了コード: 0 = 正常 / 1 = 全体NG・店舗別に陳腐化あり・設定不備・照会失敗。
+
+【2026-09-09 修正】照会に失敗したときは、落ちる前に必ず detail と cause を出す。
+以前は fetch_newest_ts の中で detail を出さないまま sys.exit(1) していたため、
+ワークフローの `outputs.detail` が空になり、通知に残るのは固定文の
+「PC停止 / Render障害 / cron-job.org障害」だけだった。2026-09-05 の Supabase 402
+（egress クォータ超過）ではその3つが全部ハズレで、原因が一文字も通知に出ず、
+16回連続で赤いまま3日半気づけなかった。詳細は _query_failure.py の docstring。
 """
 
 from __future__ import annotations
@@ -35,11 +42,20 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _query_failure import QueryFailed, describe, is_billing_error  # noqa: E402
 from _retry_common import backoff_delay  # noqa: E402
 from _stores_common import load_stores_json  # noqa: E402
 from _supabase_common import auth_headers as _auth_headers  # noqa: E402
 
 JST = timezone(timedelta(hours=9))
+
+# 照会に失敗したとき、課金・認証起因でなければ通知の1行目に出す推定原因。
+# ワークフローの custom_body に書いてあった固定文をここへ持ってきた（原因を1箇所で持つ）。
+GENERIC_CAUSE = (
+    "⚠️ 収集プロセス（/tasks/multi_collect）が長時間停止している可能性があります"
+    "（PC停止 / Render障害 / cron-job.org障害など）。"
+)
 
 # 全体照会（logs の最新1行）の再試行。
 # 【2026-08-18 修正】旧実装は 30秒タイムアウトを待ち時間ゼロで3連打するだけだった。
@@ -63,22 +79,31 @@ DAYTIME_MAX_GAP_MINUTES = 45
 
 
 def fetch_newest_ts(url: str, key: str) -> list[dict]:
-    """logs テーブル全体の最新1行を取得する（失敗し続けたら exit 1）。"""
+    """logs テーブル全体の最新1行を取得する。
+
+    失敗し続けたら QueryFailed を送出する（**ここでは exit しない**）。
+    detail / cause を GITHUB_OUTPUT へ書けるのは main だけなので、
+    落ちる場所を main に一本化する（2026-09-09。通知が空になっていた件の修正）。
+    """
     q = urllib.parse.urlencode({"select": "ts", "order": "ts.desc", "limit": "1"})
     req = urllib.request.Request(f"{url}/rest/v1/logs?{q}", headers=_auth_headers(key))
-    last_err: Exception | None = None
     for attempt in range(1, NEWEST_ATTEMPTS + 1):
         try:
             with urllib.request.urlopen(req, timeout=NEWEST_TIMEOUT) as r:
                 return json.loads(r.read().decode())
         except Exception as e:  # noqa: BLE001
-            last_err = e
+            if is_billing_error(e):
+                # 401/402/403 は再試行しても直らない。バックオフで何十秒も待つ意味がないので
+                # 即座に諦め、その分だけ早く「本当の原因」を人間へ届ける。
+                print("[heartbeat] 再試行しない失敗(401/402/403) — 即座に報告します")
+                raise QueryFailed(describe(e)) from e
             if attempt < NEWEST_ATTEMPTS:
                 wait = backoff_delay(attempt + 1, NEWEST_BACKOFF_CAP)
                 print(f"[heartbeat] 照会失敗({e}) — {wait:.0f}秒後に再試行 {attempt}/{NEWEST_ATTEMPTS}")
                 time.sleep(wait)
-    print(f"::error::Supabase 照会に失敗: {last_err}")
-    sys.exit(1)
+            else:
+                raise QueryFailed(describe(e)) from e
+    raise QueryFailed(describe(None))  # 到達しない（ループは必ず return か raise で抜ける）
 
 
 def newest_ts_for_store(url: str, key: str, store_id: str) -> tuple[str | None, Exception | None]:
@@ -98,6 +123,9 @@ def newest_ts_for_store(url: str, key: str, store_id: str) -> tuple[str | None, 
                 return (data[0]["ts"] if data else None), None
         except Exception as e:  # noqa: BLE001
             err = e
+            # 401/402/403 は再試行しても直らない（42店 x 3回 ぶん待つ意味がない）。
+            if is_billing_error(e):
+                break
             if attempt < PER_STORE_ATTEMPTS:
                 time.sleep(backoff_delay(attempt, PER_STORE_BACKOFF_CAP))
     return None, err
@@ -214,9 +242,16 @@ def _append_env_file(env_name: str, text: str) -> None:
         fh.write(text)
 
 
-def _emit(detail: str) -> None:
+def _emit(detail: str, cause: str = "") -> None:
+    """通知に載る2つの値を GHA へ渡す。
+
+    `cause` は通知の1行目に置く推定原因。ワークフロー側は
+    `outputs.cause || '<従来の固定文>'` の形で受けるので、ここが空でも従来どおりになる。
+    """
     _append_env_file("GITHUB_STEP_SUMMARY", detail + "\n")
     _append_env_file("GITHUB_OUTPUT", "detail<<EOF\n" + detail + "\nEOF\n")
+    if cause:
+        _append_env_file("GITHUB_OUTPUT", "cause<<EOF\n" + cause + "\nEOF\n")
 
 
 def main() -> int:
@@ -231,7 +266,16 @@ def main() -> int:
     except ValueError:
         threshold_minutes = 30
 
-    rows = fetch_newest_ts(url, key)
+    try:
+        rows = fetch_newest_ts(url, key)
+    except QueryFailed as exc:
+        # 【2026-09-09】ここが「3日半気づけなかった」穴の直し。落ちる前に必ず理由を出す。
+        failure = exc.failure
+        detail = failure.detail()
+        _emit(detail, failure.cause_line(GENERIC_CAUSE))
+        print(detail)
+        print(f"::error::Supabase 照会に失敗: {failure.message}")
+        return 1
     if not rows:
         detail = "logs テーブルが空です（収集が一度も成功していない可能性）。"
         _emit(detail)
