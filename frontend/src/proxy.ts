@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-import { fetchLatestPublishedReportByStore, fetchPublishedEditorialBySlug } from "@/lib/supabase/blogDrafts";
+import { getStoreMetaBySlugStrict } from "@/app/config/stores";
+import {
+  fetchLatestPublishedReportByStoreWithStatus,
+  fetchPublishedEditorialBySlug,
+} from "@/lib/supabase/blogDrafts";
 
 /**
  * /blog/[slug], /reports/daily/[store_slug], /reports/weekly/[store_slug] は
@@ -38,10 +42,35 @@ async function blogSlugExists(slug: string): Promise<boolean> {
   return row !== null;
 }
 
+/**
+ * レポートの存在確認。**取得できなかったときは「ある」側に倒す（fail-open）**。
+ *
+ * 2026-09-09（Supabase 402 で全リクエストが失敗した事故）:
+ * 旧実装は「行が無い」と「見に行けていない」をどちらも false に潰していたため、障害中は
+ * 実在する 84 本のレポート URL がすべて /__not_found__ へ rewrite され、本物の 404 として
+ * CDN に載った。404 は HIT で配られるので復旧後もしばらく残り、Search Console にも
+ * クロールエラーが積み上がる。取得できていないだけならページ側に通し、ページが
+ * 「一時的に取得できません」を 200 で返す（ReportTemporarilyUnavailable）。
+ *
+ * ただし fail-open の対象は**店舗マスタに実在する slug だけ**に限る。
+ * 理由: ページ側の notFound() は上のコメントのとおり soft-404（HTTP 200）になり、
+ * app/not-found.tsx が無いので layout.tsx の robots{index:true} をそのまま継承する。
+ * つまり slug を選ばず fail-open すると、障害中は /reports/daily/<任意文字列> が
+ * 「インデックス可能な 200」で無限に返る（クロールバジェットの浪費・ゴミ URL の登録）。
+ * マスタ照合は stores.json を読むだけで Supabase を引かないので、障害中でも必ず判定でき、
+ * 実在 84 本を救う利益（fail-open）はそのまま残る。
+ */
 async function reportExists(storeSlug: string, contentType: "daily" | "weekly"): Promise<boolean> {
   const normalized = storeSlug.trim().toLowerCase();
   if (!normalized) return false;
-  const row = await fetchLatestPublishedReportByStore(normalized, contentType);
+  // マスタに無い slug はページ側も必ず notFound() を返す（reports/{daily,weekly}/[store_slug]/
+  // page.tsx の getStoreMetaBySlugStrict）ので、ここで 404 に倒しても正常時の挙動は変わらない。
+  if (!getStoreMetaBySlugStrict(normalized)) return false;
+  const { row, failed } = await fetchLatestPublishedReportByStoreWithStatus(
+    normalized,
+    contentType,
+  );
+  if (failed) return true;
   return row !== null;
 }
 

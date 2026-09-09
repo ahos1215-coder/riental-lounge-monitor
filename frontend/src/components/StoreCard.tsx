@@ -48,6 +48,15 @@ type StoreCardProps = {
   forecastPending?: boolean;
   isLoading?: boolean;
   /**
+   * 実測データを取得できなかった（＝人数が不明）。true のとき呼び出し側は stats を渡さず、
+   * カードは数値の代わりに「取得できていません」と出す。
+   *
+   * 2026-09-09 の Supabase 402 事故で、取得失敗した店の空 rows がそのまま
+   * 「男性0 / 女性0 / 計0」として描画され、全店ガラガラという誤情報が 3 日半出ていた。
+   * 「0 人」と「取れていない」を表示でも区別するためのフラグ（既定 false ＝従来の見た目）。
+   */
+  dataUnavailable?: boolean;
+  /**
    * 表示中の人数/%（stats）の元になった最新実測行の ts（ISO文字列）。
    * 閉店中などで実測が古い（既定20分以上前）場合に「閉店中・最終 HH:MM 時点」の
    * 鮮度ラベルを出すために使う。未指定ならラベルは出さない（従来どおり数値のみ表示）。
@@ -99,6 +108,7 @@ function StoreCardImpl({
   sparklineGenderTimes,
   forecastPending = false,
   isLoading = false,
+  dataUnavailable = false,
   megribiScore,
   latestActualTs,
   onNavigate,
@@ -213,6 +223,13 @@ function StoreCardImpl({
               {freshnessLabel}
             </p>
           )}
+          {/* 取得できていない店は数値を一切出さず、その事実を書く（0人と誤読させない）。
+              stats が来ていれば従来どおり数値を出すので、正常時の見た目は変わらない。 */}
+          {!hasStats && dataUnavailable && (
+            <p className="mt-2 text-[11px] text-amber-200/80">
+              混雑データを取得できていません
+            </p>
+          )}
           {hasStats && (
             <div className="mt-2 space-y-2">
               <div className="flex items-center gap-2 text-[11px]">
@@ -291,7 +308,9 @@ function StoreCardImpl({
             <div className="h-12 w-full animate-pulse rounded bg-slate-800/60" aria-hidden />
           ) : (
             <p className="flex min-h-12 items-center justify-center px-2 text-center text-[10px] leading-snug text-white/35">
-              男女内訳つきの実測が十分に無く、推移を表示できません
+              {dataUnavailable
+                ? "データを取得できていないため、推移を表示できません"
+                : "男女内訳つきの実測が十分に無く、推移を表示できません"}
             </p>
           )
         ) : hasGenderTrend ? (
@@ -362,6 +381,7 @@ export const StoreCard = memo(StoreCardImpl, (prev, next) => {
     prev.isHighlight === next.isHighlight &&
     prev.forecastPending === next.forecastPending &&
     prev.isLoading === next.isLoading &&
+    prev.dataUnavailable === next.dataUnavailable &&
     prev.megribiScore === next.megribiScore &&
     prev.latestActualTs === next.latestActualTs &&
     statsEqual(prev.stats, next.stats) &&

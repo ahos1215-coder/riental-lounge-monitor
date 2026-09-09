@@ -9,18 +9,8 @@ import { getMetadataBaseUrl } from "@/lib/siteUrl";
 import { buildPageMetadata } from "@/lib/seo/pageMetadata";
 import { buildBreadcrumbList, serializeJsonLd } from "@/lib/jsonLd";
 import { SHOW_MEGRIBI_JUDGMENTS } from "@/lib/featureFlags";
-import {
-  STORE_CARD_RANGE_LIMIT,
-  STORE_CARD_SPARKLINE_POINTS,
-  buildActualSparklineFromRange,
-  buildGenderSparklineFromRange,
-} from "@/lib/storeCardRangeSparkline";
-import {
-  latestCountsOrZero,
-  parseRangeEnvelope,
-  pickLatestRow,
-  type RangeRow,
-} from "@/lib/range/rangeRows";
+import { STORE_CARD_RANGE_LIMIT } from "@/lib/storeCardRangeSparkline";
+import { buildInitialStoreCards } from "./initialStoreCards";
 
 /** /api/range_multi のCDN TTL(60s)に合わせる。一覧1ページ目の初期表示はこの粒度で十分。 */
 export const revalidate = 60;
@@ -51,7 +41,9 @@ const INITIAL_PAGE_SIZE = 12;
 
 type RangeMultiResponse = {
   ok?: boolean;
-  by_slug?: Record<string, { rows?: unknown[] }>;
+  // 店舗ごとのエントリは成功なら {rows:[...]}、その店だけ失敗なら {ok:false, error, rows:[]}。
+  // どちらかの読み分けは lib/range/rangeMultiStatus.ts が単一ソース。
+  by_slug?: Record<string, unknown>;
 };
 
 type MegribiScoreResponse = {
@@ -115,38 +107,8 @@ async function fetchInitialStoreCards(): Promise<Record<string, StoreRealtimeCar
     }
   }
 
-  const cards: Record<string, StoreRealtimeCard> = {};
-  for (const store of targets) {
-    const rows = rangeJson.by_slug[store.slug]?.rows;
-    if (!Array.isArray(rows)) continue;
-
-    const rangeRows = parseRangeEnvelope<RangeRow>({ rows });
-    const actualSparkline = buildActualSparklineFromRange(rangeRows, STORE_CARD_SPARKLINE_POINTS);
-    const { men: sparklineMen, women: sparklineWomen } = buildGenderSparklineFromRange(
-      rangeRows,
-      STORE_CARD_SPARKLINE_POINTS,
-    );
-    const current = pickLatestRow(rangeRows) ?? {};
-    const { men: menNow, women: womenNow, total: nowTotal } = latestCountsOrZero(current);
-
-    cards[store.slug] = {
-      slug: store.slug,
-      stats: {
-        menCount: menNow,
-        womenCount: womenNow,
-        nowTotal,
-        peakPredTotal: 0,
-        genderRatio: `${menNow}:${womenNow}`,
-        crowdLevel: "取得中",
-        recommendLabel: "取得中",
-      },
-      sparkline: actualSparkline,
-      sparklineMen,
-      sparklineWomen,
-      forecastPending: true,
-      megribiScore: scoreMap.has(store.slug) ? (scoreMap.get(store.slug) as number) : null,
-    };
-  }
+  // 取得できなかった店は「0 人」ではなく dataUnavailable のカードになる（initialStoreCards.ts）。
+  const cards = buildInitialStoreCards(targets, rangeJson.by_slug, scoreMap);
 
   return Object.keys(cards).length > 0 ? cards : null;
 }

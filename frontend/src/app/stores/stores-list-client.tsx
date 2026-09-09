@@ -19,10 +19,14 @@ import {
 } from "@/lib/storeCardRangeSparkline";
 import {
   latestCountsOrZero,
-  parseRangeEnvelope,
   pickLatestRow,
   type RangeRow,
 } from "@/lib/range/rangeRows";
+import {
+  readRangeMultiSlug,
+  readSingleRangeOutcome,
+  type SlugRangeOutcome,
+} from "@/lib/range/rangeMultiStatus";
 import {
   STORES_PER_PAGE,
   crowdLabelFromPred,
@@ -30,6 +34,7 @@ import {
   type BrandFilter,
   type ForecastTotalRow,
 } from "./storesListHelpers";
+import { withCardUnavailable } from "./storeCardUnavailable";
 import { StoresFilterBar } from "./StoresFilterBar";
 import { StoresPagination } from "./StoresPagination";
 import { StoresStatsFooter } from "./StoresStatsFooter";
@@ -37,7 +42,13 @@ import { StoresStatsFooter } from "./StoresStatsFooter";
 /** page.tsx（サーバー snapshot）とクライアント側 fetch の両方で使う共通シェイプ。 */
 export type StoreRealtimeCard = {
   slug: string;
-  stats: {
+  /**
+   * 実測が取れた店だけ入る。取得に失敗した店は **undefined のまま** にして
+   * dataUnavailable:true を立てる（0 人として描かないための唯一の担保）。
+   * 2026-09-09 の Supabase 402 事故では、失敗店の空 rows が 0 に潰れて
+   * 全 42 店「男性0 / 女性0 / 計0」という誤情報が 3 日半出ていた。
+   */
+  stats?: {
     menCount: number;
     womenCount: number;
     nowTotal: number;
@@ -46,6 +57,8 @@ export type StoreRealtimeCard = {
     crowdLevel: string;
     recommendLabel: string;
   };
+  /** 実測を取得できなかった（人数不明）。StoreCard は数値の代わりに理由を出す。 */
+  dataUnavailable?: boolean;
   sparkline: number[];
   /** sparkline と同順・同数の各点タイムスタンプ(epoch ms)。閉店ギャップで折れ線分割に使う。 */
   sparklineTimes?: number[];
@@ -219,8 +232,19 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
       type ForecastBatchBody = { ok?: boolean; by_slug?: Record<string, { data?: ForecastTotalRow[] }> };
       type RangeBatchResult = {
         ok: boolean;
-        bySlug: Map<string, RangeRow[]>;
+        /** 店舗ごとに「取れた行」か「取れていない理由」か。0 人との取り違えを型で防ぐ。 */
+        bySlug: Map<string, SlugRangeOutcome>;
       };
+
+      /**
+       * その店の実測が取得できなかったときのカード。stats を**付けない**ことで
+       * StoreCard 側の hasStats が false になり、人数は 1 つも描画されない。
+       * ただし既に良品カードが出ている店は消さない（判断は withCardUnavailable に集約）。
+       */
+      function markCardUnavailable(slug: string): void {
+        if (signal.aborted) return;
+        setStoreRealtime((prev) => withCardUnavailable(prev, slug));
+      }
 
       // ① range_multi・forecast_today_multi・megribi_score を完全並列で発火する。
       // 旧実装は range_multi の完了を await してから forecast/megribi を発火しており、
@@ -241,10 +265,11 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
           if (!j?.ok || !j?.by_slug || typeof j.by_slug !== "object") {
             return { ok: false, bySlug: new Map() };
           }
-          const bySlug = new Map<string, RangeRow[]>();
+          const bySlug = new Map<string, SlugRangeOutcome>();
           for (const s of targets) {
-            const rows = j.by_slug[s.slug]?.rows ?? [];
-            bySlug.set(s.slug, parseRangeEnvelope<RangeRow>({ rows }));
+            // by_slug のエントリは店舗ごとに ok:false + rows:[] になりうる（部分障害）。
+            // rows だけを見て 0 人にしないよう readRangeMultiSlug に読み分けさせる。
+            bySlug.set(s.slug, readRangeMultiSlug(j.by_slug[s.slug]));
           }
           return { ok: true, bySlug };
         })
@@ -312,8 +337,14 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
           const rangeMulti = await rangeMultiPromise;
           if (signal.aborted) return;
           let rangeRows: RangeRow[];
-          if (rangeMulti.ok && rangeMulti.bySlug.has(store.slug)) {
-            rangeRows = rangeMulti.bySlug.get(store.slug)!;
+          const batchOutcome = rangeMulti.ok ? rangeMulti.bySlug.get(store.slug) : undefined;
+          if (batchOutcome) {
+            // その店だけ上流エラー / 観測ゼロ行なら、人数を作らずに「取得できていない」を出す。
+            if (!batchOutcome.available) {
+              markCardUnavailable(store.slug);
+              return;
+            }
+            rangeRows = batchOutcome.rows;
           } else {
             // バッチ失敗時のみ個別 /api/range にフォールバック
             const rangeRes = await fetch(
@@ -321,10 +352,18 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
               { signal },
             );
             if (signal.aborted) return;
-            if (!rangeRes.ok) return;
+            if (!rangeRes.ok) {
+              markCardUnavailable(store.slug);
+              return;
+            }
             const rangeBody: unknown = await rangeRes.json();
             if (signal.aborted) return;
-            rangeRows = parseRangeEnvelope<RangeRow>(rangeBody);
+            const single = readSingleRangeOutcome(rangeBody);
+            if (!single.available) {
+              markCardUnavailable(store.slug);
+              return;
+            }
+            rangeRows = single.rows;
           }
 
           const actualSeries = buildActualSparklineSeriesFromRange(
@@ -366,6 +405,8 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
           setStoreRealtime((prev) => ({ ...prev, [store.slug]: partialCard }));
         } catch (err) {
           if (signal.aborted || isAbortError(err)) return;
+          // 例外（ネットワーク断・JSON 不正）も「取得できていない」であって 0 人ではない。
+          markCardUnavailable(store.slug);
           return;
         }
 
@@ -430,7 +471,9 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
           if (signal.aborted || isAbortError(err)) return;
           setStoreRealtime((prev) => {
             const cur = prev[store.slug];
-            if (!cur) return prev;
+            // 実測が無いカード（stats 未設定＝取得できていない店）は予測の失敗で
+            // 触らない。ここで stats を作ると 0 人が復活してしまう。
+            if (!cur?.stats) return prev;
             return {
               ...prev,
               [store.slug]: {
@@ -541,6 +584,7 @@ export default function StoresListClient({ initialCards }: StoresListClientProps
                       sparklineWomen={storeRealtime[store.slug]?.sparklineWomen}
                       sparklineGenderTimes={storeRealtime[store.slug]?.sparklineGenderTimes}
                       forecastPending={storeRealtime[store.slug]?.forecastPending}
+                      dataUnavailable={storeRealtime[store.slug]?.dataUnavailable}
                       isLoading={realtimeLoading && !storeRealtime[store.slug]}
                       megribiScore={storeRealtime[store.slug]?.megribiScore}
                       latestActualTs={storeRealtime[store.slug]?.latestActualTs}

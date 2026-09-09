@@ -12,7 +12,7 @@ import type { Metadata } from "next";
 vi.mock("server-only", () => ({}));
 
 // Supabase 依存（daily / weekly / blog editorial）は固定データに差し替える。
-// generateMetadata は行が無いと notFound() を投げるため、必ず 1 行返す。
+// generateMetadata は「取得できたうえで 0 件」のとき notFound() を投げるため、必ず 1 行返す。
 vi.mock("@/lib/supabase/blogDrafts", () => ({
   fetchLatestPublishedReportByStore: vi.fn(async () => ({
     id: "row-1",
@@ -22,6 +22,21 @@ vi.mock("@/lib/supabase/blogDrafts", () => ({
     insight_json: {},
     target_date: "2026-08-18",
     created_at: "2026-08-18T09:00:00Z",
+  })),
+  // reports/daily・weekly のページは「0件」と「障害」を区別する WithStatus 版を使う
+  // （障害時に 404 を CDN へ焼かないため。2026-09-09）。正常系のメタは行の中身を
+  // 使わないので、ここは failed:false + 1 行を返せば従来のスナップショットと同じになる。
+  fetchLatestPublishedReportByStoreWithStatus: vi.fn(async () => ({
+    row: {
+      id: "row-1",
+      store_slug: "shibuya",
+      mdx_content: "---\ntitle: x\n---\n# 見出し\n\n本文です。",
+      facts_id: null,
+      insight_json: {},
+      target_date: "2026-08-18",
+      created_at: "2026-08-18T09:00:00Z",
+    },
+    failed: false,
   })),
   // blog は「editorial あり」と「filesystem のみ」の両分岐を撮りたいので slug で切り替える。
   fetchPublishedEditorialBySlug: vi.fn(async (slug: string) =>
