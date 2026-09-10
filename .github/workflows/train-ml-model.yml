@@ -1,5 +1,13 @@
 name: Train ML model
 
+# 【2026-09-11 一時措置・日付で自動解除】Supabase が無料枠超過で全リクエストに HTTP 402 を
+# 返している間（docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md）、このジョブは必ず落ちて失敗メールを
+# 量産する。そこで先頭の "Quota pause gate" が「解除日より前」かつ「実際に 402」の両方成立時だけ
+# 後続ステップを丸ごとスキップし、ジョブを成功として終える（＝メールも notify も出ない）。
+# 解除日は既定 2026-09-16（scripts/monitor/quota_pause.py）で、その日が来たら Supabase が
+# 直っていなくても必ず通常運転に戻る。402 と確認できない場合も必ず通常運転（＝アラートを出す）。
+# 手動実行（workflow_dispatch）は止まりません。手で回したときは必ず本体が動きます。
+
 on:
   workflow_dispatch:
     inputs:
@@ -44,12 +52,34 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ── Supabase 402 の間だけアラートを止めるゲート（日付で自動解除）──────────
+      # 実体は scripts/monitor/quota_pause.py。止める条件は「解除日より前」かつ
+      # 「Supabase が実際に 402」の両方成立時だけで、それ以外は必ず paused=false。
+      # ゲート自身は常に exit 0（ここでジョブを赤くしない）。
+      - name: Quota pause gate
+        id: quota_gate
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 未設定なら scripts/monitor/quota_pause.py の既定日が使われる。
+          OPS_QUOTA_PAUSE_UNTIL: ${{ vars.OPS_QUOTA_PAUSE_UNTIL }}
+          # 手動実行を絶対に止めないための入力（2026-09-11 追加）。手で回すのは
+          # 「今どうなっているか自分の目で確かめたい」ときなので、ここでゲートに
+          # 黙ってスキップされると確かめる手段そのものが消える。ゲート側は
+          # この値が workflow_dispatch なら無条件で paused=false を返す。
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: python3 scripts/monitor/quota_pause.py
+
+      # ここから下は paused=true の間だけスキップされる。空文字（ゲートが落ちた場合）は
+      # 'true' ではないので通常どおり実行される＝fail-closed。
       - name: Setup Python
+        if: steps.quota_gate.outputs.paused != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install dependencies
+        if: steps.quota_gate.outputs.paused != 'true'
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
@@ -58,6 +88,7 @@ jobs:
       # 日次スケジュールでは固定パラメータで再学習のみ（GHA 実行時間 90% 削減）。
       # workflow_dispatch（手動実行）時は vars.ML_OPTUNA_ENABLED をそのまま使う。
       - name: Determine Optuna mode
+        if: steps.quota_gate.outputs.paused != 'true'
         id: optuna
         run: |
           if [ "${{ github.event.schedule }}" = "0 22 * * 0" ]; then
@@ -76,6 +107,7 @@ jobs:
       # exposes as an environment variable to every step automatically — no
       # extra wiring needed here beyond running the script.
       - name: Train and upload model artifacts
+        if: steps.quota_gate.outputs.paused != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

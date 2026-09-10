@@ -17,8 +17,9 @@
 #   `{"ok":true,"rows":[]}` を緑にしていたら**このワークフローの名前が嘘になる**ため。
 #   実際 2026-09-06 07:00 に収集だけが止まり Supabase は生きている、という状態が起きた。
 #   その形は HTTP だけ見ていると素通りする。
-#   経路は Vercel(CDN + プロキシ) → Render(Flask) → Supabase。この監視自身は
-#   Supabase の認証情報も PC も Ollama も使わないので、**それらが全部死んでいても動く**。
+#   経路は Vercel(CDN + プロキシ) → Render(Flask) → Supabase。この監視の**判定そのもの**は
+#   Supabase の認証情報も PC も Ollama も使わないので、**それらが全部死んでいても動く**
+#   （下の一時停止ゲートだけは 402 判定のため認証情報を読むが、2026-09-16 に自動失効する）。
 #   2026-09-05 の状態なら /api/range は 502 と
 #   {"ok":false,"error":"upstream-supabase","detail":"supabase returned status 402 ..."}
 #   を返すので、HTTPステータスと応答本文の両方が通知に載る（＝原因が1通で分かる）。
@@ -57,6 +58,15 @@
 #     （通知基盤は check-pat-expiry.yml と同じ LINE Messaging API push を流用。新設していない）
 #   OPS_NOTIFY_WEBHOOK_URL — notify-on-failure.yml 側で未設定ならスキップされる。
 #   いずれも無くても、ジョブが赤くなれば GitHub の失敗メールは届く。
+#
+# 【一時停止ゲート / 2026-09-16 に自動解除】2026-09-11 追加:
+#   Supabase の無料枠超過（402）が請求リセットまで続くあいだ、この監視は当然ずっと赤で、
+#   毎時の失敗メールと約6時間毎の LINE が鳴り続ける。そこで先頭に
+#   scripts/monitor/quota_pause.py を置き、「2026-09-16 より前」かつ「Supabase が実際に
+#   402」の**両方**が成立したときだけ後続ステップを丸ごとスキップして成功で終える。
+#   期限を過ぎたら Supabase が直っていなくても必ず元の挙動に戻る（人手の復旧作業は不要）。
+#   402 以外・通信失敗・認証情報なし等は全部「止めない」側へ倒れる（fail-closed）。
+#   手動実行（workflow_dispatch）は止まりません。手で回したときは必ず本体が動きます。
 
 name: "🔴 サイト停止（利用者にデータが出ていません）"
 
@@ -81,7 +91,8 @@ on:
         required: false
         default: ""
 
-# 最小権限: このWFはリポジトリへ書き込まない（checkout もしない）。
+# 最小権限: このWFはリポジトリへ書き込まない。checkout は一時停止ゲートの
+# スクリプト（scripts/monitor/quota_pause.py）を読むためだけに使う。
 permissions:
   contents: read
 
@@ -97,8 +108,32 @@ jobs:
       body: ${{ steps.probe.outputs.body }}
       url: ${{ steps.probe.outputs.url }}
     steps:
+      # ゲートのスクリプトを読むためだけの checkout（このWFは元々 checkout していなかった）。
+      - name: Checkout（一時停止ゲートのスクリプトを読むため）
+        uses: actions/checkout@v4
+
+      # ── Supabase 402 の間だけ黙るゲート（2026-09-16 に自動解除）──────────────
+      # paused=true になるのは「解除日より前」かつ「Supabase が実際に 402」の両方が
+      # 成立したときだけ。それ以外（402以外・通信失敗・認証情報なし・日付が読めない）は
+      # すべて paused=false ＝ 従来どおりこの監視は鳴る。判定は quota_pause.py 側にあり、
+      # このスクリプトは常に exit 0（ゲート自身がジョブを赤くしない）。
+      - name: Quota pause gate
+        id: quota_gate
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 未設定なら scripts/monitor/quota_pause.py の既定日（2026-09-16）が使われる。
+          OPS_QUOTA_PAUSE_UNTIL: ${{ vars.OPS_QUOTA_PAUSE_UNTIL }}
+          # 手動実行を絶対に止めないための入力（2026-09-11 追加）。手で回すのは
+          # 「今どうなっているか自分の目で確かめたい」ときなので、ここでゲートに
+          # 黙ってスキップされると確かめる手段そのものが消える。ゲート側は
+          # この値が workflow_dispatch なら無条件で paused=false を返す。
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: python3 scripts/monitor/quota_pause.py
+
       - name: Probe public API as a visitor
         id: probe
+        if: steps.quota_gate.outputs.paused != 'true'
         env:
           # 入力はシェル本文に埋め込まず env 経由で渡す（スクリプトインジェクション対策）。
           PROBE_URL: ${{ github.event.inputs.url || 'https://www.meguribi.jp/api/range?store=shibuya&limit=1' }}
@@ -204,7 +239,9 @@ jobs:
 
       - name: Notify LINE
         # 停止しているときだけ送る。Secret 未設定ならスキップして続行する（壊さない）。
-        if: steps.probe.outputs.down == 'true'
+        # 一時停止ゲート中は LINE も止める（止め忘れると、失敗メールだけ黙って LINE が
+        # 鳴り続けるという中途半端な状態になり、承認メッセージを押し流し続ける）。
+        if: steps.quota_gate.outputs.paused != 'true' && steps.probe.outputs.down == 'true'
         env:
           LINE_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_USER: ${{ secrets.LINE_USER_ID }}
@@ -284,7 +321,13 @@ jobs:
         # ジョブが緑で終わる穴があった（＝監視が黙る。今回直したい失敗そのもの）。
         # ここを必ず走らせ、down が true/false のどちらでもない＝「判定できなかった」ときも
         # 赤にする。分からないときは緑で見逃すより赤で騒ぐ方を選ぶ（CLAUDE.md §3 fail-closed）。
-        if: always()
+        #
+        # 一時停止ゲートとの合成（2026-09-11）: `always()` を消さずに and で重ねる。
+        # ゲートで止めた回は probe が動いていない＝ down が空なので、この番人をそのまま
+        # 走らせると「判定できませんでした」で赤くなり、黙らせた意味が消える。
+        # 逆に、ゲート自身が壊れて outputs を書けなかった場合は paused が空文字になり
+        # 'true' ではないのでこの番人は通常どおり走る（＝黙らない側に倒れる）。
+        if: always() && steps.quota_gate.outputs.paused != 'true'
         env:
           DOWN: ${{ steps.probe.outputs.down }}
           STATUS: ${{ steps.probe.outputs.status }}

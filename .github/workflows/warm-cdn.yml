@@ -80,7 +80,18 @@
 #     `workflow_dispatch` のみ残す（手動実行はいつでも可能なまま）。プライマリは
 #     ローカル実行なので、これを無効化してもCDN温めは止まらない。
 #
-# 必要な Secrets: なし（本番URLは公開URLのため secrets 化していない）。
+# 必要な Secrets: 温め自体には不要（本番URLは公開URLのため secrets 化していない）。
+# ただし下の一時停止ゲートだけは 402 判定のため SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY を
+# 読む（2026-09-16 にゲートごと自動失効する。未設定でもゲートは「止めない」側に倒れるだけ）。
+#
+# 【一時停止ゲート / 2026-09-16 に自動解除】2026-09-11 追加:
+# Supabase の無料枠超過（402）のあいだは温め対象の /api/* が軒並みエラーになり、
+# 「失敗が過半数」の判定に引っかかって赤くなる（＝バックエンド障害を正しく検知しただけで、
+# 原因は既に分かっている）。そこで先頭に scripts/monitor/quota_pause.py を置き、
+# 「2026-09-16 より前」かつ「Supabase が実際に 402」の**両方**が成立したときだけ後続
+# ステップをスキップして成功で終える。期限を過ぎたら Supabase が直っていなくても必ず
+# 元に戻る（人手の復旧作業は不要）。402 以外・通信失敗・認証情報なしは全部「止めない」。
+# 手動実行（workflow_dispatch）は止まりません。手で回したときは必ず本体が動きます。
 
 name: Warm CDN (store APIs)
 
@@ -118,7 +129,26 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ── Supabase 402 の間だけ黙るゲート（2026-09-16 に自動解除）──────────────
+      # paused=true になるのは「解除日より前」かつ「Supabase が実際に 402」の両方が
+      # 成立したときだけ。それ以外はすべて paused=false ＝ 従来どおり温めも失敗検知も動く。
+      # 判定は quota_pause.py 側にあり、このスクリプトは常に exit 0。
+      - name: Quota pause gate
+        id: quota_gate
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 未設定なら scripts/monitor/quota_pause.py の既定日（2026-09-16）が使われる。
+          OPS_QUOTA_PAUSE_UNTIL: ${{ vars.OPS_QUOTA_PAUSE_UNTIL }}
+          # 手動実行を絶対に止めないための入力（2026-09-11 追加）。手で回すのは
+          # 「今どうなっているか自分の目で確かめたい」ときなので、ここでゲートに
+          # 黙ってスキップされると確かめる手段そのものが消える。ゲート側は
+          # この値が workflow_dispatch なら無条件で paused=false を返す。
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: python3 scripts/monitor/quota_pause.py
+
       - name: Warm range/range_multi/forecast_today/forecast_today_multi/megribi_score/forecast_snapshot
+        if: steps.quota_gate.outputs.paused != 'true'
         env:
           BASE_URL: ${{ github.event.inputs.base_url || 'https://www.meguribi.jp' }}
         run: |

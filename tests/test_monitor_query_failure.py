@@ -365,11 +365,48 @@ class Test日次チェックの照会失敗の届け方:
 WORKFLOWS = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 SITE_DOWN_WATCH = WORKFLOWS / "site-down-watch.yml"
 
+# Supabase 402 の間だけ黙る一時停止ゲート（2026-09-11 追加）のステップ id。
+# ここだけは Supabase の認証情報を使ってよい例外なので、id で名指しして扱う。
+GATE_STEP_ID = "quota_gate"
+
 
 def _yaml(path: Path) -> dict:
     import yaml
 
     return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def _step_by_id(path: Path, job: str, step_id: str) -> dict:
+    """ジョブの中から `id:` でステップを引く。
+
+    位置（steps[0] 等）で引くと、先頭に checkout やゲートのステップが増えた瞬間に
+    KeyError で落ちる。実際 2026-09-11 に一時停止ゲートを足したときそれで4本壊れた。
+    見たいのは「何番目のステップか」ではなく「どのステップか」なので id で引く。
+    """
+    steps = _yaml(path)["jobs"][job]["steps"]
+    for step in steps:
+        if step.get("id") == step_id:
+            return step
+    ids = [s.get("id") or f"(id無し: {s.get('name')})" for s in steps]
+    raise AssertionError(f"{path.name} の jobs.{job} に id={step_id!r} が無い（現在: {ids}）")
+
+
+def _yaml_without_gate_steps(path: Path) -> str:
+    """一時停止ゲートのステップだけを取り除いた YAML を文字列に戻す。
+
+    コメントは落ちるが、見たいのは「ワークフローが実際に何を使うか」なので都合がよい
+    （解説文に SUPABASE_URL と書いただけで赤くなる必要はない）。
+    """
+    import copy
+
+    import yaml
+
+    doc = copy.deepcopy(_yaml(path))
+    for job in (doc.get("jobs") or {}).values():
+        steps = job.get("steps")
+        if isinstance(steps, list):
+            job["steps"] = [s for s in steps if s.get("id") != GATE_STEP_ID]
+    return yaml.safe_dump(doc, allow_unicode=True)
 
 
 class Testサイト停止の外形監視:
@@ -380,12 +417,35 @@ class Testサイト停止の外形監視:
     この1本だけは「利用者に本物のデータが出ているか」を見る。
     """
 
-    def test_公開APIを叩いていてSupabaseの認証情報を使わない(self) -> None:
+    def test_一時停止ゲート以外はSupabaseの認証情報を使わない(self) -> None:
+        """**判定そのもの**が Supabase に依存しないこと（2026-09-09 の不変条件）。
+
+        元の形は「ファイル全体に SUPABASE の文字が出てこないこと」だった。理由は
+        「Supabase の秘密が要るなら、Supabase が死んだ日にこの監視も道連れになる」。
+        守りたい中身は今も同じで、変えたのは**書き方だけ**である。
+
+        なぜ一時停止ゲート（id: quota_gate）だけ例外にしてよいか（2026-09-11）:
+          ゲートは「Supabase が実際に 402 か」を確かめるためだけに認証情報を読む。
+          そして fail-closed で、認証情報が無い・通信に失敗した・402 以外が返った、の
+          どれでも paused=false ＝ **この監視は従来どおり鳴る**（scripts/monitor/
+          quota_pause.py の docstring と tests/test_monitor_quota_pause.py が固定している）。
+          つまり Supabase の道連れになるのは「黙る側」ではなく「鳴る側」なので、
+          この不変条件が本当に守りたかったこと（Supabase が死んだ日に監視が黙らない）は
+          壊れていない。壊れたのは文字列検索という**表現**だけ。
+
+        そこで、ゲートのステップだけを id で除いた残りに対して同じ検査を続ける。
+        ここが赤くなったら「probe や通知が Supabase に依存し始めた」＝本物の後退。
+        """
         text = SITE_DOWN_WATCH.read_text(encoding="utf-8")
         assert "https://www.meguribi.jp/api/range?store=shibuya&limit=1" in text
-        # Supabase の秘密が要るなら、Supabase が死んだ日にこの監視も道連れになる。
-        assert "SUPABASE_URL" not in text
-        assert "SUPABASE_SERVICE_ROLE_KEY" not in text
+
+        # 例外が「1ステップだけ」であることも一緒に固定する（増えたら気づける）。
+        gate = _step_by_id(SITE_DOWN_WATCH, "probe", GATE_STEP_ID)
+        assert "quota_pause.py" in gate["run"], "quota_gate が一時停止ゲート以外の何かになっている"
+
+        rest = _yaml_without_gate_steps(SITE_DOWN_WATCH)
+        assert "SUPABASE_URL" not in rest
+        assert "SUPABASE_SERVICE_ROLE_KEY" not in rest
 
     def test_ワークフロー名だけで意味が通る(self) -> None:
         """GitHub の失敗メールは件名にワークフロー名しか載せない。
@@ -408,7 +468,7 @@ class Testサイト停止の外形監視:
 
     def test_1回の非200では落とさない(self) -> None:
         """Render のコールドスタート由来の一時的な502で誤報しないこと。"""
-        run = _yaml(SITE_DOWN_WATCH)["jobs"]["probe"]["steps"][0]["run"]
+        run = _step_by_id(SITE_DOWN_WATCH, "probe", "probe")["run"]
         assert run.count("probe_once") >= 3  # 定義 + 1回目 + 再試行
         assert "sleep 60" in run
 
@@ -428,10 +488,28 @@ class Testサイト停止の外形監視:
         切れている。そのため「停止を検知したのに outputs を書けなかった」場合に
         ジョブが緑で終わる穴があった＝監視が黙る。最終ステップを always() で必ず走らせ、
         down が true/false のどちらでもないときも exit 1 することで塞ぐ。
+
+        一時停止ゲートとの合成（2026-09-11）:
+          ゲートで止めた回は probe が走らない＝ down が空なので、番人をそのまま走らせると
+          「判定できませんでした」で赤くなり、黙らせた意味が消える。そこで
+          `always() && steps.quota_gate.outputs.paused != 'true'` へ合成した。
+          完全一致（== "always()"）に戻さないこと。また同じ理由で壊れるし、
+          「always() を消してしまった」という**本物の後退**と区別がつかなくなる。
+          代わりに、① always() から始まること ② paused ガードが `&&` で重ねてあること、
+          の両方を見る。①を消しても②を消しても赤くなる。
         """
         steps = _yaml(SITE_DOWN_WATCH)["jobs"]["probe"]["steps"]
         guard = steps[-1]
-        assert guard["if"] == "always()", "番人が always() でないと probe が死んだ瞬間に黙る"
+        cond = guard["if"]
+        # ① 先頭の項が always() そのものであること。`||` で薄めたり、条件を前に足したり
+        #    すると第1項が always() ではなくなるので、ここで捕まる。
+        assert cond.split("&&")[0].strip() == "always()", (
+            f"番人が always() で始まっていないと probe が死んだ瞬間に黙る（if: {cond}）"
+        )
+        # ② 一時停止ゲートの条件が and で重ねてあること（or だと always() が無意味になる）。
+        assert "&&" in cond and "steps.quota_gate.outputs.paused != 'true'" in cond, (
+            f"一時停止ゲート中も番人が走ると「判定できませんでした」で赤くなる（if: {cond}）"
+        )
         run = guard["run"]
         # down が空（＝判定できなかった）でも参照できるように env で受けていること
         assert guard["env"]["DOWN"] == "${{ steps.probe.outputs.down }}"
@@ -446,7 +524,7 @@ class Testサイト停止の外形監視:
         200 + {"ok":true,"rows":[]} は「収集だけ止まって Supabase は生きている」形で、
         2026-09-06 07:00 に実際に起きた。HTTP だけ見ていると素通りする。
         """
-        run = _yaml(SITE_DOWN_WATCH)["jobs"]["probe"]["steps"][0]["run"]
+        run = _step_by_id(SITE_DOWN_WATCH, "probe", "probe")["run"]
         assert ".ok == true" in run
         assert ".rows" in run
         # 判定は「200 かつ 本文OK」の連言であること（片方だけで緑にしない）

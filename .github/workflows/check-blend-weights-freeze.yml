@@ -15,6 +15,16 @@ name: Check blend weights freeze integrity
 # 頻度は6時間毎。CLAUDE.md 罠#5: GitHub Actions の schedule 間引きは10分毎のような
 # 高頻度cron固有の問題で、日次/週次相当の低頻度cronは実測で発火欠落ゼロだった。
 # 6時間毎はその中間だが、間引かれても数時間の遅延で済み、凍結監視としては十分な頻度。
+#
+# 【一時停止ゲート / 2026-09-16 に自動解除】2026-09-11 追加:
+# Supabase の無料枠超過（402）が請求リセットまで続くあいだ、Storage を読むこの監視は
+# 必ず赤になり6時間毎に失敗メールが出る。そこで先頭に scripts/monitor/quota_pause.py を
+# 置き、「2026-09-16 より前」かつ「Supabase が実際に 402」の**両方**が成立したときだけ
+# 後続ステップをスキップして成功で終える。期限を過ぎたら Supabase が直っていなくても
+# 必ず元に戻る（人手の復旧作業は不要）。402 以外・通信失敗・認証情報なしは全部「止めない」。
+# なお凍結の実体は Storage 上のファイルなので、止まっているあいだ hash が変わることはない
+# （402 は読み取りも書き込みも通さない）。見張れない期間があるだけで、見逃しは増えない。
+# 手動実行（workflow_dispatch）は止まりません。手で回したときは必ず本体が動きます。
 
 on:
   schedule:
@@ -40,8 +50,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ── Supabase 402 の間だけ黙るゲート（2026-09-16 に自動解除）──────────────
+      # paused=true になるのは「解除日より前」かつ「Supabase が実際に 402」の両方が
+      # 成立したときだけ。それ以外はすべて paused=false ＝ 従来どおり監視が鳴る。
+      # 判定は quota_pause.py 側にあり、このスクリプトは常に exit 0。
+      - name: Quota pause gate
+        id: quota_gate
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 未設定なら scripts/monitor/quota_pause.py の既定日（2026-09-16）が使われる。
+          OPS_QUOTA_PAUSE_UNTIL: ${{ vars.OPS_QUOTA_PAUSE_UNTIL }}
+          # 手動実行を絶対に止めないための入力（2026-09-11 追加）。手で回すのは
+          # 「今どうなっているか自分の目で確かめたい」ときなので、ここでゲートに
+          # 黙ってスキップされると確かめる手段そのものが消える。ゲート側は
+          # この値が workflow_dispatch なら無条件で paused=false を返す。
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: python3 scripts/monitor/quota_pause.py
+
       - name: Check blend_weights freeze integrity
         id: check
+        if: steps.quota_gate.outputs.paused != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

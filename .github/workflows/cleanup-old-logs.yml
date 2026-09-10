@@ -13,6 +13,15 @@ name: Cleanup Old Logs
 # 存在を GitHub Releases API で確認し、無ければ --execute を止めて失敗させる
 # （notify-on-failure で運用者に通知）。workflow_dispatch の force=true で明示的に
 # バイパス可能（バックアップ機構自体のメンテなど、意図的にバイパスしたい運用向け）。
+#
+# 【2026-09-11 一時措置・日付で自動解除】Supabase が無料枠超過で全リクエストに HTTP 402 を
+# 返している間（docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md）、backup-logs.yml が失敗して
+# 「今週のバックアップ Release が無い」→ この check-backup が exit 1 → 失敗メール、という連鎖が起きる。
+# そこで両ジョブの先頭に "Quota pause gate" を置き、「解除日より前」かつ「実際に 402」の両方成立時だけ
+# 後続ステップを丸ごとスキップしてジョブを成功で終える（＝メールも notify も出ない）。解除日は既定
+# 2026-09-16（scripts/monitor/quota_pause.py）で、その日を過ぎたら必ず通常運転に戻る。
+# 402 と確認できない場合も必ず通常運転。止めている間は削除も走らないので、データが減ることはない。
+# 手動実行（workflow_dispatch）は止まりません。手で回したときは必ず本体が動きます。
 on:
   workflow_dispatch:
     inputs:
@@ -57,7 +66,35 @@ jobs:
     outputs:
       backup_ok: ${{ steps.check.outputs.backup_ok }}
     steps:
+      # ゲートは scripts/monitor/quota_pause.py を実行するので checkout が要る
+      # （このジョブは元々 checkout していなかった）。
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Supabase 402 の間だけアラートを止めるゲート（日付で自動解除）──────────
+      # 実体は scripts/monitor/quota_pause.py。止める条件は「解除日より前」かつ
+      # 「Supabase が実際に 402」の両方成立時だけで、それ以外は必ず paused=false。
+      # ゲート自身は常に exit 0（ここでジョブを赤くしない）。
+      - name: Quota pause gate
+        id: quota_gate
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 未設定なら scripts/monitor/quota_pause.py の既定日が使われる。
+          OPS_QUOTA_PAUSE_UNTIL: ${{ vars.OPS_QUOTA_PAUSE_UNTIL }}
+          # 手動実行を絶対に止めないための入力（2026-09-11 追加）。手で回すのは
+          # 「今どうなっているか自分の目で確かめたい」ときなので、ここでゲートに
+          # 黙ってスキップされると確かめる手段そのものが消える。ゲート側は
+          # この値が workflow_dispatch なら無条件で paused=false を返す。
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: python3 scripts/monitor/quota_pause.py
+
+      # ここから下は paused=true の間だけスキップされる。空文字（ゲートが落ちた場合）は
+      # 'true' ではないので通常どおり実行される＝fail-closed。
+      # スキップされると backup_ok は空文字になる。下の cleanup は BACKUP_OK != "true" を
+      # 「破壊的実行をしない」側に読むので、止めた週に誤って削除が走ることはない。
       - name: Verify this week's backup release exists
+        if: steps.quota_gate.outputs.paused != 'true'
         id: check
         env:
           GH_TOKEN: ${{ github.token }}
@@ -115,12 +152,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ── Supabase 402 の間だけアラートを止めるゲート（日付で自動解除）──────────
+      # steps コンテキストはジョブごとに独立しているので、check-backup と同じゲートを
+      # このジョブでも1回引く（週次ジョブなので追加リクエストは週2回。無視できる）。
+      # 実体は scripts/monitor/quota_pause.py。止める条件は「解除日より前」かつ
+      # 「Supabase が実際に 402」の両方成立時だけで、それ以外は必ず paused=false。
+      - name: Quota pause gate
+        id: quota_gate
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 未設定なら scripts/monitor/quota_pause.py の既定日が使われる。
+          OPS_QUOTA_PAUSE_UNTIL: ${{ vars.OPS_QUOTA_PAUSE_UNTIL }}
+          # 手動実行を絶対に止めないための入力（2026-09-11 追加）。手で回すのは
+          # 「今どうなっているか自分の目で確かめたい」ときなので、ここでゲートに
+          # 黙ってスキップされると確かめる手段そのものが消える。ゲート側は
+          # この値が workflow_dispatch なら無条件で paused=false を返す。
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: python3 scripts/monitor/quota_pause.py
+
+      # ここから下は paused=true の間だけスキップされる。空文字（ゲートが落ちた場合）は
+      # 'true' ではないので通常どおり実行される＝fail-closed。
       - name: Setup Python
+        if: steps.quota_gate.outputs.paused != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Run cleanup
+        if: steps.quota_gate.outputs.paused != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}

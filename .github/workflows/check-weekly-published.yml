@@ -8,6 +8,15 @@ name: Check weekly reports published
 # 店舗数が基準を満たさない、または最終更新が古すぎることで検知する。
 # 失敗時はジョブが exit 1 する → GitHub が自動でオーナーにメール通知。
 # さらに OPS_NOTIFY_WEBHOOK_URL があれば Slack/Discord にも通知する。
+#
+# 【一時停止ゲート / 2026-09-16 に自動解除】2026-09-11 追加:
+# Supabase の無料枠超過（402）が請求リセットまで続くあいだ、この監視は照会自体が失敗して
+# 必ず赤になる。そこで先頭に scripts/monitor/quota_pause.py を置き、「2026-09-16 より前」
+# かつ「Supabase が実際に 402」の**両方**が成立したときだけ後続ステップをスキップして
+# 成功で終える。期限を過ぎたら Supabase が直っていなくても必ず元に戻る（人手の復旧作業は
+# 不要）。402 以外・通信失敗・認証情報なしは全部「止めない」側へ倒れる。
+# 発火は週1回（木 08:00 JST）なので、実際に黙るのは解除日までに来る1回だけ。
+# 手動実行（workflow_dispatch）は止まりません。手で回したときは必ず本体が動きます。
 
 on:
   schedule:
@@ -49,8 +58,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # ── Supabase 402 の間だけ黙るゲート（2026-09-16 に自動解除）──────────────
+      # paused=true になるのは「解除日より前」かつ「Supabase が実際に 402」の両方が
+      # 成立したときだけ。それ以外はすべて paused=false ＝ 従来どおり監視が鳴る。
+      # 判定は quota_pause.py 側にあり、このスクリプトは常に exit 0。
+      - name: Quota pause gate
+        id: quota_gate
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 未設定なら scripts/monitor/quota_pause.py の既定日（2026-09-16）が使われる。
+          OPS_QUOTA_PAUSE_UNTIL: ${{ vars.OPS_QUOTA_PAUSE_UNTIL }}
+          # 手動実行を絶対に止めないための入力（2026-09-11 追加）。手で回すのは
+          # 「今どうなっているか自分の目で確かめたい」ときなので、ここでゲートに
+          # 黙ってスキップされると確かめる手段そのものが消える。ゲート側は
+          # この値が workflow_dispatch なら無条件で paused=false を返す。
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: python3 scripts/monitor/quota_pause.py
+
       - name: Query Supabase for latest weekly reports
         id: check
+        if: steps.quota_gate.outputs.paused != 'true'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
