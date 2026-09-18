@@ -14,13 +14,18 @@ name: Cleanup Old Logs
 # （notify-on-failure で運用者に通知）。workflow_dispatch の force=true で明示的に
 # バイパス可能（バックアップ機構自体のメンテなど、意図的にバイパスしたい運用向け）。
 #
-# 【2026-09-11 一時措置・日付で自動解除】Supabase が無料枠超過で全リクエストに HTTP 402 を
-# 返している間（docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md）、backup-logs.yml が失敗して
-# 「今週のバックアップ Release が無い」→ この check-backup が exit 1 → 失敗メール、という連鎖が起きる。
-# そこで両ジョブの先頭に "Quota pause gate" を置き、「解除日より前」かつ「実際に 402」の両方成立時だけ
-# 後続ステップを丸ごとスキップしてジョブを成功で終える（＝メールも notify も出ない）。解除日は既定
-# 2026-09-16（scripts/monitor/quota_pause.py）で、その日を過ぎたら必ず通常運転に戻る。
-# 402 と確認できない場合も必ず通常運転。止めている間は削除も走らないので、データが減ることはない。
+# 【反響の抑制 / 2026-09-18 に恒久化】Supabase が止まっている間は backup-logs.yml が失敗して
+# 「今週のバックアップ Release が無い」→ この check-backup が exit 1 → 失敗メール、という連鎖が
+# 起きる（docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md）。このWFは**反響**側＝上流が死んで
+# いれば巻き添えで赤くなるだけで、鳴っても新しい情報は増えない。そこで両ジョブの先頭に
+# "Quota pause gate"（scripts/monitor/quota_pause.py ＋ env の QUOTA_GATE_ALWAYS: "1"）を置き、
+# 「上流が止まっている署名」を観測している間だけ後続ステップを丸ごとスキップしてジョブを
+# 成功で終える（＝メールも notify も出ない）。署名は HTTP 402 と Supabase ホストの
+# 名前解決失敗の2つだけで、タイムアウト・5xx・401/403 では止めない。
+# **一次信号は別**: site-down-watch.yml（利用者にデータが出ていない）と
+# check-collection-heartbeat.yml（収集が止まった）にはゲート自体が無く、必ず鳴る。
+# 上流が戻れば次の実行から自動で通常運転に戻る（人手の復旧作業は不要）。
+# 止めている間は削除も走らないので、データが減ることはない。
 # 手動実行（workflow_dispatch）は止まりません。手で回したときは必ず本体が動きます。
 on:
   workflow_dispatch:
@@ -71,16 +76,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Supabase 402 の間だけアラートを止めるゲート（日付で自動解除）──────────
-      # 実体は scripts/monitor/quota_pause.py。止める条件は「解除日より前」かつ
-      # 「Supabase が実際に 402」の両方成立時だけで、それ以外は必ず paused=false。
+      # ── 上流が止まっている間だけ反響を抑えるゲート（2026-09-18 恒久化）────────
+      # 実体は scripts/monitor/quota_pause.py。止める条件は「上流が止まっている署名
+      # （402 / ホスト名の解決失敗）を観測した」ときだけで、それ以外は必ず paused=false。
       # ゲート自身は常に exit 0（ここでジョブを赤くしない）。
       - name: Quota pause gate
         id: quota_gate
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          # 未設定なら scripts/monitor/quota_pause.py の既定日が使われる。
+          # このWFは**反響**側（上流が死んでいれば必ず巻き添えで赤くなる）。解除日に関係なく、
+          # 上流が止まっている署名を観測している間は抑制する（2026-09-18 に恒久化）。
+          # 一次信号（site-down-watch / check-collection-heartbeat）にはゲート自体が無い。
+          QUOTA_GATE_ALWAYS: "1"
+          # 日付モード用。QUOTA_GATE_ALWAYS が効いている間は参照されない。
           OPS_QUOTA_PAUSE_UNTIL: ${{ vars.OPS_QUOTA_PAUSE_UNTIL }}
           # 手動実行を絶対に止めないための入力（2026-09-11 追加）。手で回すのは
           # 「今どうなっているか自分の目で確かめたい」ときなので、ここでゲートに
@@ -152,17 +161,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Supabase 402 の間だけアラートを止めるゲート（日付で自動解除）──────────
+      # ── 上流が止まっている間だけ反響を抑えるゲート（2026-09-18 恒久化）────────
       # steps コンテキストはジョブごとに独立しているので、check-backup と同じゲートを
       # このジョブでも1回引く（週次ジョブなので追加リクエストは週2回。無視できる）。
-      # 実体は scripts/monitor/quota_pause.py。止める条件は「解除日より前」かつ
-      # 「Supabase が実際に 402」の両方成立時だけで、それ以外は必ず paused=false。
+      # 実体は scripts/monitor/quota_pause.py。止める条件は「上流が止まっている署名
+      # （402 / ホスト名の解決失敗）を観測した」ときだけで、それ以外は必ず paused=false。
       - name: Quota pause gate
         id: quota_gate
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          # 未設定なら scripts/monitor/quota_pause.py の既定日が使われる。
+          # このWFは**反響**側（上流が死んでいれば必ず巻き添えで赤くなる）。解除日に関係なく、
+          # 上流が止まっている署名を観測している間は抑制する（2026-09-18 に恒久化）。
+          # 一次信号（site-down-watch / check-collection-heartbeat）にはゲート自体が無い。
+          QUOTA_GATE_ALWAYS: "1"
+          # 日付モード用。QUOTA_GATE_ALWAYS が効いている間は参照されない。
           OPS_QUOTA_PAUSE_UNTIL: ${{ vars.OPS_QUOTA_PAUSE_UNTIL }}
           # 手動実行を絶対に止めないための入力（2026-09-11 追加）。手で回すのは
           # 「今どうなっているか自分の目で確かめたい」ときなので、ここでゲートに

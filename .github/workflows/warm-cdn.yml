@@ -81,16 +81,19 @@
 #     ローカル実行なので、これを無効化してもCDN温めは止まらない。
 #
 # 必要な Secrets: 温め自体には不要（本番URLは公開URLのため secrets 化していない）。
-# ただし下の一時停止ゲートだけは 402 判定のため SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY を
-# 読む（2026-09-16 にゲートごと自動失効する。未設定でもゲートは「止めない」側に倒れるだけ）。
+# ただし下の一時停止ゲートだけは署名判定のため SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY を
+# 読む（未設定でもゲートは「止めない」側に倒れるだけで、温めそのものは動く）。
 #
-# 【一時停止ゲート / 2026-09-16 に自動解除】2026-09-11 追加:
-# Supabase の無料枠超過（402）のあいだは温め対象の /api/* が軒並みエラーになり、
-# 「失敗が過半数」の判定に引っかかって赤くなる（＝バックエンド障害を正しく検知しただけで、
-# 原因は既に分かっている）。そこで先頭に scripts/monitor/quota_pause.py を置き、
-# 「2026-09-16 より前」かつ「Supabase が実際に 402」の**両方**が成立したときだけ後続
-# ステップをスキップして成功で終える。期限を過ぎたら Supabase が直っていなくても必ず
-# 元に戻る（人手の復旧作業は不要）。402 以外・通信失敗・認証情報なしは全部「止めない」。
+# 【反響の抑制 / 2026-09-18 に恒久化】
+# Supabase が止まっているあいだは温め対象の /api/* が軒並みエラーになり、「失敗が過半数」の
+# 判定に引っかかって赤くなる（＝バックエンド障害を正しく検知しただけで、原因は既に分かって
+# いる）。このWFは**反響**側なので、先頭に scripts/monitor/quota_pause.py を置き
+# （env に QUOTA_GATE_ALWAYS: "1"）、「上流が止まっている署名」を観測している間だけ後続
+# ステップをスキップして成功で終える。署名は HTTP 402 と Supabase ホストの名前解決失敗の
+# 2つだけで、タイムアウト・5xx・401/403 では止めない。上流が戻れば次の実行から自動で
+# 通常運転に戻る（人手の復旧作業は不要）。
+# **一次信号は別**: site-down-watch.yml（利用者にデータが出ていない）と
+# check-collection-heartbeat.yml（収集が止まった）にはゲート自体が無く、必ず鳴る。
 # 手動実行（workflow_dispatch）は止まりません。手で回したときは必ず本体が動きます。
 
 name: Warm CDN (store APIs)
@@ -129,16 +132,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Supabase 402 の間だけ黙るゲート（2026-09-16 に自動解除）──────────────
-      # paused=true になるのは「解除日より前」かつ「Supabase が実際に 402」の両方が
-      # 成立したときだけ。それ以外はすべて paused=false ＝ 従来どおり温めも失敗検知も動く。
+      # ── 上流が止まっている間だけ反響を抑えるゲート（2026-09-18 恒久化）────────
+      # paused=true になるのは「上流が止まっている署名（402 / ホスト名の解決失敗）を
+      # 観測した」ときだけ。それ以外は paused=false ＝ 従来どおり温めも失敗検知も動く。
       # 判定は quota_pause.py 側にあり、このスクリプトは常に exit 0。
       - name: Quota pause gate
         id: quota_gate
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          # 未設定なら scripts/monitor/quota_pause.py の既定日（2026-09-16）が使われる。
+          # このWFは**反響**側（上流が死んでいれば必ず巻き添えで赤くなる）。解除日に関係なく、
+          # 上流が止まっている署名を観測している間は抑制する（2026-09-18 に恒久化）。
+          # 一次信号（site-down-watch / check-collection-heartbeat）にはゲート自体が無い。
+          QUOTA_GATE_ALWAYS: "1"
+          # 日付モード用。QUOTA_GATE_ALWAYS が効いている間は参照されない。
           OPS_QUOTA_PAUSE_UNTIL: ${{ vars.OPS_QUOTA_PAUSE_UNTIL }}
           # 手動実行を絶対に止めないための入力（2026-09-11 追加）。手で回すのは
           # 「今どうなっているか自分の目で確かめたい」ときなので、ここでゲートに

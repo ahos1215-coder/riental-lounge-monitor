@@ -19,13 +19,23 @@
     2) 再試行しても結果が変わらない。指数バックオフで何十秒も待つのは無駄なので、
        この3ステータスは即座に諦めて理由を報告する方が早く人間に届く。
 
-失敗の分類は3つある（2026-09-09 に3つ目を追加）:
+失敗の分類は4つある（2026-09-09 に3つ目、2026-09-18 に4つ目を追加）:
   1) 課金・認証起因（401/402/403）    … Supabase 側。再試行しても直らない。
-  2) 通信失敗（ステータスが取れない） … タイムアウト・DNS・接続断。
+  2) 通信失敗（ステータスが取れない） … タイムアウト・接続断。
   3) 本文が想定外（UnexpectedBody）  … **HTTP は成功している**が中身が想定した形ではない。
      3つ目を分けた理由: 以前は 2) と一緒くたに QueryFailed へ包んでいたため、通知に
      「HTTP ステータス: （なし＝通信失敗・タイムアウト）」と出ていた。実際は通信できて
      いて本文だけがおかしいので、読んだ人がネットワークを疑って調べる先を間違える。
+  4) ホスト名を解決できない（2026-09-18 追加）… Supabase 側が停止している疑い。
+     4つ目を分けた理由は 3) とまったく同じ「調べる先を間違えさせない」:
+     2026-09-12 以降、Supabase の壊れ方が「402 を返す」から「**ホスト名が引けない**」へ
+     変わった。ところがこれは 2) に潰れるため、9/12〜9/16 の通知には
+     「HTTP ステータス: （なし＝通信失敗・タイムアウト）」＋ ハズレの原因3つ
+     （PC停止 / Render障害 / cron-job.org障害）が並んだ。2026-09-05 の事故で直したはずの
+     「本当の原因が一文字も載らない」が、別の入口からそのまま再発していた。
+     urllib ではこの形は `URLError` の `reason` が `socket.gaierror` として現れる。
+     接続拒否もタイムアウトも同じ `URLError` なので、**reason の型**で見分ける
+     （メッセージ文字列で判定するとランナーの言語・libc 実装で簡単に壊れる）。
 
 公開リポジトリであることの扱い:
   detail_lines(include_body=False) は「誰でも読める場所（GITHUB_STEP_SUMMARY / Actions の
@@ -40,7 +50,9 @@ scripts/_retry_common.py 等と同じ規約で、呼び出し側が
 from __future__ import annotations
 
 import re
+import socket
 from dataclasses import dataclass
+from urllib.error import HTTPError, URLError
 
 # 「課金・認証起因」として他の失敗と区別するステータス。
 #   401 = キー不正 / 403 = 権限不足・プロジェクト停止 / 402 = 支払い・クォータ超過
@@ -92,6 +104,8 @@ class QueryFailure:
     message: str
     # HTTP は成功していて本文だけが想定外か（第3分類）。通信失敗と混ぜない。
     unexpected_body: bool = False
+    # Supabase のホスト名を解決できなかったか（第4分類）。同じく通信失敗と混ぜない。
+    host_unresolved: bool = False
 
     @property
     def is_billing(self) -> bool:
@@ -108,6 +122,10 @@ class QueryFailure:
         if self.unexpected_body:
             known = str(self.status) if self.status is not None else "不明"
             return f"{known}（通信は成功。本文が想定外の形）"
+        if self.host_unresolved:
+            # 「タイムアウト」と書かないのが肝。名前が引けないのはネットワークの遅さでは
+            # なく、宛先そのものが無いということなので、読む人の調べる先が変わる。
+            return "（なし＝Supabase のホスト名を解決できません）"
         if self.status is None:
             return "（なし＝通信失敗・タイムアウト）"
         return str(self.status)
@@ -126,6 +144,15 @@ class QueryFailure:
             return (
                 f"🔴 Supabase の応答が{where}想定外の形でした。"
                 "監視は判定できていません（通信自体は成功しています）。"
+            )
+        if self.host_unresolved:
+            # ここでも fallback（PC停止 / Render障害 / cron-job.org障害 / Ollama不調）は
+            # **1つも書かない**。ホスト名が引けない時点で疑うべきは Supabase 側であって、
+            # それらを並べると 9/12〜9/16 の通知と同じく読む人を外れに誘導する。
+            return (
+                "🔴 Supabase のホスト名を解決できませんでした。"
+                "Supabase 側が停止している疑いがあります"
+                "（プロジェクトの一時停止・削除、または DNS 障害）。"
             )
         if self.is_billing:
             # 誤った原因（PC停止 / Render障害 / cron-job.org障害 / Ollama不調）は**1つも書かない**。
@@ -168,6 +195,11 @@ class QueryFailure:
             lines.append(
                 "- 確認先: 上のステータスのとおり応答は届いています。"
                 "PC・Ollama・ネットワークではなく、返ってきた本文の中身を見ること。"
+            )
+        if self.host_unresolved:
+            lines.append(
+                "- 確認先: Supabase ダッシュボードでプロジェクトが生きているか"
+                "（一時停止 / 削除 / 無料枠超過による停止）。"
             )
         return lines
 
@@ -215,7 +247,23 @@ def describe(err: BaseException | None) -> QueryFailure:
         body=body,
         message=str(err) or type(err).__name__,
         unexpected_body=unexpected_body,
+        host_unresolved=is_host_unresolved(err),
     )
+
+
+def is_host_unresolved(err: BaseException | None) -> bool:
+    """Supabase のホスト名を解決できなかった失敗か（第4分類）。
+
+    HTTPError は URLError の**子**だが `.reason` は HTTP の理由句（文字列）なので、
+    先に除外しておかないと将来 reason の型が変わったときに誤判定しうる。
+    接続拒否・タイムアウトも同じ URLError で来るため、`socket.gaierror` という
+    **型**で見分ける（メッセージ文字列で判定すると言語設定や libc で壊れる）。
+    """
+    if isinstance(err, HTTPError):
+        return False
+    if not isinstance(err, URLError):
+        return False
+    return isinstance(getattr(err, "reason", None), socket.gaierror)
 
 
 def is_billing_error(err: BaseException | None) -> bool:

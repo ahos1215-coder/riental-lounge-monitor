@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import socket
 import sys
 import urllib.request
 from pathlib import Path
@@ -167,6 +168,74 @@ class Test本文が想定外という第3分類:
         assert qf.describe(qf.UnexpectedBody("x", status=200)).is_billing is False
 
 
+class Testホスト名が引けないという第4分類:
+    """「通信失敗」と「上流が消えている」を混ぜないこと（2026-09-18）。
+
+    守っている事故（2026-09-12〜09-16）: Supabase の壊れ方が「402 を返す」から
+    「**ホスト名が引けない**」へ変わった。ところがこれは「通信失敗（ステータスなし）」に
+    潰れるため、通知には
+      HTTP ステータス: （なし＝通信失敗・タイムアウト）
+      ⚠️ PC停止 / Render障害 / cron-job.org障害など
+    と出た。原因は Supabase 側なのに、示された調べ先は3つとも外れ——2026-09-05 の事故で
+    直したはずの「本当の原因が一文字も載らない」が、別の入口からそのまま再発していた。
+    """
+
+    @staticmethod
+    def _dns_error() -> URLError:
+        # urllib が名前解決の失敗を包む形そのもの（reason が socket.gaierror）。
+        return URLError(socket.gaierror(-2, "Name or service not known"))
+
+    def test_名前解決の失敗はSupabase停止の疑いとして分類される(self) -> None:
+        f = qf.describe(self._dns_error())
+        assert f.host_unresolved is True
+        assert f.status is None
+        assert f.unexpected_body is False
+
+    def test_タイムアウトとは書き分ける(self) -> None:
+        detail = qf.describe(self._dns_error()).detail()
+        assert "- HTTP ステータス: （なし＝Supabase のホスト名を解決できません）" in detail
+        assert "（なし＝通信失敗・タイムアウト）" not in detail
+
+    def test_1行目にSupabase停止の疑いが出てハズレの原因は出ない(self) -> None:
+        """9/12〜9/16 の通知に出ていた3つの外れを、1つも書かないこと。"""
+        fallback = "⚠️ PC停止 / Render障害 / cron-job.org障害など"
+        cause = qf.describe(self._dns_error()).cause_line(fallback)
+        assert "ホスト名を解決できませんでした" in cause
+        assert "Supabase 側が停止している疑い" in cause
+        for wrong in WRONG_CAUSES:
+            assert wrong not in cause
+
+    def test_調べに行く先が書いてある(self) -> None:
+        assert "Supabase ダッシュボード" in qf.describe(self._dns_error()).detail()
+
+    def test_タイムアウトは第4分類に混ざらない(self) -> None:
+        """名前は引けている＝宛先は在る。上流が消えた証拠にはならない。"""
+        f = qf.describe(URLError("The read operation timed out"))
+        assert f.host_unresolved is False
+        assert "（なし＝通信失敗・タイムアウト）" in f.detail()
+        assert qf.describe(URLError("timed out")).cause_line("固定文") == "固定文"
+
+    def test_接続拒否も第4分類に混ざらない(self) -> None:
+        f = qf.describe(URLError(ConnectionRefusedError(111, "Connection refused")))
+        assert f.host_unresolved is False
+
+    def test_HTTPErrorは第4分類に混ざらない(self) -> None:
+        """HTTPError は URLError の子。ここを取り違えると 402 の説明が消える。"""
+        f = qf.describe(_http_error(402))
+        assert f.host_unresolved is False
+        assert f.is_billing is True
+
+    def test_判定関数単体でも同じ結果になる(self) -> None:
+        assert qf.is_host_unresolved(self._dns_error()) is True
+        assert qf.is_host_unresolved(URLError("timed out")) is False
+        assert qf.is_host_unresolved(_http_error(402)) is False
+        assert qf.is_host_unresolved(None) is False
+
+    def test_課金起因とは別物として扱う(self) -> None:
+        """ステータスが無いので Billing 画面直行ではない（プロジェクトの生死が先）。"""
+        assert qf.describe(self._dns_error()).is_billing is False
+
+
 class Test公開リポジトリに本文を出さない:
     """このリポジトリは public。GITHUB_STEP_SUMMARY も Actions のログも誰でも読める。
 
@@ -268,6 +337,33 @@ class Test監視3本の照会失敗:
         assert recorder.calls <= 2
         assert recorder.calls < getattr(module, attempts_attr) * 2
 
+    def test_名前解決に失敗したらSupabase停止の疑いを1行目に出す(
+        self, module, attempts_attr, gha_env, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """9/12〜09/16 に実際に届いていた通知の中身を直すテスト（2026-09-18）。
+
+        このときの通知は「（なし＝通信失敗・タイムアウト）」＋ 外れの原因3つだった。
+        監視が止まっていたわけでも detail が空だったわけでもなく、**原因の名指しだけ**が
+        間違っていた。
+        """
+        recorder = _Recorder(lambda: URLError(socket.gaierror(-2, "Name or service not known")))
+        monkeypatch.setattr(urllib.request, "urlopen", recorder)
+        monkeypatch.setattr(module, attempts_attr, 1)  # 待たせない
+
+        assert module.main() == 1
+
+        outputs = _outputs(gha_env[0])
+        assert "- HTTP ステータス: （なし＝Supabase のホスト名を解決できません）" in outputs
+        assert "（なし＝通信失敗・タイムアウト）" not in outputs
+        assert "cause<<EOF" in outputs
+        cause = outputs.split("cause<<EOF\n", 1)[1]
+        assert "Supabase 側が停止している疑い" in cause
+        # 外れの原因（PC停止 / Render障害 / cron-job.org / Ollama）を1つも出さない
+        for wrong in WRONG_CAUSES:
+            assert wrong not in cause
+        # 固定文そのものへのフォールバックも起きていないこと
+        assert module.GENERIC_CAUSE not in cause
+
     def test_通信失敗でもdetailは空にならない(
         self, module, attempts_attr, gha_env, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -365,10 +461,6 @@ class Test日次チェックの照会失敗の届け方:
 WORKFLOWS = Path(__file__).resolve().parents[1] / ".github" / "workflows"
 SITE_DOWN_WATCH = WORKFLOWS / "site-down-watch.yml"
 
-# Supabase 402 の間だけ黙る一時停止ゲート（2026-09-11 追加）のステップ id。
-# ここだけは Supabase の認証情報を使ってよい例外なので、id で名指しして扱う。
-GATE_STEP_ID = "quota_gate"
-
 
 def _yaml(path: Path) -> dict:
     import yaml
@@ -391,24 +483,6 @@ def _step_by_id(path: Path, job: str, step_id: str) -> dict:
     raise AssertionError(f"{path.name} の jobs.{job} に id={step_id!r} が無い（現在: {ids}）")
 
 
-def _yaml_without_gate_steps(path: Path) -> str:
-    """一時停止ゲートのステップだけを取り除いた YAML を文字列に戻す。
-
-    コメントは落ちるが、見たいのは「ワークフローが実際に何を使うか」なので都合がよい
-    （解説文に SUPABASE_URL と書いただけで赤くなる必要はない）。
-    """
-    import copy
-
-    import yaml
-
-    doc = copy.deepcopy(_yaml(path))
-    for job in (doc.get("jobs") or {}).values():
-        steps = job.get("steps")
-        if isinstance(steps, list):
-            job["steps"] = [s for s in steps if s.get("id") != GATE_STEP_ID]
-    return yaml.safe_dump(doc, allow_unicode=True)
-
-
 class Testサイト停止の外形監視:
     """site-down-watch.yml が「Supabaseが死んでいても動く」形を保っていること。
 
@@ -417,35 +491,17 @@ class Testサイト停止の外形監視:
     この1本だけは「利用者に本物のデータが出ているか」を見る。
     """
 
-    def test_一時停止ゲート以外はSupabaseの認証情報を使わない(self) -> None:
-        """**判定そのもの**が Supabase に依存しないこと（2026-09-09 の不変条件）。
+    def test_公開APIを叩いていてSupabaseの認証情報を使わない(self) -> None:
+        """Supabase の秘密が要るなら、Supabase が死んだ日にこの監視も道連れになる。
 
-        元の形は「ファイル全体に SUPABASE の文字が出てこないこと」だった。理由は
-        「Supabase の秘密が要るなら、Supabase が死んだ日にこの監視も道連れになる」。
-        守りたい中身は今も同じで、変えたのは**書き方だけ**である。
-
-        なぜ一時停止ゲート（id: quota_gate）だけ例外にしてよいか（2026-09-11）:
-          ゲートは「Supabase が実際に 402 か」を確かめるためだけに認証情報を読む。
-          そして fail-closed で、認証情報が無い・通信に失敗した・402 以外が返った、の
-          どれでも paused=false ＝ **この監視は従来どおり鳴る**（scripts/monitor/
-          quota_pause.py の docstring と tests/test_monitor_quota_pause.py が固定している）。
-          つまり Supabase の道連れになるのは「黙る側」ではなく「鳴る側」なので、
-          この不変条件が本当に守りたかったこと（Supabase が死んだ日に監視が黙らない）は
-          壊れていない。壊れたのは文字列検索という**表現**だけ。
-
-        そこで、ゲートのステップだけを id で除いた残りに対して同じ検査を続ける。
-        ここが赤くなったら「probe や通知が Supabase に依存し始めた」＝本物の後退。
+        2026-09-11 に一時停止ゲート（402 判定のため認証情報を読む）を足したせいで、この
+        検問は一度「ゲートのステップだけ除いた残りを見る」形へ緩めた。2026-09-18 に
+        ゲートを撤去した（このWFは一次信号なので黙らせない）ので、元の厳しい形に戻す。
         """
         text = SITE_DOWN_WATCH.read_text(encoding="utf-8")
         assert "https://www.meguribi.jp/api/range?store=shibuya&limit=1" in text
-
-        # 例外が「1ステップだけ」であることも一緒に固定する（増えたら気づける）。
-        gate = _step_by_id(SITE_DOWN_WATCH, "probe", GATE_STEP_ID)
-        assert "quota_pause.py" in gate["run"], "quota_gate が一時停止ゲート以外の何かになっている"
-
-        rest = _yaml_without_gate_steps(SITE_DOWN_WATCH)
-        assert "SUPABASE_URL" not in rest
-        assert "SUPABASE_SERVICE_ROLE_KEY" not in rest
+        assert "SUPABASE_URL" not in text
+        assert "SUPABASE_SERVICE_ROLE_KEY" not in text
 
     def test_ワークフロー名だけで意味が通る(self) -> None:
         """GitHub の失敗メールは件名にワークフロー名しか載せない。
@@ -489,26 +545,27 @@ class Testサイト停止の外形監視:
         ジョブが緑で終わる穴があった＝監視が黙る。最終ステップを always() で必ず走らせ、
         down が true/false のどちらでもないときも exit 1 することで塞ぐ。
 
-        一時停止ゲートとの合成（2026-09-11）:
-          ゲートで止めた回は probe が走らない＝ down が空なので、番人をそのまま走らせると
-          「判定できませんでした」で赤くなり、黙らせた意味が消える。そこで
-          `always() && steps.quota_gate.outputs.paused != 'true'` へ合成した。
-          完全一致（== "always()"）に戻さないこと。また同じ理由で壊れるし、
-          「always() を消してしまった」という**本物の後退**と区別がつかなくなる。
-          代わりに、① always() から始まること ② paused ガードが `&&` で重ねてあること、
-          の両方を見る。①を消しても②を消しても赤くなる。
+        一時停止ゲートの撤去（2026-09-18）:
+          2026-09-11 はゲートと合成して
+          `always() && steps.quota_gate.outputs.paused != 'true'` にしていた。ゲートを
+          外したので条件は `always()` 単独に戻っている。ここで見るのは2つ:
+            ① 第1項が always() そのもの（`||` で薄めたり条件を前に足したら捕まる）
+            ② ゲートの条件が**戻ってきていない**こと。このWFは一次信号なので、
+               上流が死んでいる間こそ判定を出さなければならない。
+          ステップは位置ではなく id で引く（先頭に何か増えても壊れないため）。
         """
         steps = _yaml(SITE_DOWN_WATCH)["jobs"]["probe"]["steps"]
-        guard = steps[-1]
+        guard = _step_by_id(SITE_DOWN_WATCH, "probe", "verdict")
+        # 番人は最後に置く（この後ろに素通りするステップを足さない）。
+        assert steps[-1].get("id") == "verdict"
         cond = guard["if"]
-        # ① 先頭の項が always() そのものであること。`||` で薄めたり、条件を前に足したり
-        #    すると第1項が always() ではなくなるので、ここで捕まる。
+        # ① 先頭の項が always() そのものであること。
         assert cond.split("&&")[0].strip() == "always()", (
             f"番人が always() で始まっていないと probe が死んだ瞬間に黙る（if: {cond}）"
         )
-        # ② 一時停止ゲートの条件が and で重ねてあること（or だと always() が無意味になる）。
-        assert "&&" in cond and "steps.quota_gate.outputs.paused != 'true'" in cond, (
-            f"一時停止ゲート中も番人が走ると「判定できませんでした」で赤くなる（if: {cond}）"
+        # ② 一次信号を黙らせる条件が付いていないこと。
+        assert "quota_gate" not in cond and "paused" not in cond, (
+            f"一次信号の番人にゲートを戻してはいけない（if: {cond}）"
         )
         run = guard["run"]
         # down が空（＝判定できなかった）でも参照できるように env で受けていること

@@ -9,13 +9,15 @@ name: Check weekly reports published
 # 失敗時はジョブが exit 1 する → GitHub が自動でオーナーにメール通知。
 # さらに OPS_NOTIFY_WEBHOOK_URL があれば Slack/Discord にも通知する。
 #
-# 【一時停止ゲート / 2026-09-16 に自動解除】2026-09-11 追加:
-# Supabase の無料枠超過（402）が請求リセットまで続くあいだ、この監視は照会自体が失敗して
-# 必ず赤になる。そこで先頭に scripts/monitor/quota_pause.py を置き、「2026-09-16 より前」
-# かつ「Supabase が実際に 402」の**両方**が成立したときだけ後続ステップをスキップして
-# 成功で終える。期限を過ぎたら Supabase が直っていなくても必ず元に戻る（人手の復旧作業は
-# 不要）。402 以外・通信失敗・認証情報なしは全部「止めない」側へ倒れる。
-# 発火は週1回（木 08:00 JST）なので、実際に黙るのは解除日までに来る1回だけ。
+# 【反響の抑制 / 2026-09-18 に恒久化】
+# Supabase が止まっているあいだ、この監視は照会自体が失敗して必ず赤になる。このWFは**反響**
+# 側＝上流が死んでいれば巻き添えで赤くなるだけで、鳴っても新しい情報は増えない。そこで先頭に
+# scripts/monitor/quota_pause.py を置き（env に QUOTA_GATE_ALWAYS: "1"）、「上流が止まって
+# いる署名」を観測している間だけ後続ステップをスキップして成功で終える。署名は HTTP 402 と
+# Supabase ホストの名前解決失敗の2つだけで、タイムアウト・5xx・401/403 では止めない。
+# 上流が戻れば次の実行から自動で通常運転に戻る（人手の復旧作業は不要）。
+# **一次信号は別**: site-down-watch.yml（利用者にデータが出ていない）と
+# check-collection-heartbeat.yml（収集が止まった）にはゲート自体が無く、必ず鳴る。
 # 手動実行（workflow_dispatch）は止まりません。手で回したときは必ず本体が動きます。
 
 on:
@@ -58,16 +60,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Supabase 402 の間だけ黙るゲート（2026-09-16 に自動解除）──────────────
-      # paused=true になるのは「解除日より前」かつ「Supabase が実際に 402」の両方が
-      # 成立したときだけ。それ以外はすべて paused=false ＝ 従来どおり監視が鳴る。
+      # ── 上流が止まっている間だけ反響を抑えるゲート（2026-09-18 恒久化）────────
+      # paused=true になるのは「上流が止まっている署名（402 / ホスト名の解決失敗）を
+      # 観測した」ときだけ。それ以外はすべて paused=false ＝ 従来どおり監視が鳴る。
       # 判定は quota_pause.py 側にあり、このスクリプトは常に exit 0。
       - name: Quota pause gate
         id: quota_gate
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          # 未設定なら scripts/monitor/quota_pause.py の既定日（2026-09-16）が使われる。
+          # このWFは**反響**側（上流が死んでいれば必ず巻き添えで赤くなる）。解除日に関係なく、
+          # 上流が止まっている署名を観測している間は抑制する（2026-09-18 に恒久化）。
+          # 一次信号（site-down-watch / check-collection-heartbeat）にはゲート自体が無い。
+          QUOTA_GATE_ALWAYS: "1"
+          # 日付モード用。QUOTA_GATE_ALWAYS が効いている間は参照されない。
           OPS_QUOTA_PAUSE_UNTIL: ${{ vars.OPS_QUOTA_PAUSE_UNTIL }}
           # 手動実行を絶対に止めないための入力（2026-09-11 追加）。手で回すのは
           # 「今どうなっているか自分の目で確かめたい」ときなので、ここでゲートに
