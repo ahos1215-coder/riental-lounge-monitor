@@ -18,6 +18,12 @@ Design notes
   walks ~1M rows reliably without offset drift, and streams each page straight to
   the gzip file (bounded memory).
 - Read-only: never writes to Supabase.
+- 2026-09-18: 各ページの GET は `_supabase_common.rest_get_json`（stdlib のみ）経由で
+  gzip 受信する。この週次全量ダンプは Supabase 無料枠 uncached egress（5GB/月）の
+  最大の1本（約1.25GB/月・推定）で、非圧縮で受けていたのが原因。gzip 要求で本文は
+  6〜11 倍に縮む（本番で実測。select する列数とデータの偏りで変わる。細い select で 11.05 倍、
+  このダンプに近い11列の select で 6.10 倍）。出力ファイル（gzipped NDJSON）の形式は1バイトも変えていない
+  （受信の圧縮と、書き出しの圧縮は別物）。
 
 Usage
 -----
@@ -46,7 +52,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 # scripts/_supabase_common.py（.env 読み込み）をシブリングとしてベアインポートする。
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _retry_common import backoff_delay, is_retryable_status  # noqa: E402
-from _supabase_common import _load_env, _supabase_conf, auth_headers  # noqa: E402
+from _supabase_common import _load_env, _supabase_conf, auth_headers, rest_get_json  # noqa: E402
 
 SELECT = "id,store_id,ts,men,women,total,weather_code,weather_label,temp_c,precip_mm,src_brand"
 # Row-count sanity check tolerance: allows for rows inserted by the live 5-min
@@ -98,9 +104,12 @@ def _get(endpoint: str, key: str, params: list[tuple[str, str]], retries: int = 
     for attempt in range(1, retries + 1):
         retry_after = None
         try:
-            req = urllib.request.Request(query, headers=headers)
-            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SEC) as resp:
-                return json.loads(resp.read().decode())
+            # 2026-09-18: GET 1回ぶんは共有ヘルパへ（Accept-Encoding: gzip の付与と
+            # Content-Encoding を見た解凍をペアで持つ。個別に付けると解凍忘れで壊れる）。
+            # 再試行・Retry-After・4xx/5xx の分類はこのループが従来どおり持つ。
+            # 壊れた gzip（BadGzipFile）は下の汎用 except で一過性エラーとして再試行される
+            # （旧実装でも途中で切れた本文は json.loads が落ちて同じ経路だった）。
+            return rest_get_json(query, headers, timeout=REQUEST_TIMEOUT_SEC)
         except urllib.error.HTTPError as exc:
             last = f"HTTP {exc.code}"
             # 4xx other than 429 is a real error (bad auth/query) -- not retryable.
@@ -126,6 +135,10 @@ def _get_exact_row_count(endpoint: str, key: str, retries: int = FETCH_RETRIES) 
     of consequence). This is the sanity check against a silent pagination bug like
     the 2026-07-06 incident where the dump stopped after the first page (1,000
     rows) out of ~1.07M and still exited 0.
+
+    2026-09-18: ここは意図的に `rest_get_json` へ移していない。読むのは応答ヘッダ
+    （Content-Range）だけで本文は 1 行（数十バイト）なので gzip の効果が無く、
+    ヘルパは本文しか返さない（ヘッダを返す口を増やすより現状維持が安い）。
     """
     headers = {
         **auth_headers(key, accept_json=True),

@@ -40,7 +40,6 @@ import sys
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from statistics import median
@@ -57,7 +56,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _night_slots import SLOTS, NIGHT_START_HOUR  # noqa: E402
 from _standalone_import import load_module_from_file  # noqa: E402
 from _retry_common import backoff_delay, is_retryable_status  # noqa: E402
-from _supabase_common import _load_env, _supabase_conf, auth_headers, storage_get, storage_put  # noqa: E402
+from _supabase_common import (  # noqa: E402
+    _load_env,
+    _supabase_conf,
+    auth_headers,
+    rest_get_json,
+    storage_get,
+    storage_put,
+)
 
 # ログ接頭辞だけを固定した別名（モジュール変数名は従来どおり = 既存テストの
 # monkeypatch.setattr(bt, "_storage_get", ...) がそのまま効く）。
@@ -610,6 +616,11 @@ def _fetch_store_rows(url: str, key: str, store_id: str, start_iso: str) -> list
     PostgREST は 1 リクエスト最大 1000 行。ts.asc + ts=gt.<cursor> で O(1)/ページ。
     1 店では ts は実質ユニーク（1 計測=1 タイムスタンプ）なので gt 境界でのロスは無い。
     一過性の 5xx/429/ネットワークエラーはリトライ。
+
+    2026-09-18: GET 1回ぶんは `_supabase_common.rest_get_json` 経由で gzip 受信する。
+    この日次ジョブ（FETCH_DAYS 日分 × 42 店）は Supabase 無料枠 uncached egress
+    （5GB/月）の 2 番目に大きい1本（約1.0GB/月・推定）で、非圧縮で受けていたのが原因。
+    gzip 要求で本文は 6〜11 倍に縮む（本番で実測。列数とデータの偏りで変わる）。キーセットページングと再試行の挙動は不変。
     """
     endpoint = f"{url}/rest/v1/logs"
     headers = auth_headers(key, accept_json=True)
@@ -626,14 +637,14 @@ def _fetch_store_rows(url: str, key: str, store_id: str, start_iso: str) -> list
         if cursor is not None:
             params.append(("ts", f"gt.{cursor}"))
         full = endpoint + "?" + urllib.parse.urlencode(params)
-        req = urllib.request.Request(full, headers=headers)
 
         payload = None
         last_err = ""
         for attempt in range(1, 5):
             try:
-                with urllib.request.urlopen(req, timeout=60) as resp:
-                    payload = json.loads(resp.read().decode())
+                # Accept-Encoding: gzip の付与と Content-Encoding を見た解凍はヘルパの責務
+                # （個別に付けると解凍忘れで壊れる）。再試行と 4xx/5xx の分類はここが持つ。
+                payload = rest_get_json(full, headers, timeout=60)
                 break
             except urllib.error.HTTPError as exc:
                 last_err = f"status={exc.code}"

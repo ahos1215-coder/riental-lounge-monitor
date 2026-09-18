@@ -1,6 +1,7 @@
 """Supabase の設定読み込み・認証ヘッダ・Storage オブジェクト GET/PUT の共有ヘルパー。
 
-公開名は `load_env` / `supabase_conf` / `auth_headers` / `storage_get` / `storage_put`。
+公開名は `load_env` / `supabase_conf` / `auth_headers` / `storage_get` / `storage_put` /
+`rest_get_bytes` / `rest_get_json`（後ろ2つは 2026-09-18 追加、REST GET の gzip 受信）。
 `_load_env` / `_supabase_conf` / `_auth_headers` は同じ関数への旧別名（既存の import を
 壊さないために残しているだけ。新規に書くコードは `_` の付かない公開名を使う）。
 
@@ -26,7 +27,32 @@ analytics_weekly_report.py の4本に手書きされ、2026-08-18 の Supabase �
 ここへ集約する（次に同種の事故が起きたとき、直す場所が1つになる）。
 
 REST（`/rest/v1/logs`）の fetch/paging はスクリプトごとにクエリも完全性要件も
-異なるため、ここでは統合しない。
+異なるため、ページング・再試行のループはここでは統合しない。ただし **REST の GET
+1回そのもの**は `rest_get_bytes` / `rest_get_json` を必ず通すこと（2026-09-18）。
+理由: urllib は requests と違って応答を自動解凍しない。個別のスクリプトで
+`Accept-Encoding: gzip` を付けるだけだと、解凍を忘れて `json.loads` が gzip の
+バイト列を食って壊れる（＝「ヘッダを足すだけ」の修正は事故になる）。ヘッダの付与と
+`Content-Encoding` を見た解凍を1箇所に閉じ込めるのがこのヘルパの役目。
+
+背景（2026-09-18 監査）: Supabase 無料枠の uncached egress（DB 側、5GB/月）が
+推定 約4.5GB/月で余裕 1.1 倍しか無く、次に止まる最有力候補だった（前回 2026-09-05 の
+超過で猶予を使い切っており、次は警告なしで即 402）。主犯は urllib で REST を読む
+スクリプトが Accept-Encoding を送らず**非圧縮**で受けていたこと。gzip を要求すると
+本文は 6〜11 倍に縮む（本番で実測。細い select ほど縮む。`select=ts` で 11.05 倍、
+6列で 6.10 倍）。移行済みの2本（backup_logs.py 約1.25GB/月・
+build_templates.py 約1.0GB/月。月間 GB はいずれも推定）で uncached egress を
+約半分にできる見込み（推定）。
+
+未移行の urllib 系 REST 読み取り（小口。担当外の班が編集中のものを含むため
+2026-09-18 時点では触っていない。次にこれらへ手を入れるときは上のヘルパを通すこと）:
+  - scripts/cleanup_old_logs.py
+  - scripts/generate_weekly_insights.py
+  - scripts/local_report_job.py
+  - scripts/score_forecasts.py
+  - scripts/monitor/*.py
+  - scripts/backup_logs.py の `_get_exact_row_count`（Content-Range ヘッダしか読まず
+    本文は 1 行なので gzip の効果が無い。意図的に未移行）
+※ requests を使う scripts/train_ml_model.py 等は requests が自動で gzip を扱うので対象外。
 
 トップレベルスクリプトとして `python scripts/x.py` 実行される前提（パッケージ化しない）
 なので、他の scripts/ 内モジュール（例: commentary_quality_gate.py）と同じ規約で、
@@ -36,6 +62,8 @@ REST（`/rest/v1/logs`）の fetch/paging はスクリプトごとにクエリ�
 
 from __future__ import annotations
 
+import gzip
+import json
 import os
 import sys
 import time
@@ -135,6 +163,68 @@ def auth_headers(
 _load_env = load_env
 _supabase_conf = supabase_conf
 _auth_headers = auth_headers
+
+
+# ---- REST GET（gzip 受信）----------------------------------------------------- #
+REST_GET_TIMEOUT = 60
+# 送るのは gzip だけ。応答側で受け付ける Content-Encoding もこの範囲に限る
+# （こちらが要求していない br/deflate が来たら黙って生バイト列を返さず落とす）。
+_REST_ACCEPT_ENCODING = "gzip"
+_REST_GZIP_ENCODINGS = ("gzip", "x-gzip")
+_REST_IDENTITY_ENCODINGS = ("", "identity")
+
+
+def _content_encoding(resp: object) -> str:
+    """応答の Content-Encoding を小文字・前後空白なしで返す（無ければ空文字）。
+
+    実物の http.client.HTTPResponse は `.headers`（大文字小文字を区別しない
+    HTTPMessage）を持つ。テストの偽物が `.headers` を持たない場合は非圧縮扱い
+    （既存テストの最小フェイクを壊さないため）。
+    """
+    headers = getattr(resp, "headers", None)
+    if headers is None:
+        return ""
+    try:
+        raw = headers.get("Content-Encoding", "") or ""
+    except Exception:  # noqa: BLE001 - 偽物が .get を持たなくても落とさない
+        return ""
+    return str(raw).strip().lower()
+
+
+def rest_get_bytes(url: str, headers: dict[str, str], timeout: float = REST_GET_TIMEOUT) -> bytes:
+    """PostgREST（/rest/v1/*）へ 1 回 GET し、**解凍済み**の本文バイト列を返す。
+
+    REST の GET は必ずここを通す（理由はモジュール docstring）。
+    - 送信ヘッダに `Accept-Encoding: gzip` を足す。呼び出し側が同名ヘッダを渡しても
+      ここで上書きする（付与と解凍をペアで管理するため）。urllib は http.client の
+      既定で `Accept-Encoding: identity` を送るので、ここを通さない GET は常に非圧縮。
+    - 応答の `Content-Encoding` が gzip/x-gzip なら `gzip.decompress` で戻す。
+      非圧縮（identity / ヘッダ無し）ならそのまま返す（PostgREST は小さな応答や
+      一部の経路で圧縮しないことがある）。
+    - gzip と名乗りながら壊れている本文は `gzip.BadGzipFile`（OSError）を**そのまま送出**
+      する。握りつぶして生バイト列を返すと、下流の json.loads が分かりにくい形で落ちる。
+    - 想定外の Content-Encoding は ValueError。何が来たかを言って落ちるほうが安い。
+    - 再試行はしない。ページング・再試行・エラー分類は呼び出し側
+      （backup_logs._get / build_templates._fetch_store_rows）がそれぞれの完全性要件で
+      持つ。HTTPError / URLError は加工せず呼び出し側へ伝える。
+    """
+    req_headers = dict(headers)
+    req_headers["Accept-Encoding"] = _REST_ACCEPT_ENCODING
+    req = urllib.request.Request(url, headers=req_headers)
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read()
+        encoding = _content_encoding(resp)
+    if encoding in _REST_GZIP_ENCODINGS:
+        return gzip.decompress(raw)
+    if encoding in _REST_IDENTITY_ENCODINGS:
+        return raw
+    # クエリ文字列は落として出す（長いだけで診断に要らない。秘密値はヘッダ側なので含まれない）
+    raise ValueError(f"unexpected Content-Encoding from REST: {encoding!r} ({url.split('?', 1)[0]})")
+
+
+def rest_get_json(url: str, headers: dict[str, str], timeout: float = REST_GET_TIMEOUT):
+    """`rest_get_bytes` の本文を UTF-8 の JSON として返す（PostgREST の通常応答）。"""
+    return json.loads(rest_get_bytes(url, headers, timeout=timeout).decode("utf-8"))
 
 
 def storage_get(
