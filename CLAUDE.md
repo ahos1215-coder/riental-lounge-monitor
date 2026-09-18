@@ -1,5 +1,8 @@
 CLAUDE.md — MEGRIBI（Oriental Lounge Monitor）3分マップ
-最終更新: 2026-09-09（§4に罠11「Supabase無料プランの枠が実運用の制約になっている」を追加＋
+最終更新: 2026-09-18（§4罠5の GHA `schedule:` 発火率を 2026-09-18 の実測で書き換え＝毎時24%・2時間毎43〜65%・
+6時間毎96%・日次100%だが1.5〜5時間遅れ。「毎時」も間引かれる側で、監視の頻度設計は日次を基準にする。
+§4に罠12「LINE 通知は Secrets 未設定だと黙って no-op になる」を追加＝2026-09-18 時点で全 LINE 経路が届いていなかった）。
+2026-09-09（§4に罠11「Supabase無料プランの枠が実運用の制約になっている」を追加＋
 §5に障害記録2本へのリンクを追加。2026-09-05の全停止を受けたもの）。
 2026-07-11（Batch B3: 新規作成。全ての記述は実コードを確認して書いた。詳細な根拠・過去の設計判断は plan/*.md を参照。
 Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追記 + sapporo_ag閉店で店舗数42（37+5）に更新）。
@@ -28,7 +31,7 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
                  ├─ Supabase Storage bucket "ml-models"（学習済みモデル + 精度追跡JSON）
                  └─ Google Sheet / GAS（レガシー fallback。通常経路では使わない）
 
-定時バッチ（.github/workflows/ 21本 + オーナーPCの Task Scheduler）
+定時バッチ（.github/workflows/ 23本・うち schedule 持ち13本 + オーナーPCの Task Scheduler）
   ├─ 収集: cron-job.org（5分毎）→ /tasks/multi_collect → multi_collect.py → Supabase logs
   ├─ Daily/Weekly Report: 【主】ローカル Ollama（オーナーPC常時稼働）
   │                        【緊急時のみ】GHA workflow_dispatch + Gemini
@@ -95,7 +98,7 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
 | 5分毎 | 混雑データ収集 | cron-job.org → `/tasks/multi_collect`（`CRON_SECRET`認証）→ `collect_all_once()` → Supabase `logs`。オリエンタル・相席屋それぞれのトップページSSRから2リクエストで全42店舗分を取得 |
 | 18:00 / 21:30 | **Daily Report生成** | 【主】Task Scheduler `MEGRIBI-daily-evening`/`-late` → `scripts/local_report_job.py --stores all --edition <evening_preview\|late_update> --mode publish` → ローカル Ollama（`gemma4:e4b`、`localhost:11434`）→ Supabase `blog_drafts` upsert。【緊急時のみ】`.github/workflows/trigger-blog-cron.yml` は `schedule:` コメントアウト済み、`workflow_dispatch`のみ（matrixはオリエンタル37店舗、相席屋5店舗は対象外、Gemini使用） |
 | 18:10 | v2 shadow: 予測スナップショット保存 | 【主】Task Scheduler `MEGRIBI-snapshot` → `scripts/snapshot_forecasts.py` → Storage `ml-models/accuracy/snapshots/<date>.json`。GHA `forecast-accuracy-track.yml` の snapshot cron は 2026-07-18 に削除済み（GHA schedule の遅延で開店後に撮れて汚染したため。`workflow_dispatch` は残る） |
-| 19:00〜23:50・10分毎 | CDN warming（`/api/range`等の温め） | 【主】Task Scheduler `MEGRIBI-warm-cdn` → `scripts/warm_cdn_local.py`。【バックアップ】GHA `warm-cdn.yml`（実測発火率8.3%と低いため保険止まり） |
+| 19:00〜23:50・10分毎 | CDN warming（`/api/range`等の温め） | 【主】Task Scheduler `MEGRIBI-warm-cdn` → `scripts/warm_cdn_local.py`。【バックアップ】GHA `warm-cdn.yml`（実測発火率 15〜34%（2026-08）と低いため保険止まり。§4 罠5） |
 | 水曜 06:30 | **Weekly Report生成** | 【主】Task Scheduler `MEGRIBI-weekly` → `run_weekly_local.ps1 -Stores all` → `generate_weekly_insights.py --stores all`（`INSIGHTS_LLM_BACKEND=ollama`）が全42店舗を単一プロセスで処理 → Supabase upsert + `frontend/content/insights/weekly/*.json`。**`index.json` は 2026-07-18 に廃止済み**（読み手が存在しない死蔵ファイルだった。`--skip-index` 引数は互換のため受けるだけの no-op）。【緊急時のみ】`generate-weekly-insights.yml`（`workflow_dispatch`, Fan-in Matrix, オリエンタル37店舗のみ, Gemini使用） |
 | 05:30 毎日 | ML再学習（固定パラメータ） | GHA `train-ml-model.yml` → `scripts/train_ml_model.py`。`ALL_STORE_IDS`（42店舗）allow-listでLightGBM学習 → Storage `ml-models/forecast/latest/` |
 | 07:00 月曜 | ML再学習 + Optuna HPO | 同じ `train-ml-model.yml`（cronパターンで分岐。日次はOptunaなし、週次のみHPOあり） |
@@ -173,21 +176,29 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
    UIには表示しない（「※推計値」を免責ページに明記する方針）。
 4. **`frontend/src/data/stores.json` が店舗マスタの唯一の正本。** 店舗の追加・削除はこのファイルと
    `oriental/utils/stores.py`（Python側）の両方に影響する。片方だけ直すと店舗数不整合になる。
-5. **GHAの`schedule:`の間引きは高頻度cron固有の問題で、日次/週次cronは間引かれない
-   （2026-08-21・外部レビュー第3ラウンドで訂正。以前この項は「GHAのscheduleは信用しすぎない」と
-   頻度を区別せず一般化していたが、それ自体が事実誤認だった）。**
-   公開Actions APIで直近30日を実測したところ、日次・週次の5本（`train-ml-model` 34/34、
-   `check-daily-published` 30/30、`check-weekly-published` 7/7、`generate-public-facts` 31/31、
-   `forecast-accuracy-track` 30/30）は**発火欠落ゼロ**だった。間引かれるのは10分毎のような
-   **高頻度cron固有**の現象で、`warm-cdn`（10分毎想定）は実測15〜34%（2026-07時点の8.3%からは改善）。
+5. **GHAの`schedule:`は頻度が上がるほど間引かれ、日次でも予定時刻から1.5〜5時間遅れる。
+   監視の頻度設計は日次を基準にする。**
+   （2026-09-18・公開Actions APIで直近30日を実測して再訂正。2026-08-21 の記述「間引きは10分毎などの
+   高頻度cron固有」は「毎時」を安全側に数えていた誤りだった。それ以前の「GHAのscheduleは信用しすぎない」
+   という頻度を区別しない一般化も、日次については誤り。この項は2回訂正されている）
+   実測の発火率: **毎時 24%、2時間毎 43〜65%、6時間毎 96%、日次 100%（ただし1.5〜5時間遅れ）**。
+   10分毎の `warm-cdn` は 2026-08 の実測 15〜34%（2026-09-18 の再測定対象外）。
+   つまり「毎時なら確実に発火する」は成り立たない。毎時の `site-down-watch.yml` は平均4回に1回しか走らず、
+   2時間毎の `check-collection-heartbeat.yml` も半分前後しか走らない。日次・週次は欠落しないが
+   **時刻は当てにならない**（cron の予定時刻を「その時刻に走る」と読まないこと。実測の遅れ幅からは
+   05:30 JST 予定の `train-ml-model` が 07:00〜10:30 に走り得る）。
+   設計への含意: **「N分以内に気づく」を GHA の schedule に約束させない**。速さが要る監視は
+   ローカル Task Scheduler か外部 cron（cron-job.org）に置き、GHA には「1日1回は必ず来る」役を任せる
+   （毎朝1通のダイジェスト方式が典型。`plan/RUNBOOK.md` の監視ワークフロー一覧を参照）。
+   なお GitHub 公式の仕様として、**リポジトリが60日間無活動だと `schedule:` は自動で無効化される**。
    自分で確かめ直すには公開Actions APIを叩く
    （例: `https://api.github.com/repos/<owner>/<repo>/actions/workflows/<file>.yml/runs?per_page=100`
    を `created_at` でフィルタし、`event=schedule` の run 数を期待回数と比較する）。
-   「日次もGHAは信用できない」という誤った前提で不要なローカル移管を増やさないこと
-   （ただし過去の判断＝CDN warmingやsnapshot保存の主経路をローカルTask Schedulerへ移したこと
-   自体は覆さない。**snapshotをローカルへ移した理由は発火の"欠落"ではなく"遅延"**——GHA schedule
-   の遅延で開店後に撮れて精度計測が汚染したため——であり、ここで訂正した「欠落ゼロ」の実測と
-   矛盾しない。両者を混同しないこと）。
+   過去の判断＝CDN warmingやsnapshot保存の主経路をローカルTask Schedulerへ移したこと自体は覆さない。
+   **snapshotをローカルへ移した理由は発火の"欠落"ではなく"遅延"**——GHA schedule の遅延で開店後に撮れて
+   精度計測が汚染したため——で、今回の実測（日次は欠落ゼロだが1.5〜5時間遅れ）とも整合する。
+   逆に「日次も欠落する」という前提で不要なローカル移管を増やさないこと（欠落するのは高頻度側、
+   日次は遅延するだけ。両者を混同しないこと）。
 6. **ドキュメントのピンポイントな値（モデル名等）は最終的にコードで確認すること。**
    実例: 本番モデルは2026-07-08に `gemma4:12b`→`gemma4:e4b` へ変更されたが、
    `docs/LOCAL_LLM_SETUP.md` 本文は2026-07-11まで旧名のままだった（修正済み）。**モデル名の正本は
@@ -211,6 +222,20 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
     誤情報を出した（経緯・復旧手順は `docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md`）。
     Supabase からのダウンロードを増やす変更（Storage の読み足し・キャッシュの撤去）は、
     転送量への影響を見積もってから入れること。
+    追記（2026-09-18 監査）: 9/5 の超過で無料プランの**猶予期間を使い切った**ため、次に超えたら
+    **警告なしで即402**（Supabase 公式 Billing FAQ）。次に危ないのは uncached（DB側）egress で余裕は約1.1倍。
+    主犯は urllib で REST を読むスクリプトが `Accept-Encoding` を送らず非圧縮なこと（gzip で実測 6〜11倍に縮む。select する列数で変わる）。
+    urllib で Supabase を読むスクリプトを書くときは gzip を要求すること。
+12. **LINE 通知は Secrets 未設定だと黙って no-op になる。「LINE が静か＝正常」と読まないこと。**
+    2026-09-18 時点で GitHub Secrets に `LINE_CHANNEL_ACCESS_TOKEN` / `LINE_USER_ID` が無く
+    （失敗 run の注記 "not set. Skipping"）、オーナーPCの `.env.local` のトークンも 401 で、
+    **全 LINE 経路が1本も届いていなかった**（`site-down-watch.yml` / `check-pat-expiry.yml` の push、
+    `scripts/analytics_weekly_report.py` の週次ダイジェスト、`multi_collect.py` の相席屋アラート）。
+    どの経路も「未設定ならスキップして exit 0」の設計なので、ジョブは緑のまま通知だけ消える。
+    オーナーがトークンを再発行して4箇所（GitHub Secrets・PC の `.env.local`・Vercel・Render の環境変数）に
+    入れるまで LINE 経路は全部 no-op。LINE 経路の生死は「届いた」で確かめる（月曜の週次ダイジェストが来ない／
+    `site-down-watch` の run ログに "Skipping LINE notification" が出ている＝死んでいる）。
+    通知の設計を書くときは、LINE を「届く前提の終着点」に置かないこと（`docs/FAILURE_MAP.md` 冒頭「現況」）。
 
 ---
 

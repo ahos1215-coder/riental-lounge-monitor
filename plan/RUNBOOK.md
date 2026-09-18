@@ -1,5 +1,9 @@
 # RUNBOOK
-Last updated: 2026-09-09（Troubleshooting に「全APIが402＝Supabase無料枠超過」の入口を追加。
+Last updated: 2026-09-18（監査の実測合わせ: `site-down-watch.yml` は30分毎ではなく毎時 :17 で、判定は
+「200 かつ ok:true かつ rows 非空」／Troubleshooting の402項に「名前解決失敗も Supabase 停止の一形態」を追記／
+監視一覧に `ops-daily-digest.yml`（別班が新設中）と「14:00 JST までに来なければダイジェスト自体の異常」の運用ルール／
+「一次信号にはゲートを付けない・反響9本は Supabase 停止中だけ抑制」の設計を1段落／GHA cron の実測発火率を併記）
+2026-09-09（Troubleshooting に「全APIが402＝Supabase無料枠超過」の入口を追加。
 オーナーの課金操作でしか直らない障害なので、切り分けの一番上に置いた。
 同日中に見直し: `/healthz` は改修で**本文**が402を名指しするようになったため「使えない」を撤回し
 「本文を見る／ステータスでは判定しない」に書き換え、復旧後レポートの戻り方を追記、
@@ -135,10 +139,11 @@ npm run dev
 | **X 自動投稿** | Daily Report 完了後（`workflow_run`）。GHA 経路使用時のみ発火 | `x-auto-post.yml` |
 | Public Facts | `30 0` UTC = JST 09:30 | `generate-public-facts.yml` |
 | PAT 期限チェック | 月曜 `0 0` UTC = JST 09:00 | `check-pat-expiry.yml` |
-| Daily/Weekly 公開監視（ローカル生成の保険） | 各種 | `check-daily-published.yml` / `check-weekly-published.yml` |
-| 収集の生存監視 | 各種 | `check-collection-heartbeat.yml` |
-| ブレンド重み凍結の hash 不変監視 | `23 */6 * * *`（6時間毎） | `check-blend-weights-freeze.yml` |
-| **サイト停止の外形監視**（利用者と同じ公開 API を認証なしで1回叩き、2回連続で非200なら赤） | `*/30 * * * *`（30分毎。高頻度 cron なので間引かれる前提で見る） | `site-down-watch.yml`（2026-09-09 新設。`docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md`） |
+| Daily/Weekly 公開監視（ローカル生成の保険） | `30 14 * * *` UTC = JST 23:30 毎日 / `0 23 * * 3` UTC = JST 木 08:00 | `check-daily-published.yml` / `check-weekly-published.yml` |
+| 収集の生存監視 | `0 */2 * * *`（2時間毎。**実測発火率 43〜65%**＝半分前後しか走らない） | `check-collection-heartbeat.yml` |
+| ブレンド重み凍結の hash 不変監視 | `23 */6 * * *`（6時間毎。実測発火率 96%） | `check-blend-weights-freeze.yml` |
+| **サイト停止の外形監視**（利用者と同じ公開 `/api/range` を認証なしで叩き、「200 かつ本文 `ok:true` かつ `rows` 非空」でなければ60秒後に再試行、2回連続で異常なら赤） | `17 * * * *`（毎時 :17。**実測発火率 24%**＝平均4回に1回しか走らない。2026-09-09 の新設時は30分毎だったが同日中に毎時へ変更） | `site-down-watch.yml`（2026-09-09 新設。`docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md`） |
+| **毎朝1通の運用ダイジェスト**（別班が 2026-09-18 に新設中。**実在はコミット後に `.github/workflows/` で確認**） | 日次（JST 朝。日次 cron は欠落しないが予定時刻から1.5〜5時間遅れる） | `ops-daily-digest.yml` — **運用ルール: 毎朝1通、来るのが正常。14:00 JST までに来なければダイジェスト自体の異常**（GHA が止まっている／Secrets 切れ／通知経路の死）として扱い、その日のうちに Actions の run 履歴を見る |
 | logs バックアップ / 古いログ削除 | 週次 / 手動 | `backup-logs.yml` / `cleanup-old-logs.yml` |
 | Blog CI / Python CI | push / PR（schedule なし） | `blog-ci.yml` / `python-ci.yml` |
 | E2E テスト | PR + dispatch | `e2e.yml` |
@@ -148,11 +153,26 @@ npm run dev
 
 - Weekly（GHA 緊急時経路）: 手動 `workflow_dispatch` で `stores` / threshold 等を指定可能。成果物 `frontend/content/insights/weekly`。matrix はオリエンタル37店舗のみ（相席屋5店舗は対象外）。ローカル主経路（`--stores all`）は全42店舗をカバーする。
 - Public Facts: 成果物 `frontend/content/facts/public`
+- **GHA cron の実測発火率（2026-09-18・公開 Actions API 30日分）**: 毎時 24%、2時間毎 43〜65%、6時間毎 96%、
+  日次 100%（ただし1.5〜5時間遅れ）。上表の cron 式は「その時刻に走る」約束ではない。詳細は `CLAUDE.md` §4 罠5。
+
+### 監視の「一次信号」と「反響」（2026-09-18 設計。別班が実装中＝実在はコミット後に確認）
+
+2026-09-05 の停止では、1つの原因（Supabase 402）が11本のワークフローから1日16〜23通の失敗メールに増幅された。
+9/11 にそれを黙らせた一時停止ゲート（`scripts/monitor/quota_pause.py`）は「HTTP 402 のときだけ止める」設計だったため、
+9/12 に壊れ方が「ホスト名が解決しない」に変わった時点で素通りした（`docs/INCIDENT_2026-09-05_SUPABASE_QUOTA.md` §4-2）。
+そこで監視を2段に分ける。**一次信号（`site-down-watch.yml` の外形監視と `check-collection-heartbeat.yml` の
+収集ハートビート）にはゲートを付けない**——この2本は「利用者にデータが出ているか」「収集が続いているか」を直接見る
+唯一の入口で、障害中に黙らせると 2026-09-05 と同じ「監視が黙る」を自分の手で作ることになる。うるさくても鳴らし続ける。
+**反響9本（学習・テンプレ・採点・公開監視・バックアップ・掃除・凍結監視など、Supabase が止まれば必ず一緒に落ちる側）は
+Supabase 停止中だけ抑制する**。抑制の条件を「HTTP 402」1個に固定しないこと（9/12 の教訓）。手動実行
+（`workflow_dispatch`）はどちらも必ず本体が動く（ゲートに黙って飛ばされると確かめる手段そのものが消える）。
+実装の詳細は別班のコミットが正本で、この段落は設計の要点だけ。
 
 ### Actions 失敗通知（任意・2026-03 追加）
 - **Secret**: `OPS_NOTIFY_WEBHOOK_URL`（Slack Incoming Webhook の URL 等）。**未設定のときは通知のみスキップ**し、ワークフロー自体は従来どおり。
 - **Variable**（任意）: `OPS_NOTIFY_WEBHOOK_TYPE` — `slack`（既定・`{"text":"..."}`）または `discord`（`{"content":"..."}`）。未設定または空なら Slack 形式。
-- **呼び出し元**: `generate-weekly-insights.yml` / `trigger-blog-cron.yml`（**全体失敗**・**定時ブログの一部店舗失敗**の両方で `notify-on-failure.yml`）/ `retry-blog-draft-stores.yml` / `generate-public-facts.yml` / `blog-request.yml` が失敗時に再利用ワークフロー `.github/workflows/notify-on-failure.yml` を実行。
+- **呼び出し元**: `generate-weekly-insights.yml` / `trigger-blog-cron.yml`（**全体失敗**・**定時ブログの一部店舗失敗**の両方で `notify-on-failure.yml`）/ `retry-blog-draft-stores.yml` / `generate-public-facts.yml` / `blog-request.yml` が失敗時に再利用ワークフロー `.github/workflows/notify-on-failure.yml` を実行。（2026-03 時点の一覧。**2026-09-18 時点では `train-ml-model.yml` / `site-down-watch.yml` / `build-templates.yml` / `forecast-accuracy-track.yml` / `backup-logs.yml` / `cleanup-old-logs.yml` / `check-*.yml` も呼ぶ**＝定期ワークフローのほぼ全部。正本は `grep -l notify-on-failure.yml .github/workflows/*.yml`。なお `OPS_NOTIFY_WEBHOOK_URL` 未設定なら全部 no-op で、届くのは GitHub の失敗メールだけ）
 - PR 用の `blog-ci.yml` には付けていない（失敗が多く通知が煩いため）。
 
 ### 外部 cron（運用側）
@@ -194,13 +214,19 @@ npm run dev
   402 なら `problems` に `data_upstream_payment_required`、`problem_detail` に
   `Supabase /rest/v1/logs が HTTP 402 (...)` が名指しで載る。ステータスで判定したいときは
   `/readyz`（壊れていれば503）、利用者と同じ経路の裏取りは `/api/current?store=<1店>`。
+  **同じ障害でも壊れ方は途中で変わる**（2026-09-18 追記）: 2026-09-12 からは 402 ではなく**ホスト名が解決しない**
+  （プロジェクト一時停止相当。urllib なら `URLError(gaierror 'Name or service not known')`、curl なら
+  "Could not resolve host"）に変わった。**名前解決失敗（Name or service not known）も Supabase 停止の一形態**として、
+  この項の手順で切り分けること（下の「DNS エラー」の項へ行かない）。この形では `/healthz` 本文の `problems` が
+  `data_upstream_payment_required` にならない可能性が高いので、コードだけでなく `problem_detail` の生文言を読む。
+  猶予期間は 9/5 で使い切っているため、**次の超過は予告なしで即402**（Supabase 公式 Billing FAQ）。
 - **402 から復旧したのにレポートだけ戻らない**: 復旧後 **1〜5分**（`revalidate` は daily=60秒 /
   weekly=300秒）で**日付が障害前のままの本文**が戻るのが正常（carry-over で行は消えていない）。
   5分待っても戻らなければ**別の異常**。日付が最新になるのは次の生成便（daily 18:00/21:30、
   weekly 水曜 06:30 JST）なので、そこまでは古い日付のままで正常。
 - `/api/range` が空: Supabase `logs` と `/tasks/multi_collect` を確認
 - Forecast 503: `ENABLE_FORECAST=1`
-- DNS エラー: URL を安易に変えず、ログで確認
+- DNS エラー: URL を安易に変えず、ログで確認。**Supabase のホスト名が解決しないときは、上の「全APIが402」項＝プロジェクト停止を先に疑う**（2026-09-12 に実際に起きた形）
 - `/reports/weekly/[store_slug]` が読めない: Supabase `blog_drafts` の該当行・`error_message` を確認
   （`index.json` は 2026-07-18 に廃止済みの死蔵ファイルのため確認対象から除外）
 - **ブラウザで `/api/range` が 502**: Flask（`BACKEND_URL`、通常 `http://127.0.0.1:5000`）が起動していない、または URL が間違い。Flask を起動してから再読み込み。
