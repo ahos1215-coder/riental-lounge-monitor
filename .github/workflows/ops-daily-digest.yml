@@ -1,0 +1,94 @@
+# 毎朝1通だけ届く運用ダイジェスト（2026-09-18 新設）。
+#
+# ■ これは何か
+#   失敗ワークフロー・止まっているワークフロー・サイトの健全性・収集の鮮度・
+#   Storage 使用量・LINE の残り枠・期限つきリスク・監視の一時停止状態を、
+#   1日1回まとめて1通にして送る。判定ロジックは scripts/monitor/daily_digest.py。
+#
+# ■ なぜ作ったか
+#   既存の通知は「壊れたときに鳴る」形しか無く、平常時は月1〜2通＝ほぼ無音だった。
+#   無音が「正常」なのか「監視自体が死んでいる」のか区別できず、2026-09-05 の
+#   Supabase 停止では3日半誰も気づけなかった。逆に障害中は1つの原因が11本の
+#   ワークフローに波及して1日16〜23通に増幅され、本当の原因がその洪水に埋もれた。
+#   毎日必ず1通来る便を用意すれば、沈黙が異常だと分かり、障害時も通数は増えない。
+#   これが揃って初めて、オーナーは GitHub の失敗メールを切っても困らなくなる。
+#
+# ■ 【運用ルール】14:00 JST までに来なければ、ダイジェスト自体の異常
+#   予定は UTC 00:07（JST 09:07）だが、**GHA の日次 cron は予定時刻から 1.5〜5 時間
+#   遅れる**（2026-09-18 に公開 Actions API で実測）。だから「09:00 に来ない＝異常」は
+#   誤報になる。欠落そのものはゼロだったので、遅れを吸収した 14:00 を基準にする。
+#   来ない日に疑うもの: この WF の schedule 無効化（60日無活動）／リポジトリの
+#   Actions 停止／daily_digest.py の破損。Actions の画面で本 WF の run を直接見ること。
+#
+# ■ このワークフローは常に成功で終える
+#   赤くする＝失敗メールを1通増やすことであり、この仕組みの目的（メールを減らす）と
+#   正面衝突する。生成に失敗した場合もジョブサマリに理由を残して緑で終え、
+#   「1通も届かない」という形でオーナーに伝わるのに任せる。
+#
+# ■ Secrets / 権限
+#   新しい Secret は要らない。失敗 run と WF 状態の照会は自動発行の GITHUB_TOKEN で足りる
+#   （actions: read）。LINE の Secrets は未設定でも壊れない: 警告を出して本文を
+#   ジョブサマリにだけ書き、緑で終える（2026-09-18 時点で LINE は1本も届いていない。
+#   トークンが復活したら、このファイルを変えなくてもそのまま届き始める）。
+
+name: "🌅 朝の点検ダイジェスト（毎日1通）"
+
+on:
+  schedule:
+    # 1日1回。UTC 00:07 ＝ JST 09:07。
+    # 実測の発火率は毎時 24% / 2時間毎 43% に対し**日次は欠落ゼロ**なので、
+    # 「1日1回は必ず来る」役はここに任せられる（CLAUDE.md §4 罠5）。
+    # 分を :00 でなく :07 にしているのは、毎正時に集中する他リポジトリの cron を
+    # 避けて遅延を減らすため（GitHub 公式の推奨。site-down-watch.yml と同じ理由）。
+    - cron: "7 0 * * *"
+  workflow_dispatch:
+
+# 最小権限。actions: read は「失敗した run の一覧」と「ワークフローの state」を
+# 読むために必要。contents: read は checkout のため。書き込み権限は一切要らない。
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  digest:
+    name: 今日の運用ダイジェストを送る
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build and send the digest
+        env:
+          # 失敗 run / WF 状態の照会。自動発行のトークンで足りる（新しい Secret 不要）。
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          # 収集の鮮度と Storage 合計。未設定なら本文に「未設定」と出るだけで落ちない。
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          # 未設定なら送信せず、警告を出してジョブサマリにだけ本文を書く（緑で終わる）。
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_USER_ID: ${{ secrets.LINE_USER_ID }}
+          # 監視が一時停止中かどうかを本文に出すためだけに読む
+          # （このワークフロー自身は quota_pause.py のゲートを持たない。
+          #   止まっている最中こそ、毎朝の1通が唯一の状況報告になるため）。
+          OPS_QUOTA_PAUSE_UNTIL: ${{ vars.OPS_QUOTA_PAUSE_UNTIL }}
+        # 判定・組み立て・送信はすべて scripts/monitor/daily_digest.py（stdlib のみ。
+        # pip install は不要）。回帰テストは tests/test_monitor_daily_digest.py。
+        run: |
+          # GHA の既定シェルは `bash -e`。スクリプトが想定外に落ちてもジョブは緑で
+          # 終えたいので、エラー伝播を切って終了コードを自分で握り潰す
+          # （赤くする＝メールを1通増やす、というのがこの仕組みの避けたいこと）。
+          set +e
+          python3 scripts/monitor/daily_digest.py
+          code=$?
+          if [ "$code" -ne 0 ]; then
+            echo "::warning::ダイジェストの生成に失敗しました（exit ${code}）。ジョブは緑のままです。"
+            {
+              echo "## 朝の点検ダイジェスト"
+              echo ""
+              echo "生成に失敗しました（exit ${code}）。上のログを確認してください。"
+              echo "このワークフローは意図的に常に成功で終わります（失敗メールを増やさないため）。"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit 0
