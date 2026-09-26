@@ -233,8 +233,9 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
     **Supabase へ1件ずつループで書く・問い合わせる書き方をしないこと**（収集の42店1件ずつ INSERT をまとめ書きに
     直したのが最大の削減＝`multi_collect.insert_supabase_logs`）。**② DB 容量 500MB**（2026-09-26 に70%・約1.2MB/日増）＝
     無料プランは超えると read-only で収集が止まる。対処として `logs` は **145万行を超えたら古い順に削除**
-    （DB に残るのは約9か月半ぶん。`cleanup_old_logs.py` の `MAX_ROWS`）、消える前の行は 12週ごとの永久アーカイブ
-    `logs-archive-*`（`backup-logs.yml`）に残す。上限を上げる変更は 500MB との関係を計算してから。詳細は `docs/FAILURE_MAP.md`。
+    （普段の夜は約8〜9か月ぶん残る。`cleanup_old_logs.py` の `MAX_ROWS`）。ただし**直近2年の特別な夜**
+    （年末年始・クリスマス・GW・お盆・大型連休・ハロウィン。`is_special_night`）は去年と比べるために飛ばして残す。
+    消える前の行は 12週ごとの永久アーカイブ `logs-archive-*`（`backup-logs.yml`）に残す。上限を上げる変更は 500MB との関係を計算してから。詳細は `docs/FAILURE_MAP.md`。
 12. **LINE 通知は Secrets 未設定だと黙って no-op になる。「LINE が静か＝正常」と読まないこと。**
     2026-09-18 時点で GitHub Secrets に `LINE_CHANNEL_ACCESS_TOKEN` / `LINE_USER_ID` が無く
     （失敗 run の注記 "not set. Skipping"）、オーナーPCの `.env.local` のトークンも 401 で、

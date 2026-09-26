@@ -269,7 +269,8 @@ Task Scheduler `MEGRIBI-warm-cdn` が主経路（GHA `warm-cdn.yml` は実測発
 
 ## Logs Maintenance (scripts/cleanup_old_logs.py) — 新規セクション（Supabase logs の肥大化対策）
 - `LOGS_MAX_ROWS`（int, 既定 `1450000`。logs テーブルの行数上限。超えたら古い順に上限の95%まで削除。2026-09-26 に `3000000` から変更＝無料プランの DB 容量 500MB に収まる値。根拠は `scripts/cleanup_old_logs.py` の `MAX_ROWS` 注記）
-- `LOGS_DOWNSAMPLE_AFTER_DAYS`（int, 既定 `365`。この日数より古い行をダウンサンプリング対象にする）
+- `LOGS_DOWNSAMPLE_AFTER_DAYS`（int, 既定 `730`。この日数より古い行をダウンサンプリング対象にする。2026-09-26 に `365` から変更＝残している特別な夜を1年で粗くしないため）
+- `LOGS_SPECIAL_KEEP_DAYS`（int, 既定 `730`。年末年始・クリスマス・GW・お盆・大型連休・ハロウィンの夜を、緊急削除で飛ばして残す日数。2026-09-26 追加）
 - `LOGS_DOWNSAMPLE_MINUTES`（int, 既定 `30`。ダウンサンプリング後の間引き間隔（分））
 - `LOGS_EMERGENCY_DELETE_BATCH`（int, 既定 `10000`。緊急削除時のバッチサイズ）
 - `LOGS_PROTECT_DAYS`（int, 既定 `200`。緊急削除でも絶対に消さない直近日数。`train_ml_model.py` の `ML_TRAIN_DAYS`(180) + 20日の安全マージン——`ML_TRAIN_DAYS` を変更した場合はこちらも合わせて見直すこと）

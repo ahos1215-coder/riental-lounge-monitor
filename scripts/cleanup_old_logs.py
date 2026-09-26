@@ -2,13 +2,15 @@
 Supabase logs テーブルの容量管理スクリプト。
 
 2段階の防御:
-  1. ダウンサンプリング: 1年超のデータを 30分間隔に間引く（先に実行し、余剰を間引いてから）
+  1. ダウンサンプリング: 2年超のデータを 30分間隔に間引く（先に実行し、余剰を間引いてから）
   2. 緊急削除: 行数上限（デフォルト145万行＝DB 容量 500MB に収まる値。下の MAX_ROWS の注記）を
-     超えたら最古から、上限の95%まで削除。1晩 5,040 行なので実際に残るのは約9か月半ぶんで、
-     1年超の間引き（1.）はこの上限が先に効くため通常は発動しない
+     超えたら最古から、上限の95%まで削除。1晩 5,040 行なので普段の夜が残るのは約8〜9か月ぶん。
      ただし ML 学習ウィンドウ（PROTECT_DAYS、既定200日 = train_ml_model.py の
      ML_TRAIN_DAYS=180 + 余裕）より新しい行は「絶対に」削除しない。フロアを守れず
      上限を切れない場合は、安全に消せる分だけ消して大声で警告する。
+     また直近2年の「特別な夜」（年末年始・クリスマス・GW・お盆・大型連休とその前夜・ハロウィン。
+     is_special_night）は、去年と比べられるように飛ばして残す（2026-09-26 オーナー要望）。
+  消える行は backup-logs.yml の週次バックアップと12週ごとの永久アーカイブ（logs-archive-*）に残る。
 
 Usage:
     python scripts/cleanup_old_logs.py                    # dry-run（確認のみ）
@@ -19,7 +21,8 @@ Usage:
     SUPABASE_URL                  (必須)
     SUPABASE_SERVICE_ROLE_KEY     (必須)
     LOGS_MAX_ROWS                 行数上限（デフォルト 1450000。2026-09-26 に 3000000 から変更）
-    LOGS_DOWNSAMPLE_AFTER_DAYS    ダウンサンプリング対象（デフォルト 365日）
+    LOGS_DOWNSAMPLE_AFTER_DAYS    ダウンサンプリング対象（デフォルト 730日。2026-09-26 に 365 から変更）
+    LOGS_SPECIAL_KEEP_DAYS        特別な夜を緊急削除から守る日数（デフォルト 730日＝2年）
     LOGS_DOWNSAMPLE_MINUTES       間引き間隔（デフォルト 30分）
     LOGS_DOWNSAMPLE_SCAN_PAGE     ダウンサンプリング候補探索の1ページ行数
                                    （デフォルト 1000 = PostgREST の db-max-rows と同じ。
@@ -53,6 +56,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _retry_common import backoff_delay, is_retryable_status  # noqa: E402
 from _supabase_common import _supabase_conf, auth_headers  # noqa: E402
 
+# 特別な夜の判定（GW・お盆・年末年始・連休）は予測側と同じ定義を使う。GHA の最小依存環境
+# （stdlib＋jpholiday）ではパッケージ経由の import が flask 等を引き込んで失敗するので、
+# build_templates.py と同じくファイル直読みで代替する（scripts/_standalone_import.py）。
+try:
+    from oriental.ml.holiday_calendar import get_holiday_block
+    from oriental.ml.night_type import NIGHT_SESSION_SHIFT_HOURS, JST, night_date_of, special_block
+except ModuleNotFoundError:
+    from _standalone_import import load_module_from_file  # noqa: E402
+
+    _hc = load_module_from_file("_holiday_calendar_standalone", "oriental/ml/holiday_calendar.py")
+    _nt = load_module_from_file("_night_type_standalone", "oriental/ml/night_type.py")
+    get_holiday_block = _hc.get_holiday_block
+    NIGHT_SESSION_SHIFT_HOURS, JST, night_date_of, special_block = (
+        _nt.NIGHT_SESSION_SHIFT_HOURS, _nt.JST, _nt.night_date_of, _nt.special_block,
+    )
+
 # 【2026-08-19 の統一】旧実装はここだけ `SUPABASE_SERVICE_KEY`（別名キー）を見ておらず、
 # 他のバッチが動く環境でもこのスクリプトだけ「キーが無い」で止まりうる状態だった。
 # `_supabase_conf()` に寄せて他スクリプトと同じ解決順（ROLE_KEY → SERVICE_KEY）にする。
@@ -65,10 +84,14 @@ SUPABASE_URL, SUPABASE_KEY = _CONF if _CONF else ("", "")
 # 1行あたり約 231B＋固定分 約20MB）。300万行は約 713MB で、この上限に届く前に 500MB を超えていた
 # （＝安全弁として効いていなかった）。145万行なら、上限を少し超えた時点の実データ 約363MB に、
 # 削除後に autovacuum が走るまで再利用できない空き（約2か月ぶん 約67MB）を足しても 約430MB（86%）。
-# 1晩 5,040 行（42店×120回）なので、DB に残るのは約9か月半ぶん。消える前の行は
+# 1晩 5,040 行（42店×120回）なので、DB に残るのは約9か月半ぶん（直近2年の特別な夜を残す分
+# ＝最大 約20万行を差し引くと、普段の夜は約8か月まで短くなる）。消える前の行は
 # backup-logs.yml が 12週ごとに永久アーカイブ（logs-archive-*）として残す。
 MAX_ROWS = int(os.getenv("LOGS_MAX_ROWS", "1450000"))
-DOWNSAMPLE_AFTER_DAYS = int(os.getenv("LOGS_DOWNSAMPLE_AFTER_DAYS", "365"))
+# 【2026-09-26 に 365 → 730】普段の夜は行数上限（MAX_ROWS）で約8〜9か月のうちに消えるので、1年を
+# 超えて残っているのは「特別な夜」（2年残す。SPECIAL_KEEP_DAYS）だけになった。365日のままだと、
+# 去年と比べるために残している特別な夜を1年で30分刻みに粗くしてしまうので、2年に揃える。
+DOWNSAMPLE_AFTER_DAYS = int(os.getenv("LOGS_DOWNSAMPLE_AFTER_DAYS", "730"))
 DOWNSAMPLE_MINUTES = int(os.getenv("LOGS_DOWNSAMPLE_MINUTES", "30"))
 # PostgREST はサーバー側上限（db-max-rows、既定1000）で1リクエストの応答行数を頭打ちに
 # するため、旧実装の limit=50000 一発 GET は実際には cutoff より古い最古1000行しか
@@ -78,7 +101,7 @@ DOWNSAMPLE_MINUTES = int(os.getenv("LOGS_DOWNSAMPLE_MINUTES", "30"))
 # （id.asc + id=gt.<cursor>）をこちらにも移植する（find_downsample_candidates() 参照）。
 DOWNSAMPLE_SCAN_PAGE = int(os.getenv("LOGS_DOWNSAMPLE_SCAN_PAGE", "1000"))
 # 1回の実行でダウンサンプリング候補探索のために走査する行数の上限（安全弁）。
-# ダウンサンプリング対象（365日超）が積み上がり始めるのは2026年11月下旬からの見込みで、
+# ダウンサンプリング対象（730日超。2026-09-26 までは365日超）が現れるのは早くても2027年11月下旬で、
 # このスクリプトは週次cronのため、1回で全件を捌けなくても複数回の実行で収束すればよい。
 # 既定20万行 = ページ1000行×200回程度のREST呼び出し（backup_logs.py の1回のフル
 # バックアップが約1300回のページングであることと比べて十分小さい）。
@@ -88,6 +111,74 @@ EMERGENCY_DELETE_BATCH = int(os.getenv("LOGS_EMERGENCY_DELETE_BATCH", "10000"))
 # train_ml_model.py は numpy/xgboost/lightgbm/optuna 等の重い依存を持つため、
 # ここでは import せず、独立した env 変数 + 定数フォールバックで意図を明示する。
 PROTECT_DAYS = int(os.getenv("LOGS_PROTECT_DAYS", "200"))
+
+# 【2026-09-26 追加】特別な夜は2年間残す。普段の夜は行数上限（MAX_ROWS）で約8〜9か月で消えるが、
+# 年末年始・クリスマス・GW・お盆・大型連休の夜は、去年の同じ夜と比べる価値がある（予測でも、
+# これらの夜は普段の夜を参考にできないので night_type.special_block で参照から外している＝
+# 「お手本」は去年の同じ夜しかない）。年に約30夜・約15万行（約35MB）なので、500MB の枠に収まる
+# （その分、普段の夜の保持は少し短くなる）。2年を過ぎた特別な夜は普段の夜と同じ扱いに戻る。
+SPECIAL_KEEP_DAYS = int(os.getenv("LOGS_SPECIAL_KEEP_DAYS", "730"))
+# この日数以上の連休（シルバーウィーク等）の夜と、その前夜を特別な夜とみなす。
+LONG_HOLIDAY_MIN_DAYS = 4
+# 暦で決まるイベントの夜（月, 日）。クリスマスイブ・クリスマス・ハロウィン。
+EVENT_NIGHTS_MD = frozenset({(12, 24), (12, 25), (10, 31)})
+
+
+def is_special_night(night) -> bool:
+    """夜 night（-6h シフト規約の暦日）が、去年と比べるために長く残す「特別な夜」か。
+
+    - night_type.special_block: 年末年始（12/29-1/3）・お盆（8/13-15）・GW の連休
+    - 4連休以上の連休に含まれる夜、または翌日から4連休以上が始まる夜（連休前夜）
+    - クリスマスイブ・クリスマス・ハロウィン
+    """
+    if special_block(night) is not None:
+        return True
+    if (night.month, night.day) in EVENT_NIGHTS_MD:
+        return True
+    for day in (night, night + timedelta(days=1)):
+        length, _position = get_holiday_block(day)
+        if length >= LONG_HOLIDAY_MIN_DAYS:
+            return True
+    return False
+
+
+def night_window_utc(night) -> tuple[datetime, datetime]:
+    """夜 night の行が入る時間帯 [night 06:00 JST, 翌日 06:00 JST) を UTC で返す（-6h シフト規約と同じ境界）。"""
+    start = datetime(night.year, night.month, night.day, NIGHT_SESSION_SHIFT_HOURS, tzinfo=JST)
+    return start.astimezone(timezone.utc), (start + timedelta(days=1)).astimezone(timezone.utc)
+
+
+def special_night_ranges(today, protect_cutoff_iso: str, keep_days: int = SPECIAL_KEEP_DAYS) -> list[tuple[datetime, datetime]]:
+    """削除対象になり得る期間（today-keep_days 〜 保護境界）の特別な夜の時間帯を、連続する夜はまとめて返す。"""
+    cutoff = datetime.fromisoformat(protect_cutoff_iso.replace("Z", "+00:00"))
+    night = today - timedelta(days=keep_days)
+    last = night_date_of(cutoff)
+    ranges: list[tuple[datetime, datetime]] = []
+    while night <= last:
+        if is_special_night(night):
+            start, end = night_window_utc(night)
+            if ranges and ranges[-1][1] == start:
+                ranges[-1] = (ranges[-1][0], end)
+            else:
+                ranges.append((start, end))
+        night += timedelta(days=1)
+    return ranges
+
+
+def _ts_literal(dt: datetime) -> str:
+    """PostgREST の論理式（and=(...)）に入れる時刻。':' を含むので二重引用符で囲む。"""
+    return '"' + dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") + '"'
+
+
+def deletable_filter(protect_cutoff_iso: str, special_ranges: list[tuple[datetime, datetime]]) -> str:
+    """緊急削除で消してよい行の条件（PostgREST の and=(...) の値）。
+
+    保護境界（ML 学習ウィンドウ）より古く、かつどの特別な夜の時間帯にも入らない行。
+    """
+    cutoff = datetime.fromisoformat(protect_cutoff_iso.replace("Z", "+00:00"))
+    parts = [f"ts.lt.{_ts_literal(cutoff)}"]
+    parts += [f"not.and(ts.gte.{_ts_literal(s)},ts.lt.{_ts_literal(e)})" for s, e in special_ranges]
+    return "(" + ",".join(parts) + ")"
 
 # Retry budget for every Supabase call in this script.
 #
@@ -293,6 +384,8 @@ def emergency_delete_oldest(
     dry_run: bool,
     protect_cutoff_iso: str,
     protected_count: int,
+    *,
+    today=None,
 ) -> int:
     """行数上限を超えている場合、最古から削除して上限の 95% まで減らす。
 
@@ -300,6 +393,10 @@ def emergency_delete_oldest(
     PROTECT_DAYS 日）は絶対に削除しない。フロアを守ったままでは目標行数まで
     減らせない場合は、安全に削除できる分だけ削除して大声で警告する
     （例外は投げない＝cleanup 自体は成功させ、運用者に気づかせることを優先する）。
+
+    2026-09-26: 直近 SPECIAL_KEEP_DAYS 日（既定2年）の「特別な夜」（is_special_night）は
+    飛ばして、その次に古い普段の夜から消す。特別な夜を飛ばした結果、消せる行が足りなくなったら
+    そこで止まる（dry-run の戻り値はこの除外を数えない概数）。
     """
     target = int(max_rows * 0.95)  # 5% のバッファを確保
     excess = current_count - target
@@ -330,6 +427,11 @@ def emergency_delete_oldest(
     if dry_run:
         return safe_excess
 
+    today = today or datetime.now(JST).date()
+    special_ranges = special_night_ranges(today, protect_cutoff_iso)
+    condition = deletable_filter(protect_cutoff_iso, special_ranges)
+    print(f"  [emergency] keeping {len(special_ranges)} special-night range(s) from the last {SPECIAL_KEEP_DAYS} days")
+
     total_deleted = 0
     remaining = safe_excess
     while remaining > 0:
@@ -337,10 +439,15 @@ def emergency_delete_oldest(
         rows = _rest_get("logs", {
             "select": "id",
             "order": "ts.asc",
-            "ts": f"lt.{protect_cutoff_iso}",
+            "and": condition,
             "limit": str(batch),
         })
         if not rows:
+            if total_deleted < safe_excess:
+                print(
+                    f"  [emergency][WARNING] no more deletable rows outside special nights; "
+                    f"stopped at {total_deleted:,}/{safe_excess:,}"
+                )
             break
         ids = [r["id"] for r in rows]
         delete_by_ids(ids, dry_run=False)

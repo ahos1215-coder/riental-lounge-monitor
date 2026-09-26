@@ -192,6 +192,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      # 特別な夜（年末年始・GW・お盆・連休）の判定が祝日判定（oriental/ml/holiday_calendar.py）を
+      # 使うので jpholiday が要る（2026-09-26〜。build-templates.yml と同じバージョンにピン）。
+      - name: Install deps (jpholiday)
+        if: steps.quota_gate.outputs.paused != 'true'
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "jpholiday==1.0.3"
+
       - name: Run cleanup
         if: steps.quota_gate.outputs.paused != 'true'
         env:
