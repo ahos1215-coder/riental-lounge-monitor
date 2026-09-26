@@ -3,7 +3,9 @@ Supabase logs テーブルの容量管理スクリプト。
 
 2段階の防御:
   1. ダウンサンプリング: 1年超のデータを 30分間隔に間引く（先に実行し、余剰を間引いてから）
-  2. 緊急削除: 行数上限（デフォルト300万行）を超えたら最古から削除
+  2. 緊急削除: 行数上限（デフォルト145万行＝DB 容量 500MB に収まる値。下の MAX_ROWS の注記）を
+     超えたら最古から、上限の95%まで削除。1晩 5,040 行なので実際に残るのは約9か月半ぶんで、
+     1年超の間引き（1.）はこの上限が先に効くため通常は発動しない
      ただし ML 学習ウィンドウ（PROTECT_DAYS、既定200日 = train_ml_model.py の
      ML_TRAIN_DAYS=180 + 余裕）より新しい行は「絶対に」削除しない。フロアを守れず
      上限を切れない場合は、安全に消せる分だけ消して大声で警告する。
@@ -16,7 +18,7 @@ Usage:
 環境変数:
     SUPABASE_URL                  (必須)
     SUPABASE_SERVICE_ROLE_KEY     (必須)
-    LOGS_MAX_ROWS                 行数上限（デフォルト 3000000）
+    LOGS_MAX_ROWS                 行数上限（デフォルト 1450000。2026-09-26 に 3000000 から変更）
     LOGS_DOWNSAMPLE_AFTER_DAYS    ダウンサンプリング対象（デフォルト 365日）
     LOGS_DOWNSAMPLE_MINUTES       間引き間隔（デフォルト 30分）
     LOGS_DOWNSAMPLE_SCAN_PAGE     ダウンサンプリング候補探索の1ページ行数
@@ -58,7 +60,14 @@ from _supabase_common import _supabase_conf, auth_headers  # noqa: E402
 _CONF = _supabase_conf()
 SUPABASE_URL, SUPABASE_KEY = _CONF if _CONF else ("", "")
 
-MAX_ROWS = int(os.getenv("LOGS_MAX_ROWS", "3000000"))
+# 行数上限。【2026-09-26 に 300万 → 145万】Supabase 無料プランの DB 容量は 500MB で、超えると
+# read-only になり収集（INSERT）が止まる。9/26 の実測は 1,417,390 行で 347.5MB（索引・他テーブル込みで
+# 1行あたり約 231B＋固定分 約20MB）。300万行は約 713MB で、この上限に届く前に 500MB を超えていた
+# （＝安全弁として効いていなかった）。145万行なら、上限を少し超えた時点の実データ 約363MB に、
+# 削除後に autovacuum が走るまで再利用できない空き（約2か月ぶん 約67MB）を足しても 約430MB（86%）。
+# 1晩 5,040 行（42店×120回）なので、DB に残るのは約9か月半ぶん。消える前の行は
+# backup-logs.yml が 12週ごとに永久アーカイブ（logs-archive-*）として残す。
+MAX_ROWS = int(os.getenv("LOGS_MAX_ROWS", "1450000"))
 DOWNSAMPLE_AFTER_DAYS = int(os.getenv("LOGS_DOWNSAMPLE_AFTER_DAYS", "365"))
 DOWNSAMPLE_MINUTES = int(os.getenv("LOGS_DOWNSAMPLE_MINUTES", "30"))
 # PostgREST はサーバー側上限（db-max-rows、既定1000）で1リクエストの応答行数を頭打ちに

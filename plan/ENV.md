@@ -268,7 +268,7 @@ Task Scheduler `MEGRIBI-warm-cdn` が主経路（GHA `warm-cdn.yml` は実測発
 - `WARM_CDN_LOG_DIR`（warming ログの出力先ディレクトリ。既定は `%TEMP%`）
 
 ## Logs Maintenance (scripts/cleanup_old_logs.py) — 新規セクション（Supabase logs の肥大化対策）
-- `LOGS_MAX_ROWS`（int, 既定 `3000000`。logs テーブルの行数上限）
+- `LOGS_MAX_ROWS`（int, 既定 `1450000`。logs テーブルの行数上限。超えたら古い順に上限の95%まで削除。2026-09-26 に `3000000` から変更＝無料プランの DB 容量 500MB に収まる値。根拠は `scripts/cleanup_old_logs.py` の `MAX_ROWS` 注記）
 - `LOGS_DOWNSAMPLE_AFTER_DAYS`（int, 既定 `365`。この日数より古い行をダウンサンプリング対象にする）
 - `LOGS_DOWNSAMPLE_MINUTES`（int, 既定 `30`。ダウンサンプリング後の間引き間隔（分））
 - `LOGS_EMERGENCY_DELETE_BATCH`（int, 既定 `10000`。緊急削除時のバッチサイズ）

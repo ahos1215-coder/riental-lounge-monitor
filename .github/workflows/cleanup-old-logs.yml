@@ -39,9 +39,9 @@ on:
           - "false"
           - "true"
       max_rows:
-        description: "行数上限 (デフォルト: 3000000)"
+        description: "行数上限 (デフォルト: 1450000＝DB 容量 500MB に収まる値。根拠は scripts/cleanup_old_logs.py の MAX_ROWS)"
         required: false
-        default: "3000000"
+        default: "1450000"
       force:
         description: "今週のバックアップ確認をバイパスして強制実行する (通常は false のままにする)"
         required: false
@@ -197,7 +197,7 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          LOGS_MAX_ROWS: ${{ github.event.inputs.max_rows || '3000000' }}
+          LOGS_MAX_ROWS: ${{ github.event.inputs.max_rows || '1450000' }}
           BACKUP_OK: ${{ needs.check-backup.outputs.backup_ok }}
         run: |
           set -euo pipefail

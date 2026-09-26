@@ -110,6 +110,39 @@ jobs:
             --notes "Encrypted (AES256) weekly snapshot of the Supabase logs table. Decrypt with the BACKUP_PASSPHRASE. Restore steps: plan/LOGS_BACKUP.md." \
             || gh release upload "$TAG" "${FILE}.gpg" --clobber
 
+      # 【2026-09-26 追加】永久アーカイブ。上の週次バックアップは最新8世代（約2か月）しか残さない一方、
+      # DB は無料プランの容量（500MB）に収めるため、cleanup-old-logs.yml が行数 145万行を超えたら古い順に
+      # 消していく（DB に残るのは約9か月半ぶん）。それだけだと消えた行は2か月後にバックアップからも消え、
+      # 永久に失われる。そこで 12週（84日）に1回、同じ暗号化ファイルを別名 logs-archive-* でも保存する。
+      # DB に約9か月半ぶん残っている間に次を撮るので、重なりながら全期間を覆う（取りこぼしなし）。
+      # 下の prune は '^logs-backup-' しか消さないので、こちらは残り続ける（1本 約20MB・年4本）。
+      # 直近のアーカイブから84日たっていなければ何もしない。撮れなかった週があっても、次に成功した
+      # 回で撮り直す（暦で決め打ちしない＝自己修復）。復元手順は plan/LOGS_BACKUP.md。
+      - name: Keep a permanent archive (every 12 weeks)
+        if: steps.quota_gate.outputs.paused != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          FILE="logs-backup-${STAMP}.ndjson.gz.gpg"
+          LATEST="$(gh release list --limit 200 --json tagName --jq '.[].tagName' \
+            | grep '^logs-archive-' | sort -r | head -n 1 || true)"
+          if [ -n "$LATEST" ]; then
+            AGE_DAYS=$(( ( $(date -u +%s) - $(date -u -d "${LATEST#logs-archive-}" +%s) ) / 86400 ))
+            if [ "$AGE_DAYS" -lt 84 ]; then
+              echo "latest archive ${LATEST} is ${AGE_DAYS} days old (< 84); nothing to do."
+              exit 0
+            fi
+            echo "latest archive ${LATEST} is ${AGE_DAYS} days old; taking a new one."
+          else
+            echo "no archive yet; taking the first one."
+          fi
+          TAG="logs-archive-${STAMP}"
+          gh release create "$TAG" "$FILE" \
+            --title "logs archive ${STAMP} (encrypted, kept permanently)" \
+            --notes "Permanent encrypted (AES256) archive of the Supabase logs table, taken every 12 weeks and never pruned. The database itself keeps only about 9.5 months (free plan 500MB limit). Decrypt with the BACKUP_PASSPHRASE. Restore steps: plan/LOGS_BACKUP.md." \
+            || gh release upload "$TAG" "$FILE" --clobber
+
       # 止めている間は新しいバックアップが増えないので、古い分の削除も一緒に止める
       # （消すだけ進めると、復旧までの間に手持ちのバックアップが痩せていく）。
       - name: Prune old backups (keep newest 8)
