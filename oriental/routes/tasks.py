@@ -134,7 +134,7 @@ def _is_production() -> bool:
 def _warn_if_production_without_supabase() -> None:
     """本番で Supabase 未設定なら起動時に警告する（F3 の補足）。
 
-    multi_collect.insert_supabase_log() は HAS_SUPABASE=False のとき True を返す
+    multi_collect.insert_supabase_logs() は HAS_SUPABASE=False のとき全行 True を返す
     （docstring 明記の開発時フォールバック＝そのまま維持する）。そのため設定漏れは
     fail 件数に現れず、収集が1行も保存していなくても success に見える。挙動は変えず、
     起動時のログで気づけるようにする。

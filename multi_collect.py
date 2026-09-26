@@ -77,7 +77,8 @@ def _aisekiya_capacity(slug: str) -> int:
         return 0
     return (info["tables"] + info["vip"]) * 2
 
-# 店舗を回す間隔（秒）— 書き込みフェーズで使用
+# 店舗を回す間隔（秒）— 書き込みフェーズで使用（2026-09-26 以降は GAS 送信の間隔のみ。
+# Supabase へは全店まとめて1回で送るので、この待ちは挟まらない）
 BETWEEN_STORES_SEC = float(os.environ.get("BETWEEN_STORES_SEC", "0.0"))
 
 # 並列スクレイピングのワーカー数（デフォルト10）
@@ -422,8 +423,45 @@ def post_to_gas(body: dict) -> None:
                 return
 
 # ========= Supabase への INSERT =========
+#
+# 2026-09-26: 全店を「まとめて1回」で書く（Supabase のログ取り込み枠への対策）。
+#   Supabase は HTTP リクエスト1回ごとに API ゲートウェイのログを1件残し、その量が
+#   無料プランの「ログ取り込み枠（月1GB。2027年初めから適用）」に数えられる。以前は
+#   5分ごとの収集で42店を1店ずつ INSERT し（1日 5,040回）、毎時の天気の有無も1店ずつ
+#   問い合わせていた（1日 約1,100回）。この2つだけでアクセス全体の3〜4割を占めていた。
+#   行の中身（列・値・天気を付けるかどうか）は変えず、送る回数だけをまとめる。
 
-def insert_supabase_log(
+# まとめ書きで送る列。天気の有無は行ごとに違うので、行に無い列は「列の既定値」で入れる
+# （Prefer: missing=default）。1行ずつ送っていた頃の「天気が無ければキーごと省く」と同じ結果になる。
+LOGS_INSERT_COLUMNS = (
+    "store_id",
+    "ts",
+    "men",
+    "women",
+    "total",
+    "src_brand",
+    "weather_code",
+    "weather_label",
+    "temp_c",
+    "precip_mm",
+)
+# 1回で最大 42 行。1行ずつのときの 10 秒より少しだけ長く待つ。
+BATCH_INSERT_TIMEOUT_SEC = 15
+
+
+def _logs_endpoint() -> str:
+    return SUPABASE_URL.rstrip("/") + "/rest/v1/logs"
+
+
+def _supabase_headers(**extra: str) -> dict[str, str]:
+    return {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        **extra,
+    }
+
+
+def build_supabase_log_row(
     store_id: str,
     men: int,
     women: int,
@@ -433,25 +471,19 @@ def insert_supabase_log(
     precip_mm: float | None,
     *,
     brand: str = SUPABASE_BRAND,
-) -> bool:
-    """Supabase の logs テーブルに 1 行 INSERT する。
+    ts: str | None = None,
+) -> dict[str, object]:
+    """logs テーブル1行分の payload。天気の値が無い列はキーごと省く。
 
-    返値: INSERT が成功したか（HTTP 2xx）どうか。Supabase 未設定時は
-    そもそも書き込み対象外なので True（成功扱い）を返す。
+    ts を渡さなければ今の時刻（UTC）。まとめ書きでは同じ回の行に同じ ts を渡す
+    （送った後に「本当に入ったか」を ts で確かめられるようにするため）。
     """
-    if not HAS_SUPABASE:
-        return True
-
-    endpoint = SUPABASE_URL.rstrip("/") + "/rest/v1/logs"
-    ts = datetime.now(timezone.utc).isoformat()
-    total = int(men) + int(women)
-
     row: dict[str, object] = {
         "store_id": store_id,
-        "ts": ts,
+        "ts": ts or datetime.now(timezone.utc).isoformat(),
         "men": int(men),
         "women": int(women),
-        "total": total,
+        "total": int(men) + int(women),
         "src_brand": brand,
     }
 
@@ -464,24 +496,117 @@ def insert_supabase_log(
         row["temp_c"] = float(temp_c)
     if precip_mm is not None:
         row["precip_mm"] = float(precip_mm)
+    return row
 
-    headers = {
-        "apikey": SUPABASE_SERVICE_ROLE_KEY,
-        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "return=minimal",
-    }
 
+def _post_log_row(row: dict[str, object]) -> bool:
+    """1行だけ INSERT する（まとめ書きが使えなかったときの退避路。以前の書き込み方と同じ）。"""
+    store_id = row.get("store_id")
+    headers = _supabase_headers(**{"Content-Type": "application/json", "Prefer": "return=minimal"})
     try:
-        r = requests.post(endpoint, json=row, headers=headers, timeout=10)
-        print(
-            f"[supabase] store_id={store_id} status={r.status_code} "
-            f"body={r.text[:200]}"
-        )
+        r = requests.post(_logs_endpoint(), json=row, headers=headers, timeout=10)
+        print(f"[supabase] store_id={store_id} status={r.status_code} body={r.text[:200]}")
         return r.ok
     except Exception as e:
         print(f"[supabase][error] store_id={store_id} err={e}")
         return False
+
+
+def _parse_ts(value: object) -> datetime | None:
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+
+
+def _stores_already_written(rows: list[dict[str, object]]) -> set[str] | None:
+    """rows のうち、すでに logs に入っている行の store_id を返す（確かめられなければ None）。
+
+    まとめ書きが通信エラーやタイムアウトで終わったとき、Supabase 側では入ったのか
+    入らなかったのかが分からない。そのまま送り直すと二重に入り得るので、先にこれで確かめる。
+    店と ts の組が完全に一致する行だけを「入っていた」と数える。
+    """
+    wanted = {(str(r["store_id"]), _parse_ts(r["ts"])) for r in rows}
+    stamps = [ts for _sid, ts in wanted if ts is not None]
+    if not stamps:
+        return None
+    params = [
+        ("select", "store_id,ts"),
+        ("store_id", f"in.({','.join(sorted({sid for sid, _ts in wanted}))})"),
+        ("ts", f"gte.{min(stamps).isoformat()}"),
+        ("ts", f"lte.{max(stamps).isoformat()}"),
+        ("limit", str(len(rows) * 4)),
+    ]
+    try:
+        resp = requests.get(
+            _logs_endpoint(),
+            params=params,
+            headers=_supabase_headers(Accept="application/json"),
+            timeout=10,
+        )
+        if not resp.ok:
+            return None
+        payload = resp.json()
+    except Exception:
+        return None
+    if not isinstance(payload, list):
+        return None
+    found = {
+        (str(item.get("store_id")), _parse_ts(item.get("ts")))
+        for item in payload
+        if isinstance(item, dict)
+    }
+    return {sid for sid, ts in wanted & found}
+
+
+def insert_supabase_logs(rows: list[dict[str, object]]) -> dict[str, bool]:
+    """rows（build_supabase_log_row の戻り値）をまとめて1回で INSERT し、{store_id: 成否} を返す。
+
+    PostgREST の一括 INSERT は1つの SQL 文なので、「全行入る」か「1行も入らない」かのどちらか。
+      - 2xx: 全行成功。
+      - HTTP エラー（4xx/5xx）: 1行も入っていない。どの行が悪いかを切り分けるため1行ずつ
+        送り直す（＝以前と同じ書き方。1店の不正な値で残りの店を道連れにしない）。
+      - 通信エラー・タイムアウト: 入ったかどうか分からない。そのまま送り直すと二重に入り
+        得るので、先に確かめて、入っていない行だけを1行ずつ送る。確かめられなければ
+        送り直さない（以前もタイムアウトした行は失敗扱いで、送り直していなかった）。
+
+    Supabase 未設定時はそもそも書き込み対象外なので全行 True（成功扱い）を返す
+    （以前の1行ずつの書き込み関数と同じ開発時フォールバック）。
+    """
+    if not rows:
+        return {}
+    if not HAS_SUPABASE:
+        return {str(row["store_id"]): True for row in rows}
+
+    headers = _supabase_headers(
+        **{"Content-Type": "application/json", "Prefer": "return=minimal,missing=default"}
+    )
+    try:
+        r = requests.post(
+            _logs_endpoint(),
+            params={"columns": ",".join(LOGS_INSERT_COLUMNS)},
+            json=rows,
+            headers=headers,
+            timeout=BATCH_INSERT_TIMEOUT_SEC,
+        )
+    except Exception as e:
+        print(f"[supabase][batch][error] rows={len(rows)} err={type(e).__name__}: {e}")
+        written = _stores_already_written(rows)
+        if written is None:
+            print("[supabase][batch][error] could not verify the batch; not resending (avoid duplicates)")
+            return {str(row["store_id"]): False for row in rows}
+        print(f"[supabase][batch] verified written={len(written)}/{len(rows)}; resending the rest one by one")
+        return {
+            str(row["store_id"]): (str(row["store_id"]) in written) or _post_log_row(row)
+            for row in rows
+        }
+
+    print(f"[supabase][batch] rows={len(rows)} status={r.status_code} body={r.text[:200]}")
+    if r.ok:
+        return {str(row["store_id"]): True for row in rows}
+    print("[supabase][batch] rejected as a whole; retrying one row at a time")
+    return {str(row["store_id"]): _post_log_row(row) for row in rows}
 
 
 def _current_hour_window_jst() -> tuple[datetime, datetime]:
@@ -491,32 +616,39 @@ def _current_hour_window_jst() -> tuple[datetime, datetime]:
     return hour_start, hour_start + timedelta(hours=1)
 
 
-def _store_has_weather_this_hour(store_id: str) -> bool:
-    if not HAS_SUPABASE:
-        return False
+def _stores_with_weather_this_hour(store_ids: list[str]) -> set[str]:
+    """この1時間（JST）に天気付きの行がすでにある店を、まとめて1回で問い合わせる。
+
+    以前は店ごとに1回ずつ問い合わせていた（毎時の最初の10分に 3回 × 37店）。
+    失敗したら空集合＝以前の1店ずつ版が False を返したときと同じで、天気を取り直して
+    付けるだけ（害はない）。
+    """
+    if not HAS_SUPABASE or not store_ids:
+        return set()
     hour_start, hour_end = _current_hour_window_jst()
-    endpoint = SUPABASE_URL.rstrip("/") + "/rest/v1/logs"
     params = [
-        ("select", "id"),
-        ("store_id", f"eq.{store_id}"),
+        ("select", "store_id"),
+        ("store_id", f"in.({','.join(sorted(set(store_ids)))})"),
         ("ts", f"gte.{hour_start.isoformat()}"),
         ("ts", f"lt.{hour_end.isoformat()}"),
         ("weather_code", "not.is.null"),
-        ("limit", "1"),
+        ("limit", "1000"),
     ]
-    headers = {
-        "apikey": SUPABASE_SERVICE_ROLE_KEY,
-        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
-        "Accept": "application/json",
-    }
     try:
-        resp = requests.get(endpoint, params=params, headers=headers, timeout=8)
+        resp = requests.get(
+            _logs_endpoint(),
+            params=params,
+            headers=_supabase_headers(Accept="application/json"),
+            timeout=8,
+        )
         if not resp.ok:
-            return False
+            return set()
         payload = resp.json()
-        return isinstance(payload, list) and len(payload) > 0
     except Exception:
-        return False
+        return set()
+    if not isinstance(payload, list):
+        return set()
+    return {str(item["store_id"]) for item in payload if isinstance(item, dict) and item.get("store_id")}
 
 # ========= スクレイピング部 =========
 
@@ -756,13 +888,15 @@ def _prefetch_weather(
         str, tuple[int | None, str | None, float | None, float | None]
     ] = {}
     checked_hourly: dict[str, bool] = {}
+    # 天気付きの行が今の1時間にもうある店を、全店まとめて1回で聞いておく。
+    already_has_weather = _stores_with_weather_this_hour([entry["store_id"] for entry in stores])
 
     for entry in stores:
         store_id = entry["store_id"]
 
         has_weather = checked_hourly.get(store_id)
         if has_weather is None:
-            has_weather = _store_has_weather_this_hour(store_id)
+            has_weather = store_id in already_has_weather
             checked_hourly[store_id] = has_weather
 
         if has_weather:
@@ -992,9 +1126,11 @@ def _write_aisekiya_results(
     scrape_results: dict[str, tuple[int | None, int | None]],
     weather_map: dict[str, tuple[int | None, str | None, float | None, float | None]],
 ) -> tuple[int, int]:
-    """相席屋のスクレイピング結果を Supabase に書き込む。"""
+    """相席屋のスクレイピング結果を Supabase に書き込む（全店まとめて1回）。"""
     success = 0
     fail = 0
+    ts = datetime.now(timezone.utc).isoformat()
+    rows: list[dict[str, object]] = []
 
     for slug, info in AISEKIYA_STORES.items():
         store_id = info["store_id"]
@@ -1014,16 +1150,21 @@ def _write_aisekiya_results(
                 weather_code, weather_label, temp_c, precip_mm = wdata
                 break
 
-        db_ok = insert_supabase_log(
-            store_id,
-            int(men),
-            int(women),
-            weather_code,
-            weather_label,
-            temp_c,
-            precip_mm,
-            brand=AISEKIYA_BRAND,
+        rows.append(
+            build_supabase_log_row(
+                store_id,
+                int(men),
+                int(women),
+                weather_code,
+                weather_label,
+                temp_c,
+                precip_mm,
+                brand=AISEKIYA_BRAND,
+                ts=ts,
+            )
         )
+
+    for store_id, db_ok in insert_supabase_logs(rows).items():
         if db_ok:
             success += 1
         else:
@@ -1077,11 +1218,14 @@ def _write_results(
     weather_map: dict[str, tuple[int | None, str | None, float | None, float | None]],
 ) -> tuple[int, int]:
     """
-    スクレイピング結果を GAS + Supabase に書き込む。
+    スクレイピング結果を GAS + Supabase に書き込む（Supabase へは全店まとめて1回）。
     返値: (success_count, fail_count)
     """
     success = 0
     fail = 0
+    ts = datetime.now(timezone.utc).isoformat()
+    rows: list[dict[str, object]] = []
+    store_names: dict[str, str] = {}
 
     for entry in stores:
         store_id = entry["store_id"]
@@ -1109,24 +1253,29 @@ def _write_results(
             body["weather_label"] = weather_label
         post_to_gas(body)
 
-        # Supabase
-        db_ok = insert_supabase_log(
-            store_id,
-            int(men),
-            int(women),
-            weather_code,
-            weather_label,
-            temp_c,
-            precip_mm,
+        # Supabase（行を貯めて、ループの後でまとめて1回で送る）
+        rows.append(
+            build_supabase_log_row(
+                store_id,
+                int(men),
+                int(women),
+                weather_code,
+                weather_label,
+                temp_c,
+                precip_mm,
+                ts=ts,
+            )
         )
+        store_names[store_id] = store_name
 
         if BETWEEN_STORES_SEC > 0:
             time.sleep(BETWEEN_STORES_SEC)
 
+    for store_id, db_ok in insert_supabase_logs(rows).items():
         if db_ok:
             success += 1
         else:
-            print(f"[error] supabase insert failed store={store_name}")
+            print(f"[error] supabase insert failed store={store_names.get(store_id, store_id)}")
             fail += 1
 
     return success, fail
@@ -1322,7 +1471,7 @@ def collect_all_once(*, target_store_id: str | None = None) -> dict:
     3-phase パイプライン:
       Phase 1 — 天気プリフェッチ (sequential, Open-Meteo rate-limit 遵守)
       Phase 2 — 全店並列スクレイピング (ThreadPoolExecutor)
-      Phase 3 — GAS / Supabase 書き込み (sequential)
+      Phase 3 — GAS / Supabase 書き込み (GAS は1店ずつ、Supabase は全店まとめて1回)
 
     Returns dict with keys: stores, success, fail, duration_sec
     """

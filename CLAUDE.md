@@ -1,5 +1,7 @@
 CLAUDE.md — MEGRIBI（Oriental Lounge Monitor）3分マップ
-最終更新: 2026-09-18（§4罠5の GHA `schedule:` 発火率を 2026-09-18 の実測で書き換え＝毎時24%・2時間毎43〜65%・
+最終更新: 2026-09-26（§4罠11に Supabase の次の壁2つ＝ログ取り込み枠 月1GB（2027年初めから）と DB 容量 500MB を追記。
+収集の Supabase 書き込みを1店ずつ→まとめて1回に変更した反映）。
+2026-09-18（§4罠5の GHA `schedule:` 発火率を 2026-09-18 の実測で書き換え＝毎時24%・2時間毎43〜65%・
 6時間毎96%・日次100%だが1.5〜5時間遅れ。「毎時」も間引かれる側で、監視の頻度設計は日次を基準にする。
 §4に罠12「LINE 通知は Secrets 未設定だと黙って no-op になる」を追加＝2026-09-18 時点で全 LINE 経路が届いていなかった）。
 2026-09-09（§4に罠11「Supabase無料プランの枠が実運用の制約になっている」を追加＋
@@ -95,7 +97,7 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
 
 | 時刻(JST) | 何が起きるか | 主体 |
 |---|---|---|
-| 5分毎 | 混雑データ収集 | cron-job.org → `/tasks/multi_collect`（`CRON_SECRET`認証）→ `collect_all_once()` → Supabase `logs`。オリエンタル・相席屋それぞれのトップページSSRから2リクエストで全42店舗分を取得 |
+| 5分毎 | 混雑データ収集 | cron-job.org → `/tasks/multi_collect`（`CRON_SECRET`認証）→ `collect_all_once()` → Supabase `logs`。オリエンタル・相席屋それぞれのトップページSSRから2リクエストで全42店舗分を取得。Supabase への書き込みもブランドごとに**まとめて1回**（2026-09-26〜。以前は1店ずつ。§4 罠11） |
 | 18:00 / 21:30 | **Daily Report生成** | 【主】Task Scheduler `MEGRIBI-daily-evening`/`-late` → `scripts/local_report_job.py --stores all --edition <evening_preview\|late_update> --mode publish` → ローカル Ollama（`gemma4:e4b`、`localhost:11434`）→ Supabase `blog_drafts` upsert。【緊急時のみ】`.github/workflows/trigger-blog-cron.yml` は `schedule:` コメントアウト済み、`workflow_dispatch`のみ（matrixはオリエンタル37店舗、相席屋5店舗は対象外、Gemini使用） |
 | 18:10 | v2 shadow: 予測スナップショット保存 | 【主】Task Scheduler `MEGRIBI-snapshot` → `scripts/snapshot_forecasts.py` → Storage `ml-models/accuracy/snapshots/<date>.json`。GHA `forecast-accuracy-track.yml` の snapshot cron は 2026-07-18 に削除済み（GHA schedule の遅延で開店後に撮れて汚染したため。`workflow_dispatch` は残る） |
 | 19:00〜23:50・10分毎 | CDN warming（`/api/range`等の温め） | 【主】Task Scheduler `MEGRIBI-warm-cdn` → `scripts/warm_cdn_local.py`。【バックアップ】GHA `warm-cdn.yml`（実測発火率 15〜34%（2026-08）と低いため保険止まり。§4 罠5） |
@@ -226,6 +228,11 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
     **警告なしで即402**（Supabase 公式 Billing FAQ）。次に危ないのは uncached（DB側）egress で余裕は約1.1倍。
     主犯は urllib で REST を読むスクリプトが `Accept-Encoding` を送らず非圧縮なこと（gzip で実測 6〜11倍に縮む。select する列数で変わる）。
     urllib で Supabase を読むスクリプトを書くときは gzip を要求すること。
+    追記（2026-09-26）: 次の壁は2つ（管理画面の実測）。**① ログ取り込み枠 月1GB（2027年初めから適用）**＝
+    Supabase は**リクエスト1回ごとにログを1件**残すので、量はリクエスト回数に比例する（実測ペース 月1.5GB前後）。
+    **Supabase へ1件ずつループで書く・問い合わせる書き方をしないこと**（収集の42店1件ずつ INSERT をまとめ書きに
+    直したのが最大の削減＝`multi_collect.insert_supabase_logs`）。**② DB 容量 500MB**（2026-09-26 に70%・約1.2MB/日増）＝
+    無料プランは超えると read-only で収集が止まる。詳細と見込みは `docs/FAILURE_MAP.md`。
 12. **LINE 通知は Secrets 未設定だと黙って no-op になる。「LINE が静か＝正常」と読まないこと。**
     2026-09-18 時点で GitHub Secrets に `LINE_CHANNEL_ACCESS_TOKEN` / `LINE_USER_ID` が無く
     （失敗 run の注記 "not set. Skipping"）、オーナーPCの `.env.local` のトークンも 401 で、
