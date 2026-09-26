@@ -467,31 +467,43 @@ class Test状態の項目:
 class Test期限:
     def test_出典の3件を定数で持つ(self) -> None:
         """docs/FAILURE_MAP.md の「固定日付のリスク」と同じ3件（定数の番犬）。"""
-        assert [iso for _label, iso in dd.DEADLINES] == ["2026-10-01", "2026-11-20", "2026-12-31"]
+        assert [iso for _label, iso in dd.DEADLINES] == ["2026-11-20", "2026-12-31", "2027-01-01"]
+
+    def test_解決済みのNode20は載せない(self) -> None:
+        """2026-09-26 に package.json で固定して解消済み。残すと 10/1 以降「🔴 超過」と嘘をつく。"""
+        assert all("Node.js 20" not in label for label, _iso in dd.DEADLINES)
 
     def test_31日先は出さない(self) -> None:
-        due = dd.parse_ymd("2026-10-01")
+        due = dd.parse_ymd("2026-11-20")
         assert dd.section_deadlines(due - timedelta(days=31)) == []
 
     def test_30日先は出す(self) -> None:
-        due = dd.parse_ymd("2026-10-01")
+        due = dd.parse_ymd("2026-11-20")
         lines = dd.section_deadlines(due - timedelta(days=30))
         assert len(lines) == 1
         assert "まで30日" in lines[0]
 
     def test_期限切れは黙らせない(self) -> None:
         """過ぎた瞬間に消えると「予告を受けたが何もしなかった」型の再発そのものになる。"""
-        due = dd.parse_ymd("2026-10-01")
+        due = dd.parse_ymd("2026-11-20")
         lines = dd.section_deadlines(due + timedelta(days=3))
         assert "🔴" in lines[0]
         assert "3日超過" in lines[0]
 
-    def test_今日時点ではNode20だけが出る(self, monkeypatch, router) -> None:
+    def test_今日時点では期限の行が出ない(self, monkeypatch, router) -> None:
+        """NOW（2026-09-18）から見て最も近い期限は 63日先。30日以内のものが無ければ行を出さない。"""
         _configure(monkeypatch)
         router()
         body = dd.build_digest(now=NOW, dry_run=True).body
+        assert f"{dd.L_DEADLINE}: " not in body
+
+    def test_30日以内の期限は本文に配線されている(self, monkeypatch, router) -> None:
+        _configure(monkeypatch)
+        router()
+        monkeypatch.setattr(dd, "DEADLINES", (("テスト用の期限", "2026-10-01"),))
+        body = dd.build_digest(now=NOW, dry_run=True).body
         assert body.count(f"{dd.L_DEADLINE}: ") == 1
-        assert "Node.js 20" in body
+        assert "テスト用の期限" in body
 
 
 # --------------------------------------------------------------------------- #
@@ -544,6 +556,9 @@ class Test長さの上限:
         # （現実には起きにくいが、溢れたときの振る舞いを固定しておく）。
         long_names = [("非常に長い名前のワークフロー" * 15) + str(i) for i in range(11)]
         r = router(**{"/actions/runs": _runs(*long_names)})
+        # main() は実時計で日付を決めるので、本文の末尾側に必ず出る行として「期限切れ」の
+        # 期限を1件だけ置く（期限切れは日付に関係なく必ず出る設計）。
+        monkeypatch.setattr(dd, "DEADLINES", (("末尾の目印の期限", "2000-01-01"),))
 
         assert dd.main([]) == 0
 
@@ -554,7 +569,7 @@ class Test長さの上限:
         # 全文はサマリに残っている（切られた末尾の行がこちらには載っている）
         written = summary.read_text(encoding="utf-8")
         assert len(written) > dd.LINE_MAX_CHARS
-        assert "Node.js 20" in written
+        assert "末尾の目印の期限" in written
 
 
 # --------------------------------------------------------------------------- #
