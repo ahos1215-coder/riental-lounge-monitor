@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from datetime import timedelta
 from typing import Callable, Dict
 
 import numpy as np
@@ -9,6 +10,7 @@ import pandas as pd
 from ..data.provider import GoogleSheetProvider, SupabaseError, SupabaseLogsProvider
 from ._num import as_ts, env_float
 from .model_registry import ModelRegistryError, ModelSchemaMismatchError
+from .night_type import NIGHT_SESSION_SHIFT_HOURS, night_date_of, reference_offsets
 from .preprocess import FEATURE_COLUMNS, add_time_features, prepare_dataframe
 
 FutureBuilder = Callable[[pd.DataFrame], pd.DatetimeIndex]
@@ -143,6 +145,15 @@ class ForecastService:
             future_times = future_builder(df)
             self.logger.info("forecast.service.future size=%d", len(future_times))
 
+            # 先週の同じ夜が祝日がらみ・データなしで、もっと前の夜を手本にする週だけ、その夜を追加で
+            # 取得する（通常の履歴は8日分）。取れなければ手本なし＝特徴は NaN、ブレンドはしない
+            # （予測自体は止めない）。
+            if not df.empty:
+                extra = self._fetch_reference_nights(store_id, future_times, df)
+                if extra:
+                    df = prepare_dataframe(records + extra, self.timezone)
+                    self.logger.info("forecast.service.reference_nights rows=%d", len(extra))
+
             clamped_slots = 0
             blended_slots = 0
             w_ml_used = 1.0
@@ -204,6 +215,54 @@ class ForecastService:
             # 予期せぬ内部エラーを ok:true（成功）で隠すと、予測グラフが空のまま
             # 5xx もアラートも出ず、障害に何日も気づけない。ok:false で明示する。
             return _error_result("forecast_internal_error", exc, store_id, freq_min, extra_meta)
+
+    def _fetch_reference_nights(
+        self, store_id: str, future_times: pd.DatetimeIndex, history: pd.DataFrame
+    ) -> list[dict]:
+        """予測する夜の「手本の夜」が通常の履歴（history_days 日）に無いとき、その夜だけを取得する。
+
+        手本の候補は night_type.reference_offsets（7/14/21/28日前のうち祝日がらみでない夜）。近い順に見て、
+        履歴に実測がある夜があればそれで足りる。履歴の窓より古い候補だけを1夜ずつ取りに行き、実測が
+        あった時点で止める（普段は7日前が履歴の中にあるので、1回も取りに行かない）。学習時は180日分の
+        中から同じ規則で引くので、ここで取らないと推論時だけ手本が欠けて学習と推論がずれる。
+        取得に失敗しても予測は止めない（手本なしとして続ける）。
+        """
+        fetch = getattr(self.provider, "fetch_range", None)
+        if fetch is None or len(future_times) == 0:
+            return []
+        window_start = pd.Timestamp.now(tz=self.tz) - pd.Timedelta(days=self.history_days)
+        shift = pd.Timedelta(hours=NIGHT_SESSION_SHIFT_HOURS)
+        have = set((history["ts"] - shift).dt.date) if "ts" in history.columns else set()
+        extra: list[dict] = []
+        for night in sorted({night_date_of(t.to_pydatetime()) for t in future_times}):
+            for offset_days in reference_offsets(night):
+                ref_night = night - timedelta(days=offset_days)
+                if ref_night in have:
+                    break  # この夜の実測がある＝手本が決まった
+                start = pd.Timestamp(
+                    ref_night.year, ref_night.month, ref_night.day, NIGHT_SESSION_SHIFT_HOURS, tz=self.tz
+                )
+                if start >= window_start:
+                    continue  # 履歴の窓の中なのに実測が無い（収集停止など）→ 次の候補へ
+                end = min(start + pd.Timedelta(days=1), window_start)
+                try:
+                    rows = fetch(
+                        store_id=store_id,
+                        start_ts=start.to_pydatetime(),
+                        end_ts=end.to_pydatetime(),
+                        limit=400,
+                    )
+                except Exception as exc:  # noqa: BLE001 — 手本の追加取得は任意。予測は止めない
+                    self.logger.warning(
+                        "forecast.service.reference_night_fetch_failed store=%s night=%s err=%s",
+                        store_id, ref_night, type(exc).__name__,
+                    )
+                    break
+                if rows:
+                    extra += rows
+                    have.add(ref_night)
+                    break
+        return extra
 
     def _fetch_history(self, store_id: str) -> list[dict]:
         try:

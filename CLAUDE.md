@@ -246,6 +246,16 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
     入れるまで LINE 経路は全部 no-op。LINE 経路の生死は「届いた」で確かめる（月曜の週次ダイジェストが来ない／
     `site-down-watch` の run ログに "Skipping LINE notification" が出ている＝死んでいる）。
     通知の設計を書くときは、LINE を「届く前提の終着点」に置かないこと（`docs/FAILURE_MAP.md` 冒頭「現況」）。
+13. **「先週の同じ夜」を手本にするときは、祝日がらみの夜とデータの無い夜を飛ばすこと。**
+    2026-09-28/29 に、シルバーウィーク（9/19〜23）の翌週の本番予測が全店で普段の数倍に膨らんだ
+    （福岡 9/28 は実測平均 7.5人に対し誤差約70人）。ML 特徴 `same_dow_last_week_total` と後処理の
+    ブレンド（`postprocess.blend_with_baseline`、約4割）の2か所が「7日前」を手本にしていて、連休の夜
+    （普段の約5倍の人出）をそのまま使っていたため。現在は `night_type.reference_offsets`（7/14/21/28日前から
+    祝日の夜・祝前夜・特別な夜を除いたもの）を近い順に見て、実測がある最初の夜を使う（推論時は
+    `forecast_service._fetch_reference_nights` が8日より前の手本の夜だけ追加取得）。新しく「過去の同じ夜」を
+    参照する処理を書くときもこの関数を使う。なお特徴の欠損は `prepare_dataframe` 末尾で**表の中央値**に
+    埋められる（LightGBM の NaN 処理ではない）。推論時の表に連休が入っている週は中央値も膨らむ点に注意。
+    採点側の素朴な基準（`score_forecasts.py` の「7日前」）は比較用の定義なので変えていない。
 
 ---
 

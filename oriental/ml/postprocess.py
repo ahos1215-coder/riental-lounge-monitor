@@ -44,7 +44,7 @@ import numpy as np
 import pandas as pd
 
 from oriental.ml._num import as_ts, env_float, is_finite_number
-from oriental.ml.night_type import NIGHT_SESSION_SHIFT_HOURS
+from oriental.ml.night_type import NIGHT_SESSION_SHIFT_HOURS, night_date_of, reference_offsets
 
 logger = logging.getLogger(__name__)
 
@@ -233,8 +233,9 @@ def blend_with_baseline(
 ) -> tuple[list[dict], int]:
     """各スロットを pred = w_ml*ML + (1-w_ml)*季節ナイーブ・ベースラインでブレンドする。
 
-    ベースライン = 同一店の「7日前・同一スロット」の実測。その夜の該当スロットが
-    履歴に無ければそのスロットはブレンドせず ML のまま（skip）。men/women を各々ブレンドし、
+    ベースライン = 同一店の「7日前・同一スロット」の実測。7日前の夜が祝日がらみ・データなしなら
+    14→21→28日前の順に下がる（2026-09-29〜。night_type.reference_offsets）。
+    どれも無ければそのスロットはブレンドせず ML のまま（skip）。men/women を各々ブレンドし、
     total = men + women で内部整合を保つ（後段クランプのスケール整合のため）。
 
     - w_ml >= 1.0 なら純 ML（no-op）。FORECAST_BASELINE_BLEND=0 で全体を無効化。
@@ -269,11 +270,17 @@ def blend_with_baseline(
                 continue
             try:
                 ts = _as_ts(p["ts"], tz)
-                base_slot = (ts - pd.Timedelta(days=7)).floor(freq)
+                # 2026-09-29: 7→14→21→28日前の順に、祝日がらみの夜を飛ばして実測がある最初の夜を
+                # 手本にする（night_type.reference_offsets。シルバーウィーク翌週に連休の人出を手本に
+                # して全店の予測が数倍に膨らんだ）。ML 側の same_dow_last_week_total と同じ規則。
+                base = None
+                for offset_days in reference_offsets(night_date_of(ts)):
+                    base = slot_map.get((ts - pd.Timedelta(days=offset_days)).floor(freq))
+                    if base is not None:
+                        break
             except Exception:  # noqa: BLE001 — 個々のスロットのts不正はスキップ
                 out.append(q)
                 continue
-            base = slot_map.get(base_slot)
             if base is None:
                 out.append(q)
                 continue

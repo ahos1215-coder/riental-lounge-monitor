@@ -56,20 +56,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _retry_common import backoff_delay, is_retryable_status  # noqa: E402
 from _supabase_common import _supabase_conf, auth_headers  # noqa: E402
 
-# 特別な夜の判定（GW・お盆・年末年始・連休）は予測側と同じ定義を使う。GHA の最小依存環境
-# （stdlib＋jpholiday）ではパッケージ経由の import が flask 等を引き込んで失敗するので、
-# build_templates.py と同じくファイル直読みで代替する（scripts/_standalone_import.py）。
+# 特別な夜の判定（GW・お盆・年末年始・連休）は予測側と同じ定義（night_type.is_special_night）を
+# 使う。GHA の最小依存環境（stdlib＋jpholiday）ではパッケージ経由の import が flask 等を引き込んで
+# 失敗するので、build_templates.py と同じくファイル直読みで代替する（scripts/_standalone_import.py）。
 try:
-    from oriental.ml.holiday_calendar import get_holiday_block
-    from oriental.ml.night_type import NIGHT_SESSION_SHIFT_HOURS, JST, night_date_of, special_block
+    from oriental.ml.night_type import NIGHT_SESSION_SHIFT_HOURS, JST, is_special_night, night_date_of
 except ModuleNotFoundError:
     from _standalone_import import load_module_from_file  # noqa: E402
 
-    _hc = load_module_from_file("_holiday_calendar_standalone", "oriental/ml/holiday_calendar.py")
     _nt = load_module_from_file("_night_type_standalone", "oriental/ml/night_type.py")
-    get_holiday_block = _hc.get_holiday_block
-    NIGHT_SESSION_SHIFT_HOURS, JST, night_date_of, special_block = (
-        _nt.NIGHT_SESSION_SHIFT_HOURS, _nt.JST, _nt.night_date_of, _nt.special_block,
+    NIGHT_SESSION_SHIFT_HOURS, JST, is_special_night, night_date_of = (
+        _nt.NIGHT_SESSION_SHIFT_HOURS, _nt.JST, _nt.is_special_night, _nt.night_date_of,
     )
 
 # 【2026-08-19 の統一】旧実装はここだけ `SUPABASE_SERVICE_KEY`（別名キー）を見ておらず、
@@ -117,29 +114,8 @@ PROTECT_DAYS = int(os.getenv("LOGS_PROTECT_DAYS", "200"))
 # これらの夜は普段の夜を参考にできないので night_type.special_block で参照から外している＝
 # 「お手本」は去年の同じ夜しかない）。年に約30夜・約15万行（約35MB）なので、500MB の枠に収まる
 # （その分、普段の夜の保持は少し短くなる）。2年を過ぎた特別な夜は普段の夜と同じ扱いに戻る。
+# 特別な夜の定義そのもの（is_special_night）は oriental/ml/night_type.py が正本（2026-09-29 に移した）。
 SPECIAL_KEEP_DAYS = int(os.getenv("LOGS_SPECIAL_KEEP_DAYS", "730"))
-# この日数以上の連休（シルバーウィーク等）の夜と、その前夜を特別な夜とみなす。
-LONG_HOLIDAY_MIN_DAYS = 4
-# 暦で決まるイベントの夜（月, 日）。クリスマスイブ・クリスマス・ハロウィン。
-EVENT_NIGHTS_MD = frozenset({(12, 24), (12, 25), (10, 31)})
-
-
-def is_special_night(night) -> bool:
-    """夜 night（-6h シフト規約の暦日）が、去年と比べるために長く残す「特別な夜」か。
-
-    - night_type.special_block: 年末年始（12/29-1/3）・お盆（8/13-15）・GW の連休
-    - 4連休以上の連休に含まれる夜、または翌日から4連休以上が始まる夜（連休前夜）
-    - クリスマスイブ・クリスマス・ハロウィン
-    """
-    if special_block(night) is not None:
-        return True
-    if (night.month, night.day) in EVENT_NIGHTS_MD:
-        return True
-    for day in (night, night + timedelta(days=1)):
-        length, _position = get_holiday_block(day)
-        if length >= LONG_HOLIDAY_MIN_DAYS:
-            return True
-    return False
 
 
 def night_window_utc(night) -> tuple[datetime, datetime]:

@@ -6,6 +6,8 @@ import jpholiday
 import numpy as np
 import pandas as pd
 
+from oriental.ml.night_type import NIGHT_SESSION_SHIFT_HOURS, REFERENCE_OFFSETS_DAYS, reference_offsets
+
 FEATURE_COLUMNS = [
     "month",
     "hour",
@@ -185,27 +187,45 @@ def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
     # --- 同曜日先週の実測 total（v3 feature） ---
     # 各行の ts を15分単位に丸め、7日前の同スロットの total を参照する。
     # 学習時: DataFrame 内の過去データから自動算出。
-    # 推論時: 7日分の history が concat されているため future 行でも算出可能。
-    # マッチしなければ NaN — XGBoost は NaN を native に処理する。
+    # 推論時: 8日分の history が concat されているため future 行でも算出可能
+    # （8日より前へ下がる夜は forecast_service がその夜だけ追加で取得する）。
+    # マッチしなければ NaN。NaN はこの関数の末尾で「その表の中央値」に埋められる。
+    #
+    # 2026-09-29: 手本の夜を 7→14→21→28日前の順に見て、祝日がらみ（祝日の夜・祝前夜・連休・
+    # 年末年始など）の夜を飛ばし、実測がある最初の夜を使う（night_type.reference_offsets）。
+    # シルバーウィークの翌週、「先週の月曜（敬老の日の夜）」を手本にして全店の予測が普段の数倍に
+    # 膨らんだため。データの無い夜（9/6〜16 の収集停止）も飛ばす。推論時の表（直近8日＋今夜）の
+    # 中央値は連休の夜に引っ張られて膨らむので、中央値埋めに落ちる行をなるべく作らないため。
+    # 学習と推論は同じこの関数を通るので、定義の変更は両方に同時に効く（翌朝の再学習で揃う）。
     _ts_rounded = ts_local.dt.floor("15min").dt.tz_localize(None)
+    _night_start = (_ts_rounded - pd.Timedelta(hours=NIGHT_SESSION_SHIFT_HOURS)).dt.normalize()
+    _offsets_by_night = {
+        pd.Timestamp(night): reference_offsets(pd.Timestamp(night).date())
+        for night in _night_start.dropna().unique()
+    }
     _valid_mask = df["total"].notna()
     _lookup_df = pd.DataFrame({
-        "_future_ts": (_ts_rounded[_valid_mask] + pd.Timedelta(days=7)).reset_index(drop=True),
+        "_source_ts": _ts_rounded[_valid_mask].reset_index(drop=True),
         "_total": df.loc[_valid_mask, "total"].reset_index(drop=True),
     })
-    if group_keys:
-        for gk in group_keys:
-            _lookup_df[gk] = df.loc[_valid_mask, gk].reset_index(drop=True)
-        _lookup_df = _lookup_df.groupby(group_keys + ["_future_ts"], dropna=False).agg({"_total": "mean"}).reset_index()
-        _merge_df = pd.DataFrame({"_future_ts": _ts_rounded.reset_index(drop=True)})
+    for gk in group_keys:
+        _lookup_df[gk] = df.loc[_valid_mask, gk].reset_index(drop=True)
+    _lookup_df = _lookup_df.groupby(group_keys + ["_source_ts"], dropna=False).agg({"_total": "mean"}).reset_index()
+    _same_dow = pd.Series(np.nan, index=range(len(df)), dtype=float)
+    for rank in range(len(REFERENCE_OFFSETS_DAYS)):
+        _offset_days = pd.to_numeric(
+            _night_start.map({n: (offs[rank] if len(offs) > rank else np.nan) for n, offs in _offsets_by_night.items()}),
+            errors="coerce",
+        ).reset_index(drop=True)
+        _need = _same_dow.isna() & _offset_days.notna()
+        if not _need.any():
+            continue
+        _merge_df = pd.DataFrame({"_source_ts": (_ts_rounded.reset_index(drop=True) - pd.to_timedelta(_offset_days, unit="D"))})
         for gk in group_keys:
             _merge_df[gk] = df[gk].reset_index(drop=True)
-        _merged = _merge_df.merge(_lookup_df, on=group_keys + ["_future_ts"], how="left")
-    else:
-        _lookup_df = _lookup_df.groupby("_future_ts", dropna=False).agg({"_total": "mean"}).reset_index()
-        _merge_df = pd.DataFrame({"_future_ts": _ts_rounded.reset_index(drop=True)})
-        _merged = _merge_df.merge(_lookup_df, on="_future_ts", how="left")
-    df["same_dow_last_week_total"] = _merged["_total"].values
+        _merged = _merge_df.merge(_lookup_df, on=group_keys + ["_source_ts"], how="left")
+        _same_dow = _same_dow.where(~_need, pd.Series(_merged["_total"].values, dtype=float))
+    df["same_dow_last_week_total"] = _same_dow.values
 
     # --- 直近30分の人数変化速度（v4 feature、v7でラグ化） ---
     # 5分間隔のデータで「1行前」と「7行前」の差 = t-1 時点で終わる30分間の変化量。
