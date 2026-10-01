@@ -252,7 +252,9 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
     ブレンド（`postprocess.blend_with_baseline`、約4割）の2か所が「7日前」を手本にしていて、連休の夜
     （普段の約5倍の人出）をそのまま使っていたため。現在は `night_type.reference_offsets`（7/14/21/28日前から
     祝日の夜・祝前夜・特別な夜を除いたもの）を近い順に見て、実測がある最初の夜を使う（推論時は
-    `forecast_service._fetch_reference_nights` が8日より前の手本の夜だけ追加取得）。新しく「過去の同じ夜」を
+    `forecast_service._fetch_reference_nights` が8日より前の手本の夜だけ追加取得し、結果（実測なし＝空も含む）を
+    (店, 夜) ごとに6時間覚える。覚えないと予測キャッシュ切れのたびに取り直し、2026-09-30 夜は推定 約3,800回の
+    余分な Supabase リクエストになっていた）。新しく「過去の同じ夜」を
     参照する処理を書くときもこの関数を使う。なお特徴の欠損は `prepare_dataframe` 末尾で**表の中央値**に
     埋められる（LightGBM の NaN 処理ではない）。推論時の表に連休が入っている週は中央値も膨らむ点に注意。
     採点側の素朴な基準（`score_forecasts.py` の「7日前」）は比較用の定義なので変えていない。

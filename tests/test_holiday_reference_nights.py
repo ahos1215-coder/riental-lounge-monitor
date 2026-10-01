@@ -218,6 +218,40 @@ class Test推論時の追加取得:
         provider = _FakeProvider({date(2026, 9, 14): RuntimeError("down")})
         assert _service(provider)._fetch_reference_nights("ol_fukuoka", _tonight(date(2026, 9, 28)), _hist([])) == []
 
+    def test_2回目は覚えた結果を使い取りに行かない(self) -> None:
+        """2026-09-30 夜は予測キャッシュが切れるたびに同じ過去の夜を取り直し、推定 約3,800回の
+        余分な Supabase リクエストになっていた。実測なし（空）の夜も覚える。"""
+        provider = _FakeProvider({date(2026, 9, 7): [_rec("2026-09-07T23:00", 12)]})
+        svc = _service(provider)
+        first = svc._fetch_reference_nights("ol_fukuoka", _tonight(date(2026, 9, 28)), _hist([]))
+        second = svc._fetch_reference_nights("ol_fukuoka", _tonight(date(2026, 9, 28)), _hist([]))
+        assert provider.calls == [date(2026, 9, 14), date(2026, 9, 7)]  # 2回目はゼロ回
+        assert first == second and len(second) == 1
+
+    def test_店が違えば別に取りに行く(self) -> None:
+        provider = _FakeProvider({date(2026, 9, 14): [_rec("2026-09-14T23:00", 12)]})
+        svc = _service(provider)
+        svc._fetch_reference_nights("ol_fukuoka", _tonight(date(2026, 9, 28)), _hist([]))
+        svc._fetch_reference_nights("ol_shibuya", _tonight(date(2026, 9, 28)), _hist([]))
+        assert provider.calls == [date(2026, 9, 14), date(2026, 9, 14)]
+
+    def test_取得に失敗した結果は覚えない(self) -> None:
+        provider = _FakeProvider({date(2026, 9, 14): RuntimeError("down")})
+        svc = _service(provider)
+        svc._fetch_reference_nights("ol_fukuoka", _tonight(date(2026, 9, 28)), _hist([]))
+        provider.results[date(2026, 9, 14)] = [_rec("2026-09-14T23:00", 12)]
+        extra = svc._fetch_reference_nights("ol_fukuoka", _tonight(date(2026, 9, 28)), _hist([]))
+        assert provider.calls == [date(2026, 9, 14), date(2026, 9, 14)]
+        assert len(extra) == 1
+
+    def test_期限0なら覚えない(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("FORECAST_REFERENCE_NIGHT_CACHE_TTL", "0")
+        provider = _FakeProvider({date(2026, 9, 14): [_rec("2026-09-14T23:00", 12)]})
+        svc = _service(provider)
+        svc._fetch_reference_nights("ol_fukuoka", _tonight(date(2026, 9, 28)), _hist([]))
+        svc._fetch_reference_nights("ol_fukuoka", _tonight(date(2026, 9, 28)), _hist([]))
+        assert provider.calls == [date(2026, 9, 14), date(2026, 9, 14)]
+
     def test_fetch_rangeの無い提供元では何もしない(self) -> None:
         class _Legacy:
             logger = logging.getLogger("test")

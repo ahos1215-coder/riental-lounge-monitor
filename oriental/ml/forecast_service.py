@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 from datetime import timedelta
 from typing import Callable, Dict
 
@@ -14,6 +16,13 @@ from .night_type import NIGHT_SESSION_SHIFT_HOURS, night_date_of, reference_offs
 from .preprocess import FEATURE_COLUMNS, add_time_features, prepare_dataframe
 
 FutureBuilder = Callable[[pd.DataFrame], pd.DatetimeIndex]
+
+# 手本の夜（_fetch_reference_nights）の取得結果をプロセス内で覚えておく秒数と件数の上限。
+# 手本の夜は常に8日以上前＝もう変わらないデータなので、覚えておいても予測は変わらない。
+# 覚えないと、予測キャッシュ（既定180秒）が切れるたびに同じ過去の夜を Supabase へ取りに行く
+# （2026-09-30 夜は手本候補3夜×42店×CDN温め30回で推定 約3,800回。Supabase のログ枠を食う）。
+_REFERENCE_NIGHT_CACHE_TTL_DEFAULT = 6 * 3600.0
+_REFERENCE_NIGHT_CACHE_MAX_ENTRIES = 1000
 
 
 class ForecastService:
@@ -49,6 +58,9 @@ class ForecastService:
         # プロセス内キャッシュ（~1時間）。Storage 障害時は空 {} → w_ml=1.0(純ML)へ graceful fallback。
         self._blend_weights: dict[str, float] | None = None
         self._blend_weights_at: float = 0.0
+        # (store_id, 手本の夜) -> (取得した時刻, 行)。行が空＝「その夜は実測なし」も覚える。
+        self._reference_night_cache: dict[tuple[str, object], tuple[float, list[dict]]] = {}
+        self._reference_night_cache_lock = threading.Lock()
 
     @classmethod
     def from_app(cls, app):
@@ -226,6 +238,9 @@ class ForecastService:
         あった時点で止める（普段は7日前が履歴の中にあるので、1回も取りに行かない）。学習時は180日分の
         中から同じ規則で引くので、ここで取らないと推論時だけ手本が欠けて学習と推論がずれる。
         取得に失敗しても予測は止めない（手本なしとして続ける）。
+
+        取得結果（実測なし＝空も含む）は (店, 夜) ごとに数時間覚える（_cached_reference_night）。
+        取得に失敗したときは覚えない（次の計算で取り直す）。
         """
         fetch = getattr(self.provider, "fetch_range", None)
         if fetch is None or len(future_times) == 0:
@@ -245,24 +260,51 @@ class ForecastService:
                 if start >= window_start:
                     continue  # 履歴の窓の中なのに実測が無い（収集停止など）→ 次の候補へ
                 end = min(start + pd.Timedelta(days=1), window_start)
-                try:
-                    rows = fetch(
-                        store_id=store_id,
-                        start_ts=start.to_pydatetime(),
-                        end_ts=end.to_pydatetime(),
-                        limit=400,
-                    )
-                except Exception as exc:  # noqa: BLE001 — 手本の追加取得は任意。予測は止めない
-                    self.logger.warning(
-                        "forecast.service.reference_night_fetch_failed store=%s night=%s err=%s",
-                        store_id, ref_night, type(exc).__name__,
-                    )
-                    break
+                rows = self._cached_reference_night(store_id, ref_night)
+                if rows is None:
+                    try:
+                        rows = fetch(
+                            store_id=store_id,
+                            start_ts=start.to_pydatetime(),
+                            end_ts=end.to_pydatetime(),
+                            limit=400,
+                        )
+                    except Exception as exc:  # noqa: BLE001 — 手本の追加取得は任意。予測は止めない
+                        self.logger.warning(
+                            "forecast.service.reference_night_fetch_failed store=%s night=%s err=%s",
+                            store_id, ref_night, type(exc).__name__,
+                        )
+                        break
+                    rows = list(rows or [])
+                    self._remember_reference_night(store_id, ref_night, rows)
                 if rows:
                     extra += rows
                     have.add(ref_night)
                     break
         return extra
+
+    def _cached_reference_night(self, store_id: str, night) -> list[dict] | None:
+        """覚えている手本の夜の行（空リスト＝実測なし）。覚えていない・期限切れなら None。"""
+        ttl = env_float("FORECAST_REFERENCE_NIGHT_CACHE_TTL", _REFERENCE_NIGHT_CACHE_TTL_DEFAULT)
+        if ttl <= 0:
+            return None
+        with self._reference_night_cache_lock:
+            hit = self._reference_night_cache.get((store_id, night))
+            if hit is None:
+                return None
+            fetched_at, rows = hit
+            if time.monotonic() - fetched_at > ttl:
+                self._reference_night_cache.pop((store_id, night), None)
+                return None
+            return rows
+
+    def _remember_reference_night(self, store_id: str, night, rows: list[dict]) -> None:
+        with self._reference_night_cache_lock:
+            if len(self._reference_night_cache) >= _REFERENCE_NIGHT_CACHE_MAX_ENTRIES:
+                # 上限に達したら古い半分を捨てる（dict は挿入順）。普段の週は1件も入らない。
+                for key in list(self._reference_night_cache)[: _REFERENCE_NIGHT_CACHE_MAX_ENTRIES // 2]:
+                    self._reference_night_cache.pop(key, None)
+            self._reference_night_cache[(store_id, night)] = (time.monotonic(), rows)
 
     def _fetch_history(self, store_id: str) -> list[dict]:
         try:
