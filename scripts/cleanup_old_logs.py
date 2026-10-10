@@ -334,8 +334,14 @@ def find_downsample_candidates(cutoff_iso: str) -> list[dict]:
     return to_delete
 
 
-def delete_by_ids(ids: list[str], dry_run: bool) -> int:
-    """指定 ID の行を削除。"""
+def delete_by_ids(ids: list[int | str], dry_run: bool) -> int:
+    """指定 ID の行を削除。
+
+    ids は PostgREST の応答そのまま（logs.id は bigint なので **int** で来る）。
+    2026-10-04 の初回の本番実行で、ここが ",".join(int のリスト) の TypeError で落ちた
+    （緊急削除も間引きもこれまで一度も実行されたことがなく、テストは dry-run か
+    delete_by_ids の差し替えしか通っていなかった）。文字列に直してから繋ぐ。
+    """
     if not ids:
         return 0
     if dry_run:
@@ -346,7 +352,7 @@ def delete_by_ids(ids: list[str], dry_run: bool) -> int:
     batch_size = 500
     for i in range(0, len(ids), batch_size):
         batch = ids[i:i + batch_size]
-        id_filter = ",".join(batch)
+        id_filter = ",".join(str(row_id) for row_id in batch)
         url = f"{SUPABASE_URL}/rest/v1/logs?id=in.({id_filter})"
         req = Request(url, method="DELETE", headers=_headers())
         _rest_request(req, what=f"delete_by_ids batch {i // batch_size + 1}")

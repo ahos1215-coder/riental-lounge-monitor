@@ -143,6 +143,51 @@ def test_dry_run_delete_by_ids_issues_no_network_call(monkeypatch):
     assert calls == []  # ネットワーク相当の関数は一度も呼ばれていない
 
 
+def test_delete_by_ids_accepts_int_ids_from_postgrest(monkeypatch):
+    """PostgREST は logs.id を int で返す。2026-10-04 の初回の本番実行は
+    ",".join(int のリスト) の TypeError で落ちた（それまで削除経路は一度も実行されていなかった）。"""
+    urls: list[str] = []
+
+    def _capture(req, *, what, timeout=90.0):
+        urls.append(req.full_url)
+        return b"", {}
+
+    monkeypatch.setattr(cleanup, "_rest_request", _capture)
+    monkeypatch.setattr(cleanup, "SUPABASE_URL", "https://example.supabase.co")
+
+    deleted = cleanup.delete_by_ids(list(range(1, 1203)), dry_run=False)
+
+    assert deleted == 1202
+    assert len(urls) == 3  # 500 件ずつ
+    assert urls[0].startswith("https://example.supabase.co/rest/v1/logs?id=in.(1,2,3,")
+    assert urls[-1].endswith(",1201,1202)")
+
+
+def test_emergency_delete_passes_fetched_int_ids_to_delete(monkeypatch):
+    """緊急削除の本番経路（_rest_get → delete_by_ids → _rest_request）を差し替えなしで通す。"""
+    urls: list[str] = []
+    pages = [[{"id": 10}, {"id": 11}], []]
+
+    def _capture(req, *, what, timeout=90.0):
+        urls.append(req.full_url)
+        return b"", {}
+
+    monkeypatch.setattr(cleanup, "_rest_get", lambda path, params=None: pages.pop(0))
+    monkeypatch.setattr(cleanup, "_rest_request", _capture)
+    monkeypatch.setattr(cleanup, "SUPABASE_URL", "https://example.supabase.co")
+
+    deleted = cleanup.emergency_delete_oldest(
+        current_count=1_500_000,
+        max_rows=1_450_000,
+        dry_run=False,
+        protect_cutoff_iso="2026-03-01T00:00:00+00:00",
+        protected_count=1_000_000,
+    )
+
+    assert deleted == 2
+    assert urls == ["https://example.supabase.co/rest/v1/logs?id=in.(10,11)"]
+
+
 def test_dry_run_emergency_delete_does_not_call_delete_by_ids(monkeypatch):
     """dry-run では emergency_delete_oldest() も delete_by_ids へ到達しない
     （safe_excess の算出だけ行い、実削除には進まない）。"""
