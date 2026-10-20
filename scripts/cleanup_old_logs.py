@@ -256,8 +256,14 @@ def get_protect_cutoff_iso(protect_days: int = PROTECT_DAYS) -> str:
 
 
 def get_row_count_before(cutoff_iso: str) -> int:
-    """cutoff より古い行数を取得（count=exact ヘッダー使用）。"""
-    url = f"{SUPABASE_URL}/rest/v1/logs?select=id&ts=lt.{cutoff_iso}&limit=1"
+    """cutoff より古い行数を取得（count=exact ヘッダー使用）。
+
+    cutoff_iso は isoformat() の "+00:00" 付きなので urlencode を通す。旧実装は f-string に
+    そのまま埋めていたため "+" がクエリ上で空白と解釈され、PostgREST が 400 を返していた
+    （400 は再試行対象外なので即終了）。行数上限を超えた夜だけ通る経路で、2026-10-04 の
+    TypeError を直した後も 10/11・10/18 の本番実行がここで落ち、緊急削除は一度も走っていなかった。
+    """
+    url = f"{SUPABASE_URL}/rest/v1/logs?" + urlencode({"select": "id", "ts": f"lt.{cutoff_iso}", "limit": "1"})
     headers = {**_headers(), "Prefer": "count=exact"}
     req = Request(url, headers=headers)
     _, resp_headers = _rest_request(req, what="get_row_count_before (count=exact)")

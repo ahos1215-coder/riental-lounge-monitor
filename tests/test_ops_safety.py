@@ -12,10 +12,33 @@
 
 from __future__ import annotations
 
+from urllib.parse import parse_qs, urlsplit
+
+import pytest
+
+from scripts import cleanup_old_logs
 from scripts.backup_logs import backoff_delay as backup_backoff_delay
 from scripts.backup_logs import check_row_count_sane
 from scripts.cleanup_old_logs import backoff_delay as cleanup_backoff_delay
 from scripts.cleanup_old_logs import emergency_delete_oldest, is_retryable_status
+
+
+def test_count_before_keeps_plus_sign_of_cutoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-10-11/18 の本番失敗の再現: "+00:00" の "+" が空白に化けると PostgREST が 400 を返す。"""
+    urls: list[str] = []
+
+    class _Headers(dict):
+        pass
+
+    def fake_request(req, *, what, timeout=90.0):
+        urls.append(req.full_url)
+        return b"", _Headers({"Content-Range": "0-0/600467"})
+
+    monkeypatch.setattr(cleanup_old_logs, "_rest_request", fake_request)
+    cutoff = "2026-04-03T17:15:19.967740+00:00"
+    assert cleanup_old_logs.get_row_count_before(cutoff) == 600467
+    query = parse_qs(urlsplit(urls[0]).query)
+    assert query["ts"] == [f"lt.{cutoff}"]
 
 
 class TestEmergencyDeleteOldestFloorProtection:
