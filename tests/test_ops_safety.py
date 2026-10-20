@@ -34,6 +34,8 @@ def test_count_before_keeps_plus_sign_of_cutoff(monkeypatch: pytest.MonkeyPatch)
         urls.append(req.full_url)
         return b"", _Headers({"Content-Range": "0-0/600467"})
 
+    # CI には SUPABASE_URL が無い（空だと urllib の Request が URL を組めずに落ちる）
+    monkeypatch.setattr(cleanup_old_logs, "SUPABASE_URL", "https://example.supabase.co")
     monkeypatch.setattr(cleanup_old_logs, "_rest_request", fake_request)
     cutoff = "2026-04-03T17:15:19.967740+00:00"
     assert cleanup_old_logs.get_row_count_before(cutoff) == 600467
