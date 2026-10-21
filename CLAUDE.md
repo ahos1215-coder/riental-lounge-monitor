@@ -246,6 +246,10 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
     入れるまで LINE 経路は全部 no-op。LINE 経路の生死は「届いた」で確かめる（月曜の週次ダイジェストが来ない／
     `site-down-watch` の run ログに "Skipping LINE notification" が出ている＝死んでいる）。
     通知の設計を書くときは、LINE を「届く前提の終着点」に置かないこと（`docs/FAILURE_MAP.md` 冒頭「現況」）。
+    追記（2026-10-22）: Vercel の `POST /api/line` は送信者の許可リスト（`LINE_ALLOWED_USER_IDS` ∪ `LINE_USER_ID`、
+    `frontend/src/lib/line/allowedSenders.ts`）で絞るようになった。署名検証は「LINE 経由」しか保証せず、友だち追加した
+    誰でも記事の生成・公開ができていたため。**本番で両方空なら全員拒否**なので、Vercel にトークンを入れ直すときは
+    `LINE_USER_ID`（オーナーの `U…`）も入れること（弾かれた送信者には本人の userId が返信される）。
 13. **「先週の同じ夜」を手本にするときは、祝日がらみの夜とデータの無い夜を飛ばすこと。**
     2026-09-28/29 に、シルバーウィーク（9/19〜23）の翌週の本番予測が全店で普段の数倍に膨らんだ
     （福岡 9/28 は実測平均 7.5人に対し誤差約70人）。ML 特徴 `same_dow_last_week_total` と後処理の

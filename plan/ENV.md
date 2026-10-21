@@ -34,6 +34,10 @@ LINE Webhook（`frontend/src/app/api/line/route.ts`）:
 - `LINE_CHANNEL_SECRET`（`x-line-signature` 検証。本番では必須）
 - `LINE_CHANNEL_ACCESS_TOKEN`（返信メッセージ用）
 - `SKIP_LINE_SIGNATURE_VERIFY`（**`NODE_ENV=development` かつ** `"1"` のときのみ署名検証をスキップ。本番・Preview では無効。**本番で有効化できない**）
+- `LINE_ALLOWED_USER_IDS`（**コマンドを受け付ける送信者の userId（`U…`）をカンマ区切りで**。`LINE_USER_ID` も自動で許可に含める。2026-10-22〜、`frontend/src/lib/line/allowedSenders.ts`）。
+  署名検証は「LINE 経由」しか保証せず、友だち追加した誰でも下書き生成・「公開」を送れていたための制限。
+  **本番・Preview で `LINE_ALLOWED_USER_IDS` と `LINE_USER_ID` が両方空なら全員を拒否**（fail-closed。development で空のときだけ全員許可）。
+  弾かれた送信者には本人の userId が返信されるので、オーナーは自分でボットに送ればその値を Vercel に入れられる
 - `GEMINI_API_KEY`（下書き生成）
 - `GEMINI_MODEL`（任意。既定 `gemini-2.5-flash`。404 時は `gemini-2.5-flash-lite` を試行。古い `gemini-1.x` / `gemini-2.0-flash` 等はコード側で `gemini-2.5-flash` に正規化）
 - `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` or `SUPABASE_SERVICE_KEY`（`blog_drafts` への INSERT。未設定時は生成のみ・DB 保存なし）

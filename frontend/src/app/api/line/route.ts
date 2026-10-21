@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "node:crypto";
 
 import { getBackendBaseUrl, isBackendUrlFromEnv } from "@/lib/backendUrl";
+import { isAllowedLineSender } from "@/lib/line/allowedSenders";
 import { parseLineIntent } from "@/lib/line/parseLineIntent";
 import { runBlogDraftPipeline } from "@/lib/blog/runBlogDraftPipeline";
 import { limitLineUserDraft, limitLineWebhookGlobal } from "@/lib/rateLimit/lineWebhookLimits";
@@ -241,6 +242,17 @@ async function processMessageEvent(ev: LineEvent): Promise<void> {
   const replyToken = ev.replyToken;
   if (!replyToken) return;
 
+  // 署名検証は「LINE 経由」しか保証しないため、下書き生成・公開の前に送信者を許可リストで絞る。
+  // 弾いた相手には本人の userId だけを返す（オーナーが LINE_ALLOWED_USER_IDS を設定するときの手掛かり）。
+  const lineUserId = ev.source?.userId ?? null;
+  if (!isAllowedLineSender(lineUserId)) {
+    console.warn("[line] sender not in allowlist; ignored");
+    if (lineUserId) {
+      await replyLine(replyToken, `このボットは管理者専用です。\n（あなたの LINE ユーザー ID: ${lineUserId}）`);
+    }
+    return;
+  }
+
   const text = ev.message?.type === "text" ? ev.message.text?.trim() : "";
   // 本文そのものは PII になり得るため本番では出力しない（開発時のみ全文ログ）
   if (process.env.NODE_ENV !== "production") {
@@ -265,8 +277,6 @@ async function processMessageEvent(ev: LineEvent): Promise<void> {
     await replyLine(replyToken, intent.message);
     return;
   }
-
-  const lineUserId = ev.source?.userId ?? null;
 
   if (intent.kind === "approve") {
     await handleApproveIntent(replyToken, lineUserId, intent.targetSlug);
