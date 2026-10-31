@@ -110,5 +110,7 @@ def test_realized_night_avg_absent_when_no_matched_slots(monkeypatch) -> None:
 
     sf.main()
 
-    scores = puts[f"accuracy/scores/{night_date}.json"]
+    # 採点できた店が0（＝期待の90%未満）の夜は正規パスへ昇格せず `_partial/` に退避される
+    # （CLAUDE.md §3・2026-10-31）。ここで確かめたいのは per_store に店が入らないことだけ。
+    scores = puts.get(f"accuracy/scores/{night_date}.json") or puts[f"accuracy/scores/_partial/{night_date}.json"]
     assert "shibuya" not in scores["per_store"]

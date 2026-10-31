@@ -893,6 +893,49 @@ def _merge_summary_nights(existing_nights: list[dict], entry: dict) -> list[dict
     )[:SUMMARY_KEEP]
 
 
+# --- 2026-10-31: 偽陽性/部分採点の昇格を断つための判定部品（純関数） ---------------------
+# 既定 5%: 直近52夜の「ML - baseline」相対差の中央値は -16%。±5% 以内は3夜だけで、うち 2026-10-13 の
+# +0.3%（live 7.61 vs baseline 7.59）が 10/14 の単発 failure メールの正体。真の劣化（2026-09-24 の +30.6%）は残る。
+BASELINE_LOSS_TOLERANCE_PCT_DEFAULT = 5.0
+COVERAGE_MIN_RATIO = 0.9
+
+
+def _baseline_loss_tolerance() -> float:
+    """ACCURACY_BASELINE_LOSS_TOLERANCE_PCT（既定 5）を比率で返す。0 で従来どおり「1でも負けたら失敗」。
+    空・不正値・負・100超は既定へ戻す（打ち間違いで黙る側に倒れないようにする）。"""
+    raw = (os.environ.get("ACCURACY_BASELINE_LOSS_TOLERANCE_PCT") or "").strip()
+    try:
+        pct = float(raw) if raw else BASELINE_LOSS_TOLERANCE_PCT_DEFAULT
+    except ValueError:
+        pct = BASELINE_LOSS_TOLERANCE_PCT_DEFAULT
+    if pct != pct or pct < 0 or pct > 100:
+        pct = BASELINE_LOSS_TOLERANCE_PCT_DEFAULT
+    return pct / 100.0
+
+
+def _baseline_loss(live: float | None, baseline: float | None, tol: float = 0.0) -> bool:
+    """live が baseline を tol(比率) を超えて上回る（＝ML の負け）か。tol=0 なら従来と同じ。"""
+    return live is not None and baseline is not None and live > baseline * (1.0 + tol)
+
+
+def _coverage_failure(expected: int, stores_scored: int) -> bool:
+    """採点できた店が期待の 90% 未満か。expected==0（snapshot が空）は別枠でここでは失敗にしない。"""
+    return expected > 0 and stores_scored < expected * COVERAGE_MIN_RATIO
+
+
+def _paired_means(per_store: dict[str, dict]) -> tuple[float | None, float | None, int]:
+    """ML と baseline の両方を持つ店だけで平均した (live, baseline, 店数)。
+
+    overall_live_mae は「採点できた全店」、overall_baseline_mae は「先週の実測もある店だけ」の平均で、
+    店の集合が違う。先週が欠測の店（収集が止まった夜の翌週）が混ざると、同じ土俵でない数字同士を比べて
+    偽の負けが出る。勝敗判定はこの対（paired）で行う。公開用の既存フィールドの定義は変えない。"""
+    pairs = [(v["live_mae"], v["live_baseline_mae"]) for v in per_store.values() if "live_baseline_mae" in v]
+    if not pairs:
+        return None, None, 0
+    n = len(pairs)
+    return round(sum(a for a, _ in pairs) / n, 2), round(sum(b for _, b in pairs) / n, 2), n
+
+
 def _collect_accuracy_alerts(
     *,
     overall: float | None,
@@ -900,14 +943,23 @@ def _collect_accuracy_alerts(
     summary_nights: list[dict],
     expected: int,
     stores_scored: int,
+    paired_live: float | None = None,
+    paired_baseline: float | None = None,
+    loss_tolerance: float = 0.0,
 ) -> tuple[list[str], bool]:
     """Act（PDCA を閉じる）: 本番劣化のアラート文面と、カバレッジ失敗かどうかを返す。
 
     返り値の2つ目 `coverage_failure` は main() の終了コード判定にも使う。
+    勝敗は paired（両方を持つ店だけ）があればそれで、無ければ従来の overall/overall_baseline で判定し、
+    loss_tolerance(比率)を超えて負けたときだけアラートにする（既定 0 ＝従来どおり）。
     """
     alerts: list[str] = []
-    if overall is not None and overall_baseline is not None and overall > overall_baseline:
-        alerts.append(f"ML is NOT beating the naive baseline in production (live MAE {overall} vs naive {overall_baseline}).")
+    if paired_live is not None and paired_baseline is not None:
+        cmp_live, cmp_base = paired_live, paired_baseline
+    else:
+        cmp_live, cmp_base = overall, overall_baseline
+    if _baseline_loss(cmp_live, cmp_base, loss_tolerance):
+        alerts.append(f"ML is NOT beating the naive baseline in production (live MAE {cmp_live} vs naive {cmp_base}).")
     # 汚染夜は「直近の中央値」からも除外する（さもないと汚染された過去夜が
     # スパイク検知の基準そのものを歪める）。
     recent = [n.get("overall_live_mae") for n in _uncontaminated_recent(summary_nights[1:], 7)
@@ -921,7 +973,7 @@ def _collect_accuracy_alerts(
     # 店舗数(stores_scored)が 90% 未満なら異常。0 件を含め、監視ジョブが
     # green のまま死ぬのを防ぐ。expected==0（スナップショット自体が空）は
     # 別枠でログのみ（snapshot 側の問題なので score 側の非ゼロ終了はしない）。
-    coverage_failure = expected > 0 and stores_scored < expected * 0.9
+    coverage_failure = _coverage_failure(expected, stores_scored)
     if coverage_failure:
         alerts.append(
             f"Only {stores_scored}/{expected} stores were scored (<90% coverage) — "
@@ -974,6 +1026,12 @@ def main() -> int:
         # green で終わらせず、監視が拾えるようアラート + 非ゼロ終了にする。
         msg = f"[MEGRIBI forecast accuracy] night {night_date}: no snapshot found — snapshot job may not have run."
         print(f"[score] no snapshot for {night_date} — nothing to score (snapshot job may not have run).")
+        # 失敗メールの本文は「Run failed」だけで理由が載らない。Actions 画面に出る注釈で原因を名指しする
+        # （2026-10-27〜29 は PC が未ログオンで MEGRIBI-snapshot が走らず、3日連続でこの経路に入った）。
+        print(
+            f"::error title=score: no snapshot::night {night_date}: accuracy/snapshots/{night_date}.json is missing. "
+            "Check the owner PC (Task Scheduler MEGRIBI-snapshot runs only while the user is logged on)."
+        )
         _alert(msg)
         return 1
     snapshot = json.loads(snap_raw.decode())
@@ -1143,6 +1201,10 @@ def main() -> int:
     v2_maes = [v["v2_mae"] for v in v2_per_store.values() if "v2_mae" in v]
     overall_v2 = round(sum(v2_maes) / len(v2_maes), 2) if v2_maes else None
     fleet_scorecard = _fleet_scorecard(scorecard_per_store)
+    # 勝敗判定用の paired（両方を持つ店だけ）と、部分採点の夜かどうか（昇格ガード）。
+    paired_live, paired_baseline, paired_n = _paired_means(per_store)
+    loss_tol = _baseline_loss_tolerance()
+    partial_night = _coverage_failure(expected, len(per_store))
     result = {
         "night_date": night_date,
         "scored_at_utc": datetime.now(timezone.utc).isoformat(),
@@ -1154,6 +1216,9 @@ def main() -> int:
         "overall_live_mae": overall,
         "overall_baseline_mae": overall_baseline,
         "stores_scored": len(per_store),
+        "paired_live_mae": paired_live,
+        "paired_baseline_mae": paired_baseline,
+        "paired_stores": paired_n,
         "per_store": per_store,
         # --- 追加(後方互換): v2 と scorecard を別キーで併記。既存 consumer は無視できる。 ---
         "v2": {
@@ -1164,7 +1229,21 @@ def main() -> int:
         },
         "scorecard": {**fleet_scorecard, "per_store": scorecard_per_store},
     }
-    _storage_put(bucket, f"accuracy/scores/{night_date}.json", json.dumps(result, ensure_ascii=False).encode("utf-8"), supabase_url, key)
+    # 壊れた成果物を正規パスへ昇格させない（CLAUDE.md §3）: 採点できた店が期待の90%未満の夜
+    # （例: 2026-10-30 はオリエンタル37店の logs が無く相席屋5店だけ）は、正規パスにも summary.json にも
+    # 載せず `_partial/` へ退避する。載せると /api/forecast_accuracy の「直近夜の店数」と per_store が
+    # 5店になり、mae_7d にも混ざる（snapshot 側の `_partial/` と同じ規約）。ジョブは従来どおり失敗させる。
+    score_path = f"accuracy/scores/_partial/{night_date}.json" if partial_night else f"accuracy/scores/{night_date}.json"
+    if partial_night:
+        print(
+            f"[score][ERROR] partial coverage {len(per_store)}/{expected} stores — NOT promoted: wrote {score_path}, "
+            "summary.json left untouched."
+        )
+        print(
+            f"::error title=score: partial coverage::night {night_date}: only {len(per_store)}/{expected} stores had "
+            "actuals in logs. Check the collector (/tasks/multi_collect) per brand."
+        )
+    _storage_put(bucket, score_path, json.dumps(result, ensure_ascii=False).encode("utf-8"), supabase_url, key)
 
     # rolling summary (newest first, capped)
     summary = {"nights": []}
@@ -1190,7 +1269,8 @@ def main() -> int:
         ),
     )
     summary["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
-    _storage_put(bucket, "accuracy/scores/summary.json", json.dumps(summary, ensure_ascii=False).encode("utf-8"), supabase_url, key)
+    if not partial_night:
+        _storage_put(bucket, "accuracy/scores/summary.json", json.dumps(summary, ensure_ascii=False).encode("utf-8"), supabase_url, key)
 
     # --- closed-loop feedback: 直近最大7夜の本番スコアから店舗別ブレンド重み(legacy
     # candidate)を算出する（本丸③）。2026-08-22 重み凍結（上のヘルパー群のdocstring参照）
@@ -1204,7 +1284,7 @@ def main() -> int:
         # （self-flattery loop into serving を断つ。モジュールdocstring参照）。
         recent_dates = [
             n.get("night_date") for n in _uncontaminated_recent(summary["nights"], 7)
-            if n.get("night_date")
+            if n.get("night_date") and not (partial_night and n.get("night_date") == night_date)
         ]
         excluded_contaminated = [
             n.get("night_date") for n in summary["nights"][:7]
@@ -1272,6 +1352,9 @@ def main() -> int:
         summary_nights=summary["nights"],
         expected=expected,
         stores_scored=stores_scored,
+        paired_live=paired_live,
+        paired_baseline=paired_baseline,
+        loss_tolerance=loss_tol,
     )
 
     if alerts:
@@ -1302,16 +1385,18 @@ def main() -> int:
 
     # 艦隊 ML がナイーブ・ベースラインに負けた夜はジョブを RED にして notify-on-failure を
     # 発火させる（Act 断線の修理）。ACCURACY_FAIL_ON_BASELINE_LOSS=0 で無効化可。
-    baseline_loss = (
-        overall is not None and overall_baseline is not None and overall > overall_baseline
-    )
+    if paired_live is not None and paired_baseline is not None:
+        baseline_loss = _baseline_loss(paired_live, paired_baseline, loss_tol)
+    else:
+        baseline_loss = _baseline_loss(overall, overall_baseline, loss_tol)
     fail_on_loss = os.environ.get("ACCURACY_FAIL_ON_BASELINE_LOSS", "1").strip() == "1"
 
     if coverage_failure:
         return 1
     if baseline_loss and fail_on_loss:
-        print(f"[score] FAIL: fleet ML lost to baseline (live {overall} > baseline {overall_baseline}). "
-              "Set ACCURACY_FAIL_ON_BASELINE_LOSS=0 to silence.")
+        print(f"[score] FAIL: fleet ML lost to baseline (paired live {paired_live} > baseline {paired_baseline} "
+              f"x{1 + loss_tol:g}; stores={paired_n}). Set ACCURACY_FAIL_ON_BASELINE_LOSS=0 to silence, "
+              "ACCURACY_BASELINE_LOSS_TOLERANCE_PCT to tune.")
         return 1
     # 重み凍結パイプライン(mode分岐/backup世代/manifest/shadow)のintegrity失敗は、
     # 広い except で握りつぶさずここで最終戻り値に反映する
