@@ -35,6 +35,8 @@ schedule から6時間毎に呼ばれる）:
   c. shadow: manifest が active かつ activated_at から30時間以上経っていれば、
      shadow.generated_at が48時間以内であること（= score ジョブが生きている証拠）。
      発動直後（30時間未満）は score が1回もまだ回っていない可能性があるので猶予する。
+     ただし score ジョブ自体が36時間以内に走っていれば（失敗なら score 自身が失敗メールを出している）、
+     shadow の古さは同じ原因の反響なので、168時間（7日）までは警告に留める（2026-11-01）。
 
 復元モード（--restore。workflow_dispatch の input restore=true のときだけ渡される。
 schedule からは絶対に渡らない = 自動復元はしない設計）:
@@ -45,6 +47,7 @@ schedule からは絶対に渡らない = 自動復元はしない設計）:
   SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY  必須
   FORECAST_MODEL_BUCKET  Storage バケット名（既定 ml-models。oriental/config.py の既定と同じ）
   GITHUB_STEP_SUMMARY / GITHUB_OUTPUT  あれば書き込む（GHA 外では書かずに続行）
+  GITHUB_TOKEN / GITHUB_REPOSITORY  あれば score ジョブの直近の実行時刻を照会する（無ければ照会しない）
 
 終了コード: 0 = 凍結が健全（または未発動・正常に解除済み） / 1 = 破損・不一致・照会失敗。
 """
@@ -57,6 +60,7 @@ import json
 import math
 import os
 import sys
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
@@ -77,6 +81,12 @@ GRACE_HOURS = 30.0
 # 1回落ちてもすぐには赤くしないが、2回連続で落ちたら気づく」ための閾値
 # （check_daily_published.py 等、他の監視スクリプトの猶予設計と同じ考え方）。
 SHADOW_STALE_HOURS = 48.0
+# shadow が古くても score ジョブ自体が直近に走っているなら、score の失敗メールと同じ原因の反響にすぎない
+# （2026-10-29〜30 は PC 未ログオンで snapshot が無く、score の失敗3通にこの判定の失敗6通が重なった）。
+# その間は警告に留め、7日を超えたら（または score が走っていない／確かめられないなら）従来どおり失敗にする。
+SHADOW_HARD_STALE_HOURS = 168.0
+SCORE_ALIVE_WINDOW_HOURS = 36.0
+SCORE_WORKFLOW_FILE = "forecast-accuracy-track.yml"
 
 Fetch = Callable[[str], bytes | None]
 Put = Callable[[str, bytes], None]
@@ -144,7 +154,9 @@ def _check_manifest(raw: bytes | None) -> tuple[dict | None, list[str]]:
     return doc, []
 
 
-def evaluate(fetch: Fetch, now: datetime) -> tuple[str, list[str]]:
+def evaluate(
+    fetch: Fetch, now: datetime, score_last_run: Callable[[], datetime | None] | None = None
+) -> tuple[str, list[str]]:
     """通常モード（read-only）の判定本体。サマリ本文と問題点一覧を返す。"""
     lines = ["blend_weights 凍結監視"]
     problems: list[str] = []
@@ -265,9 +277,25 @@ def evaluate(fetch: Fetch, now: datetime) -> tuple[str, list[str]]:
 
     shadow_age_h = (now - shadow_generated_at).total_seconds() / 3600.0
     if shadow_age_h > SHADOW_STALE_HOURS:
-        msg = f"shadow が古すぎます（score ジョブ停止の疑い）: {shadow_age_h:.1f}h > {SHADOW_STALE_HOURS:.0f}h"
-        lines.append(f"- shadow: NG ({msg})")
-        problems.append(msg)
+        # score の実行履歴は shadow が古いときだけ照会する（score_last_run は GitHub API を叩く）。
+        last_run = score_last_run() if score_last_run is not None else None
+        score_age_h = (now - last_run).total_seconds() / 3600.0 if last_run is not None else None
+        if (
+            score_age_h is not None
+            and score_age_h <= SCORE_ALIVE_WINDOW_HOURS
+            and shadow_age_h <= SHADOW_HARD_STALE_HOURS
+        ):
+            msg = (
+                f"shadow が古い（{shadow_age_h:.1f}h > {SHADOW_STALE_HOURS:.0f}h）が、score ジョブは "
+                f"{score_age_h:.1f}h 前に実行されている（失敗なら score 自身が通知済み）。"
+                f"{SHADOW_HARD_STALE_HOURS:.0f}h を超えたら失敗にする"
+            )
+            lines.append(f"- shadow: 警告 ({msg})")
+            print(f"::warning::{msg}")
+        else:
+            msg = f"shadow が古すぎます（score ジョブ停止の疑い）: {shadow_age_h:.1f}h > {SHADOW_STALE_HOURS:.0f}h"
+            lines.append(f"- shadow: NG ({msg})")
+            problems.append(msg)
     else:
         lines.append(f"- shadow: OK（{shadow_age_h:.1f}h 前に更新、score ジョブは生存しています）")
 
@@ -335,6 +363,32 @@ def _append_env_file(env_name: str, text: str) -> None:
         fh.write(text)
 
 
+def _score_last_run_at() -> datetime | None:
+    """score ジョブ（forecast-accuracy-track.yml）の最新の完了 run の時刻（成否は問わない）。
+
+    GITHUB_TOKEN / GITHUB_REPOSITORY が無い（GHA 外）・照会に失敗したときは None
+    （＝ shadow の古さは従来どおり失敗として扱う）。"""
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    token = os.environ.get("GITHUB_TOKEN")
+    if not repo or not token:
+        return None
+    req = urllib.request.Request(
+        f"https://api.github.com/repos/{repo}/actions/workflows/{SCORE_WORKFLOW_FILE}/runs?status=completed&per_page=1",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            runs = json.loads(resp.read().decode("utf-8")).get("workflow_runs") or []
+    except Exception as exc:  # noqa: BLE001
+        print(f"::warning::score ジョブの実行履歴を取得できませんでした（shadow の古さは従来どおり失敗扱い）: {exc}")
+        return None
+    return _parse_iso(runs[0].get("updated_at")) if runs else None
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="blend_weights 凍結の監視・復元")
     parser.add_argument(
@@ -365,7 +419,7 @@ def main() -> int:
         if args.restore:
             detail, code = restore(fetch, put, datetime.now(timezone.utc))
         else:
-            detail, problems = evaluate(fetch, datetime.now(timezone.utc))
+            detail, problems = evaluate(fetch, datetime.now(timezone.utc), score_last_run=_score_last_run_at)
             code = 1 if problems else 0
     except Exception as exc:  # noqa: BLE001 — Storage 通信断など。fail-closed で赤くする
         print(f"::error::Storage 照会に失敗しました: {exc}")

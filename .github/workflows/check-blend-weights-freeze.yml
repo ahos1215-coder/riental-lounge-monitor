@@ -42,6 +42,8 @@ on:
 
 permissions:
   contents: read
+  # score ジョブの直近の実行時刻を照会する（shadow の古さが score 失敗の反響かを見分ける）。
+  actions: read
 
 jobs:
   check:
@@ -82,6 +84,7 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           FORECAST_MODEL_BUCKET: ${{ vars.FORECAST_MODEL_BUCKET }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # 判定/復元ロジックの実体は scripts/monitor/check_blend_weights_freeze.py（stdlib のみ）。
         # --restore は workflow_dispatch で restore=true を明示したときだけ渡す。
         run: |

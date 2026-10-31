@@ -118,6 +118,7 @@ _ENV_KEYS_NOT_FROM_WORKFLOW = {
     "GITHUB_OUTPUT",   # runner が常に設定する
     "GITHUB_ENV",
     "GITHUB_STEP_SUMMARY",
+    "GITHUB_REPOSITORY",  # runner が常に設定する（無くても freeze 監視は従来どおり失敗側に倒れる）
 }
 
 

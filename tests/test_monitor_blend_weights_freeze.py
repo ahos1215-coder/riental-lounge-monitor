@@ -318,7 +318,7 @@ class Testmain配線:
             calls["restore"] += 1
             return "restore called", 0
 
-        def fake_evaluate(fetch, now):
+        def fake_evaluate(fetch, now, score_last_run=None):
             calls["evaluate"] += 1
             return "evaluate called", []
 
@@ -343,7 +343,7 @@ class Testmain配線:
             calls["restore"] += 1
             return "restore called", 0
 
-        def fake_evaluate(fetch, now):
+        def fake_evaluate(fetch, now, score_last_run=None):
             calls["evaluate"] += 1
             return "evaluate called", []
 
@@ -366,3 +366,71 @@ class Testmain配線:
         monkeypatch.setattr(bwf, "storage_get", boom)
         assert bwf.main() == 1
         assert "Storage 照会に失敗しました" in capsys.readouterr().out
+
+
+class Testshadowの古さはscoreが走っている間は警告止まり:
+    """2026-10-29〜30: PC 未ログオンで snapshot が無く score が3回失敗（各回メール）し、その反響で
+    この判定の失敗メールが6通重なった。score 自体が直近に走っている間は警告に留める。"""
+
+    def _store(self, shadow_age_h: float) -> dict[str, bytes]:
+        canonical_raw = _bytes(_canonical_doc())
+        freeze_id = hashlib.sha256(canonical_raw).hexdigest()
+        manifest = _manifest_doc(state="active", freeze_id=freeze_id, activated_at=(NOW - timedelta(days=60)).isoformat())
+        return {
+            bwf.CANONICAL_PATH: canonical_raw,
+            bwf.MANIFEST_PATH: _bytes(manifest),
+            f"{bwf.GENERATIONS_PREFIX}{freeze_id}.json": canonical_raw,
+            bwf.SHADOW_PATH: _bytes(_shadow_doc((NOW - timedelta(hours=shadow_age_h)).isoformat())),
+        }
+
+    def test_scoreが36時間以内に走っていれば48時間超でも警告のみ(self) -> None:
+        detail, problems = bwf.evaluate(_fetch_from(self._store(60)), NOW, score_last_run=lambda: NOW - timedelta(hours=10))
+        assert problems == []
+        assert "- shadow: 警告" in detail
+
+    def test_scoreが36時間より前にしか走っていなければ失敗(self) -> None:
+        _detail, problems = bwf.evaluate(_fetch_from(self._store(60)), NOW, score_last_run=lambda: NOW - timedelta(hours=40))
+        assert any("shadow が古すぎます" in p for p in problems)
+
+    def test_7日を超えたらscoreが走っていても失敗(self) -> None:
+        _detail, problems = bwf.evaluate(_fetch_from(self._store(170)), NOW, score_last_run=lambda: NOW - timedelta(hours=10))
+        assert any("shadow が古すぎます" in p for p in problems)
+
+    def test_scoreの実行履歴が分からなければ従来どおり失敗(self) -> None:
+        _detail, problems = bwf.evaluate(_fetch_from(self._store(60)), NOW, score_last_run=lambda: None)
+        assert any("shadow が古すぎます" in p for p in problems)
+
+    def test_shadowが新しければscoreの実行履歴は照会しない(self) -> None:
+        def _must_not_call():
+            raise AssertionError("shadow が新しいのに GitHub API を叩いてはいけない")
+
+        _detail, problems = bwf.evaluate(_fetch_from(self._store(5)), NOW, score_last_run=_must_not_call)
+        assert problems == []
+
+    def test_score_last_run_atは最新の完了runの時刻を返す(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self) -> bytes:
+                return json.dumps({"workflow_runs": [{"updated_at": "2026-10-31T00:43:30Z", "conclusion": "failure"}]}).encode()
+
+        seen: dict[str, str] = {}
+
+        def _fake_urlopen(req, timeout=20):
+            seen["url"] = req.full_url
+            return _Resp()
+
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("GITHUB_TOKEN", "dummy")
+        monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+        assert bwf._score_last_run_at() == datetime(2026, 10, 31, 0, 43, 30, tzinfo=timezone.utc)
+        assert "/actions/workflows/forecast-accuracy-track.yml/runs?status=completed" in seen["url"]
+
+    def test_score_last_run_atはGHA外では照会しない(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        assert bwf._score_last_run_at() is None
