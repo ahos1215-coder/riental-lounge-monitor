@@ -686,6 +686,32 @@ _USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
 ]
 
+# --- Oriental Lounge への HTTP ヘッダ（2026-10-31 追加・全37店が取れなくなった件の再発防止） ---
+# 2026-10-29 頃から oriental-lounge.com は次のように変わった（実測で再現済み）:
+#   * Accept-Encoding に br を含めると Brotli 圧縮で返す。requests は brotli ライブラリが
+#     無いと解凍できず resp.text が文字化けのバイナリになる（Render の requirements.txt に
+#     brotli は無い）。→ 全37店が (None, None) になり、logs に1行も入らなくなった。
+#   * Accept-Language に en を含めると /en/ へ 302 する。トップの店舗カードの href が
+#     /en/stores/N に変わり、a[href^='/stores/'] が 0 件になる。
+# 相席屋側（_scrape_aisekiya）は最初から「gzip, deflate のみ」で無事だった。同じ規約に揃える。
+# 解凍器の無い圧縮方式は要求しない・日本語ページだけを要求する、で固定する。
+SCRAPE_ACCEPT_LANGUAGE = "ja"
+SCRAPE_ACCEPT_ENCODING = "gzip, deflate"  # br / zstd は要求しない
+
+
+def _require_html(resp: "requests.Response", url: str) -> str:
+    """resp.text を返す。解凍できなかった・HTML でない応答は、黙って (None, None) に落とさず
+    原因を名指しして例外にする（br 事件では静かな全店失敗が2日間気づかれなかった）。"""
+    html = resp.text
+    head = html[:2000].lower()
+    if "<html" not in head and "<!doctype" not in head:
+        enc = (resp.headers.get("Content-Encoding") or "none").lower()
+        raise ValueError(
+            f"non-HTML response (content-encoding={enc}, bytes={len(resp.content)}) url={url}"
+        )
+    return html
+
+
 # --- データ検証: 店舗あたりの人数上限 ---
 MAX_PEOPLE_PER_GENDER = 500  # 1店舗の男女それぞれの上限（定員超過の異常値を弾く）
 
@@ -754,15 +780,15 @@ def _scrape_store_once(url: str) -> tuple[int | None, int | None]:
     headers = {
         "User-Agent": _pick_user_agent(),
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-        "Accept-Encoding": "gzip, deflate, br",
+        "Accept-Language": SCRAPE_ACCEPT_LANGUAGE,
+        "Accept-Encoding": SCRAPE_ACCEPT_ENCODING,
         "Connection": "keep-alive",
         "Cache-Control": "no-cache",
     }
 
     resp = requests.get(url, headers=headers, timeout=10)
     resp.raise_for_status()
-    html = resp.text
+    html = _require_html(resp, url)
 
     # サイレント・フェイル検知
     if _detect_maintenance(html):
@@ -947,14 +973,14 @@ def _scrape_top_page(
         headers = {
             "User-Agent": _pick_user_agent(),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-            "Accept-Encoding": "gzip, deflate, br",
+            "Accept-Language": SCRAPE_ACCEPT_LANGUAGE,
+            "Accept-Encoding": SCRAPE_ACCEPT_ENCODING,
             "Connection": "keep-alive",
             "Cache-Control": "no-cache",
         }
         resp = requests.get(TOP_PAGE_URL, headers=headers, timeout=15)
         resp.raise_for_status()
-        html = resp.text
+        html = _require_html(resp, TOP_PAGE_URL)
 
         if _detect_maintenance(html):
             print("[top_page] maintenance detected, falling back to individual scraping")
@@ -963,7 +989,8 @@ def _scrape_top_page(
         soup = BeautifulSoup(html, "html.parser")
 
         # トップページの店舗カード: <a href="/stores/{id}"> 内にデータが含まれる
-        cards = soup.select("a[href^='/stores/']")
+        # /stores/N に加え、言語プレフィックス付き（/en/stores/N, /ko/stores/N）も拾う。
+        cards = soup.select("a[href*='/stores/']")
         if not cards:
             print("[top_page] no store cards found, falling back to individual scraping")
             return None
@@ -1371,7 +1398,8 @@ def _check_dom_health(
             headers = {
                 "User-Agent": _pick_user_agent(),
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+                "Accept-Language": SCRAPE_ACCEPT_LANGUAGE,
+                "Accept-Encoding": SCRAPE_ACCEPT_ENCODING,
             }
             resp = requests.get(sample_url, headers=headers, timeout=10)
             resp.raise_for_status()
