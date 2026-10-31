@@ -90,6 +90,12 @@ def hm_jst(ts: str | None) -> str | None:
     （2026-08-19 の日報で「現在（12時半頃）」と出た原因）。オフセット無しは UTC とみなす。
     解釈できなければ None。
     """
+    d = _parse_iso_utc(ts)
+    return d.astimezone(JST).strftime("%H:%M") if d is not None else None
+
+
+def _parse_iso_utc(ts: str | None) -> datetime | None:
+    """ISO 8601 文字列を aware datetime にする。オフセット無しは UTC とみなす。解釈できなければ None。"""
     if not isinstance(ts, str) or len(ts) < 16:
         return None
     raw = ts.strip()
@@ -99,9 +105,15 @@ def hm_jst(ts: str | None) -> str | None:
         d = datetime.fromisoformat(raw)
     except ValueError:
         return None
-    if d.tzinfo is None:
-        d = d.replace(tzinfo=timezone.utc)
-    return d.astimezone(JST).strftime("%H:%M")
+    return d if d.tzinfo is not None else d.replace(tzinfo=timezone.utc)
+
+
+def age_minutes(ts: str | None, now: datetime | None = None) -> float | None:
+    """ts が now（既定は現在時刻）の何分前か。解釈できなければ None。"""
+    d = _parse_iso_utc(ts)
+    if d is None:
+        return None
+    return ((now or datetime.now(timezone.utc)) - d).total_seconds() / 60.0
 
 
 def fetch_store_facts(slug: str) -> dict:
@@ -131,6 +143,9 @@ def fetch_store_facts(slug: str) -> dict:
             latest_hm = hm_jst(row.get("ts"))
             if latest_hm:
                 facts["latest_ts"] = latest_hm
+                # latest_ts は日付を落とした "HH:MM" なので、2日前の値でも「直近」に見える。
+                # 鮮度を判定できるよう元の ts（UTC）も持つ（2026-10-31 の日報事故。local_report_job.py）。
+                facts["latest_ts_utc"] = row.get("ts")
     except Exception as e:  # noqa: BLE001
         facts["megribi_error"] = str(e)
     try:

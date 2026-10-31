@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import json
 import urllib.parse
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -60,6 +61,11 @@ class _FakeResp:
 
     def __exit__(self, *exc):
         return False
+
+
+def _fresh_ts() -> str:
+    """鮮度ガード（_drop_stale_live_facts）を通る「今」の実測時刻。"""
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _store_row(slug: str = "shibuya", brand: str = "oriental") -> dict[str, Any]:
@@ -454,7 +460,7 @@ class TestBuildRecordCarryOver:
         assert "sample fallback" in record["_carry_over_reason"]
 
     def test_ollama_failure_carries_over_prior_body(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setattr(lrj.spk, "fetch_store_facts", lambda slug: {"source": "live", "megribi_score": 0.6})
+        monkeypatch.setattr(lrj.spk, "fetch_store_facts", lambda slug: {"source": "live", "megribi_score": 0.6, "latest_ts_utc": _fresh_ts()})
         monkeypatch.setattr(lrj.spk, "run_ollama", lambda *a, **k: ("", 0.2, "HTTP 500: internal error"))
         monkeypatch.setattr(lrj, "_fetch_existing_daily_report", lambda facts_id: _prior_good_row())
 
@@ -509,7 +515,7 @@ class TestBuildRecordCarryOver:
         """同日内の再実行で、1回目成功・2回目失敗というシナリオでも1回目の内容が生き残る
         （facts_id に日付が入っていないため、同一 store+edition の行は毎回 PATCH で
         上書きされる設計。carry-over が無いとこの再実行だけで良品が消えてしまう）。"""
-        monkeypatch.setattr(lrj.spk, "fetch_store_facts", lambda slug: {"source": "live", "megribi_score": 0.5})
+        monkeypatch.setattr(lrj.spk, "fetch_store_facts", lambda slug: {"source": "live", "megribi_score": 0.5, "latest_ts_utc": _fresh_ts()})
         monkeypatch.setattr(lrj.spk, "run_ollama", lambda *a, **k: ("# 今夜の渋谷\n空いています。", 1.0, ""))
 
         first_run = lrj.build_record(
@@ -691,6 +697,7 @@ class TestFactsBlockBrandRules:
             "female_ratio": 0.44,
             "latest_total": 22,
             "latest_ts": "21:05",
+            "latest_ts_utc": datetime.now(timezone.utc).isoformat(),  # 鮮度ガードを通る「今」の実測
             "men_seat_pct": 60,
             "women_seat_pct": 40,
             "forecast_peak_total": 30.0,
@@ -812,3 +819,117 @@ class Test終了コード:
     def test_off_switchで旧挙動へ戻せる(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("DAILY_EXIT_NONZERO", "0")
         assert lrj._exit_code(gen_fail=9, write_err=9, gen_carried=9) == 0
+
+
+# --------------------------------------------------------------------------- #
+# 直近実測の鮮度ガード（2026-11-01）
+#
+# 18:00 の evening_preview は収集開始（19:00）前なので、最新の行が「その日の朝 4:55＝前夜の閉店間際」
+# になり、それが毎日「現在◯人」と書かれていた。収集停止中（2026-10-29〜31）は 21:30 便も2日前の値で
+# 「現在、ラウンジには誰も確認されていません」と書いた（実際はハロウィンで満員）。
+# --------------------------------------------------------------------------- #
+class TestLiveFreshnessGuard:
+    NOW = datetime(2026, 10, 31, 9, 5, tzinfo=timezone.utc)  # 18:05 JST（evening_preview の実行時刻）
+
+    def _facts(self, ts_utc: str | None) -> dict[str, Any]:
+        return {
+            "slug": "shibuya",
+            "source": "live",
+            "megribi_score": 0.1,
+            "occupancy_rate": 0.02,
+            "female_ratio": 0.5,
+            "latest_total": 2,
+            "latest_ts": "04:55",
+            "latest_ts_utc": ts_utc,
+            "forecast_peak_total": 96.0,
+            "forecast_peak_time": "01:00",
+        }
+
+    def test_新鮮な実測はそのまま渡す(self) -> None:
+        facts = self._facts((self.NOW - timedelta(minutes=5)).isoformat())
+        assert lrj._drop_stale_live_facts(facts, now=self.NOW) is facts
+
+    def test_18時便では前夜の閉店間際の人数を落として予測だけ残す(self) -> None:
+        facts = self._facts("2026-10-30T19:55:18+00:00")  # 当日 04:55 JST
+        out = lrj._drop_stale_live_facts(facts, now=self.NOW)
+
+        assert out["live_stale"] is True
+        assert out["live_age_min"] == pytest.approx(790, abs=1)
+        for k in ("latest_total", "latest_ts", "latest_ts_utc", "female_ratio", "occupancy_rate", "megribi_score"):
+            assert k not in out
+        assert out["forecast_peak_total"] == 96.0 and out["forecast_peak_time"] == "01:00"
+        assert facts["latest_total"] == 2  # 元の dict は壊さない
+
+    def test_時刻が無い_読めない実測は古いものとして扱う(self) -> None:
+        for ts in (None, "", "garbage"):
+            out = lrj._drop_stale_live_facts(self._facts(ts), now=self.NOW)
+            assert out["live_stale"] is True
+            assert out["live_age_min"] is None
+            assert "latest_total" not in out
+
+    def test_古い実測のときのプロンプトは予測だけで今の様子に触れさせない(self) -> None:
+        out = lrj._drop_stale_live_facts(self._facts("2026-10-28T19:55:00+00:00"), now=self.NOW)
+        for brand, label in (("oriental", "オリエンタルラウンジ 渋谷本店"), ("aisekiya", "相席屋 渋谷店")):
+            prompt = lrj.prompt_daily(label, out, brand=brand)
+            assert "今夜ここまでの実測" not in prompt
+            assert "今夜の実測はまだありません" in prompt
+            assert "今の様子には触れない" in prompt
+            assert "直近の来店人数" not in prompt
+            assert "04:55" not in prompt
+            assert "01:00" in prompt
+
+    def test_新鮮な実測のときのプロンプトは従来どおり(self) -> None:
+        facts = self._facts((self.NOW - timedelta(minutes=5)).isoformat())
+        prompt = lrj.prompt_daily("オリエンタルラウンジ 渋谷本店", facts, brand="oriental")
+        assert "今夜ここまでの実測" in prompt
+        assert "今どのくらい来ているか" in prompt
+        assert "直近の来店人数(実測・人): 2" in prompt
+
+    def test_build_recordは古い実測なら予測だけのプロンプトで生成する(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        captured: dict[str, str] = {}
+        monkeypatch.setattr(lrj.spk, "fetch_store_facts", lambda slug: self._facts("2026-10-28T19:55:00+00:00"))
+
+        def _fake_run_ollama(model, system, user, **kwargs):
+            captured["user"] = user
+            return ("# 見出し\n本文です。", 1.0, "")
+
+        monkeypatch.setattr(lrj.spk, "run_ollama", _fake_run_ollama)
+        rec = lrj.build_record(
+            slug="shibuya", store_row=_store_row("shibuya"),
+            edition="late_update", target_date="2026-10-31", mode="dry-run",
+        )
+        assert rec["is_published"] is True
+        assert rec["_debug_live_stale"] is True
+        assert "今夜ここまでの実測" not in captured["user"]
+        assert "直近の来店人数" not in captured["user"]
+
+    def test_build_recordは古い実測かつ予測も無ければ生成しない(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        facts = {
+            "slug": "shibuya", "source": "live", "latest_total": 0, "latest_ts": "04:55",
+            "latest_ts_utc": "2026-10-28T19:55:00+00:00", "megribi_score": 0.0,
+            "forecast_error": "timed out",
+        }
+        monkeypatch.setattr(lrj.spk, "fetch_store_facts", lambda slug: facts)
+
+        def _no_llm(*args, **kwargs):
+            raise AssertionError("書く材料が無いのに LLM を呼んではいけない")
+
+        monkeypatch.setattr(lrj.spk, "run_ollama", _no_llm)
+        rec = lrj.build_record(
+            slug="shibuya", store_row=_store_row("shibuya"),
+            edition="late_update", target_date="2026-10-31", mode="dry-run",
+        )
+        assert rec["is_published"] is False
+        assert "no fresh live facts" in (rec["error_message"] or "")
+
+    def test_fetch_store_factsは鮮度判定用に元のUTC時刻を持つ(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _fake_urlopen(req, timeout=25):
+            if "megribi_score" in req.full_url:
+                return _FakeResp(json.dumps({"data": [{"slug": "shibuya", "total": 2,
+                                                       "ts": "2026-10-28T19:55:20.082013+00:00"}]}).encode())
+            return _FakeResp(json.dumps({"data": [{"ts": "2026-10-31T01:00:00+09:00", "total_pred": 96}]}).encode())
+
+        monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
+        facts = lrj.spk.fetch_store_facts("shibuya")
+        assert facts["latest_ts"] == "04:55"
+        assert facts["latest_ts_utc"] == "2026-10-28T19:55:20.082013+00:00"

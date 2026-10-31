@@ -221,6 +221,31 @@ def _brand_for(store_row: dict[str, Any]) -> str:
     return str(store_row.get("brand") or "oriental")
 
 
+# 直近実測の鮮度（2026-11-01）。収集は 19:00〜05:00 JST の5分おきなので、18:00 の evening_preview では
+# 最新の行が「その日の朝 4:55＝前夜の閉店間際」になり、LLM がそれを「現在◯人」と書いていた（毎日・全店）。
+# 収集停止中（2026-10-29〜31）は 21:30 便も2日前の値で「現在、ラウンジには誰も確認されていません」と
+# 書いた（実際はハロウィンで満員）。これより古い実測は「今の様子」として渡さず、予測だけで書かせる。
+LIVE_MAX_AGE_MIN = 30.0
+_LIVE_FACT_KEYS = (
+    "megribi_score", "occupancy_rate", "female_ratio", "latest_total",
+    "men_seat_pct", "women_seat_pct", "latest_ts", "latest_ts_utc",
+)
+
+
+def _drop_stale_live_facts(
+    facts: dict[str, Any], *, now: datetime | None = None, max_age_min: float = LIVE_MAX_AGE_MIN
+) -> dict[str, Any]:
+    """直近実測が max_age_min 分より古い（時刻が読めない・実測が無いも含む）なら、実測系の値を落として
+    live_stale=True を立てた新しい dict を返す。新鮮なら facts をそのまま返す。"""
+    age = spk.age_minutes(facts.get("latest_ts_utc"), now)
+    if age is not None and age <= max_age_min:
+        return facts
+    out = {k: v for k, v in facts.items() if k not in _LIVE_FACT_KEYS}
+    out["live_stale"] = True
+    out["live_age_min"] = round(age, 1) if age is not None else None
+    return out
+
+
 def prompt_daily(store_label: str, facts: dict[str, Any], brand: str = "oriental") -> str:
     """日次レポート用のユーザープロンプト。
 
@@ -237,13 +262,25 @@ def prompt_daily(store_label: str, facts: dict[str, Any], brand: str = "oriental
         if is_aisekiya
         else "普段の言葉と直感的な数字(時刻・おおよその人数)だけで書く。"
     )
+    if facts.get("live_stale"):
+        # 今夜の実測が無い・古い（開店前の 18:00 便、収集停止中）。今の様子には触れさせず予測だけで書かせる。
+        intro = f"次のデータは相席ラウンジ「{store_label}」の今夜の予測です（今夜の実測はまだありません）。\n\n"
+        flow = (
+            "『何時ごろが最も多くなりそうか』→『いつ行くと良さそうか』の流れで書く。"
+            "今の人数・今の混み具合・『誰もいない』のような今の様子には触れない。"
+        )
+    else:
+        intro = f"次のデータは相席ラウンジ「{store_label}」の今夜ここまでの実測と、これからの予測です。\n\n"
+        flow = (
+            "『今どのくらい来ているか(渡されたデータの事実)』→『何時ごろが最も多くなりそうか』→"
+            "『いつ行くと良さそうか』の流れで書く。"
+        )
     return (
-        f"次のデータは相席ラウンジ「{store_label}」の今夜ここまでの実測と、これからの予測です。\n\n"
-        f"{spk.facts_block(facts, store_label, brand=brand)}\n\n"
+        intro
+        + f"{spk.facts_block(facts, store_label, brand=brand)}\n\n"
         "これをもとに、今夜これから来店を検討している“初めての人”にも一目で伝わる短い日次レポートを書いてください。"
         "見出し(#)のあと、本文は2〜3文だけ。長くしない。"
-        "『今どのくらい来ているか(渡されたデータの事実)』→『何時ごろが最も多くなりそうか』→"
-        "『いつ行くと良さそうか』の流れで書く。"
+        f"{flow}"
         f"{number_hint}"
         "渡されたデータに無い混雑の断定（空いている/混んでいる/ほぼ満席）はしない。"
         "内部スコアや0〜1の生の数値は本文に出さない。"
@@ -477,6 +514,15 @@ def build_record(
         )
         return _apply_carry_over_or_fail(base, reason, allow_fetch=allow_fetch)
 
+    # 古い実測は「現在の人数」として渡さない（LIVE_MAX_AGE_MIN の説明参照）。予測も無ければ書く材料が無い。
+    facts = _drop_stale_live_facts(facts)
+    if facts.get("live_stale") and facts.get("forecast_peak_time") is None:
+        reason = (
+            f"no fresh live facts (age_min={facts.get('live_age_min')}) and no forecast: "
+            f"megribi={facts.get('megribi_error')} forecast={facts.get('forecast_error')}"
+        )
+        return _apply_carry_over_or_fail(base, reason, allow_fetch=allow_fetch)
+
     # 2) Ollama 生成（呼び出し側で gpu_lock を取得済みの前提）
     user_prompt = prompt_daily(store_label, facts, brand=_brand_for(store_row))
     tuned = _load_tuned_options() or {"num_gpu": 999}
@@ -502,6 +548,8 @@ def build_record(
         "error_message": None,
         "_debug_elapsed_sec": round(elapsed, 1),
         "_debug_facts_source": facts.get("source"),
+        "_debug_live_stale": bool(facts.get("live_stale")),
+        "_debug_live_age_min": facts.get("live_age_min"),
     }
 
 
@@ -595,6 +643,8 @@ def _print_record(slug: str, record: dict[str, Any]) -> None:
         _pr(f"  carried_over  : True (reason: {record.get('_carry_over_reason')})")
     if record.get("_debug_facts_source"):
         _pr(f"  (debug) facts_source : {record['_debug_facts_source']}")
+    if record.get("_debug_live_stale"):
+        _pr(f"  (debug) live_stale   : True (age_min={record.get('_debug_live_age_min')}; forecast-only)")
     if record.get("_debug_elapsed_sec") is not None:
         _pr(f"  (debug) ollama_sec   : {record['_debug_elapsed_sec']}")
     _pr("  --- mdx_content -----------------------------------------------------")
