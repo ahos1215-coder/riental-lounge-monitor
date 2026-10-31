@@ -17,7 +17,7 @@ import { rateLimit, rateLimitHeaders } from "@/lib/rateLimit/apiRateLimit";
 export type ProxyBackendOptions = {
   /** バックエンド側のパス（先頭スラッシュ込み。例: "/api/range"） */
   path: string;
-  /** CDN キャッシュ秒。fetch の revalidate と s-maxage を兼ねる */
+  /** CDN キャッシュ秒。fetch の revalidate と s-maxage を兼ねる（bypassDataCache のときは s-maxage だけ） */
   ttlSeconds: number;
   /** cache-control の stale-while-revalidate 秒 */
   swrSeconds: number;
@@ -30,6 +30,12 @@ export type ProxyBackendOptions = {
   buildQuery?: (searchParams: URLSearchParams) => string;
   /** バックエンドが content-type を返さなかったときに補う値 */
   defaultContentType?: string;
+  /**
+   * true なら fetch を Next のデータキャッシュに載せず（cache: "no-store"）、CDN の s-maxage / SWR だけで持つ。
+   * TTL が長く利用の少ないルートでは、データキャッシュに残った古い値を CDN がさらに TTL 分抱え、
+   * 何日も前の内容が出ることがある（2026-11-01: /api/forecast_accuracy が 10/27 の答え合わせのままだった）。
+   */
+  bypassDataCache?: boolean;
 };
 
 /** `store` パラメータの解決（未指定・空白のみなら既定店舗）。3ルートで共通。 */
@@ -57,7 +63,10 @@ export async function proxyBackendGet(
   const targetUrl = query ? `${base}${opts.path}?${query}` : `${base}${opts.path}`;
 
   try {
-    const backendRes = await fetch(targetUrl, { next: { revalidate: opts.ttlSeconds } });
+    const backendRes = await fetch(
+      targetUrl,
+      opts.bypassDataCache ? { cache: "no-store" } : { next: { revalidate: opts.ttlSeconds } },
+    );
     const buf = await backendRes.arrayBuffer();
 
     const headers = new Headers();

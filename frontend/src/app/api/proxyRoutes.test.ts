@@ -24,8 +24,10 @@ type RouteSpec = {
   requestUrl: string;
   /** バックエンドへ実際に投げられるべき URL */
   expectedTargetUrl: string;
-  /** fetch(init.next.revalidate) の期待値 */
-  expectedRevalidate: number;
+  /** fetch(init.next.revalidate) の期待値（データキャッシュに載せないルートは undefined） */
+  expectedRevalidate: number | undefined;
+  /** fetch(init.cache) の期待値（データキャッシュに載せないルートだけ "no-store"） */
+  expectedFetchCache?: RequestCache;
   /** ok のとき付与される cache-control */
   expectedCacheHeader: string;
   /** バックエンドが content-type を返さなかったときに補われる値（無ければ null） */
@@ -94,7 +96,8 @@ const ROUTES: RouteSpec[] = [
     modulePath: "./forecast_accuracy/route",
     requestUrl: "http://localhost:3000/api/forecast_accuracy",
     expectedTargetUrl: `${BASE}/api/forecast_accuracy`,
-    expectedRevalidate: 3600,
+    expectedRevalidate: undefined,
+    expectedFetchCache: "no-store",
     expectedCacheHeader: "public, s-maxage=3600, stale-while-revalidate=7200",
     expectedContentTypeFallback: null,
   },
@@ -186,6 +189,7 @@ describe.each(ROUTES)("$name プロキシの契約", (spec) => {
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toBe(spec.expectedTargetUrl);
     expect(calls[0].init.next?.revalidate).toBe(spec.expectedRevalidate);
+    expect(calls[0].init.cache).toBe(spec.expectedFetchCache);
 
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("application/json");
