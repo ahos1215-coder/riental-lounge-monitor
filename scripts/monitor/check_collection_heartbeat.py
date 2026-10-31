@@ -78,14 +78,23 @@ PER_STORE_TIMEOUT = 30
 DAYTIME_MAX_GAP_MINUTES = 45
 
 
-def fetch_newest_ts(url: str, key: str) -> list[dict]:
-    """logs テーブル全体の最新1行を取得する。
+# 2026-10-31: ブランド別の鮮度。全体チェックは「logs 全体の最新1行」しか見ないため、オリエンタル37店が
+# 丸ごと止まっても相席屋5店の新しい行に隠れて緑のままだった（2026-10-29 04:55 JST 以降の2夜が無通知。
+# 店舗別チェックは閾値3日で、検知は止まってから約3日後になる）。ブランドごとに同じ判定を掛ける。
+BRANDS = ("oriental", "aisekiya")
+
+
+def fetch_newest_ts(url: str, key: str, brand: str | None = None) -> list[dict]:
+    """logs テーブル全体（brand 指定時はそのブランドだけ）の最新1行を取得する。
 
     失敗し続けたら QueryFailed を送出する（**ここでは exit しない**）。
     detail / cause を GITHUB_OUTPUT へ書けるのは main だけなので、
     落ちる場所を main に一本化する（2026-09-09。通知が空になっていた件の修正）。
     """
-    q = urllib.parse.urlencode({"select": "ts", "order": "ts.desc", "limit": "1"})
+    params = {"select": "ts", "order": "ts.desc", "limit": "1"}
+    if brand:
+        params["src_brand"] = f"eq.{brand}"
+    q = urllib.parse.urlencode(params)
     req = urllib.request.Request(f"{url}/rest/v1/logs?{q}", headers=_auth_headers(key))
     for attempt in range(1, NEWEST_ATTEMPTS + 1):
         try:
@@ -192,6 +201,28 @@ def evaluate_overall(
     return mode, ok, fail_msg, age_minutes
 
 
+def evaluate_brands(
+    newest_by_brand: dict[str, str | None], now: datetime, threshold_minutes: int
+) -> tuple[list[str], list[str]]:
+    """ブランド別の判定（純関数）。返り値 (表示行, 問題の一覧)。
+
+    ブランドごとの最新 ts に、全体チェックと同じ evaluate_overall（夜間=閾値分 / 昼間=昨夜の完走）を
+    掛ける。None は「そのブランドの行が1行も無い」。"""
+    lines: list[str] = []
+    problems: list[str] = []
+    for brand, raw in newest_by_brand.items():
+        if raw is None:
+            lines.append(f"- 判定(ブランド={brand}): NG（収集行なし）")
+            problems.append(f"{brand}: 収集行なし")
+            continue
+        newest = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        _mode, ok, fail_msg, age = evaluate_overall(newest, now, threshold_minutes, raw)
+        lines.append(f"- 判定(ブランド={brand}): {'OK' if ok else 'NG'}（最新 {raw} / {age:.1f}分前）")
+        if not ok:
+            problems.append(f"{brand}: {fail_msg}")
+    return lines, problems
+
+
 def check_per_store(
     url: str, key: str, store_rows: list[dict], now: datetime, per_store_stale_days: float
 ) -> tuple[list[str], list[str], int]:
@@ -295,6 +326,18 @@ def main() -> int:
         f"- 判定(全体): {'OK' if ok else 'NG'}",
     ]
 
+    # ブランド別（oriental / aisekiya）。照会の一時失敗では落とさない（全体チェックが疎通を保証済み）。
+    newest_by_brand: dict[str, str | None] = {}
+    for brand in BRANDS:
+        try:
+            brows = fetch_newest_ts(url, key, brand=brand)
+        except QueryFailed:
+            print(f"::warning::ブランド別の照会に失敗しました: {brand}（このブランドの判定はスキップ）")
+            continue
+        newest_by_brand[brand] = brows[0]["ts"] if brows else None
+    brand_lines, brand_problems = evaluate_brands(newest_by_brand, now, threshold_minutes)
+    lines.extend(brand_lines)
+
     try:
         per_store_stale_days = float(os.environ.get("PER_STORE_STALE_DAYS") or "3")
     except ValueError:
@@ -318,7 +361,16 @@ def main() -> int:
         lines.append(f"    停止疑い -> {s}")
 
     detail = "\n".join(lines)
-    _emit(detail)
+    # 全体は新鮮なのに特定ブランドだけ止まっている＝そのサイトだけスクレイプが全店失敗している型
+    # （2026-10-29: オリエンタルのヘッダ変更で37店が無音停止）。通知の1行目で名指しする。
+    brand_cause = ""
+    if ok and brand_problems:
+        stopped = "、".join(p.split(":")[0] for p in brand_problems)
+        brand_cause = (
+            f"{stopped} の収集だけが止まっています（他ブランドは正常）。"
+            "サイト側の変更でスクレイプが全店失敗している疑い（Render ログの [top_page] / [error] を確認）"
+        )
+    _emit(detail, brand_cause)
     print(detail)
 
     # 全体NG または 店舗別で陳腐化があれば失敗。照会失敗(=一時的な通信エラー)のみでは
@@ -327,6 +379,9 @@ def main() -> int:
     if not ok:
         print(f"::error::{fail_msg}")
         problems.append("全体")
+    if brand_problems:
+        print(f"::error::収集が止まっているブランドがあります: {'; '.join(brand_problems)}")
+        problems.append("ブランド別")
     if stale_stores:
         print(f"::error::収集が止まっている店舗があります: {', '.join(stale_stores)}")
         problems.append("店舗別")
