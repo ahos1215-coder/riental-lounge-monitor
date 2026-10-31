@@ -1,6 +1,8 @@
 # GitHub PAT 期限切れ通知
 # 毎週月曜 09:00 JST (UTC 00:00) に PAT の残り有効期限を確認し、
 # 30日以内に期限が切れる場合は LINE に Push 通知を送る。
+# 14日以内ならジョブを失敗させて GitHub の失敗メールで知らせる（LINE は Secrets 未設定で黙って
+# no-op になり、2026-09-18 以降この警告は誰にも届いていなかった。CLAUDE.md §4 罠12）。
 #
 # 必要な Secrets:
 #   GH_PAT_CHECK_TOKEN   — チェック対象の PAT（meta エンドポイントで自己検査）
@@ -90,6 +92,9 @@ jobs:
           else
             echo "should_notify=false" >> "$GITHUB_OUTPUT"
           fi
+          if [ "$DAYS_LEFT" -le 14 ]; then
+            echo "expiring_soon=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Notify LINE
         if: steps.expiry.outputs.skip != 'true' && steps.expiry.outputs.should_notify == 'true'
@@ -135,3 +140,10 @@ jobs:
             echo "::error::LINE push failed: HTTP ${HTTP_CODE}"
             exit 1
           fi
+
+      # 週1回の cron なので、期限14日前から切れるまでに2回ほど失敗メールが届く（冷却は不要）。
+      - name: Fail loudly when the PAT expires within 14 days
+        if: steps.expiry.outputs.expiring_soon == 'true'
+        run: |
+          echo "::error::GitHub PAT（GH_PAT_CHECK_TOKEN）の期限まで残り ${{ steps.expiry.outputs.days_left }} 日です（${{ steps.expiry.outputs.expiry_date }}）。https://github.com/settings/tokens で再発行し、GitHub Secrets を更新してください。"
+          exit 1
