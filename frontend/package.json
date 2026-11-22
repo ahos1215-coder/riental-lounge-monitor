@@ -6,6 +6,7 @@
         "node": "24.x"
     },
     "scripts": {
+        "trends:build": "node scripts/build-store-trends.mjs",
         "facts:generate": "node scripts/generate-public-facts.mjs",
         "drafts:export": "node scripts/export-blog-draft.mjs",
         "smoke:blog-apis": "node scripts/smoke-blog-apis.mjs",

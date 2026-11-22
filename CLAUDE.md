@@ -1,5 +1,7 @@
 CLAUDE.md — MEGRIBI（Oriental Lounge Monitor）3分マップ
-最終更新: 2026-10-31（§4に罠14「収集が片方のブランドだけ無音で止まる」・罠15「オーナーPCのタスクはサインイン中のセッションが無いと動かない」を追加。10/27〜10/31 の失敗メール連発の原因2つ）。
+最終更新: 2026-11-22（§2の09:30行と§7に、店舗ページの「混みやすい曜日・時間帯」＝週次JSONの直近4週を事前集計する
+`storeTrends.generated.json` と、近い店舗の選び方 `pickNearbyStores` を追記）。
+2026-10-31（§4に罠14「収集が片方のブランドだけ無音で止まる」・罠15「オーナーPCのタスクはサインイン中のセッションが無いと動かない」を追加。10/27〜10/31 の失敗メール連発の原因2つ）。
 2026-09-26（§4罠11に Supabase の次の壁2つ＝ログ取り込み枠 月1GB（2027年初めから）と DB 容量 500MB を追記。
 収集の Supabase 書き込みを1店ずつ→まとめて1回に変更した反映）。
 2026-09-18（§4罠5の GHA `schedule:` 発火率を 2026-09-18 の実測で書き換え＝毎時24%・2時間毎43〜65%・
@@ -107,7 +109,7 @@ Batch G: gunicorn `--graceful-timeout 30` を Procfile 実物に合わせて追�
 | 07:00 月曜 | ML再学習 + Optuna HPO | 同じ `train-ml-model.yml`（cronパターンで分岐。日次はOptunaなし、週次のみHPOあり） |
 | 06:10 | v2 shadow: 前夜の答え合わせ | GHA `forecast-accuracy-track.yml`（mode=score）→ `scripts/score_forecasts.py` → Storage `ml-models/accuracy/scores/<date>.json` + `summary.json` |
 | 07:30 | v2 shadow: テンプレ再生成 | GHA `build-templates.yml` → `scripts/build_templates.py` → Storage `forecast/templates_v2.json` |
-| 09:30 | Public Facts生成 | GHA `generate-public-facts.yml` → `frontend/content/facts/public/*.json` → git commit |
+| 09:30 | Public Facts生成 ＋ 店舗ページの傾向集計 | GHA `generate-public-facts.yml` → `frontend/content/facts/public/*.json`。同じジョブで `npm run trends:build`（`frontend/scripts/build-store-trends.mjs`）が `frontend/content/insights/weekly/<slug>/` の直近4週を集約して `frontend/src/data/storeTrends.generated.json` を更新（失敗してもfactsは止めない `continue-on-error`）→ まとめて git commit。店舗ページはこのJSONを**静的import**するだけ（実行時にSupabase/fsを読まない＝§4罠11の転送量に影響しない）。水曜の週報が入った当日〜翌日の便で反映 |
 
 **重要**: v2 shadow パイプライン（18:10 snapshot / 06:10 score / 07:30 templates）は**答え合わせ・評価専用**で、
 本番配信 (`oriental/ml/forecast_service.py`) には一切影響しない。「v2」という名前に惑わされて
@@ -346,5 +348,7 @@ python app.py                # Flask ローカル起動（.env に環境変数�
 | 料金計算（オリエンタル/相席屋） | `frontend/src/lib/pricing/computeCost.ts`（相席屋は `computeCostAisekiya.ts`、共有は `computeCostShared.ts`） |
 | 退役スクリプト | リポジトリ直下 `archive/`（README に理由）。`scripts/experiments/` は実験専用（本番は依存しない） |
 | GA4/GSC の最新値を読む | `scripts/analytics_report.py`（read-only。手順は `docs/ANALYTICS_AGENT_RUNBOOK.md`） |
+| 店舗ページ「混みやすい曜日・時間帯」（全店同じ定型文・LLM不使用） | 週の選択と合算 `frontend/scripts/lib/storeTrendsCore.mjs` → 生成物 `frontend/src/data/storeTrends.generated.json`（手で編集しない）→ 要約・定型文 `frontend/src/lib/store/storeTrends.ts` / 読み出し `storeTrendsData.ts`（server-only）→ 表示 `app/store/[id]/StoreTrendsSection.tsx` |
+| 近い店舗の選び方（距離順4店） | `frontend/src/lib/store/nearbyStores.ts`（`pickNearbyStores`。店舗ページのおすすめ（クライアント）とSSRの「近くの店舗」リンクで共通） |
 
 このファイルの記述と実際のコードが食い違っていたら、コードを信じて `CLAUDE.md` を更新してください。

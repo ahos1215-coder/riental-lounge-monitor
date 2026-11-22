@@ -39,6 +39,8 @@ import {
   fetchBackendSnapshot,
 } from "@/lib/serverSnapshot";
 import StorePageClient from "./StorePageClient";
+import StoreTrendsSection from "./StoreTrendsSection";
+import { pickNearbyStores } from "@/lib/store/nearbyStores";
 import Link from "next/link";
 import { getAreaConfigForStoreSlug } from "@/app/config/areas";
 
@@ -325,19 +327,23 @@ export default async function StorePage({ params }: Props) {
 
       <StorePageClient initialSnapshot={initialSnapshot} />
 
+      <StoreTrendsSection slug={meta.slug} />
+
       {/*
         SSR の内部リンク: /store/[id] の静的HTMLは h1 + Suspense fallback だけで、
         「ほかの店舗」「エリア一覧」への実アンカーはクライアント描画後にしか出ない。
-        クローラが読む raw HTML にエリアハブ（/area/{id}）と全店舗一覧への導線を1行だけ載せる
-        （SEO Phase2 の /stores AllStoresSsrNav と同じ考え方）。エリア未設定の店舗は一覧のみ。
+        クローラが読む raw HTML にエリアハブ（/area/{id}）と全店舗一覧への導線、
+        および地理的に近い4店舗へのリンクを載せる（SEO Phase2 の /stores AllStoresSsrNav と
+        同じ考え方）。エリア未設定の店舗はエリアリンクなし。
       */}
-      <StoreAreaSsrNav slug={meta.slug} />
+      <StoreAreaSsrNav meta={meta} />
     </>
   );
 }
 
-function StoreAreaSsrNav({ slug }: { slug: string }) {
-  const area = getAreaConfigForStoreSlug(slug);
+function StoreAreaSsrNav({ meta }: { meta: StoreMeta }) {
+  const area = getAreaConfigForStoreSlug(meta.slug);
+  const nearby = pickNearbyStores(meta);
   return (
     <nav
       aria-label="エリア・店舗一覧へ"
@@ -357,6 +363,20 @@ function StoreAreaSsrNav({ slug }: { slug: string }) {
       >
         全店舗の混雑状況一覧 →
       </Link>
+      {nearby.length > 0 && (
+        <div className="flex w-full flex-wrap items-center gap-x-4 gap-y-2">
+          <span className="text-slate-500">近くの店舗：</span>
+          {nearby.map((s) => (
+            <Link
+              key={s.slug}
+              href={`/store/${encodeURIComponent(s.slug)}`}
+              className="text-slate-400 underline decoration-white/20 underline-offset-2 hover:text-slate-200"
+            >
+              {buildStoreFullName(s)}の混雑状況
+            </Link>
+          ))}
+        </div>
+      )}
     </nav>
   );
 }

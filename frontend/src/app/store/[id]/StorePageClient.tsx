@@ -22,8 +22,9 @@ import {
   type RangeRow,
 } from "@/lib/range/rangeRows";
 import { ForecastAccuracyCard } from "@/components/ForecastAccuracyCard";
-import { DEFAULT_STORE, STORES, STORE_REGION_FILTER_ORDER, distanceKm, getStoreMetaBySlugOrDefault, getStoreMetaBySlugStrict } from "../../config/stores";
+import { DEFAULT_STORE, getStoreMetaBySlugOrDefault, getStoreMetaBySlugStrict } from "../../config/stores";
 import type { StoreSnapshot } from "../../hooks/useStorePreviewData";
+import { pickNearbyStores } from "@/lib/store/nearbyStores";
 import { useDeferredFetchGate } from "./useDeferredFetchGate";
 import { StorePageFallback } from "./StorePageFallback";
 import { StoreReportSummarySection } from "./StoreReportSummarySection";
@@ -88,23 +89,13 @@ function StorePageInner({ initialSnapshot }: { initialSnapshot: StoreSnapshot | 
   // おすすめ（ほかの店舗）は「今見ている店舗に地理的に近い」店を出す。
   // 実座標（stores.json の lat/lon）が全店に入ったので、ハバサイン距離で近い順に並べる。
   // 座標が欠けた店だけは地域（regionLabel）の並び順で近似し、距離が取れる店の後ろに置く。
-  const digestStores = useMemo(() => {
-    const order = STORE_REGION_FILTER_ORDER;
-    const curIdx = order.indexOf(meta.regionLabel);
-    const regionDist = (region: string): number => {
-      const i = order.indexOf(region);
-      return curIdx < 0 || i < 0 ? 99 : Math.abs(i - curIdx);
-    };
-    return STORES.filter((s) => s.slug !== slug)
-      .map((s, i) => {
-        const km = distanceKm(meta, s);
-        const p = km != null ? km : 100000 + regionDist(s.regionLabel);
-        return { s, i, p };
-      })
-      .sort((a, b) => (a.p !== b.p ? a.p - b.p : a.i - b.i))
-      .slice(0, 4)
-      .map((x) => x.s);
-  }, [slug, meta.regionLabel, meta.lat, meta.lon]);
+  // 算出本体は lib/store/nearbyStores.ts の pickNearbyStores（SSR の近隣リンクと共通）。
+  const digestStores = useMemo(
+    () => pickNearbyStores(meta),
+    // meta は毎レンダー別参照になり得るため、判定に使うキーだけを依存に置く（従来と同じ）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [slug, meta.regionLabel, meta.lat, meta.lon],
+  );
 
   const [reportSummary, setReportSummary] = useState<ReportSummaryData>({
     weekly: null,
